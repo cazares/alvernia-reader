@@ -27,11 +27,11 @@ test("normalizeProxyPath keeps miguelbase.com at the domain root", () => {
 test("buildProxyUrl forwards root and assets to the live Pages deployment", () => {
   assert.equal(
     buildProxyUrl("https://miguelbase.com/").toString(),
-    "https://dev-standalone-alvernia-read.alvernia-reader.pages.dev/",
+    "https://alvernia-reader.pages.dev/",
   );
 
   assert.equal(
     buildProxyUrl("https://miguelbase.com/pages.json?cache=1").toString(),
-    "https://dev-standalone-alvernia-read.alvernia-reader.pages.dev/pages.json?cache=1",
+    "https://alvernia-reader.pages.dev/pages.json?cache=1",
   );
 });
