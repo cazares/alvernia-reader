@@ -13,6 +13,7 @@ test("web shell includes iOS standalone metadata and native-like controls", () =
 
   assert.match(source, /apple-mobile-web-app-capable/);
   assert.match(source, /apple-mobile-web-app-status-bar-style/);
+  assert.match(source, /maximum-scale=1, user-scalable=no/);
   assert.match(source, /id="launch-screen"/);
   assert.match(source, /id="launch-fullscreen"/);
   assert.match(source, /id="launch-window"/);
@@ -22,6 +23,7 @@ test("web shell includes iOS standalone metadata and native-like controls", () =
   assert.match(source, /id="share-button"/);
   assert.match(source, /id="top-chrome"/);
   assert.match(source, /id="bottom-chrome"/);
+  assert.match(source, /id="song-number"[^>]*type="tel"[^>]*autofocus/);
 });
 
 test("web app script supports install, share, fullscreen, new windows, and deep links", () => {
@@ -41,6 +43,9 @@ test("web app script supports install, share, fullscreen, new windows, and deep 
   assert.match(source, /launchFullscreenButton\.disabled = false/);
   assert.match(source, /launchWindowButton\.disabled = false/);
   assert.match(source, /window\.open\([\s\S]*"_blank"/);
+  assert.match(source, /pendingSingleTapTimer/);
+  assert.match(source, /focusSongInput/);
+  assert.match(source, /touchend[\s\S]*preventDefault\(\)/);
 });
 
 test("manifest is configured for standalone install from the domain root", () => {
@@ -82,4 +87,5 @@ test("web styles include launch and fullscreen affordances", () => {
   assert.match(source, /\.launch-screen/);
   assert.match(source, /\.launch-card/);
   assert.match(source, /\.nav-button-fullscreen/);
+  assert.match(source, /touch-action: manipulation/);
 });

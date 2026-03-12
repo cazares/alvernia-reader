@@ -41,6 +41,7 @@ const state = {
   chromeTimer: null,
   lastTap: null,
   lastTapTimer: null,
+  pendingSingleTapTimer: null,
   touchStart: null,
   lastTouchEndedAt: 0,
   appReady: false,
@@ -272,11 +273,35 @@ const renderPage = (pageNumber, { syncUrl = true } = {}) => {
   }
 };
 
+const clearPendingSingleTap = () => {
+  window.clearTimeout(state.pendingSingleTapTimer);
+  state.pendingSingleTapTimer = null;
+};
+
+const focusSongInput = () => {
+  if (!modal.open) return;
+  try {
+    songInput.focus({ preventScroll: true });
+  } catch {
+    songInput.focus();
+  }
+  songInput.select?.();
+};
+
 const openModal = () => {
   songInput.value = "";
+  clearPendingSingleTap();
   setChromeVisible(true);
-  modal.showModal();
-  window.setTimeout(() => songInput.focus(), 30);
+  if (!modal.open) {
+    modal.showModal();
+  }
+  focusSongInput();
+  window.requestAnimationFrame(() => {
+    focusSongInput();
+  });
+  window.setTimeout(() => {
+    focusSongInput();
+  }, 120);
 };
 
 const closeModal = () => {
@@ -447,6 +472,7 @@ const consumeTap = (clientX, clientY) => {
     && Math.abs(clientY - state.lastTap.y) < 28
   ) {
     window.clearTimeout(state.lastTapTimer);
+    clearPendingSingleTap();
     state.lastTap = null;
     openModal();
     return;
@@ -457,6 +483,15 @@ const consumeTap = (clientX, clientY) => {
   state.lastTapTimer = window.setTimeout(() => {
     state.lastTap = null;
   }, DOUBLE_TAP_WINDOW_MS + 40);
+
+  if (isFullscreen() && !state.controlsVisible) {
+    clearPendingSingleTap();
+    state.pendingSingleTapTimer = window.setTimeout(() => {
+      state.pendingSingleTapTimer = null;
+      setChromeVisible(true);
+    }, DOUBLE_TAP_WINDOW_MS + 20);
+    return;
+  }
 
   setChromeVisible(!state.controlsVisible);
 };
@@ -571,6 +606,7 @@ viewerShell.addEventListener("click", (event) => {
 
 viewerShell.addEventListener("dblclick", (event) => {
   event.preventDefault();
+  event.stopPropagation();
   openModal();
 });
 
@@ -634,14 +670,16 @@ viewerShell.addEventListener("touchend", (event) => {
   state.touchStart = null;
 
   if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY)) {
+    event.preventDefault();
     turnPage(deltaX < 0 ? 1 : -1);
     return;
   }
 
   if (Math.abs(deltaX) < 14 && Math.abs(deltaY) < 14 && elapsed < 360) {
+    event.preventDefault();
     consumeTap(touch.clientX, touch.clientY);
   }
-}, { passive: true });
+}, { passive: false });
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();

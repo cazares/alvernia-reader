@@ -55,7 +55,7 @@ button:disabled {
   width: 100%;
   place-items: center;
   padding: 0;
-  touch-action: pan-x pan-y;
+  touch-action: manipulation;
   user-select: none;
 }
 
@@ -66,6 +66,7 @@ button:disabled {
   object-fit: contain;
   background: #090909;
   transition: opacity 160ms ease;
+  touch-action: manipulation;
 }
 
 #page-image.is-loading {
