@@ -48,14 +48,17 @@ test("web app script supports install, sticky fullscreen, modal navigation, and 
   assert.match(source, /launchInstallButton\.disabled = false/);
   assert.match(source, /pendingSingleTapTimer/);
   assert.match(source, /FOCUS_RETRY_MS/);
+  assert.match(source, /DOUBLE_TAP_DISTANCE_PX/);
   assert.match(source, /stickyFullscreenWanted/);
   assert.match(source, /userRequestedFullscreenExit/);
+  assert.match(source, /ignoreTapUntilTouchEnd/);
   assert.match(source, /setFullscreenGuardVisible/);
   assert.match(source, /recoverFullscreen/);
   assert.match(source, /resumeFullscreenButton\.addEventListener/);
   assert.match(source, /focusSongInput/);
   assert.match(source, /queueSongInputFocus/);
   assert.match(source, /cancelGoButton\.addEventListener\("click", closeModal\)/);
+  assert.match(source, /viewerShell\.addEventListener\("touchstart"[\s\S]*openModal\(\)/);
   assert.match(source, /touchend[\s\S]*preventDefault\(\)/);
   assert.match(source, /const shouldUseStartupDeepLink = launchMode === WINDOW_MODE \|\| !isStandalone/);
   assert.match(source, /const isModalOpen = \(\) => !modal\.classList\.contains\("is-hidden"\)/);
