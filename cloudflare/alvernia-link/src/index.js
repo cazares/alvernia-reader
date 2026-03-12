@@ -1,4 +1,4 @@
-const PAGES_ORIGIN = "https://alvernia-reader.pages.dev";
+const PAGES_ORIGIN = "https://dev-standalone-alvernia-read.alvernia-reader.pages.dev";
 const LEGACY_ROUTE_PREFIX = "/alvernia";
 
 export const normalizeProxyPath = ({ host, pathname }) => {
