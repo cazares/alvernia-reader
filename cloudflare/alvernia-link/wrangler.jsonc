@@ -4,11 +4,11 @@
   "compatibility_date": "2026-03-12",
   "routes": [
     {
-      "pattern": "miguelworld.com",
+      "pattern": "miguelbase.com",
       "custom_domain": true
     },
     {
-      "pattern": "www.miguelworld.com",
+      "pattern": "www.miguelbase.com",
       "custom_domain": true
     }
   ]
