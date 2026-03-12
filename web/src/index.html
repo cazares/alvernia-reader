@@ -2,7 +2,7 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0a0a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -88,7 +88,7 @@
       <dialog class="modal" id="go-modal">
         <form class="modal-card" method="dialog" id="go-form">
           <label class="modal-label" for="song-number">Numero de cancion</label>
-          <input id="song-number" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="off" />
+          <input id="song-number" type="tel" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="off" autofocus />
           <div class="modal-actions">
             <button class="button button-secondary" value="cancel">Cancelar</button>
             <button class="button button-primary" id="confirm-go" value="default">Ir</button>
