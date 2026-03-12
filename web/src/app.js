@@ -21,6 +21,7 @@ const nextPageButton = document.getElementById("next-page");
 const modal = document.getElementById("go-modal");
 const form = document.getElementById("go-form");
 const songInput = document.getElementById("song-number");
+const cancelGoButton = document.getElementById("cancel-go");
 const installSheet = document.getElementById("install-sheet");
 const installCopy = document.getElementById("install-copy");
 const installSteps = document.getElementById("install-steps");
@@ -31,6 +32,8 @@ const INSTALL_DISMISS_KEY = "alvernia-reader-install-dismissed";
 const DOUBLE_TAP_WINDOW_MS = 260;
 const CHROME_HIDE_MS = 2400;
 const WINDOW_MODE = "reader";
+const FOCUS_RETRY_MS = [90, 220, 420, 650];
+const FULLSCREEN_LAUNCH_DELAY_MS = 140;
 
 const state = {
   totalPages: 1,
@@ -42,6 +45,7 @@ const state = {
   lastTap: null,
   lastTapTimer: null,
   pendingSingleTapTimer: null,
+  inputFocusTimers: [],
   touchStart: null,
   lastTouchEndedAt: 0,
   appReady: false,
@@ -113,6 +117,7 @@ state.songIndex = [...manifest.songIndex].sort((left, right) => left.page - righ
 
 const pageFileName = (pageNumber) => `./pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
+const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 const setLoading = (active, text = "Cargando...") => {
   loading.textContent = text;
@@ -206,7 +211,7 @@ const updateFullscreenUi = () => {
 
 const updateWindowUi = () => {
   windowButton.classList.toggle("is-hidden", !supportsWindowOpen || isStandalone);
-  launchWindowButton.classList.toggle("is-hidden", !supportsWindowOpen);
+  launchWindowButton.classList.toggle("is-hidden", true);
 };
 
 const setLaunchVisible = (visible) => {
@@ -218,38 +223,34 @@ const setLaunchVisible = (visible) => {
 };
 
 const shouldShowLaunchScreen = () => {
-  if (launchMode === WINDOW_MODE) return false;
+  if (launchMode === WINDOW_MODE || isStandalone) return false;
   return true;
 };
 
 const updateLaunchUi = () => {
   const steps = [];
   if (!state.appReady) {
-    launchCopy.textContent = "Puedes tocar un boton ya mismo. El manual termina de cargar mientras entras.";
+    launchCopy.textContent = "Abre el manual.";
     steps.push(
-      "Pantalla completa intenta abrir el lector sin barras del navegador.",
-      "Ventana nueva abre otra ventana o pestaña con este mismo punto del manual.",
-      "Como instalar te deja el icono en tu pantalla de inicio.",
+      "Pantalla completa",
+      "Instalar",
     );
   } else {
     if (supportsFullscreen) {
-      launchCopy.textContent = "Empieza en pantalla completa con un toque, o abre otra ventana con el mismo punto del manual.";
+      launchCopy.textContent = "Toca Pantalla completa para entrar.";
       steps.push(
-        "Pantalla completa oculta las barras del navegador cuando tu navegador lo permite.",
-        "Ventana nueva abre otra ventana o pestaña con la misma cancion o pagina.",
-        "Como instalar te deja el icono en tu pantalla de inicio para abrirlo como app.",
+        "Instalar para guardarlo como app.",
       );
     } else {
-      launchCopy.textContent = "Tu navegador no siempre deja entrar a pantalla completa desde la web, pero puedes abrir otra ventana o instalar el icono para sentirlo mas nativo.";
+      launchCopy.textContent = "Abre el lector o instalalo como app.";
       steps.push(
-        "Ventana nueva abre otra ventana o pestaña con el mismo punto del manual.",
-        "Como instalar deja un icono en tu pantalla de inicio.",
-        "Seguir aqui abre el lector normal en esta misma pantalla.",
+        "Instalar para dejarlo en inicio.",
       );
     }
   }
 
   launchSteps.innerHTML = steps.map((step) => `<li>${step}</li>`).join("");
+  launchSteps.classList.toggle("is-hidden", steps.length === 0);
   launchFullscreenButton.disabled = false;
   launchWindowButton.disabled = false;
   launchContinueButton.disabled = false;
@@ -278,6 +279,13 @@ const clearPendingSingleTap = () => {
   state.pendingSingleTapTimer = null;
 };
 
+const clearInputFocusTimers = () => {
+  state.inputFocusTimers.forEach((timerId) => {
+    window.clearTimeout(timerId);
+  });
+  state.inputFocusTimers = [];
+};
+
 const focusSongInput = () => {
   if (!modal.open) return;
   try {
@@ -286,6 +294,18 @@ const focusSongInput = () => {
     songInput.focus();
   }
   songInput.select?.();
+  songInput.click?.();
+};
+
+const queueSongInputFocus = () => {
+  clearInputFocusTimers();
+  focusSongInput();
+  FOCUS_RETRY_MS.forEach((delay) => {
+    const timerId = window.setTimeout(() => {
+      focusSongInput();
+    }, delay);
+    state.inputFocusTimers.push(timerId);
+  });
 };
 
 const openModal = () => {
@@ -295,16 +315,11 @@ const openModal = () => {
   if (!modal.open) {
     modal.showModal();
   }
-  focusSongInput();
-  window.requestAnimationFrame(() => {
-    focusSongInput();
-  });
-  window.setTimeout(() => {
-    focusSongInput();
-  }, 120);
+  queueSongInputFocus();
 };
 
 const closeModal = () => {
+  clearInputFocusTimers();
   if (modal.open) modal.close();
   scheduleChromeHide();
 };
@@ -421,16 +436,28 @@ const shareCurrentLocation = async () => {
   }
 };
 
-const openCurrentLocationInNewWindow = () => {
-  if (!supportsWindowOpen) return false;
+const openCurrentLocationInNewWindow = ({ fallbackToSameTab = false } = {}) => {
+  const targetUrl = currentShareUrl({ windowMode: true });
+
+  if (!supportsWindowOpen) {
+    if (fallbackToSameTab) {
+      window.location.assign(targetUrl);
+      return true;
+    }
+    return false;
+  }
 
   const popup = window.open(
-    currentShareUrl({ windowMode: true }),
+    targetUrl,
     "_blank",
     "noopener,noreferrer",
   );
 
   if (!popup) {
+    if (fallbackToSameTab) {
+      window.location.assign(targetUrl);
+      return true;
+    }
     flashButtonLabel(windowButton, "Bloqueada");
     flashButtonLabel(launchWindowButton, "Bloqueada");
     return false;
@@ -525,14 +552,22 @@ const continueIntoReader = () => {
 };
 
 const handleLaunchFullscreen = async () => {
+  let enteredFullscreen = false;
   if (supportsFullscreen) {
-    await toggleFullscreen({ sourceButton: launchFullscreenButton });
+    enteredFullscreen = await toggleFullscreen({ sourceButton: launchFullscreenButton });
+    if (enteredFullscreen) {
+      await sleep(FULLSCREEN_LAUNCH_DELAY_MS);
+    } else {
+      window.setTimeout(() => {
+        toggleFullscreen({ sourceButton: fullscreenButton }).catch(() => {});
+      }, FULLSCREEN_LAUNCH_DELAY_MS);
+    }
   }
   continueIntoReader();
 };
 
 const handleLaunchWindow = () => {
-  const opened = openCurrentLocationInNewWindow();
+  const opened = openCurrentLocationInNewWindow({ fallbackToSameTab: true });
   if (opened) {
     continueIntoReader();
   }
@@ -545,7 +580,7 @@ shareButton.addEventListener("click", () => {
   });
 });
 windowButton.addEventListener("click", () => {
-  openCurrentLocationInNewWindow();
+  openCurrentLocationInNewWindow({ fallbackToSameTab: true });
 });
 installButton.addEventListener("click", () => {
   triggerInstall().catch((error) => {
@@ -563,6 +598,7 @@ confirmInstallButton.addEventListener("click", () => {
   });
 });
 dismissInstallButton.addEventListener("click", dismissInstall);
+cancelGoButton.addEventListener("click", closeModal);
 launchFullscreenButton.addEventListener("click", () => {
   handleLaunchFullscreen().catch((error) => {
     console.error("No se pudo abrir en pantalla completa", error);
@@ -626,6 +662,11 @@ modal.addEventListener("click", (event) => {
   if (!inside) {
     closeModal();
   }
+});
+
+modal.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeModal();
 });
 
 installSheet.addEventListener("click", (event) => {
@@ -699,6 +740,9 @@ window.addEventListener("appinstalled", () => {
   document.addEventListener(eventName, () => {
     updateFullscreenUi();
     setChromeVisible(true);
+    if (modal.open) {
+      queueSongInputFocus();
+    }
   });
 });
 
