@@ -1,0 +1,80 @@
+# Version control
+.git
+.github
+.gitignore
+.gitattributes
+
+# Python
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+.DS_Store
+.claude
+
+# Node.js
+node_modules
+package-lock.json
+
+# React Native / Expo (not needed for backend)
+karaoapp
+
+# Data directories
+audio
+cache
+downloads
+demucs_out
+intermediate
+logs
+mixes
+mp3s
+mp4s
+output
+separated
+stems
+stems_temp
+tmp
+tmp_vw3
+videos
+whisper.cpp
+timings_inbox
+metal_out.wts
+*.log
+.backend.pid
+
+# Documentation (not needed at runtime)
+*.md
+!README.md
+
+# Dev containers
+.devcontainer
+
+# Test files
+tests
+test_*.py
+*_test.py
+
+# Scripts not needed in production
+scripts/optional_*
+scripts/CAUTION-*
+*.sh
+!karaoapi/scripts/start-server.sh
+!start-with-tor.sh
+
+# CI/CD
+.gcloudignore
+cloudbuild.yaml
+deploy-railway.sh
+test_deployed_api.sh

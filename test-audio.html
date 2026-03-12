@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Test Audio Download</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background: #4a90e2;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            margin: 10px 0;
+            width: 100%;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+        .success { color: #5cb85c; }
+        .error { color: #d9534f; }
+        .info { color: #5bc0de; }
+    </style>
+</head>
+<body>
+    <h1>🎵 Test Audio Download</h1>
+
+    <button onclick="testAudio()">Test: The Beatles - Let It Be</button>
+    <button onclick="testAudio2()">Test: John Frusciante - God</button>
+
+    <div id="status">Tap a button to test audio download...</div>
+
+    <script>
+        const API = 'https://karaoapi-ujhkqz2naa-uc.a.run.app';
+        let currentJobId = null;
+        let pollInterval = null;
+
+        function log(msg, type = 'info') {
+            const status = document.getElementById('status');
+            const time = new Date().toLocaleTimeString();
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+            status.innerHTML += `<span class="${className}">[${time}] ${msg}</span>\n`;
+            status.scrollTop = status.scrollHeight;
+        }
+
+        async function testAudio() {
+            await startJob('The Beatles - Let It Be');
+        }
+
+        async function testAudio2() {
+            await startJob('John Frusciante - God');
+        }
+
+        async function startJob(query) {
+            document.getElementById('status').innerHTML = '';
+            log(`Starting job: "${query}"`, 'info');
+
+            try {
+                const response = await fetch(`${API}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        render_mode: 'preview'
+                    })
+                });
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    log(`❌ Failed: ${response.status} - ${text}`, 'error');
+                    return;
+                }
+
+                const job = await response.json();
+                currentJobId = job.id;
+                log(`✅ Job created: ${job.id}`, 'success');
+                log(`Status: ${job.status}`, 'info');
+
+                // Start polling
+                if (pollInterval) clearInterval(pollInterval);
+                pollInterval = setInterval(pollStatus, 2000);
+                pollStatus(); // Check immediately
+
+            } catch (err) {
+                log(`❌ Error: ${err.message}`, 'error');
+            }
+        }
+
+        async function pollStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`${API}/jobs/${currentJobId}`);
+                if (!response.ok) return;
+
+                const job = await response.json();
+
+                // Show progress
+                const progress = job.progress_percent || 0;
+                const eta = job.estimated_seconds_remaining ? ` (~${Math.ceil(job.estimated_seconds_remaining)}s left)` : '';
+                const stage = job.stage ? ` [${job.stage.replace(/_/g, ' ')}]` : '';
+
+                log(`📊 Progress: ${progress.toFixed(0)}%${eta}${stage}`, 'info');
+
+                if (job.last_message) {
+                    log(`💬 ${job.last_message}`, 'info');
+                }
+
+                // Check if done
+                if (job.status === 'succeeded') {
+                    clearInterval(pollInterval);
+                    log(`\n🎉 SUCCESS!`, 'success');
+                    log(`✅ Audio downloaded successfully!`, 'success');
+                    log(`✅ Video processed!`, 'success');
+                    if (job.preview_output_url) {
+                        log(`\n🎥 Preview: ${job.preview_output_url}`, 'success');
+                    }
+                    if (job.final_output_url) {
+                        log(`🎥 Final: ${job.final_output_url}`, 'success');
+                    }
+                } else if (job.status === 'failed') {
+                    clearInterval(pollInterval);
+                    log(`\n❌ FAILED: ${job.error || 'Unknown error'}`, 'error');
+                } else if (job.status === 'cancelled') {
+                    clearInterval(pollInterval);
+                    log(`\n⚠️ Job was cancelled`, 'error');
+                }
+
+            } catch (err) {
+                log(`⚠️ Poll error: ${err.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel AS whisper-builder
+
+ARG WHISPER_CPP_REPO_URL=https://github.com/ggerganov/whisper.cpp.git
+ARG WHISPER_CPP_REF=master
+ARG WHISPER_MODEL=tiny
+
+WORKDIR /opt
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        build-essential \
+        ca-certificates \
+        cmake \
+        git \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && git clone --depth 1 --branch "${WHISPER_CPP_REF}" "${WHISPER_CPP_REPO_URL}" whisper.cpp \
+    && cmake -S whisper.cpp -B whisper.cpp/build -DGGML_NATIVE=OFF -DGGML_CUDA=ON \
+    && cmake --build whisper.cpp/build -j"$(nproc)" \
+    && bash whisper.cpp/models/download-ggml-model.sh "${WHISPER_MODEL}" \
+    && rm -rf whisper.cpp/.git
+
+
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    MIXTERIOSO_DEMUCS_DEVICE=auto \
+    KARAOKE_AUTO_OFFSET_ENABLED=1 \
+    MIXTERIOSO_WHISPER_BIN=/app/whisper.cpp/build/bin/whisper-cli \
+    MIXTERIOSO_WHISPER_MODEL=/app/whisper.cpp/models/ggml-tiny.bin
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=whisper-builder /opt/whisper.cpp /app/whisper.cpp
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt \
+    && python -m pip install --no-cache-dir -U "yt-dlp[default]" \
+    && command -v demucs >/dev/null \
+    && python -c "import torch; print('torch=' + str(torch.__version__) + ' cuda=' + str(torch.version.cuda))" \
+    && test -x /app/whisper.cpp/build/bin/whisper-cli \
+    && test -f /app/whisper.cpp/models/ggml-tiny.bin
+
+COPY . /app
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "if [ \"${MIXTERIOSO_GPU_WORKER_MODE:-0}\" = \"1\" ]; then uvicorn karaoapi.gpu_worker_app:app --host 0.0.0.0 --port ${PORT:-8080}; else uvicorn karaoapi.app:app --host 0.0.0.0 --port ${PORT:-8080}; fi"]

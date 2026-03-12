@@ -1,0 +1,4 @@
+name = "mixterious-api-proxy"
+main = "src/index.js"
+compatibility_date = "2026-03-11"
+workers_dev = false
