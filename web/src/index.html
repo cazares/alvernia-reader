@@ -19,32 +19,36 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="launch-screen" id="launch-screen" aria-live="polite">
-        <div class="launch-card">
-          <img class="launch-icon" src="./icon-192.png" alt="" />
-          <p class="launch-eyebrow">Alvernia Reader</p>
-          <h1 class="launch-title">Abrir</h1>
-          <p class="launch-copy" id="launch-copy">Abriendo...</p>
-          <ol class="launch-steps" id="launch-steps"></ol>
-          <div class="launch-actions">
-            <button class="launch-button launch-button-primary" id="launch-install" type="button">
-              Instalar app
-            </button>
-            <button class="launch-button" id="launch-fullscreen" type="button">
-              Abrir
-            </button>
-          </div>
-        </div>
-      </section>
-
       <header class="chrome chrome-top is-hidden" id="top-chrome">
         <div class="pill" id="page-status">Pagina 1</div>
-        <button class="pill-button" id="open-modal" type="button">Ir a cancion</button>
       </header>
 
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" alt="Pagina actual del manual" />
         <div class="loading" id="loading">Cargando...</div>
+      </section>
+
+      <section class="jump-cta is-hidden" id="jump-cta">
+        <form class="jump-form" id="jump-form" novalidate>
+          <label class="jump-label" for="jump-song">Ir a cancion</label>
+          <div class="jump-row">
+            <input
+              class="jump-input"
+              id="jump-song"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              enterkeyhint="go"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              maxlength="4"
+              placeholder="Numero"
+            />
+            <button class="jump-button" id="jump-submit" type="submit">Ir</button>
+          </div>
+        </form>
       </section>
 
       <section class="fullscreen-guard is-hidden" id="fullscreen-guard" aria-live="assertive">
@@ -60,11 +64,11 @@
       </section>
 
       <footer class="chrome chrome-bottom is-hidden" id="bottom-chrome">
-        <button class="nav-button" id="prev-page" type="button" aria-label="Pagina anterior">Anterior</button>
+        <button class="nav-button" id="prev-page" type="button" aria-label="Pagina anterior">&larr; Anterior</button>
         <button class="nav-button nav-button-fullscreen" id="fullscreen-button" type="button" aria-label="Pantalla completa">
           Pantalla completa
         </button>
-        <button class="nav-button nav-button-primary" id="next-page" type="button" aria-label="Pagina siguiente">Siguiente</button>
+        <button class="nav-button nav-button-primary" id="next-page" type="button" aria-label="Pagina siguiente">Siguiente &rarr;</button>
       </footer>
 
       <dialog class="install-sheet" id="install-sheet">
@@ -80,16 +84,6 @@
         </form>
       </dialog>
 
-      <section class="modal is-hidden" id="go-modal" aria-hidden="true">
-        <form class="modal-card" id="go-form" novalidate>
-          <label class="modal-label" for="song-number">Numero de cancion</label>
-          <input id="song-number" type="tel" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="off" autofocus />
-          <div class="modal-actions">
-            <button class="button button-secondary" id="cancel-go" type="button">Cancelar</button>
-            <button class="button button-primary" id="confirm-go" type="submit" value="default">Ir</button>
-          </div>
-        </form>
-      </section>
     </main>
 
     <script type="module" src="./app.js"></script>
