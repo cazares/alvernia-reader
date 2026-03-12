@@ -31,13 +31,7 @@
               Instalar app
             </button>
             <button class="launch-button" id="launch-fullscreen" type="button">
-              Pantalla completa
-            </button>
-            <button class="launch-button" id="launch-window" type="button">
-              Otra ventana
-            </button>
-            <button class="launch-link" id="launch-continue" type="button">
-              Abrir sin instalar
+              Abrir
             </button>
           </div>
         </div>
@@ -45,18 +39,7 @@
 
       <header class="chrome chrome-top is-hidden" id="top-chrome">
         <div class="pill" id="page-status">Pagina 1</div>
-        <div class="chrome-actions">
-          <button class="pill-button pill-button-secondary is-hidden" id="share-button" type="button">
-            Compartir
-          </button>
-          <button class="pill-button pill-button-secondary" id="window-button" type="button">
-            Ventana
-          </button>
-          <button class="pill-button pill-button-secondary is-hidden" id="install-button" type="button">
-            Instalar
-          </button>
-          <button class="pill-button" id="open-modal" type="button">Ir a cancion</button>
-        </div>
+        <button class="pill-button" id="open-modal" type="button">Ir a cancion</button>
       </header>
 
       <section class="viewer-shell" id="viewer-shell">
@@ -97,8 +80,8 @@
         </form>
       </dialog>
 
-      <dialog class="modal" id="go-modal">
-        <form class="modal-card" method="dialog" id="go-form">
+      <section class="modal is-hidden" id="go-modal" aria-hidden="true">
+        <form class="modal-card" id="go-form" novalidate>
           <label class="modal-label" for="song-number">Numero de cancion</label>
           <input id="song-number" type="tel" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="off" autofocus />
           <div class="modal-actions">
@@ -106,7 +89,7 @@
             <button class="button button-primary" id="confirm-go" type="submit" value="default">Ir</button>
           </div>
         </form>
-      </dialog>
+      </section>
     </main>
 
     <script type="module" src="./app.js"></script>

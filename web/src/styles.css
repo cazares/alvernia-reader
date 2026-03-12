@@ -337,16 +337,26 @@ button:disabled {
   font-size: 1.03rem;
 }
 
-.modal,
 .install-sheet {
   border: 0;
   padding: 0;
   background: transparent;
 }
 
-.modal::backdrop,
 .install-sheet::backdrop {
   background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-top) + 1rem) 1rem calc(var(--safe-bottom) + 1.25rem);
+  background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
