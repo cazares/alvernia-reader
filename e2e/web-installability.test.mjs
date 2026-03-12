@@ -13,19 +13,27 @@ test("web shell includes iOS standalone metadata and native-like controls", () =
 
   assert.match(source, /apple-mobile-web-app-capable/);
   assert.match(source, /apple-mobile-web-app-status-bar-style/);
+  assert.match(source, /id="launch-screen"/);
+  assert.match(source, /id="launch-fullscreen"/);
+  assert.match(source, /id="launch-window"/);
   assert.match(source, /id="install-button"/);
+  assert.match(source, /id="window-button"/);
+  assert.match(source, /id="fullscreen-button"/);
   assert.match(source, /id="share-button"/);
   assert.match(source, /id="top-chrome"/);
   assert.match(source, /id="bottom-chrome"/);
 });
 
-test("web app script supports install, share, deep links, and service worker registration", () => {
+test("web app script supports install, share, fullscreen, new windows, and deep links", () => {
   const source = readText("web/src/app.js");
 
   assert.match(source, /beforeinstallprompt/);
   assert.match(source, /navigator\.share/);
+  assert.match(source, /requestFullscreen/);
+  assert.match(source, /window\.open/);
   assert.match(source, /serviceWorker\.register/);
   assert.match(source, /searchParams\.get\("song"\)/);
+  assert.match(source, /searchParams\.get\("mode"\)/);
   assert.match(source, /history\.replaceState/);
 });
 
@@ -43,6 +51,8 @@ test("manifest is configured for standalone install from the domain root", () =>
 test("service worker caches shell assets and page images for faster reopen", () => {
   const source = readText("web/src/sw.js");
 
+  assert.match(source, /alvernia-static-v3/);
+  assert.match(source, /alvernia-pages-v3/);
   assert.match(source, /pages\.json/);
   assert.match(source, /icon-192\.png/);
   assert.match(source, /icon-512\.png/);
@@ -57,4 +67,12 @@ test("web build emits install assets and generated icons", () => {
   assert.match(source, /generateIcon\(192/);
   assert.match(source, /generateIcon\(512/);
   assert.equal(fs.existsSync(path.join(webSrcDir, "sw.js")), true);
+});
+
+test("web styles include launch and fullscreen affordances", () => {
+  const source = readText("web/src/styles.css");
+
+  assert.match(source, /\.launch-screen/);
+  assert.match(source, /\.launch-card/);
+  assert.match(source, /\.nav-button-fullscreen/);
 });

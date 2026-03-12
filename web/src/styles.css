@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
-  --bg: #050505;
   --surface: rgba(16, 16, 16, 0.78);
-  --surface-strong: rgba(18, 18, 18, 0.95);
+  --surface-strong: rgba(18, 18, 18, 0.96);
+  --surface-soft: rgba(255, 255, 255, 0.06);
   --border: rgba(255, 255, 255, 0.11);
   --text: #f4f3ee;
   --muted: #beb8ac;
@@ -35,6 +35,10 @@ body {
 button,
 input {
   font: inherit;
+}
+
+button:disabled {
+  opacity: 0.58;
 }
 
 .app-shell {
@@ -81,10 +85,141 @@ input {
   text-transform: uppercase;
   font-size: 0.78rem;
   box-shadow: var(--shadow);
+  z-index: 3;
 }
 
-.loading.is-hidden {
-  display: none;
+.loading.is-hidden,
+.is-hidden {
+  display: none !important;
+}
+
+.launch-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-top) + 1rem) 1rem calc(var(--safe-bottom) + 1.25rem);
+  background:
+    radial-gradient(circle at top, rgba(248, 215, 112, 0.18), transparent 33%),
+    linear-gradient(180deg, rgba(8, 8, 8, 0.94) 0%, rgba(4, 4, 4, 0.98) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.launch-card {
+  width: min(94vw, 520px);
+  padding: 1.25rem;
+  border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(14, 14, 14, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.launch-icon {
+  width: 84px;
+  height: 84px;
+  display: block;
+  margin-bottom: 0.95rem;
+  border-radius: 22px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.35);
+}
+
+.launch-eyebrow,
+.install-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.launch-title,
+.install-title {
+  margin: 0 0 0.8rem;
+  font-size: clamp(1.7rem, 5vw, 2.5rem);
+  line-height: 1;
+}
+
+.launch-copy,
+.install-copy {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.launch-steps,
+.install-steps {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.48rem;
+  color: var(--text);
+}
+
+.launch-steps li,
+.install-steps li {
+  line-height: 1.4;
+}
+
+.launch-actions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.launch-button,
+.launch-link,
+.pill,
+.pill-button,
+.nav-button {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+}
+
+.launch-button,
+.launch-link,
+.pill-button,
+.nav-button,
+.button {
+  border: 0;
+  cursor: pointer;
+}
+
+.launch-button {
+  width: 100%;
+  padding: 1rem 1.1rem;
+  font-size: 1.06rem;
+}
+
+.launch-button-primary,
+.pill-button:not(.pill-button-secondary),
+.nav-button-fullscreen,
+.button-primary {
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #17120a;
+  font-weight: 700;
+}
+
+.launch-button-secondary,
+.pill-button-secondary,
+.button-secondary,
+.nav-button-primary {
+  background: rgba(20, 20, 20, 0.84);
+  color: var(--text);
+}
+
+.launch-link {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
 }
 
 .chrome {
@@ -134,18 +269,6 @@ input {
   gap: 0.55rem;
 }
 
-.pill,
-.pill-button,
-.nav-button {
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: var(--shadow);
-}
-
 .pill {
   padding: 0.72rem 1rem;
   font-size: 0.95rem;
@@ -154,28 +277,17 @@ input {
 
 .pill-button,
 .nav-button {
-  border: 0;
   padding: 0.78rem 1rem;
   font-size: 1rem;
 }
 
-.pill-button-secondary {
-  background: rgba(20, 20, 20, 0.84);
-}
-
 .nav-button {
-  min-width: 132px;
+  min-width: 120px;
 }
 
-.nav-button-primary,
-.pill-button:not(.pill-button-secondary) {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: #17120a;
-  font-weight: 700;
-}
-
-.is-hidden {
-  display: none !important;
+.nav-button-fullscreen {
+  min-width: 196px;
+  font-size: 1.03rem;
 }
 
 .modal,
@@ -204,41 +316,9 @@ input {
   box-shadow: var(--shadow);
 }
 
-.modal-label,
-.install-title {
+.modal-label {
   display: block;
   margin: 0 0 0.8rem;
-}
-
-.install-eyebrow {
-  margin: 0 0 0.35rem;
-  color: var(--accent);
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.install-title {
-  font-size: 1.45rem;
-}
-
-.install-copy {
-  margin: 0 0 1rem;
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.4;
-}
-
-.install-steps {
-  margin: 0 0 1rem;
-  padding-left: 1.2rem;
-  color: var(--text);
-  display: grid;
-  gap: 0.45rem;
-}
-
-.install-steps li {
-  line-height: 1.4;
 }
 
 #song-number {
@@ -247,7 +327,7 @@ input {
   padding: 0.95rem 1rem;
   border-radius: 16px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-soft);
   color: var(--text);
   font-size: 1.45rem;
   text-align: center;
@@ -261,27 +341,29 @@ input {
 }
 
 .button {
-  border: 0;
   border-radius: 15px;
   padding: 0.82rem 1rem;
 }
 
-.button-secondary {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text);
-}
-
-.button-primary {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: #17120a;
-  font-weight: 700;
-}
-
-.nav-button:disabled {
-  opacity: 0.4;
+.nav-button:disabled,
+.launch-button:disabled,
+.launch-link:disabled {
+  opacity: 0.42;
 }
 
 @media (max-width: 720px) {
+  .launch-card {
+    width: min(94vw, 460px);
+    padding: 1rem;
+    border-radius: 26px;
+  }
+
+  .launch-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 19px;
+  }
+
   .chrome {
     padding-left: 0.65rem;
     padding-right: 0.65rem;
@@ -313,5 +395,9 @@ input {
   .nav-button {
     min-width: 0;
     flex: 1;
+  }
+
+  .nav-button-fullscreen {
+    flex: 1.35;
   }
 }
