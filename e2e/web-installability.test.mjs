@@ -35,6 +35,12 @@ test("web app script supports install, share, fullscreen, new windows, and deep 
   assert.match(source, /searchParams\.get\("song"\)/);
   assert.match(source, /searchParams\.get\("mode"\)/);
   assert.match(source, /history\.replaceState/);
+  assert.doesNotMatch(source, /sessionStorage/);
+  assert.doesNotMatch(source, /LAUNCH_SEEN_KEY/);
+  assert.match(source, /const shouldShowLaunchScreen = \(\) => \{[\s\S]*if \(launchMode === WINDOW_MODE\) return false;[\s\S]*return true;[\s\S]*\}/);
+  assert.match(source, /launchFullscreenButton\.disabled = false/);
+  assert.match(source, /launchWindowButton\.disabled = false/);
+  assert.match(source, /window\.open\([\s\S]*"_blank"/);
 });
 
 test("manifest is configured for standalone install from the domain root", () => {
@@ -51,8 +57,9 @@ test("manifest is configured for standalone install from the domain root", () =>
 test("service worker caches shell assets and page images for faster reopen", () => {
   const source = readText("web/src/sw.js");
 
-  assert.match(source, /alvernia-static-v3/);
-  assert.match(source, /alvernia-pages-v3/);
+  assert.match(source, /alvernia-static-v4/);
+  assert.match(source, /alvernia-pages-v4/);
+  assert.match(source, /NETWORK_FIRST_PATHS/);
   assert.match(source, /pages\.json/);
   assert.match(source, /icon-192\.png/);
   assert.match(source, /icon-512\.png/);

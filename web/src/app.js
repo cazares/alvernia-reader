@@ -28,7 +28,6 @@ const confirmInstallButton = document.getElementById("confirm-install");
 const dismissInstallButton = document.getElementById("dismiss-install");
 
 const INSTALL_DISMISS_KEY = "alvernia-reader-install-dismissed";
-const LAUNCH_SEEN_KEY = "alvernia-reader-launch-seen";
 const DOUBLE_TAP_WINDOW_MS = 260;
 const CHROME_HIDE_MS = 2400;
 const WINDOW_MODE = "reader";
@@ -209,31 +208,27 @@ const updateWindowUi = () => {
   launchWindowButton.classList.toggle("is-hidden", !supportsWindowOpen);
 };
 
-const setLaunchVisible = (visible, { remember = true } = {}) => {
+const setLaunchVisible = (visible) => {
   state.launchVisible = visible;
   launchScreen.classList.toggle("is-hidden", !visible);
-
-  if (!visible && remember) {
-    window.sessionStorage.setItem(LAUNCH_SEEN_KEY, "1");
+  if (!visible) {
     setChromeVisible(true);
   }
 };
 
 const shouldShowLaunchScreen = () => {
-  if (isStandalone) return false;
   if (launchMode === WINDOW_MODE) return false;
-  return window.sessionStorage.getItem(LAUNCH_SEEN_KEY) !== "1";
+  return true;
 };
 
 const updateLaunchUi = () => {
   const steps = [];
-  const actionReady = state.appReady;
-
-  if (!actionReady) {
-    launchCopy.textContent = "Preparando el manual para abrirlo sin distracciones...";
+  if (!state.appReady) {
+    launchCopy.textContent = "Puedes tocar un boton ya mismo. El manual termina de cargar mientras entras.";
     steps.push(
-      "Cargando la portada y el indice de canciones.",
-      "En cuanto termine, podras abrirlo en pantalla completa o en otra ventana.",
+      "Pantalla completa intenta abrir el lector sin barras del navegador.",
+      "Ventana nueva abre otra ventana o pestaña con este mismo punto del manual.",
+      "Como instalar te deja el icono en tu pantalla de inicio.",
     );
   } else {
     if (supportsFullscreen) {
@@ -254,9 +249,9 @@ const updateLaunchUi = () => {
   }
 
   launchSteps.innerHTML = steps.map((step) => `<li>${step}</li>`).join("");
-  launchFullscreenButton.disabled = !actionReady;
-  launchWindowButton.disabled = !actionReady;
-  launchContinueButton.disabled = !actionReady;
+  launchFullscreenButton.disabled = false;
+  launchWindowButton.disabled = false;
+  launchContinueButton.disabled = false;
   launchInstallButton.disabled = false;
   updateFullscreenUi();
   updateWindowUi();
@@ -406,8 +401,8 @@ const openCurrentLocationInNewWindow = () => {
 
   const popup = window.open(
     currentShareUrl({ windowMode: true }),
-    "alvernia-reader-window",
-    "popup=yes,resizable=yes,toolbar=no,menubar=no,width=1024,height=1366",
+    "_blank",
+    "noopener,noreferrer",
   );
 
   if (!popup) {
@@ -489,13 +484,12 @@ const toggleFullscreen = async ({ sourceButton = fullscreenButton } = {}) => {
   }
 };
 
-const continueIntoReader = ({ remember = true } = {}) => {
-  setLaunchVisible(false, { remember });
+const continueIntoReader = () => {
+  setLaunchVisible(false);
   updateInstallUi();
 };
 
 const handleLaunchFullscreen = async () => {
-  if (!state.appReady) return;
   if (supportsFullscreen) {
     await toggleFullscreen({ sourceButton: launchFullscreenButton });
   }
@@ -503,7 +497,6 @@ const handleLaunchFullscreen = async () => {
 };
 
 const handleLaunchWindow = () => {
-  if (!state.appReady) return;
   const opened = openCurrentLocationInNewWindow();
   if (opened) {
     continueIntoReader();
@@ -561,9 +554,9 @@ pageImage.addEventListener("load", () => {
     updateLaunchUi();
 
     if (shouldShowLaunchScreen()) {
-      setLaunchVisible(true, { remember: false });
+      setLaunchVisible(true);
     } else {
-      continueIntoReader({ remember: false });
+      continueIntoReader();
     }
   }
 });

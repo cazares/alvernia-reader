@@ -1,5 +1,5 @@
-const STATIC_CACHE = "alvernia-static-v3";
-const PAGE_CACHE = "alvernia-pages-v3";
+const STATIC_CACHE = "alvernia-static-v4";
+const PAGE_CACHE = "alvernia-pages-v4";
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -11,6 +11,14 @@ const CORE_ASSETS = [
   "/icon-192.png",
   "/icon-512.png",
 ];
+const NETWORK_FIRST_PATHS = new Set([
+  "/",
+  "/index.html",
+  "/styles.css",
+  "/app.js",
+  "/manifest.webmanifest",
+  "/pages.json",
+]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -48,6 +56,25 @@ self.addEventListener("fetch", (event) => {
           cache.put(event.request, response.clone());
         }
         return response;
+      }),
+    );
+    return;
+  }
+
+  if (NETWORK_FIRST_PATHS.has(requestUrl.pathname)) {
+    event.respondWith(
+      caches.open(STATIC_CACHE).then(async (cache) => {
+        try {
+          const response = await fetch(event.request);
+          if (response.ok) {
+            cache.put(event.request, response.clone());
+          }
+          return response;
+        } catch (error) {
+          const cached = await cache.match(event.request);
+          if (cached) return cached;
+          throw error;
+        }
       }),
     );
     return;
