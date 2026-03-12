@@ -7,49 +7,27 @@
     "newArchEnabled": false,
     "platforms": [
       "ios",
-      "android",
-      "web"
+      "android"
     ],
-    "icon": "./ios/Mixterious/Images.xcassets/AppIcon.appiconset/AppIcon.png",
+    "icon": "./assets/icon.png",
     "splash": {
-      "image": "./ios/Mixterious/Images.xcassets/SplashScreen.imageset/SplashScreen.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cazares.alverniareader",
-      "buildNumber": "112",
-      "infoPlist": {
-        "NSPhotoLibraryAddUsageDescription": "Alvernia Reader can save generated files to your Photos library if you choose.",
-        "NSUserNotificationsUsageDescription": "Alvernia Reader can send optional notifications when background processing finishes."
-      }
+      "buildNumber": "121"
     },
     "android": {
       "package": "com.cazares.alverniareader",
-      "versionCode": 112
-    },
-    "notification": {
-      "icon": "./icons/notification-icon.png",
-      "color": "#4a90e2"
+      "versionCode": 121
     },
     "extra": {
-      "privacyPolicyUrl": "https://example.com/privacy",
-      "termsOfUseUrl": "https://example.com/terms",
-      "supportUrl": "https://example.com/support",
       "eas": {
         "projectId": "8f4aeff3-940f-4ec2-b82d-89b430f5c8be"
       }
-    },
-    "plugins": [
-      [
-        "expo-notifications",
-        {
-          "icon": "./icons/notification-icon.png",
-          "color": "#4a90e2",
-          "sounds": []
-        }
-      ]
-    ]
+    }
   }
 }

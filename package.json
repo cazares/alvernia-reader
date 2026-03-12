@@ -1,23 +1,16 @@
 {
-  "name": "karaoapp",
-  "version": "1.0",
+  "name": "alvernia-reader",
+  "version": "1.0.0",
   "private": true,
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "web": "expo start --web",
-    "export:web": "expo export --platform web --output-dir dist --clear",
     "ios": "expo run:ios",
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
+    "build:web": "node ./web/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:e2e": "node --test ./e2e/*.test.mjs",
-    "ota:configure": "npx eas update:configure",
-    "ota:doctor": "bash ./scripts/ota-doctor.sh",
-    "ota:doctor:strict": "bash ./scripts/ota-doctor.sh --strict",
-    "ota:publish:dev": "bash ./scripts/publish-ota.sh development ios",
-    "ota:publish:preview": "bash ./scripts/publish-ota.sh preview ios",
-    "ota:publish:production": "bash ./scripts/publish-ota.sh production ios"
+    "test:e2e": "node --test ./e2e/*.test.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

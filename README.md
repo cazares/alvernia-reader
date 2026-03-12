@@ -5,6 +5,7 @@ Standalone Expo/React Native repo for the Alvernia PDF reader app.
 ## What this repo contains
 
 - A single mobile app at the repo root
+- A static web distribution build pipeline in `web/`
 - The hardcoded Alvernia PDF assets in `assets/`
 - The current shipping reader entrypoint in `PdfReaderApp.tsx`
 
@@ -15,8 +16,16 @@ Standalone Expo/React Native repo for the Alvernia PDF reader app.
 ```bash
 npm ci
 npm run typecheck
-node --test e2e/native-entrypoint.test.mjs e2e/native-stability-config.test.mjs e2e/eas-config.test.mjs
+npm run test:e2e
 ```
+
+## Build the shareable web reader
+
+```bash
+npm run build:web
+```
+
+That generates a static one-page-at-a-time reader in `web/dist/` using rendered page images, which is easier to distribute quickly to non-technical users than TestFlight.
 
 ## Run on iOS
 
@@ -27,4 +36,5 @@ npx expo run:ios -d 'mPad' --configuration Release
 ## Notes
 
 - The reader is currently configured around the hardcoded Alvernia PDF flow.
+- The fastest public distribution path is Cloudflare Pages from `web/dist/`.
 - Generated folders like `node_modules`, `ios/Pods`, and build output are intentionally not tracked.

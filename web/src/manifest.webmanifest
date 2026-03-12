@@ -1,0 +1,15 @@
+{
+  "name": "Alvernia Reader",
+  "short_name": "Alvernia",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "start_url": ".",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}

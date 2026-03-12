@@ -16,3 +16,5 @@ android/app/build/
 
 dist/
 coverage/
+web/dist/
+.wrangler/

@@ -8,20 +8,6 @@
       "developmentClient": true,
       "distribution": "internal",
       "channel": "development",
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.197:8000"
-      },
-      "ios": {
-        "simulator": true
-      }
-    },
-    "simulatorRelease": {
-      "developmentClient": false,
-      "distribution": "internal",
-      "channel": "preview",
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.197:8000"
-      },
       "ios": {
         "simulator": true
       }
@@ -30,9 +16,6 @@
       "developmentClient": false,
       "distribution": "internal",
       "channel": "preview",
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.197:8000"
-      },
       "ios": {
         "simulator": false
       }
@@ -41,9 +24,6 @@
       "developmentClient": false,
       "distribution": "store",
       "channel": "production",
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://api.miguelendpoint.com"
-      },
       "ios": {
         "simulator": false
       }
