@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-pkill -9 -f "QuickTime Player|AVKit|quicklookd" || true
-echo "[pk] Killed QuickTime/AVKit/quicklookd playback processes."

@@ -1,27 +1,30 @@
-# Mixterioso
+# Alvernia Reader
 
-Mixterioso is a karaoke generation project with:
+Standalone Expo/React Native repo for the Alvernia PDF reader app.
 
-- a Python backend pipeline under `scripts/` and `karaoapi/`
-- a mobile app under `karaoapp/`
-- local tests under `tests/` and `karaoapp/e2e/`
+## What this repo contains
 
-## Local Setup
+- A single mobile app at the repo root
+- The hardcoded Alvernia PDF assets in `assets/`
+- The current shipping reader entrypoint in `PdfReaderApp.tsx`
 
-1. Create and activate a virtual environment.
-2. Install Python dependencies:
-   - `pip install -r requirements.txt`
-3. Run tests:
-   - `pytest`
+`index.js` registers `PdfReaderApp`, so that is the reader currently used on device.
 
-For app work:
+## Quick start
 
-1. `cd karaoapp`
-2. `npm install`
-3. `npm test`
+```bash
+npm ci
+npm run typecheck
+node --test e2e/native-entrypoint.test.mjs e2e/native-stability-config.test.mjs e2e/eas-config.test.mjs
+```
 
-## Repository Notes
+## Run on iOS
 
-- CI workflows have been removed.
-- External cloud deployment automation has been removed.
-- This repository is now configured for local development and validation only.
+```bash
+npx expo run:ios -d 'mPad' --configuration Release
+```
+
+## Notes
+
+- The reader is currently configured around the hardcoded Alvernia PDF flow.
+- Generated folders like `node_modules`, `ios/Pods`, and build output are intentionally not tracked.

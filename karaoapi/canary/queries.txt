@@ -1,5 +1,0 @@
-# Production canary queries
-# Lines beginning with "#" are ignored.
-The Beatles - Let It Be
-Queen - Bohemian Rhapsody
-Luis Miguel - La Incondicional

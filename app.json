@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Alvernia Reader",
+    "description": "Single-purpose PDF reader for the Alvernia manual.",
+    "slug": "alvernia-reader",
+    "version": "1.0",
+    "newArchEnabled": false,
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "icon": "./ios/Mixterious/Images.xcassets/AppIcon.appiconset/AppIcon.png",
+    "splash": {
+      "image": "./ios/Mixterious/Images.xcassets/SplashScreen.imageset/SplashScreen.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cazares.alverniareader",
+      "buildNumber": "112",
+      "infoPlist": {
+        "NSPhotoLibraryAddUsageDescription": "Alvernia Reader can save generated files to your Photos library if you choose.",
+        "NSUserNotificationsUsageDescription": "Alvernia Reader can send optional notifications when background processing finishes."
+      }
+    },
+    "android": {
+      "package": "com.cazares.alverniareader",
+      "versionCode": 112
+    },
+    "notification": {
+      "icon": "./icons/notification-icon.png",
+      "color": "#4a90e2"
+    },
+    "extra": {
+      "privacyPolicyUrl": "https://example.com/privacy",
+      "termsOfUseUrl": "https://example.com/terms",
+      "supportUrl": "https://example.com/support",
+      "eas": {
+        "projectId": "8f4aeff3-940f-4ec2-b82d-89b430f5c8be"
+      }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./icons/notification-icon.png",
+          "color": "#4a90e2",
+          "sounds": []
+        }
+      ]
+    ]
+  }
+}

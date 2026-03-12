@@ -1,1 +1,0 @@
-# Mixterioso scripts package
