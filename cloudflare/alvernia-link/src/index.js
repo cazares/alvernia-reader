@@ -1,32 +1,39 @@
 const PAGES_ORIGIN = "https://alvernia-reader.pages.dev";
-const ROUTE_PREFIX = "/alvernia";
+const LEGACY_ROUTE_PREFIX = "/alvernia";
 
-export const normalizeProxyPath = (pathname) => {
-  if (pathname === ROUTE_PREFIX) {
+export const normalizeProxyPath = ({ host, pathname }) => {
+  if (host === "miguelworld.com" || host === "www.miguelworld.com") {
+    return { redirectToTrailingSlash: false, proxiedPath: pathname || "/" };
+  }
+
+  if (pathname === LEGACY_ROUTE_PREFIX) {
     return { redirectToTrailingSlash: true, proxiedPath: "/" };
   }
 
-  if (pathname === `${ROUTE_PREFIX}/`) {
+  if (pathname === `${LEGACY_ROUTE_PREFIX}/`) {
     return { redirectToTrailingSlash: false, proxiedPath: "/" };
   }
 
-  if (!pathname.startsWith(`${ROUTE_PREFIX}/`)) {
+  if (!pathname.startsWith(`${LEGACY_ROUTE_PREFIX}/`)) {
     return { redirectToTrailingSlash: false, proxiedPath: pathname };
   }
 
-  const proxiedPath = pathname.slice(ROUTE_PREFIX.length) || "/";
+  const proxiedPath = pathname.slice(LEGACY_ROUTE_PREFIX.length) || "/";
   return { redirectToTrailingSlash: false, proxiedPath };
 };
 
 export const buildProxyUrl = (requestUrl) => {
   const incomingUrl = new URL(requestUrl);
-  const { proxiedPath } = normalizeProxyPath(incomingUrl.pathname);
+  const { proxiedPath } = normalizeProxyPath({
+    host: incomingUrl.host,
+    pathname: incomingUrl.pathname,
+  });
   return new URL(`${proxiedPath}${incomingUrl.search}`, PAGES_ORIGIN);
 };
 
 const copyResponse = (upstreamResponse) => {
   const headers = new Headers(upstreamResponse.headers);
-  headers.set("x-alvernia-proxy", "miguelengineer.com/alvernia");
+  headers.set("x-alvernia-proxy", "miguelworld.com");
 
   return new Response(upstreamResponse.body, {
     status: upstreamResponse.status,
@@ -38,10 +45,13 @@ const copyResponse = (upstreamResponse) => {
 export default {
   async fetch(request) {
     const requestUrl = new URL(request.url);
-    const { redirectToTrailingSlash } = normalizeProxyPath(requestUrl.pathname);
+    const { redirectToTrailingSlash } = normalizeProxyPath({
+      host: requestUrl.host,
+      pathname: requestUrl.pathname,
+    });
 
     if (redirectToTrailingSlash) {
-      requestUrl.pathname = `${ROUTE_PREFIX}/`;
+      requestUrl.pathname = `${LEGACY_ROUTE_PREFIX}/`;
       return Response.redirect(requestUrl.toString(), 308);
     }
 
