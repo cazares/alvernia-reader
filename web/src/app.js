@@ -10,6 +10,9 @@ const launchInstallButton = document.getElementById("launch-install");
 const launchContinueButton = document.getElementById("launch-continue");
 const topChrome = document.getElementById("top-chrome");
 const bottomChrome = document.getElementById("bottom-chrome");
+const fullscreenGuard = document.getElementById("fullscreen-guard");
+const resumeFullscreenButton = document.getElementById("resume-fullscreen");
+const dismissFullscreenGuardButton = document.getElementById("dismiss-fullscreen-guard");
 const pageStatus = document.getElementById("page-status");
 const openModalButton = document.getElementById("open-modal");
 const shareButton = document.getElementById("share-button");
@@ -46,6 +49,8 @@ const state = {
   lastTapTimer: null,
   pendingSingleTapTimer: null,
   inputFocusTimers: [],
+  stickyFullscreenWanted: false,
+  userRequestedFullscreenExit: false,
   touchStart: null,
   lastTouchEndedAt: 0,
   appReady: false,
@@ -191,6 +196,10 @@ const setChromeVisible = (visible) => {
   scheduleChromeHide();
 };
 
+const setFullscreenGuardVisible = (visible) => {
+  fullscreenGuard.classList.toggle("is-hidden", !visible);
+};
+
 const updateStatus = () => {
   const song = findSongAtOrBeforePage(state.currentPage);
   pageStatus.textContent = song
@@ -230,19 +239,19 @@ const shouldShowLaunchScreen = () => {
 const updateLaunchUi = () => {
   const steps = [];
   if (!state.appReady) {
-    launchCopy.textContent = "Abre el manual.";
+    launchCopy.textContent = "Instalalo como app y abre en pantalla completa.";
     steps.push(
-      "Pantalla completa",
-      "Instalar",
+      "1. Instalar",
+      "2. Pantalla completa",
     );
   } else {
     if (supportsFullscreen) {
-      launchCopy.textContent = "Toca Pantalla completa para entrar.";
+      launchCopy.textContent = "Mejor: instalalo como app. Luego entra en pantalla completa.";
       steps.push(
-        "Instalar para guardarlo como app.",
+        "Instalar en tu pantalla de inicio.",
       );
     } else {
-      launchCopy.textContent = "Abre el lector o instalalo como app.";
+      launchCopy.textContent = "Instalalo como app para abrirlo facil.";
       steps.push(
         "Instalar para dejarlo en inicio.",
       );
@@ -311,6 +320,7 @@ const queueSongInputFocus = () => {
 const openModal = () => {
   songInput.value = "";
   clearPendingSingleTap();
+  setFullscreenGuardVisible(false);
   setChromeVisible(true);
   if (!modal.open) {
     modal.showModal();
@@ -467,6 +477,12 @@ const openCurrentLocationInNewWindow = ({ fallbackToSameTab = false } = {}) => {
   return true;
 };
 
+const disableStickyFullscreen = () => {
+  state.stickyFullscreenWanted = false;
+  state.userRequestedFullscreenExit = true;
+  setFullscreenGuardVisible(false);
+};
+
 const triggerInstall = async () => {
   if (!state.deferredInstallPrompt) {
     openInstallSheet();
@@ -523,7 +539,7 @@ const consumeTap = (clientX, clientY) => {
   setChromeVisible(!state.controlsVisible);
 };
 
-const toggleFullscreen = async ({ sourceButton = fullscreenButton } = {}) => {
+const toggleFullscreen = async ({ sourceButton = fullscreenButton, quiet = false } = {}) => {
   if (!supportsFullscreen) {
     return false;
   }
@@ -531,19 +547,64 @@ const toggleFullscreen = async ({ sourceButton = fullscreenButton } = {}) => {
   try {
     setButtonBusy(sourceButton, "Abriendo...", true);
     if (isFullscreen()) {
+      disableStickyFullscreen();
       await exitFullscreen();
-    } else {
-      await requestFullscreen();
+      updateFullscreenUi();
+      return true;
     }
+
+    state.stickyFullscreenWanted = true;
+    state.userRequestedFullscreenExit = false;
+    setFullscreenGuardVisible(false);
+    await requestFullscreen();
     updateFullscreenUi();
     return true;
   } catch (error) {
     console.error("No se pudo cambiar la pantalla completa", error);
+    if (!quiet) {
+      flashButtonLabel(sourceButton, "No disponible");
+    }
+    if (state.stickyFullscreenWanted && !state.userRequestedFullscreenExit) {
+      setFullscreenGuardVisible(true);
+    }
+    return false;
+  } finally {
+    setButtonBusy(sourceButton, "", false);
+  }
+};
+
+const exitFullscreenByChoice = async ({ sourceButton = fullscreenButton } = {}) => {
+  disableStickyFullscreen();
+  if (!isFullscreen()) {
+    setChromeVisible(true);
+    updateFullscreenUi();
+    return true;
+  }
+
+  try {
+    setButtonBusy(sourceButton, "Saliendo...", true);
+    await exitFullscreen();
+    updateFullscreenUi();
+    setChromeVisible(true);
+    return true;
+  } catch (error) {
+    console.error("No se pudo salir de pantalla completa", error);
     flashButtonLabel(sourceButton, "No disponible");
     return false;
   } finally {
     setButtonBusy(sourceButton, "", false);
   }
+};
+
+const recoverFullscreen = () => {
+  if (!state.stickyFullscreenWanted || state.userRequestedFullscreenExit || !supportsFullscreen) {
+    return;
+  }
+
+  setFullscreenGuardVisible(true);
+  window.setTimeout(() => {
+    toggleFullscreen({ sourceButton: fullscreenButton, quiet: true }).catch(() => {});
+  }, 80);
 };
 
 const continueIntoReader = () => {
@@ -558,12 +619,30 @@ const handleLaunchFullscreen = async () => {
     if (enteredFullscreen) {
       await sleep(FULLSCREEN_LAUNCH_DELAY_MS);
     } else {
-      window.setTimeout(() => {
-        toggleFullscreen({ sourceButton: fullscreenButton }).catch(() => {});
-      }, FULLSCREEN_LAUNCH_DELAY_MS);
+      recoverFullscreen();
     }
   }
   continueIntoReader();
+};
+
+const handleFullscreenButton = async () => {
+  if (isFullscreen()) {
+    await exitFullscreenByChoice({ sourceButton: fullscreenButton });
+    return;
+  }
+
+  await toggleFullscreen({ sourceButton: fullscreenButton });
+};
+
+const handleGuardResume = async () => {
+  state.userRequestedFullscreenExit = false;
+  state.stickyFullscreenWanted = true;
+  await toggleFullscreen({ sourceButton: resumeFullscreenButton });
+};
+
+const handleGuardDismiss = () => {
+  disableStickyFullscreen();
+  setChromeVisible(true);
 };
 
 const handleLaunchWindow = () => {
@@ -588,10 +667,16 @@ installButton.addEventListener("click", () => {
   });
 });
 fullscreenButton.addEventListener("click", () => {
-  toggleFullscreen({ sourceButton: fullscreenButton }).catch((error) => {
+  handleFullscreenButton().catch((error) => {
     console.error("No se pudo activar la pantalla completa", error);
   });
 });
+resumeFullscreenButton.addEventListener("click", () => {
+  handleGuardResume().catch((error) => {
+    console.error("No se pudo recuperar la pantalla completa", error);
+  });
+});
+dismissFullscreenGuardButton.addEventListener("click", handleGuardDismiss);
 confirmInstallButton.addEventListener("click", () => {
   triggerInstall().catch((error) => {
     console.error("No se pudo instalar", error);
@@ -685,7 +770,7 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "ArrowLeft") turnPage(-1);
   if (event.key.toLowerCase() === "g") openModal();
   if (event.key.toLowerCase() === "f") {
-    toggleFullscreen({ sourceButton: fullscreenButton }).catch((error) => {
+    handleFullscreenButton().catch((error) => {
       console.error("No se pudo activar la pantalla completa", error);
     });
   }
@@ -738,11 +823,27 @@ window.addEventListener("appinstalled", () => {
 
 ["fullscreenchange", "webkitfullscreenchange"].forEach((eventName) => {
   document.addEventListener(eventName, () => {
+    const active = isFullscreen();
     updateFullscreenUi();
-    setChromeVisible(true);
-    if (modal.open) {
-      queueSongInputFocus();
+
+    if (active) {
+      state.userRequestedFullscreenExit = false;
+      setFullscreenGuardVisible(false);
+      setChromeVisible(true);
+      if (modal.open) {
+        queueSongInputFocus();
+      }
+      return;
     }
+
+    if (state.stickyFullscreenWanted && !state.userRequestedFullscreenExit) {
+      setChromeVisible(false);
+      recoverFullscreen();
+      return;
+    }
+
+    setFullscreenGuardVisible(false);
+    setChromeVisible(true);
   });
 });
 

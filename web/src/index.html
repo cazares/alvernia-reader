@@ -27,17 +27,17 @@
           <p class="launch-copy" id="launch-copy">Abriendo...</p>
           <ol class="launch-steps" id="launch-steps"></ol>
           <div class="launch-actions">
-            <button class="launch-button launch-button-primary" id="launch-fullscreen" type="button">
+            <button class="launch-button launch-button-primary" id="launch-install" type="button">
+              Instalar app
+            </button>
+            <button class="launch-button" id="launch-fullscreen" type="button">
               Pantalla completa
             </button>
             <button class="launch-button" id="launch-window" type="button">
               Otra ventana
             </button>
-            <button class="launch-button launch-button-secondary" id="launch-install" type="button">
-              Instalar
-            </button>
             <button class="launch-link" id="launch-continue" type="button">
-              Abrir aqui
+              Abrir sin instalar
             </button>
           </div>
         </div>
@@ -62,6 +62,18 @@
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" alt="Pagina actual del manual" />
         <div class="loading" id="loading">Cargando...</div>
+      </section>
+
+      <section class="fullscreen-guard is-hidden" id="fullscreen-guard" aria-live="assertive">
+        <div class="fullscreen-guard-card">
+          <p class="fullscreen-guard-eyebrow">Pantalla completa</p>
+          <h2 class="fullscreen-guard-title">Volver a entrar</h2>
+          <p class="fullscreen-guard-copy">Toca para seguir en pantalla completa.</p>
+          <div class="fullscreen-guard-actions">
+            <button class="button button-primary" id="resume-fullscreen" type="button">Volver</button>
+            <button class="button button-secondary" id="dismiss-fullscreen-guard" type="button">Salir</button>
+          </div>
+        </div>
       </section>
 
       <footer class="chrome chrome-bottom is-hidden" id="bottom-chrome">

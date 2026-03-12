@@ -94,6 +94,52 @@ button:disabled {
   display: none !important;
 }
 
+.fullscreen-guard {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-top) + 1rem) 1rem calc(var(--safe-bottom) + 1rem);
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.fullscreen-guard-card {
+  width: min(92vw, 340px);
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: rgba(14, 14, 14, 0.94);
+  box-shadow: var(--shadow);
+}
+
+.fullscreen-guard-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fullscreen-guard-title {
+  margin: 0 0 0.45rem;
+  font-size: 1.55rem;
+}
+
+.fullscreen-guard-copy {
+  margin: 0 0 0.9rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.fullscreen-guard-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
 .launch-screen {
   position: fixed;
   inset: 0;
@@ -372,6 +418,10 @@ button:disabled {
 
   .chrome-top {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .fullscreen-guard-actions {
     flex-direction: column;
   }
 
