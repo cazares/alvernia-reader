@@ -1,0 +1,15 @@
+{
+  "name": "alvernia-reader-link",
+  "main": "src/index.js",
+  "compatibility_date": "2026-03-12",
+  "routes": [
+    {
+      "pattern": "miguelbase.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.miguelbase.com",
+      "custom_domain": true
+    }
+  ]
+}

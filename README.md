@@ -1,27 +1,43 @@
-# Mixterioso
+# Alvernia Reader
 
-Mixterioso is a karaoke generation project with:
+Standalone Expo/React Native repo for the Alvernia PDF reader app.
 
-- a Python backend pipeline under `scripts/` and `karaoapi/`
-- a mobile app under `karaoapp/`
-- local tests under `tests/` and `karaoapp/e2e/`
+## What this repo contains
 
-## Local Setup
+- A single mobile app at the repo root
+- A static web distribution build pipeline in `web/`
+- The hardcoded Alvernia PDF assets in `assets/`
+- The current shipping reader entrypoint in `PdfReaderApp.tsx`
 
-1. Create and activate a virtual environment.
-2. Install Python dependencies:
-   - `pip install -r requirements.txt`
-3. Run tests:
-   - `pytest`
+`index.js` registers `PdfReaderApp`, so that is the reader currently used on device.
 
-For app work:
+## Quick start
 
-1. `cd karaoapp`
-2. `npm install`
-3. `npm test`
+```bash
+npm ci
+npm run typecheck
+npm run test:e2e
+```
 
-## Repository Notes
+## Build the shareable web reader
 
-- CI workflows have been removed.
-- External cloud deployment automation has been removed.
-- This repository is now configured for local development and validation only.
+```bash
+npm run build:web
+```
+
+That generates a static one-page-at-a-time reader in `web/dist/` using rendered page images, which is easier to distribute quickly to non-technical users than TestFlight.
+
+## Run on iOS
+
+```bash
+npx expo run:ios -d 'mPad' --configuration Release
+```
+
+## Notes
+
+- The reader is currently configured around the hardcoded Alvernia PDF flow.
+- The fastest public distribution path is Cloudflare Pages from `web/dist/`.
+- The friendliest share path is the Worker custom domain at `https://miguelbase.com/`.
+- On iPhone or iPad, the intended install flow is Safari -> Compartir -> Agregar a pantalla de inicio.
+- Deploy that route with `npx wrangler deploy -c cloudflare/alvernia-link/wrangler.jsonc`.
+- Generated folders like `node_modules`, `ios/Pods`, and build output are intentionally not tracked.

@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Alvernia Reader",
+    "description": "Single-purpose PDF reader for the Alvernia manual.",
+    "slug": "alvernia-reader",
+    "version": "1.0",
+    "newArchEnabled": false,
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cazares.alverniareader",
+      "buildNumber": "121"
+    },
+    "android": {
+      "package": "com.cazares.alverniareader",
+      "versionCode": 121
+    },
+    "extra": {
+      "eas": {
+        "projectId": "8f4aeff3-940f-4ec2-b82d-89b430f5c8be"
+      }
+    }
+  }
+}
