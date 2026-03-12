@@ -38,5 +38,6 @@ npx expo run:ios -d 'mPad' --configuration Release
 - The reader is currently configured around the hardcoded Alvernia PDF flow.
 - The fastest public distribution path is Cloudflare Pages from `web/dist/`.
 - The friendliest share path is the Worker custom domain at `https://miguelbase.com/`.
+- On iPhone or iPad, the intended install flow is Safari -> Compartir -> Agregar a pantalla de inicio.
 - Deploy that route with `npx wrangler deploy -c cloudflare/alvernia-link/wrangler.jsonc`.
 - Generated folders like `node_modules`, `ios/Pods`, and build output are intentionally not tracked.

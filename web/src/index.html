@@ -4,20 +4,55 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0a0a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Alvernia" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Alvernia Reader" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="description" content="Manual Alvernia con navegacion rapida por numero de cancion." />
     <title>Alvernia Reader</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" href="./icon.png" />
-    <link rel="apple-touch-icon" href="./icon.png" />
+    <link rel="icon" href="./icon-192.png" />
+    <link rel="apple-touch-icon" href="./icon-512.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="app-shell">
+      <header class="chrome chrome-top is-hidden" id="top-chrome">
+        <div class="pill" id="page-status">Pagina 1</div>
+        <div class="chrome-actions">
+          <button class="pill-button pill-button-secondary is-hidden" id="share-button" type="button">
+            Compartir
+          </button>
+          <button class="pill-button pill-button-secondary is-hidden" id="install-button" type="button">
+            Instalar
+          </button>
+          <button class="pill-button" id="open-modal" type="button">Ir a cancion</button>
+        </div>
+      </header>
+
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" alt="Pagina actual del manual" />
         <div class="loading" id="loading">Cargando...</div>
       </section>
 
-      <button class="goto-fab" id="open-modal" type="button">Ir a cancion</button>
+      <footer class="chrome chrome-bottom is-hidden" id="bottom-chrome">
+        <button class="nav-button" id="prev-page" type="button" aria-label="Pagina anterior">Anterior</button>
+        <button class="nav-button nav-button-primary" id="next-page" type="button" aria-label="Pagina siguiente">Siguiente</button>
+      </footer>
+
+      <dialog class="install-sheet" id="install-sheet">
+        <form class="install-card" method="dialog">
+          <p class="install-eyebrow">Instalar</p>
+          <h1 class="install-title">Usalo como app</h1>
+          <p class="install-copy" id="install-copy"></p>
+          <div class="install-actions">
+            <button class="button button-secondary" id="dismiss-install" value="dismiss">Ahora no</button>
+            <button class="button button-primary is-hidden" id="confirm-install" type="button">Instalar</button>
+          </div>
+        </form>
+      </dialog>
 
       <dialog class="modal" id="go-modal">
         <form class="modal-card" method="dialog" id="go-form">

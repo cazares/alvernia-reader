@@ -16,6 +16,22 @@ for (const file of ["index.html", "styles.css", "app.js", "manifest.webmanifest"
 }
 
 fs.copyFileSync(path.join(rootDir, "assets", "icon.png"), path.join(distDir, "icon.png"));
+fs.copyFileSync(path.join(srcDir, "sw.js"), path.join(distDir, "sw.js"));
+
+const generateIcon = (size, outputName) => {
+  const result = spawnSync(
+    "sips",
+    ["-z", String(size), String(size), path.join(rootDir, "assets", "icon.png"), "--out", path.join(distDir, outputName)],
+    { stdio: "inherit" },
+  );
+
+  if (result.status !== 0) {
+    throw new Error(`sips failed while generating ${outputName}`);
+  }
+};
+
+generateIcon(192, "icon-192.png");
+generateIcon(512, "icon-512.png");
 
 const pdfPath = path.join(rootDir, "assets", "alvernia_manual_2.pdf");
 const outputPrefix = path.join(pagesDir, "page");
