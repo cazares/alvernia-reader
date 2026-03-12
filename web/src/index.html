@@ -19,11 +19,38 @@
   </head>
   <body>
     <main class="app-shell">
+      <section class="launch-screen" id="launch-screen" aria-live="polite">
+        <div class="launch-card">
+          <img class="launch-icon" src="./icon-192.png" alt="" />
+          <p class="launch-eyebrow">Alvernia Reader</p>
+          <h1 class="launch-title">Abrir como app</h1>
+          <p class="launch-copy" id="launch-copy">Preparando el manual...</p>
+          <ol class="launch-steps" id="launch-steps"></ol>
+          <div class="launch-actions">
+            <button class="launch-button launch-button-primary" id="launch-fullscreen" type="button">
+              Pantalla completa
+            </button>
+            <button class="launch-button" id="launch-window" type="button">
+              Ventana nueva
+            </button>
+            <button class="launch-button launch-button-secondary" id="launch-install" type="button">
+              Como instalar
+            </button>
+            <button class="launch-link" id="launch-continue" type="button">
+              Seguir aqui
+            </button>
+          </div>
+        </div>
+      </section>
+
       <header class="chrome chrome-top is-hidden" id="top-chrome">
         <div class="pill" id="page-status">Pagina 1</div>
         <div class="chrome-actions">
           <button class="pill-button pill-button-secondary is-hidden" id="share-button" type="button">
             Compartir
+          </button>
+          <button class="pill-button pill-button-secondary" id="window-button" type="button">
+            Ventana
           </button>
           <button class="pill-button pill-button-secondary is-hidden" id="install-button" type="button">
             Instalar
@@ -39,6 +66,9 @@
 
       <footer class="chrome chrome-bottom is-hidden" id="bottom-chrome">
         <button class="nav-button" id="prev-page" type="button" aria-label="Pagina anterior">Anterior</button>
+        <button class="nav-button nav-button-fullscreen" id="fullscreen-button" type="button" aria-label="Pantalla completa">
+          Pantalla completa
+        </button>
         <button class="nav-button nav-button-primary" id="next-page" type="button" aria-label="Pagina siguiente">Siguiente</button>
       </footer>
 
