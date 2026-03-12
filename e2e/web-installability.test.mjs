@@ -23,8 +23,12 @@ test("web shell includes iOS standalone metadata and native-like controls", () =
   assert.match(source, /id="share-button"/);
   assert.match(source, /id="top-chrome"/);
   assert.match(source, /id="bottom-chrome"/);
+  assert.match(source, /id="fullscreen-guard"/);
+  assert.match(source, /id="resume-fullscreen"/);
+  assert.match(source, /id="dismiss-fullscreen-guard"/);
   assert.match(source, /id="cancel-go"/);
   assert.match(source, /id="song-number"[^>]*type="tel"[^>]*autofocus/);
+  assert.match(source, /Instalar app/);
 });
 
 test("web app script supports install, share, fullscreen, new windows, and deep links", () => {
@@ -46,6 +50,11 @@ test("web app script supports install, share, fullscreen, new windows, and deep 
   assert.match(source, /window\.open\([\s\S]*"_blank"/);
   assert.match(source, /pendingSingleTapTimer/);
   assert.match(source, /FOCUS_RETRY_MS/);
+  assert.match(source, /stickyFullscreenWanted/);
+  assert.match(source, /userRequestedFullscreenExit/);
+  assert.match(source, /setFullscreenGuardVisible/);
+  assert.match(source, /recoverFullscreen/);
+  assert.match(source, /resumeFullscreenButton\.addEventListener/);
   assert.match(source, /focusSongInput/);
   assert.match(source, /queueSongInputFocus/);
   assert.match(source, /window\.location\.assign/);
@@ -92,5 +101,6 @@ test("web styles include launch and fullscreen affordances", () => {
   assert.match(source, /\.launch-screen/);
   assert.match(source, /\.launch-card/);
   assert.match(source, /\.nav-button-fullscreen/);
+  assert.match(source, /\.fullscreen-guard/);
   assert.match(source, /touch-action: manipulation/);
 });
