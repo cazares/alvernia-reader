@@ -23,6 +23,7 @@ test("web shell includes iOS standalone metadata and native-like controls", () =
   assert.match(source, /id="share-button"/);
   assert.match(source, /id="top-chrome"/);
   assert.match(source, /id="bottom-chrome"/);
+  assert.match(source, /id="cancel-go"/);
   assert.match(source, /id="song-number"[^>]*type="tel"[^>]*autofocus/);
 });
 
@@ -39,12 +40,16 @@ test("web app script supports install, share, fullscreen, new windows, and deep 
   assert.match(source, /history\.replaceState/);
   assert.doesNotMatch(source, /sessionStorage/);
   assert.doesNotMatch(source, /LAUNCH_SEEN_KEY/);
-  assert.match(source, /const shouldShowLaunchScreen = \(\) => \{[\s\S]*if \(launchMode === WINDOW_MODE\) return false;[\s\S]*return true;[\s\S]*\}/);
+  assert.match(source, /const shouldShowLaunchScreen = \(\) => \{[\s\S]*if \(launchMode === WINDOW_MODE \|\| isStandalone\) return false;[\s\S]*return true;[\s\S]*\}/);
   assert.match(source, /launchFullscreenButton\.disabled = false/);
   assert.match(source, /launchWindowButton\.disabled = false/);
   assert.match(source, /window\.open\([\s\S]*"_blank"/);
   assert.match(source, /pendingSingleTapTimer/);
+  assert.match(source, /FOCUS_RETRY_MS/);
   assert.match(source, /focusSongInput/);
+  assert.match(source, /queueSongInputFocus/);
+  assert.match(source, /window\.location\.assign/);
+  assert.match(source, /cancelGoButton\.addEventListener\("click", closeModal\)/);
   assert.match(source, /touchend[\s\S]*preventDefault\(\)/);
 });
 

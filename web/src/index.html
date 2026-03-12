@@ -23,21 +23,21 @@
         <div class="launch-card">
           <img class="launch-icon" src="./icon-192.png" alt="" />
           <p class="launch-eyebrow">Alvernia Reader</p>
-          <h1 class="launch-title">Abrir como app</h1>
-          <p class="launch-copy" id="launch-copy">Preparando el manual...</p>
+          <h1 class="launch-title">Abrir</h1>
+          <p class="launch-copy" id="launch-copy">Abriendo...</p>
           <ol class="launch-steps" id="launch-steps"></ol>
           <div class="launch-actions">
             <button class="launch-button launch-button-primary" id="launch-fullscreen" type="button">
               Pantalla completa
             </button>
             <button class="launch-button" id="launch-window" type="button">
-              Ventana nueva
+              Otra ventana
             </button>
             <button class="launch-button launch-button-secondary" id="launch-install" type="button">
-              Como instalar
+              Instalar
             </button>
             <button class="launch-link" id="launch-continue" type="button">
-              Seguir aqui
+              Abrir aqui
             </button>
           </div>
         </div>
@@ -90,8 +90,8 @@
           <label class="modal-label" for="song-number">Numero de cancion</label>
           <input id="song-number" type="tel" inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" autocomplete="off" autofocus />
           <div class="modal-actions">
-            <button class="button button-secondary" value="cancel">Cancelar</button>
-            <button class="button button-primary" id="confirm-go" value="default">Ir</button>
+            <button class="button button-secondary" id="cancel-go" type="button">Cancelar</button>
+            <button class="button button-primary" id="confirm-go" type="submit" value="default">Ir</button>
           </div>
         </form>
       </dialog>
