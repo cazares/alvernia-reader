@@ -17,7 +17,14 @@ test("normalizeProxyPath keeps nested asset paths under the reader route", () =>
   });
 });
 
-test("normalizeProxyPath keeps miguelbase.com at the domain root", () => {
+test("normalizeProxyPath keeps miguelcoro.com at the domain root", () => {
+  assert.deepEqual(normalizeProxyPath({ host: "miguelcoro.com", pathname: "/pages/page-052.jpg" }), {
+    redirectToTrailingSlash: false,
+    proxiedPath: "/pages/page-052.jpg",
+  });
+});
+
+test("normalizeProxyPath still accepts legacy root domains", () => {
   assert.deepEqual(normalizeProxyPath({ host: "miguelbase.com", pathname: "/pages/page-052.jpg" }), {
     redirectToTrailingSlash: false,
     proxiedPath: "/pages/page-052.jpg",
@@ -26,12 +33,12 @@ test("normalizeProxyPath keeps miguelbase.com at the domain root", () => {
 
 test("buildProxyUrl forwards root and assets to the live Pages deployment", () => {
   assert.equal(
-    buildProxyUrl("https://miguelbase.com/").toString(),
+    buildProxyUrl("https://miguelcoro.com/").toString(),
     "https://alvernia-reader.pages.dev/",
   );
 
   assert.equal(
-    buildProxyUrl("https://miguelbase.com/pages.json?cache=1").toString(),
+    buildProxyUrl("https://miguelcoro.com/pages.json?cache=1").toString(),
     "https://alvernia-reader.pages.dev/pages.json?cache=1",
   );
 });
