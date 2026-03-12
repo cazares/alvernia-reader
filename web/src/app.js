@@ -14,6 +14,7 @@ const form = document.getElementById("go-form");
 const songInput = document.getElementById("song-number");
 const installSheet = document.getElementById("install-sheet");
 const installCopy = document.getElementById("install-copy");
+const installSteps = document.getElementById("install-steps");
 const confirmInstallButton = document.getElementById("confirm-install");
 const dismissInstallButton = document.getElementById("dismiss-install");
 
@@ -170,14 +171,38 @@ const dismissInstall = () => {
 
 const installCopyText = () => {
   if (state.deferredInstallPrompt) {
-    return "Toca Instalar para agregar esta app a tu pantalla de inicio.";
+    return "Toca Instalar y acepta el aviso del navegador para guardarla en tu pantalla de inicio.";
   }
 
   if (isIOS) {
-    return "En Safari, toca Compartir y luego Agregar a pantalla de inicio para instalarla como app.";
+    return "Haz esto una sola vez en Safari y luego abrira como si fuera una app nativa.";
   }
 
   return "Abre este enlace en Safari o Chrome para instalar esta app en la pantalla de inicio.";
+};
+
+const installStepItems = () => {
+  if (state.deferredInstallPrompt) {
+    return [
+      "Toca Instalar.",
+      "Acepta el aviso del navegador.",
+      "Abre Alvernia desde el icono nuevo en tu pantalla de inicio.",
+    ];
+  }
+
+  if (isIOS) {
+    return [
+      "Abre este enlace en Safari.",
+      "Toca Compartir en la barra del navegador.",
+      "Toca Agregar a pantalla de inicio.",
+    ];
+  }
+
+  return [
+    "Abre este enlace en Safari o Chrome.",
+    "Toca Instalar cuando el navegador lo ofrezca.",
+    "Abre Alvernia desde el icono nuevo en tu pantalla de inicio.",
+  ];
 };
 
 const updateInstallUi = () => {
@@ -188,6 +213,9 @@ const updateInstallUi = () => {
   shareButton.classList.toggle("is-hidden", !(supportsShare || supportsClipboard));
   confirmInstallButton.classList.toggle("is-hidden", !state.deferredInstallPrompt);
   installCopy.textContent = installCopyText();
+  installSteps.innerHTML = installStepItems()
+    .map((step) => `<li>${step}</li>`)
+    .join("");
 
   if (!dismissed && shouldOfferInstall && !installSheet.open) {
     window.setTimeout(() => {
