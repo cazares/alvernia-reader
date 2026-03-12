@@ -1,13 +1,16 @@
 const PAGES_ORIGIN = "https://alvernia-reader.pages.dev";
 const LEGACY_ROUTE_PREFIX = "/alvernia";
+const ROOT_PROXY_HOSTS = new Set([
+  "miguelcoro.com",
+  "www.miguelcoro.com",
+  "miguelbase.com",
+  "www.miguelbase.com",
+  "miguelworld.com",
+  "www.miguelworld.com",
+]);
 
 export const normalizeProxyPath = ({ host, pathname }) => {
-  if (
-    host === "miguelbase.com"
-    || host === "www.miguelbase.com"
-    || host === "miguelworld.com"
-    || host === "www.miguelworld.com"
-  ) {
+  if (ROOT_PROXY_HOSTS.has(host)) {
     return { redirectToTrailingSlash: false, proxiedPath: pathname || "/" };
   }
 
@@ -36,9 +39,9 @@ export const buildProxyUrl = (requestUrl) => {
   return new URL(`${proxiedPath}${incomingUrl.search}`, PAGES_ORIGIN);
 };
 
-const copyResponse = (upstreamResponse) => {
+const copyResponse = (upstreamResponse, requestHost) => {
   const headers = new Headers(upstreamResponse.headers);
-  headers.set("x-alvernia-proxy", "miguelbase.com");
+  headers.set("x-alvernia-proxy", requestHost);
 
   return new Response(upstreamResponse.body, {
     status: upstreamResponse.status,
@@ -64,6 +67,6 @@ export default {
     const upstreamRequest = new Request(upstreamUrl, request);
     const upstreamResponse = await fetch(upstreamRequest);
 
-    return copyResponse(upstreamResponse);
+    return copyResponse(upstreamResponse, requestUrl.host);
   },
 };
