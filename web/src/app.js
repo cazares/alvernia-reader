@@ -32,6 +32,7 @@ const CHROME_HIDE_MS = 2400;
 const WINDOW_MODE = "reader";
 const FOCUS_RETRY_MS = [90, 220, 420, 650];
 const FULLSCREEN_LAUNCH_DELAY_MS = 140;
+const DOUBLE_TAP_DISTANCE_PX = 32;
 
 const state = {
   totalPages: 1,
@@ -46,6 +47,7 @@ const state = {
   inputFocusTimers: [],
   stickyFullscreenWanted: false,
   userRequestedFullscreenExit: false,
+  ignoreTapUntilTouchEnd: false,
   touchStart: null,
   lastTouchEndedAt: 0,
   appReady: false,
@@ -438,8 +440,8 @@ const consumeTap = (clientX, clientY) => {
   if (
     state.lastTap
     && now - state.lastTap.time <= DOUBLE_TAP_WINDOW_MS
-    && Math.abs(clientX - state.lastTap.x) < 28
-    && Math.abs(clientY - state.lastTap.y) < 28
+    && Math.abs(clientX - state.lastTap.x) < DOUBLE_TAP_DISTANCE_PX
+    && Math.abs(clientY - state.lastTap.y) < DOUBLE_TAP_DISTANCE_PX
   ) {
     window.clearTimeout(state.lastTapTimer);
     clearPendingSingleTap();
@@ -680,10 +682,34 @@ viewerShell.addEventListener("touchstart", (event) => {
   }
 
   const touch = event.touches[0];
+  const now = Date.now();
+  if (
+    state.lastTap
+    && now - state.lastTap.time <= DOUBLE_TAP_WINDOW_MS + 120
+    && Math.abs(touch.clientX - state.lastTap.x) < DOUBLE_TAP_DISTANCE_PX
+    && Math.abs(touch.clientY - state.lastTap.y) < DOUBLE_TAP_DISTANCE_PX
+  ) {
+    event.preventDefault();
+    state.ignoreTapUntilTouchEnd = true;
+    window.clearTimeout(state.lastTapTimer);
+    clearPendingSingleTap();
+    state.lastTap = null;
+    openModal();
+    return;
+  }
+
   state.touchStart = { x: touch.clientX, y: touch.clientY, time: Date.now() };
-}, { passive: true });
+}, { passive: false });
 
 viewerShell.addEventListener("touchend", (event) => {
+  if (state.ignoreTapUntilTouchEnd) {
+    event.preventDefault();
+    state.ignoreTapUntilTouchEnd = false;
+    state.touchStart = null;
+    state.lastTouchEndedAt = Date.now();
+    return;
+  }
+
   if (!state.touchStart || event.changedTouches.length !== 1) return;
   const touch = event.changedTouches[0];
   const deltaX = touch.clientX - state.touchStart.x;
