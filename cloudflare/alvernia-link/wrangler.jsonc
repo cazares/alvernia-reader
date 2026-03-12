@@ -1,0 +1,15 @@
+{
+  "name": "alvernia-reader-link",
+  "main": "src/index.js",
+  "compatibility_date": "2026-03-12",
+  "routes": [
+    {
+      "pattern": "miguelengineer.com/alvernia*",
+      "zone_id": "f88acffe31918dfd0b6436d420462a44"
+    },
+    {
+      "pattern": "www.miguelengineer.com/alvernia*",
+      "zone_id": "f88acffe31918dfd0b6436d420462a44"
+    }
+  ]
+}

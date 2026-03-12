@@ -1,0 +1,54 @@
+const PAGES_ORIGIN = "https://alvernia-reader.pages.dev";
+const ROUTE_PREFIX = "/alvernia";
+
+export const normalizeProxyPath = (pathname) => {
+  if (pathname === ROUTE_PREFIX) {
+    return { redirectToTrailingSlash: true, proxiedPath: "/" };
+  }
+
+  if (pathname === `${ROUTE_PREFIX}/`) {
+    return { redirectToTrailingSlash: false, proxiedPath: "/" };
+  }
+
+  if (!pathname.startsWith(`${ROUTE_PREFIX}/`)) {
+    return { redirectToTrailingSlash: false, proxiedPath: pathname };
+  }
+
+  const proxiedPath = pathname.slice(ROUTE_PREFIX.length) || "/";
+  return { redirectToTrailingSlash: false, proxiedPath };
+};
+
+export const buildProxyUrl = (requestUrl) => {
+  const incomingUrl = new URL(requestUrl);
+  const { proxiedPath } = normalizeProxyPath(incomingUrl.pathname);
+  return new URL(`${proxiedPath}${incomingUrl.search}`, PAGES_ORIGIN);
+};
+
+const copyResponse = (upstreamResponse) => {
+  const headers = new Headers(upstreamResponse.headers);
+  headers.set("x-alvernia-proxy", "miguelengineer.com/alvernia");
+
+  return new Response(upstreamResponse.body, {
+    status: upstreamResponse.status,
+    statusText: upstreamResponse.statusText,
+    headers,
+  });
+};
+
+export default {
+  async fetch(request) {
+    const requestUrl = new URL(request.url);
+    const { redirectToTrailingSlash } = normalizeProxyPath(requestUrl.pathname);
+
+    if (redirectToTrailingSlash) {
+      requestUrl.pathname = `${ROUTE_PREFIX}/`;
+      return Response.redirect(requestUrl.toString(), 308);
+    }
+
+    const upstreamUrl = buildProxyUrl(request.url);
+    const upstreamRequest = new Request(upstreamUrl, request);
+    const upstreamResponse = await fetch(upstreamRequest);
+
+    return copyResponse(upstreamResponse);
+  },
+};
