@@ -5,9 +5,7 @@ const launchScreen = document.getElementById("launch-screen");
 const launchCopy = document.getElementById("launch-copy");
 const launchSteps = document.getElementById("launch-steps");
 const launchFullscreenButton = document.getElementById("launch-fullscreen");
-const launchWindowButton = document.getElementById("launch-window");
 const launchInstallButton = document.getElementById("launch-install");
-const launchContinueButton = document.getElementById("launch-continue");
 const topChrome = document.getElementById("top-chrome");
 const bottomChrome = document.getElementById("bottom-chrome");
 const fullscreenGuard = document.getElementById("fullscreen-guard");
@@ -15,9 +13,6 @@ const resumeFullscreenButton = document.getElementById("resume-fullscreen");
 const dismissFullscreenGuardButton = document.getElementById("dismiss-fullscreen-guard");
 const pageStatus = document.getElementById("page-status");
 const openModalButton = document.getElementById("open-modal");
-const shareButton = document.getElementById("share-button");
-const windowButton = document.getElementById("window-button");
-const installButton = document.getElementById("install-button");
 const fullscreenButton = document.getElementById("fullscreen-button");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
@@ -61,9 +56,6 @@ const initialUrl = new URL(window.location.href);
 const launchMode = initialUrl.searchParams.get("mode");
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
 const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
-const supportsShare = typeof navigator.share === "function";
-const supportsClipboard = typeof navigator.clipboard?.writeText === "function";
-const supportsWindowOpen = typeof window.open === "function";
 const fullscreenTarget = document.documentElement;
 const supportsFullscreen = Boolean(
   document.fullscreenEnabled
@@ -123,6 +115,7 @@ state.songIndex = [...manifest.songIndex].sort((left, right) => left.page - righ
 const pageFileName = (pageNumber) => `./pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const isModalOpen = () => !modal.classList.contains("is-hidden");
 
 const setLoading = (active, text = "Cargando...") => {
   loading.textContent = text;
@@ -181,7 +174,7 @@ const updateHistory = () => {
 
 const scheduleChromeHide = () => {
   window.clearTimeout(state.chromeTimer);
-  if (!state.controlsVisible || modal.open || installSheet.open || state.launchVisible) return;
+  if (!state.controlsVisible || isModalOpen() || installSheet.open || state.launchVisible) return;
   state.chromeTimer = window.setTimeout(() => {
     topChrome.classList.add("is-hidden");
     bottomChrome.classList.add("is-hidden");
@@ -213,14 +206,7 @@ const updateFullscreenUi = () => {
   const active = isFullscreen();
   fullscreenButton.classList.toggle("is-hidden", !supportsFullscreen);
   fullscreenButton.textContent = active ? "Salir de pantalla completa" : "Pantalla completa";
-  launchFullscreenButton.textContent = supportsFullscreen
-    ? active ? "Salir de pantalla completa" : "Pantalla completa"
-    : "Abrir lector";
-};
-
-const updateWindowUi = () => {
-  windowButton.classList.toggle("is-hidden", !supportsWindowOpen || isStandalone);
-  launchWindowButton.classList.toggle("is-hidden", true);
+  launchFullscreenButton.textContent = supportsFullscreen ? "Abrir en pantalla completa" : "Abrir";
 };
 
 const setLaunchVisible = (visible) => {
@@ -232,7 +218,7 @@ const setLaunchVisible = (visible) => {
 };
 
 const shouldShowLaunchScreen = () => {
-  if (launchMode === WINDOW_MODE || isStandalone) return false;
+  if (launchMode === WINDOW_MODE) return false;
   return true;
 };
 
@@ -261,11 +247,8 @@ const updateLaunchUi = () => {
   launchSteps.innerHTML = steps.map((step) => `<li>${step}</li>`).join("");
   launchSteps.classList.toggle("is-hidden", steps.length === 0);
   launchFullscreenButton.disabled = false;
-  launchWindowButton.disabled = false;
-  launchContinueButton.disabled = false;
   launchInstallButton.disabled = false;
   updateFullscreenUi();
-  updateWindowUi();
 };
 
 const renderPage = (pageNumber, { syncUrl = true } = {}) => {
@@ -296,7 +279,7 @@ const clearInputFocusTimers = () => {
 };
 
 const focusSongInput = () => {
-  if (!modal.open) return;
+  if (!isModalOpen()) return;
   try {
     songInput.focus({ preventScroll: true });
   } catch {
@@ -322,15 +305,15 @@ const openModal = () => {
   clearPendingSingleTap();
   setFullscreenGuardVisible(false);
   setChromeVisible(true);
-  if (!modal.open) {
-    modal.showModal();
-  }
+  modal.classList.remove("is-hidden");
+  modal.setAttribute("aria-hidden", "false");
   queueSongInputFocus();
 };
 
 const closeModal = () => {
   clearInputFocusTimers();
-  if (modal.open) modal.close();
+  modal.classList.add("is-hidden");
+  modal.setAttribute("aria-hidden", "true");
   scheduleChromeHide();
 };
 
@@ -403,9 +386,6 @@ const installStepItems = () => {
 const updateInstallUi = () => {
   const dismissed = window.localStorage.getItem(INSTALL_DISMISS_KEY) === "1";
   const shouldOfferInstall = !isStandalone && (Boolean(state.deferredInstallPrompt) || isIOS);
-
-  installButton.classList.toggle("is-hidden", !shouldOfferInstall);
-  shareButton.classList.toggle("is-hidden", !(supportsShare || supportsClipboard));
   confirmInstallButton.classList.toggle("is-hidden", !state.deferredInstallPrompt);
   installCopy.textContent = installCopyText();
   installSteps.innerHTML = installStepItems().map((step) => `<li>${step}</li>`).join("");
@@ -414,7 +394,7 @@ const updateInstallUi = () => {
     window.setTimeout(() => {
       if (
         window.localStorage.getItem(INSTALL_DISMISS_KEY) !== "1"
-        && !modal.open
+        && !isModalOpen()
         && !installSheet.open
         && !state.launchVisible
       ) {
@@ -422,59 +402,6 @@ const updateInstallUi = () => {
       }
     }, 900);
   }
-};
-
-const shareCurrentLocation = async () => {
-  const song = findSongAtOrBeforePage(state.currentPage);
-  const text = song
-    ? `Abrir Alvernia Reader en la cancion ${song.song}`
-    : "Abrir Alvernia Reader";
-  const url = currentShareUrl();
-
-  if (supportsShare) {
-    await navigator.share({
-      title: "Alvernia Reader",
-      text,
-      url,
-    });
-    return;
-  }
-
-  if (supportsClipboard) {
-    await navigator.clipboard.writeText(url);
-    flashButtonLabel(shareButton, "Copiado");
-  }
-};
-
-const openCurrentLocationInNewWindow = ({ fallbackToSameTab = false } = {}) => {
-  const targetUrl = currentShareUrl({ windowMode: true });
-
-  if (!supportsWindowOpen) {
-    if (fallbackToSameTab) {
-      window.location.assign(targetUrl);
-      return true;
-    }
-    return false;
-  }
-
-  const popup = window.open(
-    targetUrl,
-    "_blank",
-    "noopener,noreferrer",
-  );
-
-  if (!popup) {
-    if (fallbackToSameTab) {
-      window.location.assign(targetUrl);
-      return true;
-    }
-    flashButtonLabel(windowButton, "Bloqueada");
-    flashButtonLabel(launchWindowButton, "Bloqueada");
-    return false;
-  }
-
-  popup.focus?.();
-  return true;
 };
 
 const disableStickyFullscreen = () => {
@@ -645,27 +572,7 @@ const handleGuardDismiss = () => {
   setChromeVisible(true);
 };
 
-const handleLaunchWindow = () => {
-  const opened = openCurrentLocationInNewWindow({ fallbackToSameTab: true });
-  if (opened) {
-    continueIntoReader();
-  }
-};
-
 openModalButton.addEventListener("click", openModal);
-shareButton.addEventListener("click", () => {
-  shareCurrentLocation().catch((error) => {
-    console.error("No se pudo compartir", error);
-  });
-});
-windowButton.addEventListener("click", () => {
-  openCurrentLocationInNewWindow({ fallbackToSameTab: true });
-});
-installButton.addEventListener("click", () => {
-  triggerInstall().catch((error) => {
-    console.error("No se pudo instalar", error);
-  });
-});
 fullscreenButton.addEventListener("click", () => {
   handleFullscreenButton().catch((error) => {
     console.error("No se pudo activar la pantalla completa", error);
@@ -689,11 +596,7 @@ launchFullscreenButton.addEventListener("click", () => {
     console.error("No se pudo abrir en pantalla completa", error);
   });
 });
-launchWindowButton.addEventListener("click", handleLaunchWindow);
 launchInstallButton.addEventListener("click", openInstallSheet);
-launchContinueButton.addEventListener("click", () => {
-  continueIntoReader();
-});
 prevPageButton.addEventListener("click", () => {
   turnPage(-1);
   setChromeVisible(true);
@@ -739,19 +642,9 @@ form.addEventListener("submit", (event) => {
 });
 
 modal.addEventListener("click", (event) => {
-  const rect = modal.getBoundingClientRect();
-  const inside = rect.top <= event.clientY
-    && event.clientY <= rect.top + rect.height
-    && rect.left <= event.clientX
-    && event.clientX <= rect.left + rect.width;
-  if (!inside) {
+  if (event.target === modal) {
     closeModal();
   }
-});
-
-modal.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  closeModal();
 });
 
 installSheet.addEventListener("click", (event) => {
@@ -766,6 +659,10 @@ installSheet.addEventListener("click", (event) => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && isModalOpen()) {
+    closeModal();
+    return;
+  }
   if (event.key === "ArrowRight") turnPage(1);
   if (event.key === "ArrowLeft") turnPage(-1);
   if (event.key.toLowerCase() === "g") openModal();
@@ -829,8 +726,12 @@ window.addEventListener("appinstalled", () => {
     if (active) {
       state.userRequestedFullscreenExit = false;
       setFullscreenGuardVisible(false);
-      setChromeVisible(true);
-      if (modal.open) {
+      window.setTimeout(() => {
+        if (!isModalOpen()) {
+          setChromeVisible(false);
+        }
+      }, 700);
+      if (isModalOpen()) {
         queueSongInputFocus();
       }
       return;
@@ -849,6 +750,7 @@ window.addEventListener("appinstalled", () => {
 
 const initialSong = Number.parseInt(initialUrl.searchParams.get("song") ?? "", 10);
 const initialPage = Number.parseInt(initialUrl.searchParams.get("page") ?? "", 10);
+const shouldUseStartupDeepLink = launchMode === WINDOW_MODE || !isStandalone;
 
 state.launchVisible = shouldShowLaunchScreen();
 launchScreen.classList.toggle("is-hidden", !state.launchVisible);
@@ -857,9 +759,9 @@ updateLaunchUi();
 updateStatus();
 setChromeVisible(false);
 renderPage(
-  Number.isFinite(initialSong)
+  shouldUseStartupDeepLink && Number.isFinite(initialSong)
     ? findSongPage(initialSong)
-    : Number.isFinite(initialPage)
+    : shouldUseStartupDeepLink && Number.isFinite(initialPage)
       ? initialPage
       : 1,
   { syncUrl: false },

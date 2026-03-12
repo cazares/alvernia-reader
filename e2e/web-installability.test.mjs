@@ -16,11 +16,8 @@ test("web shell includes iOS standalone metadata and native-like controls", () =
   assert.match(source, /maximum-scale=1, user-scalable=no/);
   assert.match(source, /id="launch-screen"/);
   assert.match(source, /id="launch-fullscreen"/);
-  assert.match(source, /id="launch-window"/);
-  assert.match(source, /id="install-button"/);
-  assert.match(source, /id="window-button"/);
+  assert.match(source, /id="launch-install"/);
   assert.match(source, /id="fullscreen-button"/);
-  assert.match(source, /id="share-button"/);
   assert.match(source, /id="top-chrome"/);
   assert.match(source, /id="bottom-chrome"/);
   assert.match(source, /id="fullscreen-guard"/);
@@ -29,25 +26,26 @@ test("web shell includes iOS standalone metadata and native-like controls", () =
   assert.match(source, /id="cancel-go"/);
   assert.match(source, /id="song-number"[^>]*type="tel"[^>]*autofocus/);
   assert.match(source, /Instalar app/);
+  assert.doesNotMatch(source, /id="launch-window"/);
+  assert.doesNotMatch(source, /id="share-button"/);
+  assert.doesNotMatch(source, /id="window-button"/);
+  assert.doesNotMatch(source, /id="install-button"/);
 });
 
-test("web app script supports install, share, fullscreen, new windows, and deep links", () => {
+test("web app script supports install, sticky fullscreen, modal navigation, and deep links", () => {
   const source = readText("web/src/app.js");
 
   assert.match(source, /beforeinstallprompt/);
-  assert.match(source, /navigator\.share/);
   assert.match(source, /requestFullscreen/);
-  assert.match(source, /window\.open/);
   assert.match(source, /serviceWorker\.register/);
   assert.match(source, /searchParams\.get\("song"\)/);
   assert.match(source, /searchParams\.get\("mode"\)/);
   assert.match(source, /history\.replaceState/);
   assert.doesNotMatch(source, /sessionStorage/);
   assert.doesNotMatch(source, /LAUNCH_SEEN_KEY/);
-  assert.match(source, /const shouldShowLaunchScreen = \(\) => \{[\s\S]*if \(launchMode === WINDOW_MODE \|\| isStandalone\) return false;[\s\S]*return true;[\s\S]*\}/);
+  assert.match(source, /const shouldShowLaunchScreen = \(\) => \{[\s\S]*if \(launchMode === WINDOW_MODE\) return false;[\s\S]*return true;[\s\S]*\}/);
   assert.match(source, /launchFullscreenButton\.disabled = false/);
-  assert.match(source, /launchWindowButton\.disabled = false/);
-  assert.match(source, /window\.open\([\s\S]*"_blank"/);
+  assert.match(source, /launchInstallButton\.disabled = false/);
   assert.match(source, /pendingSingleTapTimer/);
   assert.match(source, /FOCUS_RETRY_MS/);
   assert.match(source, /stickyFullscreenWanted/);
@@ -57,9 +55,12 @@ test("web app script supports install, share, fullscreen, new windows, and deep 
   assert.match(source, /resumeFullscreenButton\.addEventListener/);
   assert.match(source, /focusSongInput/);
   assert.match(source, /queueSongInputFocus/);
-  assert.match(source, /window\.location\.assign/);
   assert.match(source, /cancelGoButton\.addEventListener\("click", closeModal\)/);
   assert.match(source, /touchend[\s\S]*preventDefault\(\)/);
+  assert.match(source, /const shouldUseStartupDeepLink = launchMode === WINDOW_MODE \|\| !isStandalone/);
+  assert.match(source, /const isModalOpen = \(\) => !modal\.classList\.contains\("is-hidden"\)/);
+  assert.doesNotMatch(source, /navigator\.share/);
+  assert.doesNotMatch(source, /window\.open/);
 });
 
 test("manifest is configured for standalone install from the domain root", () => {
