@@ -16,6 +16,7 @@ const state = {
   totalPages: 1,
   totalSongs: 0,
   currentPage: 1,
+  currentPageObjectUrl: "",
   songDraft: "",
   songIndex: [],
   overlayVisible: true,
@@ -195,13 +196,31 @@ const renderDraft = () => {
   songDisplay.value = state.songDraft;
 };
 
-const loadPageImage = (pageNumber, retryToken = "") => new Promise((resolve, reject) => {
+const decodeImage = (src) => new Promise((resolve, reject) => {
   const loader = new Image();
   loader.decoding = "async";
-  loader.onload = () => resolve(pageFileUrl(pageNumber, retryToken));
-  loader.onerror = () => reject(new Error(`No se pudo cargar la página ${pageNumber}`));
-  loader.src = pageFileUrl(pageNumber, retryToken);
+  loader.onload = () => resolve(true);
+  loader.onerror = () => reject(new Error("No se pudo decodificar la imagen"));
+  loader.src = src;
 });
+
+const loadPageImage = async (pageNumber, retryToken = "") => {
+  const response = await fetch(pageFileUrl(pageNumber, retryToken), { cache: "force-cache" });
+  if (!response.ok) {
+    throw new Error(`No se pudo cargar la página ${pageNumber}`);
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+
+  try {
+    await decodeImage(objectUrl);
+    return objectUrl;
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+};
 
 const renderPage = async (pageNumber) => {
   const nextPage = clampPage(pageNumber);
@@ -210,7 +229,7 @@ const renderPage = async (pageNumber) => {
   scheduleLoadingIndicator();
 
   try {
-    let nextPageUrl;
+    let nextPageUrl = "";
 
     try {
       nextPageUrl = await loadPageImage(nextPage);
@@ -219,11 +238,18 @@ const renderPage = async (pageNumber) => {
       nextPageUrl = await loadPageImage(nextPage, Date.now());
     }
 
-    if (requestId !== state.pageLoadRequest) return;
+    if (requestId !== state.pageLoadRequest) {
+      if (nextPageUrl) URL.revokeObjectURL(nextPageUrl);
+      return;
+    }
 
     state.currentPage = nextPage;
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
+    if (state.currentPageObjectUrl) {
+      URL.revokeObjectURL(state.currentPageObjectUrl);
+    }
+    state.currentPageObjectUrl = nextPageUrl;
     renderStatus();
     hideLoadingIndicator();
     getAdjacentSongPages().forEach(prefetchSongPage);
@@ -232,6 +258,7 @@ const renderPage = async (pageNumber) => {
     clearLoadingTimer();
     console.error("No se pudo cargar la página solicitada", nextPage, error);
     setLoading(true, "No se pudo cargar esta página.");
+    setOverlayVisible(true);
   }
 };
 
