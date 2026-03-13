@@ -6,12 +6,12 @@
     <meta name="theme-color" content="#0a0a0a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Alvernia" />
+    <meta name="apple-mobile-web-app-title" content="Signo Vivo" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="application-name" content="Alvernia Reader" />
+    <meta name="application-name" content="Signo Vivo" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="description" content="Manual Alvernia con lector simple y navegacion rapida." />
-    <title>Alvernia Reader</title>
+    <title>Signo Vivo</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon-192.png" />
     <link rel="apple-touch-icon" href="./icon-512.png" />
@@ -26,13 +26,16 @@
 
       <section class="overlay-controls" id="overlay-controls">
         <div class="top-actions">
-          <button class="top-action-button" id="install-button" type="button" aria-label="Instalar app">
-            ⬇ Instalar app
+          <button class="top-action-button" id="install-button" type="button" aria-label="Instalar Signo Vivo">
+            ⬇ Instalar Signo Vivo
           </button>
         </div>
 
         <div class="navigation-stage">
-          <button class="nav-button nav-button-side nav-button-left" id="prev-page" type="button" aria-label="Canción anterior">&larr; Anterior</button>
+          <button class="nav-button nav-button-side nav-button-left" id="prev-page" type="button" aria-label="Canción anterior">
+            <span class="nav-arrow" aria-hidden="true">←</span>
+            <span class="nav-label">Anterior</span>
+          </button>
 
           <div class="navigation-numberpad" id="navigation-numberpad">
             <p class="numberpad-eyebrow">Navegación</p>
@@ -71,7 +74,10 @@
             </div>
           </div>
 
-          <button class="nav-button nav-button-side nav-button-right" id="next-page" type="button" aria-label="Canción siguiente">Siguiente &rarr;</button>
+          <button class="nav-button nav-button-side nav-button-right" id="next-page" type="button" aria-label="Canción siguiente">
+            <span class="nav-label">Siguiente</span>
+            <span class="nav-arrow" aria-hidden="true">→</span>
+          </button>
         </div>
       </section>
     </main>
