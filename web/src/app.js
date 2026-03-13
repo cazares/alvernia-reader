@@ -19,18 +19,25 @@ const state = {
   songDraft: "",
   songIndex: [],
   overlayVisible: true,
+  immersiveMode: false,
   touchStart: null,
   lastTouchEndedAt: 0,
 };
 
 const initialUrl = new URL(window.location.href);
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandaloneApp = window.matchMedia("(display-mode: standalone)").matches
+  || window.matchMedia("(display-mode: fullscreen)").matches
+  || window.navigator.standalone === true;
 const fullscreenTarget = document.documentElement;
-const supportsFullscreen = Boolean(
+const nativeFullscreenSupported = Boolean(
   document.fullscreenEnabled
     || document.webkitFullscreenEnabled
     || fullscreenTarget.requestFullscreen
     || fullscreenTarget.webkitRequestFullscreen,
 );
+const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
+const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 
 const manifestResponse = await fetch("./pages.json");
 const manifest = await manifestResponse.json();
@@ -140,6 +147,11 @@ const updateFullscreenButton = () => {
   }
 
   fullscreenButton.classList.remove("is-hidden");
+  if (canOfferPseudoFullscreen) {
+    fullscreenButton.textContent = state.immersiveMode ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa";
+    return;
+  }
+
   fullscreenButton.textContent = isFullscreen() ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa";
 };
 
@@ -167,7 +179,7 @@ const goToDraftSong = () => {
   setOverlayVisible(false);
 };
 
-const turnSong = (direction) => {
+const turnSong = (direction, { keepOverlay = false } = {}) => {
   if (direction === 0 || state.totalSongs === 0) return;
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
 
@@ -175,7 +187,7 @@ const turnSong = (direction) => {
     if (direction > 0) {
       renderPage(state.songIndex[0].page);
       clearDraft();
-      setOverlayVisible(false);
+      setOverlayVisible(keepOverlay);
     }
     return;
   }
@@ -184,11 +196,18 @@ const turnSong = (direction) => {
   if (nextIndex === currentSongIndex) return;
   renderPage(state.songIndex[nextIndex].page);
   clearDraft();
-  setOverlayVisible(false);
+  setOverlayVisible(keepOverlay);
 };
 
 const toggleFullscreen = async () => {
   if (!supportsFullscreen) return;
+
+  if (canOfferPseudoFullscreen) {
+    state.immersiveMode = !state.immersiveMode;
+    setOverlayVisible(!state.immersiveMode);
+    updateFullscreenButton();
+    return;
+  }
 
   try {
     if (isFullscreen()) {
@@ -223,11 +242,11 @@ backspaceButton.addEventListener("click", backspaceDraft);
 goButton.addEventListener("click", goToDraftSong);
 
 prevPageButton.addEventListener("click", () => {
-  turnSong(-1);
+  turnSong(-1, { keepOverlay: true });
 });
 
 nextPageButton.addEventListener("click", () => {
-  turnSong(1);
+  turnSong(1, { keepOverlay: true });
 });
 
 fullscreenButton.addEventListener("click", () => {
