@@ -124,8 +124,8 @@ button:disabled {
   width: 100%;
   padding: 1.2rem;
   border-radius: 30px;
-  border: 1px solid var(--border);
-  background: var(--surface-strong);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(12, 12, 12, 0.95);
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -145,6 +145,8 @@ button:disabled {
   margin: 0 0 0.9rem;
   text-align: center;
   font-size: 1rem;
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 600;
 }
 
 .numberpad-display {
@@ -152,8 +154,8 @@ button:disabled {
   margin: 0 0 0.9rem;
   padding: 1rem 1.1rem;
   border-radius: 22px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.14);
   color: var(--text);
   font-size: clamp(1.52rem, 4.4vw, 2.15rem);
   text-align: center;
@@ -184,13 +186,15 @@ button:disabled {
 
 .numberpad-key {
   min-height: 70px;
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.11);
   font-size: 1.32rem;
   font-weight: 600;
 }
 
 .numberpad-key-muted {
   font-size: 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 243, 238, 0.92);
 }
 
 .go-button {
@@ -221,7 +225,8 @@ button:disabled {
   min-height: 64px;
   padding: 0.9rem 1rem;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.13);
   font-size: 1rem;
   font-weight: 700;
 }
