@@ -15,9 +15,13 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /apple-mobile-web-app-status-bar-style/);
   assert.match(source, /maximum-scale=1, user-scalable=no/);
   assert.match(source, /id="overlay-controls"/);
+  assert.match(source, /id="install-button"/);
+  assert.match(source, /Instalar app/);
+  assert.match(source, /class="top-actions"/);
+  assert.match(source, /class="navigation-stage"/);
   assert.match(source, /id="navigation-numberpad"/);
   assert.match(source, /id="song-status"/);
-  assert.match(source, /Canción 0 de 0/);
+  assert.match(source, /Canción 0/);
   assert.match(source, /id="song-display"[^>]*readonly/);
   assert.match(source, /Número de canción/);
   assert.match(source, /id="numberpad-grid"/);
@@ -34,7 +38,6 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /Pantalla completa/);
   assert.doesNotMatch(source, /launch-screen/);
   assert.doesNotMatch(source, /go-modal/);
-  assert.doesNotMatch(source, /install-sheet/);
 });
 
 test("web app script supports first-page startup, song-based navigation numberpad input, and simple fullscreen", () => {
@@ -55,6 +58,11 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /setOverlayVisible\(false\)/);
   assert.match(source, /canOfferPseudoFullscreen/);
   assert.match(source, /window\.matchMedia\("\(display-mode: standalone\)"\)/);
+  assert.match(source, /beforeinstallprompt/);
+  assert.match(source, /appinstalled/);
+  assert.match(source, /state\.deferredInstallPrompt/);
+  assert.match(source, /updateInstallButton/);
+  assert.match(source, /triggerInstall/);
   assert.match(source, /requestFullscreen/);
   assert.match(source, /exitFullscreen/);
   assert.match(source, /viewerShell\.addEventListener\("touchstart"/);
@@ -62,13 +70,13 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /viewerShell\.addEventListener\("click"/);
   assert.match(source, /serviceWorker\.register/);
   assert.match(source, /songIndex/);
-  assert.doesNotMatch(source, /beforeinstallprompt/);
   assert.doesNotMatch(source, /fullscreenGuard/);
 });
 
 test("manifest is configured for standalone install from the domain root", () => {
   const manifest = JSON.parse(readText("web/src/manifest.webmanifest"));
 
+  assert.deepEqual(manifest.display_override, ["fullscreen", "standalone"]);
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.scope, "/");
   assert.equal(manifest.start_url, "/");
@@ -104,13 +112,15 @@ test("web styles include the centered navigation numberpad and overlay controls"
 
   assert.match(source, /Avenir Next/);
   assert.match(source, /\.overlay-controls/);
+  assert.match(source, /\.top-actions/);
+  assert.match(source, /\.top-action-button/);
+  assert.match(source, /\.navigation-stage/);
   assert.match(source, /\.navigation-numberpad/);
   assert.match(source, /\.numberpad-grid/);
   assert.match(source, /\.numberpad-display/);
   assert.match(source, /\.go-button/);
-  assert.match(source, /\.overlay-actions/);
+  assert.match(source, /\.fullscreen-button/);
   assert.match(source, /\.nav-button-left/);
   assert.match(source, /\.nav-button-right/);
   assert.match(source, /touch-action: manipulation/);
-  assert.doesNotMatch(source, /\.install-sheet/);
 });

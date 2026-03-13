@@ -2,6 +2,7 @@
   "name": "Alvernia Reader",
   "short_name": "Alvernia",
   "description": "Manual Alvernia con navegacion rapida por numero de cancion.",
+  "display_override": ["fullscreen", "standalone"],
   "display": "standalone",
   "scope": "/",
   "start_url": "/",
