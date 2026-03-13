@@ -11,7 +11,7 @@
   --blue-strong: #1b63da;
   --blue-glow: rgba(69, 162, 255, 0.32);
   --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
-  --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.20);
+  --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.80);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --ui-font: "Avenir Next", "SF Pro Display", "Segoe UI", "Helvetica Neue", sans-serif;
@@ -238,7 +238,7 @@ button:disabled {
   min-width: 132px;
   min-height: 72px;
   padding: 0.9rem 1rem;
-  background: linear-gradient(180deg, rgba(26, 31, 40, 0.20), rgba(13, 16, 22, 0.20));
+  background: linear-gradient(180deg, rgba(26, 31, 40, 0.80), rgba(13, 16, 22, 0.80));
   font-size: 1rem;
 }
 
@@ -262,7 +262,7 @@ button:disabled {
   justify-content: center;
   gap: 0.9rem;
   padding: 1.2rem 0.95rem;
-  background: linear-gradient(180deg, rgba(28, 34, 43, 0.20), rgba(13, 17, 24, 0.20));
+  background: linear-gradient(180deg, rgba(28, 34, 43, 0.80), rgba(13, 17, 24, 0.80));
   border-color: rgba(158, 170, 187, 0.18);
   align-self: stretch;
 }
@@ -340,7 +340,7 @@ button:disabled {
   .nav-button-side {
     gap: 0.65rem;
     padding: 0.9rem 0.5rem;
-    background: linear-gradient(180deg, rgba(28, 34, 43, 0.20), rgba(13, 17, 24, 0.20));
+    background: linear-gradient(180deg, rgba(28, 34, 43, 0.80), rgba(13, 17, 24, 0.80));
   }
 
   .nav-arrow {
