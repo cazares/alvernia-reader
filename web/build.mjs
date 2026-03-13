@@ -37,7 +37,7 @@ const pdfPath = path.join(rootDir, "assets", "alvernia_manual_2.pdf");
 const outputPrefix = path.join(pagesDir, "page");
 const convert = spawnSync(
   "pdftoppm",
-  ["-jpeg", "-jpegopt", "quality=82", "-r", "144", pdfPath, outputPrefix],
+  ["-jpeg", "-jpegopt", "quality=78", "-r", "120", pdfPath, outputPrefix],
   { stdio: "inherit" },
 );
 

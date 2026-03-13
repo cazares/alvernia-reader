@@ -24,6 +24,9 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /id="song-display"[^>]*readonly/);
   assert.match(source, /placeholder="¿Cuál canción\?"/);
   assert.match(source, /aria-label="¿Cuál canción\?"/);
+  assert.match(source, /href="\/manifest\.webmanifest"/);
+  assert.match(source, /href="\/styles\.css"/);
+  assert.match(source, /src="\/app\.js"/);
   assert.match(source, /id="numberpad-grid"/);
   assert.match(source, /Navigation numberpad/);
   assert.match(source, />Borrar todo</);
@@ -64,6 +67,10 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /state\.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp/);
   assert.match(source, /const hasPreviousPage = state\.currentPage > 1/);
   assert.match(source, /classList\.toggle\("is-unavailable"/);
+  assert.match(source, /pageFileName = \(pageNumber\) => `\/pages\/page-\$\{String\(pageNumber\)\.padStart\(3, "0"\)\}\.jpg`/);
+  assert.match(source, /fetch\("\/pages\.json", \{ cache: "no-store" \}\)/);
+  assert.match(source, /serviceWorker\.register\("\/sw\.js"\)/);
+  assert.doesNotMatch(source, /preloadPage/);
   assert.match(source, /requestFullscreen/);
   assert.match(source, /exitFullscreen/);
   assert.match(source, /viewerShell\.addEventListener\("touchstart"/);
@@ -87,15 +94,15 @@ test("manifest is configured for standalone install from the domain root", () =>
   assert.equal(manifest.scope, "/");
   assert.equal(manifest.start_url, "/");
   assert.equal(manifest.orientation, "any");
-  assert.equal(manifest.icons.some((icon) => icon.src === "./icon-192.png"), true);
-  assert.equal(manifest.icons.some((icon) => icon.src === "./icon-512.png"), true);
+  assert.equal(manifest.icons.some((icon) => icon.src === "/icon-192.png"), true);
+  assert.equal(manifest.icons.some((icon) => icon.src === "/icon-512.png"), true);
 });
 
 test("service worker caches shell assets and page images for faster reopen", () => {
   const source = readText("web/src/sw.js");
 
-  assert.match(source, /alvernia-static-v6/);
-  assert.match(source, /alvernia-pages-v6/);
+  assert.match(source, /alvernia-static-v7/);
+  assert.match(source, /alvernia-pages-v7/);
   assert.match(source, /NETWORK_FIRST_PATHS/);
   assert.match(source, /pages\.json/);
   assert.match(source, /icon-192\.png/);
@@ -135,4 +142,20 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /display: none/);
   assert.match(source, /touch-action: manipulation/);
   assert.doesNotMatch(source, /\.install-gate/);
+});
+
+test("song index stays monotonic by page number", () => {
+  const source = readText("src/alverniaManual2SongIndex.js");
+  const entries = [...source.matchAll(/song:\s*(\d+),\s*page:\s*(\d+)/g)].map((match) => ({
+    song: Number(match[1]),
+    page: Number(match[2]),
+  }));
+
+  for (let index = 1; index < entries.length; index += 1) {
+    assert.equal(
+      entries[index].page > entries[index - 1].page,
+      true,
+      `Expected page ${entries[index].page} to be greater than previous page ${entries[index - 1].page} at song ${entries[index].song}`,
+    );
+  }
 });

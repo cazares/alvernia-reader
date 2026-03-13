@@ -1,5 +1,5 @@
-const STATIC_CACHE = "alvernia-static-v6";
-const PAGE_CACHE = "alvernia-pages-v6";
+const STATIC_CACHE = "alvernia-static-v7";
+const PAGE_CACHE = "alvernia-pages-v7";
 const CORE_ASSETS = [
   "/",
   "/index.html",
