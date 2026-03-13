@@ -63,6 +63,8 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /canOfferPseudoFullscreen/);
   assert.match(source, /window\.matchMedia\("\(display-mode: standalone\)"\)/);
   assert.match(source, /state\.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp/);
+  assert.match(source, /const hasPreviousPage = state\.currentPage > 1/);
+  assert.match(source, /classList\.toggle\("is-unavailable"/);
   assert.match(source, /requestFullscreen/);
   assert.match(source, /exitFullscreen/);
   assert.match(source, /viewerShell\.addEventListener\("touchstart"/);
@@ -127,6 +129,7 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /\.nav-button-right/);
   assert.match(source, /\.nav-arrow/);
   assert.match(source, /\.nav-label/);
+  assert.match(source, /\.nav-button-side\.is-unavailable/);
   assert.match(source, /display: none/);
   assert.match(source, /touch-action: manipulation/);
   assert.doesNotMatch(source, /\.install-gate/);
