@@ -19,8 +19,9 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /id="install-gate-copy"/);
   assert.match(source, /id="install-gate-steps"/);
   assert.match(source, /id="install-gate-button"/);
-  assert.match(source, /Instala la app/);
+  assert.match(source, /Instala Signo Vivo/);
   assert.match(source, /Instalar Signo Vivo/);
+  assert.match(source, /Instálala una vez\. Luego abre solo la app\./);
   assert.match(source, /id="install-gate-note"/);
   assert.match(source, /class="viewer-shell is-hidden"/);
   assert.match(source, /id="overlay-controls"/);

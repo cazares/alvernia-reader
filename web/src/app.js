@@ -104,66 +104,65 @@ const setInstallGateVisible = (visible) => {
 
 const updateInstallGateUi = () => {
   if (state.installCompleted) {
-    installGateCopy.textContent = "Listo. Ahora abre Signo Vivo desde el ícono nuevo en tu pantalla de inicio.";
+    installGateCopy.textContent = "Listo. Ahora abre Signo Vivo.";
     installGateSteps.innerHTML = [
-      "Busca el ícono Signo Vivo en tu pantalla de inicio.",
+      "Busca el ícono Signo Vivo.",
       "Tócalo para abrir la app.",
-      "A partir de ahí se abrirá directo en modo app.",
     ].map((step) => `<li>${step}</li>`).join("");
     installGateButton.textContent = "Listo";
     installGateButton.disabled = true;
-    installGateNote.textContent = "Si no ves el ícono todavía, espera un momento y vuelve a mirar.";
+    installGateNote.textContent = "Si no aparece todavía, espera un momento.";
     return;
   }
 
   if (state.deferredInstallPrompt) {
-    installGateCopy.textContent = "Toca el botón azul y acepta la instalación para guardar Signo Vivo como app.";
+    installGateCopy.textContent = "Toca el botón y acepta.";
     installGateSteps.innerHTML = [
       "Toca Instalar Signo Vivo.",
-      "Acepta el aviso del navegador.",
-      "Abre Signo Vivo desde el ícono nuevo.",
+      "Toca Instalar.",
+      "Abre Signo Vivo.",
     ].map((step) => `<li>${step}</li>`).join("");
     installGateButton.textContent = "⬇ Instalar Signo Vivo";
     installGateButton.disabled = false;
-    installGateNote.textContent = "Solo hay que hacerlo una vez.";
+    installGateNote.textContent = "Solo se hace una vez.";
     return;
   }
 
   if (isIOS && isSafari) {
-    installGateCopy.textContent = "Haz esto una sola vez en Safari para dejar Signo Vivo como app en tu pantalla de inicio.";
+    installGateCopy.textContent = "Haz esto una vez en Safari.";
     installGateSteps.innerHTML = [
-      "Toca Compartir en Safari.",
+      "Toca Compartir.",
       "Toca Agregar a pantalla de inicio.",
-      "Abre Signo Vivo desde el ícono nuevo.",
+      "Abre Signo Vivo.",
     ].map((step) => `<li>${step}</li>`).join("");
     installGateButton.textContent = "⬇ Instalar Signo Vivo";
     installGateButton.disabled = false;
-    installGateNote.textContent = "Después ya no uses el navegador. Abre siempre el ícono Signo Vivo.";
+    installGateNote.textContent = "Después abre siempre el ícono Signo Vivo.";
     return;
   }
 
   if (isIOS && !isSafari) {
-    installGateCopy.textContent = "Primero abre este enlace en Safari. Desde otras apps o navegadores no es tan fácil instalarlo bien.";
+    installGateCopy.textContent = "Ábrelo en Safari para instalarlo.";
     installGateSteps.innerHTML = [
       "Abre este enlace en Safari.",
-      "En Safari toca Compartir.",
-      "Luego toca Agregar a pantalla de inicio.",
+      "Toca Compartir.",
+      "Toca Agregar a pantalla de inicio.",
     ].map((step) => `<li>${step}</li>`).join("");
-    installGateButton.textContent = "Abrir en Safari";
+    installGateButton.textContent = "Cómo instalar";
     installGateButton.disabled = false;
-    installGateNote.textContent = "Safari es la forma más segura para tu coro.";
+    installGateNote.textContent = "Safari es la forma más fácil.";
     return;
   }
 
-  installGateCopy.textContent = "Instala Signo Vivo y luego ábrelo como app desde tu dispositivo.";
+  installGateCopy.textContent = "Instálalo y abre la app.";
   installGateSteps.innerHTML = [
     "Toca Instalar Signo Vivo.",
-    "Acepta el aviso del navegador.",
-    "Abre Signo Vivo desde el ícono nuevo.",
+    "Toca Instalar.",
+    "Abre Signo Vivo.",
   ].map((step) => `<li>${step}</li>`).join("");
   installGateButton.textContent = "⬇ Instalar Signo Vivo";
   installGateButton.disabled = false;
-  installGateNote.textContent = "La idea es usar siempre la app instalada.";
+  installGateNote.textContent = "Después usa siempre la app instalada.";
 };
 
 const flashInstallGateButton = (label) => {
