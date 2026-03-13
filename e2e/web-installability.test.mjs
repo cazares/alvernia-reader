@@ -40,7 +40,7 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
 test("web app script supports first-page startup, song-based navigation numberpad input, and simple fullscreen", () => {
   const source = readText("web/src/app.js");
 
-  assert.match(source, /const state = \{[\s\S]*currentPage: 1,[\s\S]*songDraft: ""/);
+  assert.match(source, /const state = \{[\s\S]*currentPage: 1,[\s\S]*songDraft: "",[\s\S]*immersiveMode: false/);
   assert.match(source, /renderPage\(1\)/);
   assert.match(source, /numberpadGrid\.addEventListener\("click"/);
   assert.match(source, /appendDigit/);
@@ -50,7 +50,11 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /findSongPage/);
   assert.match(source, /findSongIndexAtOrBeforePage/);
   assert.match(source, /turnSong/);
+  assert.match(source, /keepOverlay = false/);
+  assert.match(source, /keepOverlay: true/);
   assert.match(source, /setOverlayVisible\(false\)/);
+  assert.match(source, /canOfferPseudoFullscreen/);
+  assert.match(source, /window\.matchMedia\("\(display-mode: standalone\)"\)/);
   assert.match(source, /requestFullscreen/);
   assert.match(source, /exitFullscreen/);
   assert.match(source, /viewerShell\.addEventListener\("touchstart"/);
@@ -98,6 +102,7 @@ test("web build emits install assets and generated icons", () => {
 test("web styles include the centered navigation numberpad and overlay controls", () => {
   const source = readText("web/src/styles.css");
 
+  assert.match(source, /Avenir Next/);
   assert.match(source, /\.overlay-controls/);
   assert.match(source, /\.navigation-numberpad/);
   assert.match(source, /\.numberpad-grid/);
