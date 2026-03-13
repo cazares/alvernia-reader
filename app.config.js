@@ -53,11 +53,5 @@ module.exports = ({ config }) => {
       package: "com.cazares.alverniareader",
       versionCode: buildNumber,
     },
-    extra: {
-      ...(config.extra || {}),
-      eas: {
-        projectId: "8f4aeff3-940f-4ec2-b82d-89b430f5c8be",
-      },
-    },
   };
 };
