@@ -13,7 +13,7 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
 
   assert.match(source, /apple-mobile-web-app-capable/);
   assert.match(source, /apple-mobile-web-app-status-bar-style/);
-  assert.match(source, /maximum-scale=1, user-scalable=no/);
+  assert.match(source, /minimum-scale=1, maximum-scale=5, user-scalable=yes/);
   assert.match(source, /class="viewer-shell"/);
   assert.match(source, /id="overlay-controls"/);
   assert.match(source, /class="overlay-controls"/);
