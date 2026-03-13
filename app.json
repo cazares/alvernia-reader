@@ -7,8 +7,7 @@
     "newArchEnabled": false,
     "platforms": [
       "ios",
-      "android",
-      "web"
+      "android"
     ],
     "icon": "./assets/icon.png",
     "splash": {
