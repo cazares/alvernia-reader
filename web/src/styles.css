@@ -7,12 +7,13 @@
   --panel-border: rgba(255, 255, 255, 0.18);
   --text: #f7f4ef;
   --muted: #c8d0dc;
-  --blue: #45a2ff;
-  --blue-strong: #1b63da;
-  --blue-glow: rgba(69, 162, 255, 0.32);
-  --amber: #ffcc74;
-  --amber-strong: #ff9f38;
-  --amber-glow: rgba(255, 186, 88, 0.28);
+  --blue: #81dcff;
+  --blue-strong: #2e81e8;
+  --blue-glow: rgba(129, 220, 255, 0.24);
+  --ice-top: rgba(229, 245, 255, 0.16);
+  --ice-mid: rgba(147, 210, 255, 0.2);
+  --ice-bottom: rgba(20, 45, 84, 0.26);
+  --ice-border: rgba(181, 225, 255, 0.24);
   --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
   --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.26);
   --safe-top: env(safe-area-inset-top, 0px);
@@ -152,15 +153,6 @@ button:disabled {
   pointer-events: none;
 }
 
-.numberpad-eyebrow {
-  margin: 0 0 0.45rem;
-  color: var(--muted);
-  font-size: 0.94rem;
-  letter-spacing: 0.01em;
-  font-weight: 700;
-  text-align: center;
-}
-
 .numberpad-status {
   margin: 0 0 0.9rem;
   text-align: center;
@@ -219,23 +211,21 @@ button:disabled {
   background:
     linear-gradient(
       180deg,
-      rgba(255, 241, 206, 0.18) 0%,
-      rgba(255, 214, 132, 0.24) 14%,
-      rgba(255, 182, 82, 0.28) 58%,
-      rgba(87, 53, 13, 0.24) 100%
+      var(--ice-top) 0%,
+      var(--ice-mid) 26%,
+      var(--ice-bottom) 100%
     );
-  border-color: rgba(255, 215, 136, 0.42);
-  color: rgba(255, 251, 244, 0.99);
+  border-color: var(--ice-border);
+  color: rgba(247, 251, 255, 0.99);
   font-size: 1.98rem;
   font-weight: 700;
   text-shadow:
-    0 1px 0 rgba(255, 253, 248, 0.22),
-    0 8px 18px rgba(0, 0, 0, 0.2);
+    0 1px 0 rgba(255, 255, 255, 0.14),
+    0 10px 18px rgba(0, 0, 0, 0.18);
   box-shadow:
-    inset 0 1px 0 rgba(255, 248, 228, 0.24),
-    0 0 0 1px rgba(255, 218, 148, 0.1),
-    0 12px 26px rgba(58, 34, 9, 0.22),
-    0 0 28px var(--amber-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 0 26px var(--blue-glow),
     var(--shadow-soft);
 }
 
@@ -350,14 +340,13 @@ button:disabled {
 }
 
 .numberpad-key[data-digit]:hover {
-  border-color: rgba(255, 224, 160, 0.5);
+  border-color: rgba(199, 233, 255, 0.34);
   background:
     linear-gradient(
       180deg,
-      rgba(255, 245, 216, 0.22) 0%,
-      rgba(255, 221, 150, 0.3) 14%,
-      rgba(255, 194, 94, 0.32) 58%,
-      rgba(99, 59, 12, 0.28) 100%
+      rgba(236, 248, 255, 0.2) 0%,
+      rgba(170, 222, 255, 0.24) 26%,
+      rgba(28, 60, 108, 0.3) 100%
     );
 }
 
