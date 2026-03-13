@@ -22,7 +22,6 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /id="song-status"/);
   assert.match(source, /Canción 0/);
   assert.match(source, /id="song-display"[^>]*readonly/);
-  assert.match(source, /¿Cuál canción\?/);
   assert.match(source, /placeholder="¿Cuál canción\?"/);
   assert.match(source, /aria-label="¿Cuál canción\?"/);
   assert.match(source, /id="numberpad-grid"/);
@@ -109,9 +108,13 @@ test("web build emits install assets and generated icons", () => {
   const source = readText("web/build.mjs");
 
   assert.match(source, /sw\.js/);
+  assert.match(source, /theme-preview\.html/);
+  assert.match(source, /theme-preview\.css/);
   assert.match(source, /generateIcon\(192/);
   assert.match(source, /generateIcon\(512/);
   assert.equal(fs.existsSync(path.join(webSrcDir, "sw.js")), true);
+  assert.equal(fs.existsSync(path.join(webSrcDir, "theme-preview.html")), true);
+  assert.equal(fs.existsSync(path.join(webSrcDir, "theme-preview.css")), true);
 });
 
 test("web styles include the centered navigation numberpad and overlay controls", () => {
@@ -136,4 +139,17 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /display: none/);
   assert.match(source, /touch-action: manipulation/);
   assert.doesNotMatch(source, /\.install-gate/);
+});
+
+test("theme preview page exposes the three comparison options", () => {
+  const source = readText("web/src/theme-preview.html");
+  const styles = readText("web/src/theme-preview.css");
+
+  assert.match(source, /Teal \/ Sea Glass/);
+  assert.match(source, /Jade \/ Emerald/);
+  assert.match(source, /Ice \/ Electric Blue/);
+  assert.match(source, /Mi recomendacion es <strong>Teal \/ Sea Glass<\/strong>/);
+  assert.match(styles, /\.theme-card-teal/);
+  assert.match(styles, /\.theme-card-jade/);
+  assert.match(styles, /\.theme-card-ice/);
 });

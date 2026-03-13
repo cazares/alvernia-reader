@@ -11,7 +11,7 @@ fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
 fs.mkdirSync(pagesDir, { recursive: true });
 
-for (const file of ["index.html", "styles.css", "app.js", "manifest.webmanifest"]) {
+for (const file of ["index.html", "styles.css", "theme-preview.html", "theme-preview.css", "app.js", "manifest.webmanifest"]) {
   fs.copyFileSync(path.join(srcDir, file), path.join(distDir, file));
 }
 
