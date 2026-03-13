@@ -2,6 +2,12 @@
   "name": "alvernia-reader-link",
   "main": "src/index.js",
   "compatibility_date": "2026-03-12",
+  "r2_buckets": [
+    {
+      "binding": "ALVERNIA_UPLOADS",
+      "bucket_name": "alvernia-reader-uploads"
+    }
+  ],
   "routes": [
     {
       "pattern": "miguelcoro.com",

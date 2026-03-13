@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildProxyUrl, normalizeProxyPath } from "../cloudflare/alvernia-link/src/index.js";
+import {
+  buildProxyUrl,
+  normalizeProxyPath,
+  isSpecialRoute,
+  isPageAssetRoute,
+} from "../cloudflare/alvernia-link/src/index.js";
 
 test("normalizeProxyPath redirects bare /alvernia to a trailing slash", () => {
   assert.deepEqual(normalizeProxyPath({ host: "miguelengineer.com", pathname: "/alvernia" }), {
@@ -41,4 +46,17 @@ test("buildProxyUrl forwards root and assets to the live Pages deployment", () =
     buildProxyUrl("https://miguelcoro.com/pages.json?cache=1").toString(),
     "https://alvernia-reader.pages.dev/pages.json?cache=1",
   );
+});
+
+test("special routes stay on the worker", () => {
+  assert.equal(isSpecialRoute("/upload"), true);
+  assert.equal(isSpecialRoute("/promote"), true);
+  assert.equal(isSpecialRoute("/download"), true);
+  assert.equal(isSpecialRoute("/"), false);
+});
+
+test("page asset routes are identified for R2 overrides", () => {
+  assert.equal(isPageAssetRoute("/pages.json"), true);
+  assert.equal(isPageAssetRoute("/pages/page-001.jpg"), true);
+  assert.equal(isPageAssetRoute("/app.js"), false);
 });
