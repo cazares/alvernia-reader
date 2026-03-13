@@ -239,7 +239,7 @@ export const ALVERNIA_MANUAL_2_SONG_INDEX = Object.freeze([
   Object.freeze({ song: 245, page: 245 }),
   Object.freeze({ song: 247, page: 247 }),
   Object.freeze({ song: 248, page: 248 }),
-  Object.freeze({ song: 249, page: 329 }),
+  Object.freeze({ song: 249, page: 249 }),
   Object.freeze({ song: 252, page: 252 }),
   Object.freeze({ song: 253, page: 253 }),
   Object.freeze({ song: 254, page: 254 }),
@@ -314,4 +314,3 @@ export const ALVERNIA_MANUAL_2_SONG_INDEX = Object.freeze([
   Object.freeze({ song: 367, page: 367 }),
   Object.freeze({ song: 368, page: 368 }),
 ]);
-

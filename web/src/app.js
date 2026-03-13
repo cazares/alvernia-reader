@@ -40,7 +40,7 @@ const nativeFullscreenSupported = Boolean(
 const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 
-const pageFileName = (pageNumber) => `./pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
+const pageFileName = (pageNumber) => `/pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -74,12 +74,6 @@ const setLoading = (active, text = "Cargando...") => {
   loading.textContent = text;
   loading.classList.toggle("is-hidden", !active);
   pageImage.classList.toggle("is-loading", active);
-};
-
-const preloadPage = (pageNumber) => {
-  if (pageNumber < 1 || pageNumber > state.totalPages) return;
-  const image = new Image();
-  image.src = pageFileName(pageNumber);
 };
 
 const clearInitialUrl = () => {
@@ -130,11 +124,10 @@ const renderDraft = () => {
 const renderPage = (pageNumber) => {
   state.currentPage = clampPage(pageNumber);
   setLoading(true);
+  pageImage.removeAttribute("src");
   pageImage.src = pageFileName(state.currentPage);
   pageImage.dataset.page = String(state.currentPage);
   renderStatus();
-  preloadPage(state.currentPage + 1);
-  preloadPage(state.currentPage - 1);
 };
 
 const setOverlayVisible = (visible) => {
@@ -227,7 +220,7 @@ const toggleFullscreen = async () => {
 const registerServiceWorker = async () => {
   if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register("./sw.js");
+    await navigator.serviceWorker.register("/sw.js");
   } catch (error) {
     console.error("No se pudo registrar el service worker", error);
   }
@@ -340,7 +333,7 @@ const bindReaderEvents = () => {
 };
 
 const initReader = async () => {
-  const manifestResponse = await fetch("./pages.json");
+  const manifestResponse = await fetch("/pages.json", { cache: "no-store" });
   const manifest = await manifestResponse.json();
   state.totalPages = manifest.totalPages;
   state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
