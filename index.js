@@ -1,6 +1,6 @@
 import "react-native-gesture-handler";
 import { registerRootComponent } from "expo";
 
-import App from "./PdfReaderApp.web";
+import App from "./PdfReaderApp";
 
 registerRootComponent(App);
