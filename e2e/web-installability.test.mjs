@@ -115,6 +115,8 @@ test("web build emits install assets and generated icons", () => {
   const source = readText("web/build.mjs");
 
   assert.match(source, /sw\.js/);
+  assert.match(source, /quality=80/);
+  assert.match(source, /"-r", "144"/);
   assert.match(source, /generateIcon\(192/);
   assert.match(source, /generateIcon\(512/);
   assert.equal(fs.existsSync(path.join(webSrcDir, "sw.js")), true);
