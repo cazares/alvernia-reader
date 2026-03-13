@@ -72,7 +72,6 @@ button:disabled {
   min-height: 100dvh;
   width: 100%;
   place-items: center;
-  touch-action: manipulation;
   user-select: none;
 }
 
@@ -84,7 +83,6 @@ button:disabled {
   object-fit: contain;
   background: #090909;
   transition: opacity 160ms ease;
-  touch-action: manipulation;
   filter: drop-shadow(0 26px 48px rgba(0, 0, 0, 0.32));
 }
 
@@ -118,6 +116,7 @@ button:disabled {
   inset: 0;
   z-index: 4;
   pointer-events: none;
+  touch-action: manipulation;
 }
 
 .navigation-stage {
@@ -201,7 +200,13 @@ button:disabled {
   color: var(--text);
   box-shadow: var(--shadow-soft);
   pointer-events: auto;
+  touch-action: manipulation;
   transition: transform 140ms ease, background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.navigation-numberpad,
+.numberpad-display {
+  touch-action: manipulation;
 }
 
 .numberpad-key {
