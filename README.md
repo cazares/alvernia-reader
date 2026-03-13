@@ -42,27 +42,38 @@ npx expo run:ios -d 'mPad' --configuration Release
 - Deploy that route with `npx wrangler deploy -c cloudflare/alvernia-link/wrangler.jsonc`.
 - Generated folders like `node_modules`, `ios/Pods`, and build output are intentionally not tracked.
 
-## Upload + Promote pipeline
+## Upload + Promote pipeline (Tunnel)
 
-The Worker now exposes:
+The Worker exposes:
 
 - `/upload` to upload a `.key` or `.pdf`
-- `/promote` to request that the latest upload become the active reader content
+- `/promote` to make the latest upload the active reader content
 - `/download` to grab the last converted PDF (optional)
 
-To enable automatic Keynote conversion and promotion on a Mac:
+Tunnel-based workflow (Mac stays online):
 
-1. Install Poppler for `pdftoppm`:
+1. Install Cloudflare Tunnel:
+   `brew install cloudflared`
+2. Install Poppler for `pdftoppm`:
    `brew install poppler`
-2. Make sure Keynote is installed and can open the file.
-3. Export these env vars and run the helper:
+3. Make sure Keynote is installed and can open the file.
+4. Start the local upload server:
 
 ```bash
-export R2_BUCKET=alvernia-reader-uploads
-export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-export R2_ACCESS_KEY_ID=...
-export R2_SECRET_ACCESS_KEY=...
-node scripts/keynote-promote.mjs
+npm run upload:server
 ```
 
-This helper watches `latest.json` in R2 for a `/promote` request, converts `.key` -> PDF if needed, renders page images via `pdftoppm`, and uploads new `active/pages/*` plus `active/pages.json`.
+5. Create and run the tunnel:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create nuestro-coro-upload
+cloudflared tunnel route dns nuestro-coro-upload upload.miguelcoro.com
+cloudflared tunnel run --url http://localhost:8787 nuestro-coro-upload
+```
+
+Once the tunnel is up, `https://miguelcoro.com/upload` and `https://miguelcoro.com/promote` will proxy to your Mac.
+
+## Upload + Promote pipeline (R2 fallback)
+
+If you later enable R2, the Worker can also store uploads in R2 instead of the tunnel. The helper at `scripts/keynote-promote.mjs` will watch `latest.json` in R2 and promote automatically.
