@@ -21,6 +21,7 @@ const state = {
   overlayVisible: true,
   immersiveMode: false,
   loadingTimer: 0,
+  pageLoadRequest: 0,
   prefetchedPages: new Set(),
   prefetchingPages: new Set(),
   touchStart: null,
@@ -44,6 +45,9 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 
 const pageFileName = (pageNumber) => `/pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
+const pageFileUrl = (pageNumber, retryToken = "") => retryToken
+  ? `${pageFileName(pageNumber)}?reload=${retryToken}`
+  : pageFileName(pageNumber);
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -191,13 +195,44 @@ const renderDraft = () => {
   songDisplay.value = state.songDraft;
 };
 
-const renderPage = (pageNumber) => {
-  state.currentPage = clampPage(pageNumber);
+const loadPageImage = (pageNumber, retryToken = "") => new Promise((resolve, reject) => {
+  const loader = new Image();
+  loader.decoding = "async";
+  loader.onload = () => resolve(pageFileUrl(pageNumber, retryToken));
+  loader.onerror = () => reject(new Error(`No se pudo cargar la página ${pageNumber}`));
+  loader.src = pageFileUrl(pageNumber, retryToken);
+});
+
+const renderPage = async (pageNumber) => {
+  const nextPage = clampPage(pageNumber);
+  const requestId = state.pageLoadRequest + 1;
+  state.pageLoadRequest = requestId;
   scheduleLoadingIndicator();
-  pageImage.removeAttribute("src");
-  pageImage.src = pageFileName(state.currentPage);
-  pageImage.dataset.page = String(state.currentPage);
-  renderStatus();
+
+  try {
+    let nextPageUrl;
+
+    try {
+      nextPageUrl = await loadPageImage(nextPage);
+    } catch (firstError) {
+      console.warn("Primer intento falló al cargar la página", nextPage, firstError);
+      nextPageUrl = await loadPageImage(nextPage, Date.now());
+    }
+
+    if (requestId !== state.pageLoadRequest) return;
+
+    state.currentPage = nextPage;
+    pageImage.src = nextPageUrl;
+    pageImage.dataset.page = String(nextPage);
+    renderStatus();
+    hideLoadingIndicator();
+    getAdjacentSongPages().forEach(prefetchSongPage);
+  } catch (error) {
+    if (requestId !== state.pageLoadRequest) return;
+    clearLoadingTimer();
+    console.error("No se pudo cargar la página solicitada", nextPage, error);
+    setLoading(true, "No se pudo cargar esta página.");
+  }
 };
 
 const setOverlayVisible = (visible) => {
@@ -319,16 +354,6 @@ const bindReaderEvents = () => {
     toggleFullscreen().catch((error) => {
       console.error("No se pudo activar la pantalla completa", error);
     });
-  });
-
-  pageImage.addEventListener("load", () => {
-    hideLoadingIndicator();
-    getAdjacentSongPages().forEach(prefetchSongPage);
-  });
-
-  pageImage.addEventListener("error", () => {
-    clearLoadingTimer();
-    setLoading(true, "No se pudo cargar esta página.");
   });
 
   viewerShell.addEventListener("click", (event) => {
