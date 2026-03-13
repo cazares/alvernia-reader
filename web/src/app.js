@@ -20,6 +20,9 @@ const state = {
   songIndex: [],
   overlayVisible: true,
   immersiveMode: false,
+  loadingTimer: 0,
+  prefetchedPages: new Set(),
+  prefetchingPages: new Set(),
   touchStart: null,
   lastTouchEndedAt: 0,
 };
@@ -45,6 +48,9 @@ const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPa
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 const isFullscreen = () => Boolean(getFullscreenElement());
+const scheduleIdleWork = window.requestIdleCallback
+  ? window.requestIdleCallback.bind(window)
+  : (callback) => window.setTimeout(callback, 140);
 
 const requestFullscreen = async () => {
   if (fullscreenTarget.requestFullscreen) {
@@ -76,6 +82,28 @@ const setLoading = (active, text = "Cargando...") => {
   pageImage.classList.toggle("is-loading", active);
 };
 
+const clearLoadingTimer = () => {
+  if (!state.loadingTimer) return;
+  window.clearTimeout(state.loadingTimer);
+  state.loadingTimer = 0;
+};
+
+const scheduleLoadingIndicator = (text = "Cargando...") => {
+  clearLoadingTimer();
+  loading.textContent = text;
+  loading.classList.add("is-hidden");
+  pageImage.classList.add("is-loading");
+  state.loadingTimer = window.setTimeout(() => {
+    loading.classList.remove("is-hidden");
+  }, 90);
+};
+
+const hideLoadingIndicator = () => {
+  clearLoadingTimer();
+  loading.classList.add("is-hidden");
+  pageImage.classList.remove("is-loading");
+};
+
 const clearInitialUrl = () => {
   if (!initialUrl.search) return;
   window.history.replaceState({}, "", initialUrl.pathname || "/");
@@ -103,6 +131,48 @@ const getCurrentSongNumber = () => {
   return index >= 0 ? state.songIndex[index].song : 0;
 };
 
+const getAdjacentSongPages = () => {
+  const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
+  const pages = [];
+
+  if (currentSongIndex < 0) {
+    if (state.totalSongs > 0) {
+      pages.push(state.songIndex[0].page);
+    }
+    return pages;
+  }
+
+  if (currentSongIndex > 0) {
+    pages.push(state.songIndex[currentSongIndex - 1].page);
+  }
+
+  if (currentSongIndex < state.totalSongs - 1) {
+    pages.push(state.songIndex[currentSongIndex + 1].page);
+  }
+
+  return [...new Set(pages)];
+};
+
+const prefetchSongPage = (pageNumber) => {
+  if (pageNumber < 1 || pageNumber > state.totalPages) return;
+  if (pageNumber === state.currentPage) return;
+  if (state.prefetchedPages.has(pageNumber) || state.prefetchingPages.has(pageNumber)) return;
+
+  state.prefetchingPages.add(pageNumber);
+  scheduleIdleWork(async () => {
+    try {
+      const response = await fetch(pageFileName(pageNumber), { cache: "force-cache" });
+      if (response.ok) {
+        state.prefetchedPages.add(pageNumber);
+      }
+    } catch (error) {
+      console.warn("No se pudo precargar la página", pageNumber, error);
+    } finally {
+      state.prefetchingPages.delete(pageNumber);
+    }
+  });
+};
+
 const renderStatus = () => {
   songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
@@ -123,7 +193,7 @@ const renderDraft = () => {
 
 const renderPage = (pageNumber) => {
   state.currentPage = clampPage(pageNumber);
-  setLoading(true);
+  scheduleLoadingIndicator();
   pageImage.removeAttribute("src");
   pageImage.src = pageFileName(state.currentPage);
   pageImage.dataset.page = String(state.currentPage);
@@ -252,10 +322,12 @@ const bindReaderEvents = () => {
   });
 
   pageImage.addEventListener("load", () => {
-    setLoading(false);
+    hideLoadingIndicator();
+    getAdjacentSongPages().forEach(prefetchSongPage);
   });
 
   pageImage.addEventListener("error", () => {
+    clearLoadingTimer();
     setLoading(true, "No se pudo cargar esta página.");
   });
 
