@@ -2,6 +2,7 @@ const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
 const loading = document.getElementById("loading");
 const overlayControls = document.getElementById("overlay-controls");
+const installButton = document.getElementById("install-button");
 const songStatus = document.getElementById("song-status");
 const songDisplay = document.getElementById("song-display");
 const numberpadGrid = document.getElementById("numberpad-grid");
@@ -18,6 +19,7 @@ const state = {
   currentPage: 1,
   songDraft: "",
   songIndex: [],
+  deferredInstallPrompt: null,
   overlayVisible: true,
   immersiveMode: false,
   touchStart: null,
@@ -115,7 +117,7 @@ const getCurrentSongNumber = () => {
 };
 
 const renderStatus = () => {
-  songStatus.textContent = `Canción ${getCurrentSongNumber()} de ${state.totalSongs}`;
+  songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
   prevPageButton.disabled = currentSongIndex <= 0;
   nextPageButton.disabled = currentSongIndex >= state.totalSongs - 1;
@@ -153,6 +155,21 @@ const updateFullscreenButton = () => {
   }
 
   fullscreenButton.textContent = isFullscreen() ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa";
+};
+
+const updateInstallButton = () => {
+  installButton.classList.toggle("is-hidden", isStandaloneApp);
+};
+
+const flashInstallButtonLabel = (label) => {
+  if (!installButton) return;
+  if (!installButton.dataset.defaultLabel) {
+    installButton.dataset.defaultLabel = installButton.textContent;
+  }
+  installButton.textContent = label;
+  window.setTimeout(() => {
+    installButton.textContent = installButton.dataset.defaultLabel;
+  }, 2800);
 };
 
 const appendDigit = (digit) => {
@@ -231,6 +248,23 @@ const registerServiceWorker = async () => {
   }
 };
 
+const triggerInstall = async () => {
+  if (state.deferredInstallPrompt) {
+    state.deferredInstallPrompt.prompt();
+    await state.deferredInstallPrompt.userChoice.catch(() => null);
+    state.deferredInstallPrompt = null;
+    updateInstallButton();
+    return;
+  }
+
+  if (isIOS && !isStandaloneApp) {
+    flashInstallButtonLabel("Safari > Compartir > Agregar");
+    return;
+  }
+
+  flashInstallButtonLabel("Instálala desde el navegador");
+};
+
 numberpadGrid.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-digit]");
   if (!button) return;
@@ -252,6 +286,12 @@ nextPageButton.addEventListener("click", () => {
 fullscreenButton.addEventListener("click", () => {
   toggleFullscreen().catch((error) => {
     console.error("No se pudo activar la pantalla completa", error);
+  });
+});
+
+installButton.addEventListener("click", () => {
+  triggerInstall().catch((error) => {
+    console.error("No se pudo iniciar la instalación", error);
   });
 });
 
@@ -331,6 +371,17 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  state.deferredInstallPrompt = event;
+  updateInstallButton();
+});
+
+window.addEventListener("appinstalled", () => {
+  state.deferredInstallPrompt = null;
+  installButton.classList.add("is-hidden");
+});
+
 ["fullscreenchange", "webkitfullscreenchange"].forEach((eventName) => {
   document.addEventListener(eventName, updateFullscreenButton);
 });
@@ -338,7 +389,9 @@ window.addEventListener("keydown", (event) => {
 clearInitialUrl();
 renderDraft();
 renderStatus();
-setOverlayVisible(true);
+state.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp;
+setOverlayVisible(!state.immersiveMode);
 updateFullscreenButton();
+updateInstallButton();
 renderPage(1);
 registerServiceWorker();
