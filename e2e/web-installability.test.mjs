@@ -71,6 +71,10 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /const hasPreviousPage = state\.currentPage > 1/);
   assert.match(source, /classList\.toggle\("is-unavailable"/);
   assert.match(source, /pageFileName = \(pageNumber\) => `\/pages\/page-\$\{String\(pageNumber\)\.padStart\(3, "0"\)\}\.jpg`/);
+  assert.match(source, /pageFileUrl = \(pageNumber, retryToken = ""\)/);
+  assert.match(source, /loadPageImage = \(pageNumber, retryToken = ""\) => new Promise/);
+  assert.match(source, /Primer intento falló al cargar la página/);
+  assert.match(source, /await loadPageImage\(nextPage, Date\.now\(\)\)/);
   assert.match(source, /fetch\("\/pages\.json", \{ cache: "no-store" \}\)/);
   assert.match(source, /fetch\(pageFileName\(pageNumber\), \{ cache: "force-cache" \}\)/);
   assert.match(source, /serviceWorker\.register\("\/sw\.js"\)/);
