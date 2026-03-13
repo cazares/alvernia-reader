@@ -276,14 +276,18 @@ button:disabled {
 }
 
 .nav-arrow {
-  font-size: 4.15rem;
+  font-size: 4.85rem;
   line-height: 1;
   font-weight: 900;
   opacity: 1;
   color: rgba(247, 244, 239, 0.98);
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.08);
   text-shadow:
-    0 0 18px rgba(255, 255, 255, 0.08),
-    0 6px 18px rgba(0, 0, 0, 0.34);
+    0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 0 rgba(208, 214, 224, 0.08),
+    0 10px 18px rgba(0, 0, 0, 0.38),
+    0 0 18px rgba(255, 255, 255, 0.06);
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.28));
 }
 
 .nav-label {
@@ -355,7 +359,7 @@ button:disabled {
   }
 
   .nav-arrow {
-    font-size: 3rem;
+    font-size: 3.45rem;
   }
 
   .fullscreen-button {
