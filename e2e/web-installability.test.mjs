@@ -8,57 +8,51 @@ const webSrcDir = path.join(APP_ROOT, "web", "src");
 
 const readText = (relativePath) => fs.readFileSync(path.join(APP_ROOT, relativePath), "utf8");
 
-test("web shell includes iOS standalone metadata and simplified native-like controls", () => {
+test("web shell includes standalone metadata and the navigation numberpad UI", () => {
   const source = readText("web/src/index.html");
 
   assert.match(source, /apple-mobile-web-app-capable/);
   assert.match(source, /apple-mobile-web-app-status-bar-style/);
   assert.match(source, /maximum-scale=1, user-scalable=no/);
-  assert.match(source, /id="top-chrome"/);
-  assert.match(source, /id="bottom-chrome"/);
+  assert.match(source, /id="overlay-controls"/);
+  assert.match(source, /id="navigation-numberpad"/);
+  assert.match(source, /id="page-status"/);
+  assert.match(source, /id="page-display"[^>]*readonly/);
+  assert.match(source, /id="numberpad-grid"/);
+  assert.match(source, /Navigation numberpad/);
+  assert.match(source, /id="go-button"/);
+  assert.match(source, />Ir</);
+  assert.match(source, /id="prev-page"/);
+  assert.match(source, /Anterior/);
+  assert.match(source, /id="next-page"/);
+  assert.match(source, /Siguiente/);
   assert.match(source, /id="fullscreen-button"/);
-  assert.match(source, /id="jump-cta"/);
-  assert.match(source, /id="jump-form"/);
-  assert.match(source, /id="jump-song"[^>]*type="text"[^>]*inputmode="numeric"[^>]*pattern="\[0-9\]\*"[^>]*enterkeyhint="go"/);
-  assert.match(source, /id="jump-submit"/);
-  assert.match(source, /&larr; Anterior/);
-  assert.match(source, /Siguiente &rarr;/);
-  assert.match(source, /id="fullscreen-guard"/);
-  assert.match(source, /id="resume-fullscreen"/);
-  assert.match(source, /id="dismiss-fullscreen-guard"/);
-  assert.match(source, /Instalar app|Usalo como app/);
-  assert.doesNotMatch(source, /id="launch-screen"/);
-  assert.doesNotMatch(source, /id="launch-fullscreen"/);
-  assert.doesNotMatch(source, /id="launch-install"/);
-  assert.doesNotMatch(source, /id="go-modal"/);
-  assert.doesNotMatch(source, /id="song-number"/);
-  assert.doesNotMatch(source, /id="cancel-go"/);
+  assert.match(source, /Pantalla completa/);
+  assert.doesNotMatch(source, /launch-screen/);
+  assert.doesNotMatch(source, /go-modal/);
+  assert.doesNotMatch(source, /install-sheet/);
 });
 
-test("web app script supports install, sticky fullscreen, inline song navigation, and touch controls", () => {
+test("web app script supports first-page startup, navigation numberpad input, and simple fullscreen", () => {
   const source = readText("web/src/app.js");
 
-  assert.match(source, /beforeinstallprompt/);
+  assert.match(source, /const state = \{[\s\S]*currentPage: 1,[\s\S]*pageDraft: ""/);
+  assert.match(source, /renderPage\(1\)/);
+  assert.match(source, /numberpadGrid\.addEventListener\("click"/);
+  assert.match(source, /appendDigit/);
+  assert.match(source, /clearDraft/);
+  assert.match(source, /backspaceDraft/);
+  assert.match(source, /goToDraftPage/);
+  assert.match(source, /setOverlayVisible\(false\)/);
   assert.match(source, /requestFullscreen/);
-  assert.match(source, /serviceWorker\.register/);
-  assert.match(source, /searchParams\.get\("song"\)/);
-  assert.match(source, /searchParams\.get\("page"\)/);
-  assert.match(source, /stickyFullscreenWanted/);
-  assert.match(source, /userRequestedFullscreenExit/);
-  assert.match(source, /setFullscreenGuardVisible/);
-  assert.match(source, /recoverFullscreen/);
-  assert.match(source, /jumpForm\.addEventListener\("submit"/);
-  assert.match(source, /jumpInput\.addEventListener\("input"/);
-  assert.match(source, /sanitizeSongValue/);
+  assert.match(source, /exitFullscreen/);
   assert.match(source, /viewerShell\.addEventListener\("touchstart"/);
   assert.match(source, /viewerShell\.addEventListener\("touchend"/);
   assert.match(source, /viewerShell\.addEventListener\("click"/);
-  assert.match(source, /clearInitialDeepLink/);
-  assert.doesNotMatch(source, /openModal/);
-  assert.doesNotMatch(source, /closeModal/);
-  assert.doesNotMatch(source, /dblclick/);
-  assert.doesNotMatch(source, /launchScreen/);
-  assert.doesNotMatch(source, /songDraft/);
+  assert.match(source, /serviceWorker\.register/);
+  assert.doesNotMatch(source, /songIndex/);
+  assert.doesNotMatch(source, /beforeinstallprompt/);
+  assert.doesNotMatch(source, /fullscreenGuard/);
 });
 
 test("manifest is configured for standalone install from the domain root", () => {
@@ -94,15 +88,15 @@ test("web build emits install assets and generated icons", () => {
   assert.equal(fs.existsSync(path.join(webSrcDir, "sw.js")), true);
 });
 
-test("web styles include inline jump form and fullscreen affordances", () => {
+test("web styles include the centered navigation numberpad and overlay controls", () => {
   const source = readText("web/src/styles.css");
 
-  assert.match(source, /\.jump-cta/);
-  assert.match(source, /\.jump-form/);
-  assert.match(source, /\.jump-input/);
-  assert.match(source, /\.nav-button-fullscreen/);
-  assert.match(source, /\.fullscreen-guard/);
+  assert.match(source, /\.overlay-controls/);
+  assert.match(source, /\.navigation-numberpad/);
+  assert.match(source, /\.numberpad-grid/);
+  assert.match(source, /\.numberpad-display/);
+  assert.match(source, /\.go-button/);
+  assert.match(source, /\.overlay-actions/);
   assert.match(source, /touch-action: manipulation/);
-  assert.doesNotMatch(source, /\.launch-screen/);
-  assert.doesNotMatch(source, /\.modal/);
+  assert.doesNotMatch(source, /\.install-sheet/);
 });

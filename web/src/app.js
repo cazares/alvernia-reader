@@ -1,47 +1,27 @@
 const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
 const loading = document.getElementById("loading");
-const topChrome = document.getElementById("top-chrome");
-const bottomChrome = document.getElementById("bottom-chrome");
-const jumpCta = document.getElementById("jump-cta");
-const jumpForm = document.getElementById("jump-form");
-const jumpInput = document.getElementById("jump-song");
-const fullscreenGuard = document.getElementById("fullscreen-guard");
-const resumeFullscreenButton = document.getElementById("resume-fullscreen");
-const dismissFullscreenGuardButton = document.getElementById("dismiss-fullscreen-guard");
+const overlayControls = document.getElementById("overlay-controls");
 const pageStatus = document.getElementById("page-status");
-const fullscreenButton = document.getElementById("fullscreen-button");
+const pageDisplay = document.getElementById("page-display");
+const numberpadGrid = document.getElementById("numberpad-grid");
+const clearButton = document.getElementById("clear-button");
+const backspaceButton = document.getElementById("backspace-button");
+const goButton = document.getElementById("go-button");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
-const installSheet = document.getElementById("install-sheet");
-const installCopy = document.getElementById("install-copy");
-const installSteps = document.getElementById("install-steps");
-const confirmInstallButton = document.getElementById("confirm-install");
-const dismissInstallButton = document.getElementById("dismiss-install");
-
-const INSTALL_DISMISS_KEY = "alvernia-reader-install-dismissed";
-const CHROME_HIDE_MS = 2400;
+const fullscreenButton = document.getElementById("fullscreen-button");
 
 const state = {
   totalPages: 1,
   currentPage: 1,
-  songIndex: [],
-  deferredInstallPrompt: null,
-  controlsVisible: false,
-  chromeTimer: null,
-  installTimer: null,
-  stickyFullscreenWanted: false,
-  userRequestedFullscreenExit: false,
+  pageDraft: "",
+  overlayVisible: true,
   touchStart: null,
   lastTouchEndedAt: 0,
-  appReady: false,
 };
 
 const initialUrl = new URL(window.location.href);
-const initialSong = Number.parseInt(initialUrl.searchParams.get("song") ?? "", 10);
-const initialPage = Number.parseInt(initialUrl.searchParams.get("page") ?? "", 10);
-const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 const fullscreenTarget = document.documentElement;
 const supportsFullscreen = Boolean(
   document.fullscreenEnabled
@@ -50,9 +30,14 @@ const supportsFullscreen = Boolean(
     || fullscreenTarget.webkitRequestFullscreen,
 );
 
+const manifestResponse = await fetch("./pages.json");
+const manifest = await manifestResponse.json();
+state.totalPages = manifest.totalPages;
+
+const pageFileName = (pageNumber) => `./pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
+const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 const isFullscreen = () => Boolean(getFullscreenElement());
-const isEditingSong = () => document.activeElement === jumpInput;
 
 const requestFullscreen = async () => {
   if (fullscreenTarget.requestFullscreen) {
@@ -78,31 +63,6 @@ const exitFullscreen = async () => {
   return null;
 };
 
-const setButtonBusy = (button, label, busy) => {
-  if (!button) return;
-  if (!button.dataset.defaultLabel) {
-    button.dataset.defaultLabel = button.textContent;
-  }
-  button.textContent = busy ? label : button.dataset.defaultLabel;
-};
-
-const flashButtonLabel = (button, label) => {
-  if (!button) return;
-  const previous = button.textContent;
-  button.textContent = label;
-  window.setTimeout(() => {
-    button.textContent = previous;
-  }, 1400);
-};
-
-const manifestResponse = await fetch("./pages.json");
-const manifest = await manifestResponse.json();
-state.totalPages = manifest.totalPages;
-state.songIndex = [...manifest.songIndex].sort((left, right) => left.page - right.page || left.song - right.song);
-
-const pageFileName = (pageNumber) => `./pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
-const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
-
 const setLoading = (active, text = "Cargando...") => {
   loading.textContent = text;
   loading.classList.toggle("is-hidden", !active);
@@ -115,69 +75,19 @@ const preloadPage = (pageNumber) => {
   image.src = pageFileName(pageNumber);
 };
 
-const findSongPage = (songNumber) => {
-  if (songNumber <= 0) return 1;
-  const exact = state.songIndex.find((entry) => entry.song === songNumber);
-  if (exact) return exact.page;
-  const next = state.songIndex.find((entry) => entry.song >= songNumber);
-  return next ? next.page : state.totalPages;
-};
-
-const findSongAtOrBeforePage = (pageNumber) => {
-  let match = null;
-  for (const entry of state.songIndex) {
-    if (entry.page > pageNumber) break;
-    match = entry;
-  }
-  return match;
-};
-
-const clearInitialDeepLink = () => {
+const clearInitialUrl = () => {
   if (!initialUrl.search) return;
-  window.history.replaceState({ page: 1 }, "", initialUrl.pathname || "/");
+  window.history.replaceState({}, "", initialUrl.pathname || "/");
 };
 
-const scheduleChromeHide = () => {
-  window.clearTimeout(state.chromeTimer);
-  if (!state.controlsVisible || installSheet.open || isEditingSong()) return;
-  state.chromeTimer = window.setTimeout(() => {
-    topChrome.classList.add("is-hidden");
-    jumpCta.classList.add("is-hidden");
-    bottomChrome.classList.add("is-hidden");
-    state.controlsVisible = false;
-  }, CHROME_HIDE_MS);
-};
-
-const setChromeVisible = (visible) => {
-  window.clearTimeout(state.chromeTimer);
-  state.controlsVisible = visible;
-  topChrome.classList.toggle("is-hidden", !visible);
-  jumpCta.classList.toggle("is-hidden", !visible);
-  bottomChrome.classList.toggle("is-hidden", !visible);
-  if (!visible) {
-    jumpInput.blur();
-    return;
-  }
-  scheduleChromeHide();
-};
-
-const setFullscreenGuardVisible = (visible) => {
-  fullscreenGuard.classList.toggle("is-hidden", !visible);
-};
-
-const updateStatus = () => {
-  const song = findSongAtOrBeforePage(state.currentPage);
-  pageStatus.textContent = song
-    ? `Cancion ${song.song} · Pagina ${state.currentPage}`
-    : `Inicio · Pagina ${state.currentPage}`;
+const renderStatus = () => {
+  pageStatus.textContent = `Pagina ${state.currentPage} de ${state.totalPages}`;
   prevPageButton.disabled = state.currentPage <= 1;
   nextPageButton.disabled = state.currentPage >= state.totalPages;
 };
 
-const updateFullscreenUi = () => {
-  const active = isFullscreen();
-  fullscreenButton.classList.toggle("is-hidden", !supportsFullscreen);
-  fullscreenButton.textContent = active ? "Salir de pantalla completa" : "Pantalla completa";
+const renderDraft = () => {
+  pageDisplay.value = state.pageDraft;
 };
 
 const renderPage = (pageNumber) => {
@@ -185,116 +95,71 @@ const renderPage = (pageNumber) => {
   setLoading(true);
   pageImage.src = pageFileName(state.currentPage);
   pageImage.dataset.page = String(state.currentPage);
-  updateStatus();
+  renderStatus();
   preloadPage(state.currentPage + 1);
-  preloadPage(state.currentPage + 2);
   preloadPage(state.currentPage - 1);
 };
 
-const sanitizeSongValue = (value) => value.replace(/\D+/g, "").slice(0, 4);
+const setOverlayVisible = (visible) => {
+  state.overlayVisible = visible;
+  overlayControls.classList.toggle("is-hidden", !visible);
+};
 
-const goToSong = (songNumber) => {
-  renderPage(findSongPage(songNumber));
-  jumpInput.value = "";
-  jumpInput.blur();
-  if (isFullscreen()) {
-    window.setTimeout(() => {
-      setChromeVisible(false);
-    }, 180);
+const updateFullscreenButton = () => {
+  if (!supportsFullscreen) {
+    fullscreenButton.classList.add("is-hidden");
     return;
   }
-  scheduleChromeHide();
+
+  fullscreenButton.classList.remove("is-hidden");
+  fullscreenButton.textContent = isFullscreen() ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa";
+};
+
+const appendDigit = (digit) => {
+  if (state.pageDraft.length >= 4) return;
+  state.pageDraft = `${state.pageDraft}${digit}`;
+  renderDraft();
+};
+
+const clearDraft = () => {
+  state.pageDraft = "";
+  renderDraft();
+};
+
+const backspaceDraft = () => {
+  state.pageDraft = state.pageDraft.slice(0, -1);
+  renderDraft();
+};
+
+const goToDraftPage = () => {
+  const pageNumber = Number.parseInt(state.pageDraft, 10);
+  if (!Number.isFinite(pageNumber)) return;
+  renderPage(pageNumber);
+  clearDraft();
+  setOverlayVisible(false);
 };
 
 const turnPage = (direction) => {
   if (direction === 0) return;
   renderPage(state.currentPage + direction);
+  clearDraft();
+  setOverlayVisible(false);
 };
 
-const dismissInstall = () => {
-  window.localStorage.setItem(INSTALL_DISMISS_KEY, "1");
-  if (installSheet.open) {
-    installSheet.close();
-  }
-  scheduleChromeHide();
-};
+const toggleFullscreen = async () => {
+  if (!supportsFullscreen) return;
 
-const installCopyText = () => {
-  if (state.deferredInstallPrompt) {
-    return "Toca Instalar y acepta el aviso del navegador para guardarla en tu pantalla de inicio.";
-  }
-
-  if (isIOS) {
-    return "Haz esto una sola vez en Safari y luego abrira como una app facil de abrir.";
-  }
-
-  return "Abre este enlace en Safari o Chrome para instalar esta app en la pantalla de inicio.";
-};
-
-const installStepItems = () => {
-  if (state.deferredInstallPrompt) {
-    return [
-      "Toca Instalar.",
-      "Acepta el aviso del navegador.",
-      "Abre Alvernia desde el icono nuevo en tu pantalla de inicio.",
-    ];
-  }
-
-  if (isIOS) {
-    return [
-      "Abre este enlace en Safari.",
-      "Toca Compartir en la barra del navegador.",
-      "Toca Agregar a pantalla de inicio.",
-    ];
-  }
-
-  return [
-    "Abre este enlace en Safari o Chrome.",
-    "Toca Instalar cuando el navegador lo ofrezca.",
-    "Abre Alvernia desde el icono nuevo en tu pantalla de inicio.",
-  ];
-};
-
-const updateInstallUi = () => {
-  const dismissed = window.localStorage.getItem(INSTALL_DISMISS_KEY) === "1";
-  const shouldOfferInstall = !isStandalone && (Boolean(state.deferredInstallPrompt) || isIOS);
-  confirmInstallButton.classList.toggle("is-hidden", !state.deferredInstallPrompt);
-  installCopy.textContent = installCopyText();
-  installSteps.innerHTML = installStepItems().map((step) => `<li>${step}</li>`).join("");
-
-  window.clearTimeout(state.installTimer);
-  if (!dismissed && shouldOfferInstall && state.appReady && !installSheet.open && !isFullscreen()) {
-    state.installTimer = window.setTimeout(() => {
-      if (window.localStorage.getItem(INSTALL_DISMISS_KEY) === "1" || installSheet.open || isFullscreen()) {
-        return;
-      }
-      installSheet.showModal();
-    }, 1400);
-  }
-};
-
-const disableStickyFullscreen = () => {
-  state.stickyFullscreenWanted = false;
-  state.userRequestedFullscreenExit = true;
-  setFullscreenGuardVisible(false);
-};
-
-const triggerInstall = async () => {
-  if (!state.deferredInstallPrompt) {
-    updateInstallUi();
-    if (!installSheet.open) {
-      installSheet.showModal();
+  try {
+    if (isFullscreen()) {
+      await exitFullscreen();
+    } else {
+      await requestFullscreen();
     }
-    return;
+  } catch (error) {
+    console.error("No se pudo cambiar la pantalla completa", error);
+  } finally {
+    updateFullscreenButton();
   }
-
-  state.deferredInstallPrompt.prompt();
-  await state.deferredInstallPrompt.userChoice.catch(() => null);
-  state.deferredInstallPrompt = null;
-  if (installSheet.open) {
-    installSheet.close();
-  }
-  updateInstallUi();
 };
 
 const registerServiceWorker = async () => {
@@ -306,149 +171,32 @@ const registerServiceWorker = async () => {
   }
 };
 
-const consumeTap = () => {
-  setChromeVisible(!state.controlsVisible);
-};
-
-const toggleFullscreen = async ({ sourceButton = fullscreenButton, quiet = false } = {}) => {
-  if (!supportsFullscreen) {
-    return false;
-  }
-
-  try {
-    setButtonBusy(sourceButton, "Abriendo...", true);
-    state.stickyFullscreenWanted = true;
-    state.userRequestedFullscreenExit = false;
-    setFullscreenGuardVisible(false);
-    await requestFullscreen();
-    updateFullscreenUi();
-    return true;
-  } catch (error) {
-    console.error("No se pudo cambiar la pantalla completa", error);
-    if (!quiet) {
-      flashButtonLabel(sourceButton, "No disponible");
-    }
-    if (state.stickyFullscreenWanted && !state.userRequestedFullscreenExit) {
-      setFullscreenGuardVisible(true);
-    }
-    return false;
-  } finally {
-    setButtonBusy(sourceButton, "", false);
-  }
-};
-
-const exitFullscreenByChoice = async ({ sourceButton = fullscreenButton } = {}) => {
-  disableStickyFullscreen();
-  if (!isFullscreen()) {
-    setChromeVisible(true);
-    updateFullscreenUi();
-    return true;
-  }
-
-  try {
-    setButtonBusy(sourceButton, "Saliendo...", true);
-    await exitFullscreen();
-    updateFullscreenUi();
-    setChromeVisible(true);
-    return true;
-  } catch (error) {
-    console.error("No se pudo salir de pantalla completa", error);
-    flashButtonLabel(sourceButton, "No disponible");
-    return false;
-  } finally {
-    setButtonBusy(sourceButton, "", false);
-  }
-};
-
-const recoverFullscreen = () => {
-  if (!state.stickyFullscreenWanted || state.userRequestedFullscreenExit || !supportsFullscreen) {
-    return;
-  }
-
-  setFullscreenGuardVisible(true);
-  window.setTimeout(() => {
-    toggleFullscreen({ sourceButton: resumeFullscreenButton, quiet: true }).catch(() => {});
-  }, 80);
-};
-
-const handleFullscreenButton = async () => {
-  if (isFullscreen()) {
-    await exitFullscreenByChoice({ sourceButton: fullscreenButton });
-    return;
-  }
-
-  await toggleFullscreen({ sourceButton: fullscreenButton });
-};
-
-fullscreenButton.addEventListener("click", () => {
-  handleFullscreenButton().catch((error) => {
-    console.error("No se pudo activar la pantalla completa", error);
-  });
+numberpadGrid.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-digit]");
+  if (!button) return;
+  appendDigit(button.dataset.digit);
 });
 
-resumeFullscreenButton.addEventListener("click", () => {
-  state.userRequestedFullscreenExit = false;
-  state.stickyFullscreenWanted = true;
-  toggleFullscreen({ sourceButton: resumeFullscreenButton }).catch((error) => {
-    console.error("No se pudo recuperar la pantalla completa", error);
-  });
-});
-
-dismissFullscreenGuardButton.addEventListener("click", () => {
-  disableStickyFullscreen();
-  setChromeVisible(true);
-});
-
-confirmInstallButton.addEventListener("click", () => {
-  triggerInstall().catch((error) => {
-    console.error("No se pudo instalar", error);
-  });
-});
-
-dismissInstallButton.addEventListener("click", dismissInstall);
+clearButton.addEventListener("click", clearDraft);
+backspaceButton.addEventListener("click", backspaceDraft);
+goButton.addEventListener("click", goToDraftPage);
 
 prevPageButton.addEventListener("click", () => {
   turnPage(-1);
-  setChromeVisible(true);
 });
 
 nextPageButton.addEventListener("click", () => {
   turnPage(1);
-  setChromeVisible(true);
 });
 
-jumpInput.addEventListener("input", () => {
-  const sanitized = sanitizeSongValue(jumpInput.value);
-  if (jumpInput.value !== sanitized) {
-    jumpInput.value = sanitized;
-  }
-});
-
-jumpInput.addEventListener("focus", () => {
-  setChromeVisible(true);
-});
-
-jumpInput.addEventListener("blur", () => {
-  scheduleChromeHide();
-});
-
-jumpForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const songNumber = Number.parseInt(jumpInput.value, 10);
-  if (!Number.isFinite(songNumber)) {
-    jumpInput.focus();
-    return;
-  }
-  goToSong(songNumber);
+fullscreenButton.addEventListener("click", () => {
+  toggleFullscreen().catch((error) => {
+    console.error("No se pudo activar la pantalla completa", error);
+  });
 });
 
 pageImage.addEventListener("load", () => {
   setLoading(false);
-  if (!state.appReady) {
-    state.appReady = true;
-    updateInstallUi();
-    setChromeVisible(true);
-  }
 });
 
 pageImage.addEventListener("error", () => {
@@ -459,7 +207,7 @@ viewerShell.addEventListener("click", (event) => {
   if (Date.now() - state.lastTouchEndedAt < 450) return;
   if (event.target !== viewerShell && event.target !== pageImage) return;
   if (event.detail > 1) return;
-  consumeTap();
+  setOverlayVisible(!state.overlayVisible);
 });
 
 viewerShell.addEventListener("touchstart", (event) => {
@@ -489,84 +237,48 @@ viewerShell.addEventListener("touchend", (event) => {
 
   if (Math.abs(deltaX) < 14 && Math.abs(deltaY) < 14 && elapsed < 360) {
     event.preventDefault();
-    consumeTap();
+    setOverlayVisible(!state.overlayVisible);
   }
 }, { passive: false });
 
-installSheet.addEventListener("click", (event) => {
-  const rect = installSheet.getBoundingClientRect();
-  const inside = rect.top <= event.clientY
-    && event.clientY <= rect.top + rect.height
-    && rect.left <= event.clientX
-    && event.clientX <= rect.left + rect.width;
-  if (!inside) {
-    dismissInstall();
-  }
-});
-
 window.addEventListener("keydown", (event) => {
+  if (/^[0-9]$/.test(event.key)) {
+    appendDigit(event.key);
+    return;
+  }
+
+  if (event.key === "Backspace") {
+    backspaceDraft();
+    return;
+  }
+
+  if (event.key === "Escape") {
+    clearDraft();
+    return;
+  }
+
+  if (event.key === "Enter") {
+    goToDraftPage();
+    return;
+  }
+
   if (event.key === "ArrowRight") {
     turnPage(1);
   }
+
   if (event.key === "ArrowLeft") {
     turnPage(-1);
   }
-  if (event.key.toLowerCase() === "f") {
-    handleFullscreenButton().catch((error) => {
-      console.error("No se pudo activar la pantalla completa", error);
-    });
-  }
-  if (event.key.toLowerCase() === "g") {
-    setChromeVisible(true);
-    jumpInput.focus();
-  }
-});
-
-window.addEventListener("beforeinstallprompt", (event) => {
-  event.preventDefault();
-  state.deferredInstallPrompt = event;
-  updateInstallUi();
-});
-
-window.addEventListener("appinstalled", () => {
-  if (installSheet.open) {
-    installSheet.close();
-  }
-  state.deferredInstallPrompt = null;
-  updateInstallUi();
 });
 
 ["fullscreenchange", "webkitfullscreenchange"].forEach((eventName) => {
-  document.addEventListener(eventName, () => {
-    const active = isFullscreen();
-    updateFullscreenUi();
-
-    if (active) {
-      state.userRequestedFullscreenExit = false;
-      setFullscreenGuardVisible(false);
-      window.setTimeout(() => {
-        if (!isEditingSong()) {
-          setChromeVisible(false);
-        }
-      }, 700);
-      return;
-    }
-
-    if (state.stickyFullscreenWanted && !state.userRequestedFullscreenExit) {
-      setChromeVisible(false);
-      recoverFullscreen();
-      return;
-    }
-
-    setFullscreenGuardVisible(false);
-    setChromeVisible(true);
-  });
+  document.addEventListener(eventName, updateFullscreenButton);
 });
 
-updateInstallUi();
-updateStatus();
-updateFullscreenUi();
-setChromeVisible(false);
-renderPage(Number.isFinite(initialSong) ? findSongPage(initialSong) : Number.isFinite(initialPage) ? initialPage : 1);
-clearInitialDeepLink();
+clearInitialUrl();
+renderDraft();
+renderStatus();
+setOverlayVisible(true);
+updateFullscreenButton();
+renderPage(1);
 registerServiceWorker();
