@@ -304,6 +304,11 @@ button:disabled {
   opacity: 0.42;
 }
 
+.nav-button-side.is-unavailable {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .numberpad-key:active,
 .go-button:active,
 .nav-button:active,
