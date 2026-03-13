@@ -11,7 +11,7 @@
   --blue-strong: #1b63da;
   --blue-glow: rgba(69, 162, 255, 0.32);
   --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
-  --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.26);
+  --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.70);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --ui-font: "Avenir Next", "SF Pro Display", "Segoe UI", "Helvetica Neue", sans-serif;
