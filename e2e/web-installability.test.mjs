@@ -63,6 +63,7 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /state\.deferredInstallPrompt/);
   assert.match(source, /updateInstallButton/);
   assert.match(source, /triggerInstall/);
+  assert.match(source, /state\.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp/);
   assert.match(source, /requestFullscreen/);
   assert.match(source, /exitFullscreen/);
   assert.match(source, /viewerShell\.addEventListener\("touchstart"/);

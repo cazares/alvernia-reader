@@ -389,7 +389,8 @@ window.addEventListener("appinstalled", () => {
 clearInitialUrl();
 renderDraft();
 renderStatus();
-setOverlayVisible(true);
+state.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp;
+setOverlayVisible(!state.immersiveMode);
 updateFullscreenButton();
 updateInstallButton();
 renderPage(1);
