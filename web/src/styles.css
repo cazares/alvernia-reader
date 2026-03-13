@@ -38,6 +38,7 @@ body {
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
@@ -56,6 +57,7 @@ button:disabled {
 
 .app-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at 50% -8%, rgba(76, 153, 255, 0.22), transparent 28%),
     radial-gradient(circle at 18% 20%, rgba(255, 194, 110, 0.12), transparent 24%),
@@ -67,6 +69,7 @@ button:disabled {
   position: relative;
   display: grid;
   min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
   place-items: center;
   touch-action: manipulation;
@@ -77,6 +80,7 @@ button:disabled {
   display: block;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   object-fit: contain;
   background: #090909;
   transition: opacity 160ms ease;
@@ -402,5 +406,132 @@ button:disabled {
   .fullscreen-button {
     min-height: 58px;
     font-size: 1.12rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .navigation-stage {
+    top: auto;
+    bottom: calc(0.55rem + var(--safe-bottom));
+    transform: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "pad pad"
+      "prev next";
+    align-items: end;
+    gap: 0.55rem;
+    padding: 0 0.6rem;
+  }
+
+  .navigation-numberpad {
+    grid-area: pad;
+    padding: 0.95rem;
+    border-radius: 26px;
+    background: linear-gradient(180deg, rgba(20, 24, 32, 0.94), rgba(8, 11, 16, 0.94));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
+  }
+
+  .numberpad-status {
+    margin-bottom: 0.6rem;
+    font-size: 1rem;
+  }
+
+  .numberpad-display {
+    margin-bottom: 0.65rem;
+    padding: 0.82rem 0.95rem;
+    border-radius: 18px;
+    font-size: clamp(1.34rem, 6vw, 1.7rem);
+  }
+
+  .numberpad-display::placeholder {
+    font-size: 0.8em;
+    letter-spacing: 0;
+  }
+
+  .numberpad-grid {
+    gap: 0.45rem;
+  }
+
+  .numberpad-key {
+    min-height: 54px;
+    border-radius: 18px;
+    font-size: 1rem;
+  }
+
+  .numberpad-key[data-digit] {
+    font-size: 1.62rem;
+  }
+
+  .numberpad-key-muted {
+    padding: 0 0.35rem;
+    font-size: 0.92rem;
+    line-height: 1.05;
+  }
+
+  .numberpad-actions {
+    grid-template-columns: minmax(0, 1fr) 64px;
+    gap: 0.5rem;
+    margin-top: 0.55rem;
+  }
+
+  .go-button {
+    min-height: 56px;
+    border-radius: 18px;
+    font-size: 1.2rem;
+  }
+
+  .fullscreen-button {
+    min-width: 64px;
+    min-height: 56px;
+    padding: 0;
+    border-radius: 18px;
+    font-size: 0;
+  }
+
+  .fullscreen-button::before {
+    content: "⛶";
+    font-size: 1.34rem;
+    font-weight: 800;
+  }
+
+  .nav-button-left {
+    grid-area: prev;
+  }
+
+  .nav-button-right {
+    grid-area: next;
+  }
+
+  .nav-button-side {
+    min-width: 0;
+    min-height: 56px;
+    height: 56px;
+    border-radius: 18px;
+    padding: 0;
+    background: linear-gradient(180deg, rgba(24, 29, 38, 0.92), rgba(10, 12, 16, 0.92));
+  }
+
+  .nav-arrow {
+    font-size: 2.8rem;
+  }
+
+  .nav-button-side.is-unavailable {
+    display: none;
+  }
+}
+
+@media (max-width: 400px) {
+  .numberpad-display {
+    font-size: 1.24rem;
+  }
+
+  .numberpad-key[data-digit] {
+    font-size: 1.52rem;
+  }
+
+  .numberpad-key-muted {
+    font-size: 0.84rem;
   }
 }
