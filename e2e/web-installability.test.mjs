@@ -143,6 +143,9 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /\.nav-button-side\.is-unavailable/);
   assert.match(source, /display: none/);
   assert.match(source, /touch-action: manipulation/);
+  assert.match(source, /100dvh/);
+  assert.match(source, /grid-template-areas:\s*"pad pad"/);
+  assert.match(source, /\.fullscreen-button::before/);
   assert.doesNotMatch(source, /\.install-gate/);
 });
 
