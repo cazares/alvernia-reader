@@ -254,9 +254,11 @@ button:disabled {
 .nav-button-side {
   height: 100%;
   min-height: 100%;
-  background: rgba(255, 255, 255, 0.045);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  background: rgba(132, 132, 132, 0.16);
   align-self: stretch;
 }
 
@@ -266,6 +268,17 @@ button:disabled {
 
 .nav-button-right {
   justify-self: stretch;
+}
+
+.nav-arrow {
+  font-size: 2rem;
+  line-height: 1;
+  opacity: 0.92;
+}
+
+.nav-label {
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 @media (max-width: 720px) {
@@ -302,6 +315,14 @@ button:disabled {
   .nav-button {
     min-width: 0;
     min-height: 60px;
+    font-size: 0.92rem;
+  }
+
+  .nav-arrow {
+    font-size: 1.6rem;
+  }
+
+  .nav-label {
     font-size: 0.92rem;
   }
 

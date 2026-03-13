@@ -16,7 +16,7 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /maximum-scale=1, user-scalable=no/);
   assert.match(source, /id="overlay-controls"/);
   assert.match(source, /id="install-button"/);
-  assert.match(source, /Instalar app/);
+  assert.match(source, /Instalar Signo Vivo/);
   assert.match(source, /class="top-actions"/);
   assert.match(source, /class="navigation-stage"/);
   assert.match(source, /id="navigation-numberpad"/);
@@ -31,9 +31,11 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /id="go-button"/);
   assert.match(source, />Ir</);
   assert.match(source, /id="prev-page"/);
-  assert.match(source, /&larr; Anterior/);
+  assert.match(source, /class="nav-arrow" aria-hidden="true">←/);
+  assert.match(source, /class="nav-label">Anterior/);
   assert.match(source, /id="next-page"/);
-  assert.match(source, /Siguiente &rarr;/);
+  assert.match(source, /class="nav-label">Siguiente/);
+  assert.match(source, /class="nav-arrow" aria-hidden="true">→/);
   assert.match(source, /id="fullscreen-button"/);
   assert.match(source, /Pantalla completa/);
   assert.doesNotMatch(source, /launch-screen/);
@@ -77,6 +79,8 @@ test("web app script supports first-page startup, song-based navigation numberpa
 test("manifest is configured for standalone install from the domain root", () => {
   const manifest = JSON.parse(readText("web/src/manifest.webmanifest"));
 
+  assert.equal(manifest.name, "Signo Vivo");
+  assert.equal(manifest.short_name, "Signo Vivo");
   assert.deepEqual(manifest.display_override, ["fullscreen", "standalone"]);
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.scope, "/");
@@ -123,5 +127,7 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /\.fullscreen-button/);
   assert.match(source, /\.nav-button-left/);
   assert.match(source, /\.nav-button-right/);
+  assert.match(source, /\.nav-arrow/);
+  assert.match(source, /\.nav-label/);
   assert.match(source, /touch-action: manipulation/);
 });

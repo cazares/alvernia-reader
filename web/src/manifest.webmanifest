@@ -1,6 +1,6 @@
 {
-  "name": "Alvernia Reader",
-  "short_name": "Alvernia",
+  "name": "Signo Vivo",
+  "short_name": "Signo Vivo",
   "description": "Manual Alvernia con navegacion rapida por numero de cancion.",
   "display_override": ["fullscreen", "standalone"],
   "display": "standalone",
