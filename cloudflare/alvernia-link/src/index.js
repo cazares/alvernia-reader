@@ -49,6 +49,19 @@ export const buildProxyUrl = (requestUrl) => {
 export const isSpecialRoute = (pathname) => SPECIAL_ROUTES.has(pathname.replace(/\/$/, ""));
 export const isPageAssetRoute = (pathname) => pathname === PAGES_MANIFEST_PATH || pathname.startsWith(PAGE_PATH_PREFIX);
 
+const getTunnelOrigin = (env) => (env?.TUNNEL_ORIGIN || "").trim();
+
+export const buildTunnelUrl = (requestUrl, tunnelOrigin) => {
+  const incomingUrl = new URL(requestUrl);
+  return new URL(`${incomingUrl.pathname}${incomingUrl.search}`, tunnelOrigin);
+};
+
+const proxyToTunnel = async (request, tunnelOrigin) => {
+  const tunnelUrl = buildTunnelUrl(request.url, tunnelOrigin);
+  const proxiedRequest = new Request(tunnelUrl, request);
+  return fetch(proxiedRequest);
+};
+
 const htmlResponse = (body, status = 200) => new Response(body, {
   status,
   headers: {
@@ -323,6 +336,7 @@ export default {
   async fetch(request, env) {
     const requestUrl = new URL(request.url);
     const pathname = requestUrl.pathname.replace(/\/$/, "") || "/";
+    const tunnelOrigin = getTunnelOrigin(env);
     const { redirectToTrailingSlash } = normalizeProxyPath({
       host: requestUrl.host,
       pathname: requestUrl.pathname,
@@ -334,6 +348,15 @@ export default {
     }
 
     if (isSpecialRoute(pathname)) {
+      if (tunnelOrigin) {
+        try {
+          const tunnelResponse = await proxyToTunnel(request, tunnelOrigin);
+          return copyResponse(tunnelResponse, requestUrl.host);
+        } catch (error) {
+          return jsonResponse({ error: "Tunnel no disponible" }, 503);
+        }
+      }
+
       if (!env?.ALVERNIA_UPLOADS) {
         return jsonResponse({ error: "R2 no configurado" }, 500);
       }
@@ -352,6 +375,17 @@ export default {
     }
 
     if (isPageAssetRoute(requestUrl.pathname)) {
+      if (tunnelOrigin) {
+        try {
+          const tunnelResponse = await proxyToTunnel(request, tunnelOrigin);
+          if (tunnelResponse.ok) {
+            return copyResponse(tunnelResponse, requestUrl.host);
+          }
+        } catch (error) {
+          // Ignore tunnel failures and fall back to R2 or Pages.
+        }
+      }
+
       const active = await tryServeActivePages(requestUrl, env);
       if (active) return active;
     }

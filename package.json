@@ -9,6 +9,7 @@
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
     "build:web": "node ./web/build.mjs",
+    "upload:server": "node ./scripts/upload-server.mjs",
     "promote:watch": "node ./scripts/keynote-promote.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "node --test ./e2e/*.test.mjs"
@@ -29,6 +30,7 @@
     "expo-task-manager": "~14.0.9",
     "expo-updates": "~29.0.16",
     "expo-video": "~2.2.0",
+    "busboy": "^1.6.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",

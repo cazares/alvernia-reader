@@ -1,5 +1,5 @@
-const STATIC_CACHE = "alvernia-static-v7";
-const PAGE_CACHE = "alvernia-pages-v7";
+const STATIC_CACHE = "alvernia-static-v8";
+const PAGE_CACHE = "alvernia-pages-v8";
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -39,6 +39,11 @@ self.addEventListener("activate", (event) => {
 });
 
 const isPageImageRequest = (requestUrl) => requestUrl.pathname.startsWith("/pages/");
+const shouldCacheResponse = (response) => {
+  if (!response) return false;
+  const cacheControl = response.headers.get("cache-control") || "";
+  return !cacheControl.toLowerCase().includes("no-store");
+};
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
@@ -52,7 +57,7 @@ self.addEventListener("fetch", (event) => {
         const cached = await cache.match(event.request);
         if (cached) return cached;
         const response = await fetch(event.request);
-        if (response.ok) {
+        if (response.ok && shouldCacheResponse(response)) {
           cache.put(event.request, response.clone());
         }
         return response;
@@ -66,7 +71,7 @@ self.addEventListener("fetch", (event) => {
       caches.open(STATIC_CACHE).then(async (cache) => {
         try {
           const response = await fetch(event.request);
-          if (response.ok) {
+          if (response.ok && shouldCacheResponse(response)) {
             cache.put(event.request, response.clone());
           }
           return response;
@@ -84,7 +89,7 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then(async (cached) => {
       if (cached) return cached;
       const response = await fetch(event.request);
-      if (response.ok) {
+      if (response.ok && shouldCacheResponse(response)) {
         const cache = await caches.open(STATIC_CACHE);
         cache.put(event.request, response.clone());
       }

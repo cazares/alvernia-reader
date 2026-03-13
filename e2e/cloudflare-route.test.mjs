@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildProxyUrl,
+  buildTunnelUrl,
   normalizeProxyPath,
   isSpecialRoute,
   isPageAssetRoute,
@@ -45,6 +46,13 @@ test("buildProxyUrl forwards root and assets to the live Pages deployment", () =
   assert.equal(
     buildProxyUrl("https://miguelcoro.com/pages.json?cache=1").toString(),
     "https://alvernia-reader.pages.dev/pages.json?cache=1",
+  );
+});
+
+test("buildTunnelUrl targets the upload tunnel origin", () => {
+  assert.equal(
+    buildTunnelUrl("https://miguelcoro.com/upload?foo=1", "https://upload.miguelcoro.com").toString(),
+    "https://upload.miguelcoro.com/upload?foo=1",
   );
 });
 
