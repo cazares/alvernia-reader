@@ -1,8 +1,12 @@
+const installGate = document.getElementById("install-gate");
+const installGateCopy = document.getElementById("install-gate-copy");
+const installGateSteps = document.getElementById("install-gate-steps");
+const installGateButton = document.getElementById("install-gate-button");
+const installGateNote = document.getElementById("install-gate-note");
 const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
 const loading = document.getElementById("loading");
 const overlayControls = document.getElementById("overlay-controls");
-const installButton = document.getElementById("install-button");
 const songStatus = document.getElementById("song-status");
 const songDisplay = document.getElementById("song-display");
 const numberpadGrid = document.getElementById("numberpad-grid");
@@ -24,13 +28,17 @@ const state = {
   immersiveMode: false,
   touchStart: null,
   lastTouchEndedAt: 0,
+  installCompleted: false,
 };
 
 const initialUrl = new URL(window.location.href);
-const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const userAgent = navigator.userAgent;
+const isIOS = /iphone|ipad|ipod/i.test(userAgent);
+const isSafari = /safari/i.test(userAgent) && !/crios|fxios|edgios|opr\/|opera|duckduckgo/i.test(userAgent);
 const isStandaloneApp = window.matchMedia("(display-mode: standalone)").matches
   || window.matchMedia("(display-mode: fullscreen)").matches
   || window.navigator.standalone === true;
+const shouldShowInstallGate = !isStandaloneApp;
 const fullscreenTarget = document.documentElement;
 const nativeFullscreenSupported = Boolean(
   document.fullscreenEnabled
@@ -40,12 +48,6 @@ const nativeFullscreenSupported = Boolean(
 );
 const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
-
-const manifestResponse = await fetch("./pages.json");
-const manifest = await manifestResponse.json();
-state.totalPages = manifest.totalPages;
-state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
-state.totalSongs = state.songIndex.length;
 
 const pageFileName = (pageNumber) => `./pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
@@ -94,6 +96,87 @@ const clearInitialUrl = () => {
   window.history.replaceState({}, "", initialUrl.pathname || "/");
 };
 
+const setInstallGateVisible = (visible) => {
+  installGate.classList.toggle("is-hidden", !visible);
+  viewerShell.classList.toggle("is-hidden", visible);
+  overlayControls.classList.toggle("is-hidden", visible || !state.overlayVisible);
+};
+
+const updateInstallGateUi = () => {
+  if (state.installCompleted) {
+    installGateCopy.textContent = "Listo. Ahora abre Signo Vivo desde el ícono nuevo en tu pantalla de inicio.";
+    installGateSteps.innerHTML = [
+      "Busca el ícono Signo Vivo en tu pantalla de inicio.",
+      "Tócalo para abrir la app.",
+      "A partir de ahí se abrirá directo en modo app.",
+    ].map((step) => `<li>${step}</li>`).join("");
+    installGateButton.textContent = "Listo";
+    installGateButton.disabled = true;
+    installGateNote.textContent = "Si no ves el ícono todavía, espera un momento y vuelve a mirar.";
+    return;
+  }
+
+  if (state.deferredInstallPrompt) {
+    installGateCopy.textContent = "Toca el botón azul y acepta la instalación para guardar Signo Vivo como app.";
+    installGateSteps.innerHTML = [
+      "Toca Instalar Signo Vivo.",
+      "Acepta el aviso del navegador.",
+      "Abre Signo Vivo desde el ícono nuevo.",
+    ].map((step) => `<li>${step}</li>`).join("");
+    installGateButton.textContent = "⬇ Instalar Signo Vivo";
+    installGateButton.disabled = false;
+    installGateNote.textContent = "Solo hay que hacerlo una vez.";
+    return;
+  }
+
+  if (isIOS && isSafari) {
+    installGateCopy.textContent = "Haz esto una sola vez en Safari para dejar Signo Vivo como app en tu pantalla de inicio.";
+    installGateSteps.innerHTML = [
+      "Toca Compartir en Safari.",
+      "Toca Agregar a pantalla de inicio.",
+      "Abre Signo Vivo desde el ícono nuevo.",
+    ].map((step) => `<li>${step}</li>`).join("");
+    installGateButton.textContent = "⬇ Instalar Signo Vivo";
+    installGateButton.disabled = false;
+    installGateNote.textContent = "Después ya no uses el navegador. Abre siempre el ícono Signo Vivo.";
+    return;
+  }
+
+  if (isIOS && !isSafari) {
+    installGateCopy.textContent = "Primero abre este enlace en Safari. Desde otras apps o navegadores no es tan fácil instalarlo bien.";
+    installGateSteps.innerHTML = [
+      "Abre este enlace en Safari.",
+      "En Safari toca Compartir.",
+      "Luego toca Agregar a pantalla de inicio.",
+    ].map((step) => `<li>${step}</li>`).join("");
+    installGateButton.textContent = "Abrir en Safari";
+    installGateButton.disabled = false;
+    installGateNote.textContent = "Safari es la forma más segura para tu coro.";
+    return;
+  }
+
+  installGateCopy.textContent = "Instala Signo Vivo y luego ábrelo como app desde tu dispositivo.";
+  installGateSteps.innerHTML = [
+    "Toca Instalar Signo Vivo.",
+    "Acepta el aviso del navegador.",
+    "Abre Signo Vivo desde el ícono nuevo.",
+  ].map((step) => `<li>${step}</li>`).join("");
+  installGateButton.textContent = "⬇ Instalar Signo Vivo";
+  installGateButton.disabled = false;
+  installGateNote.textContent = "La idea es usar siempre la app instalada.";
+};
+
+const flashInstallGateButton = (label) => {
+  if (!installGateButton.dataset.defaultLabel) {
+    installGateButton.dataset.defaultLabel = installGateButton.textContent;
+  }
+  installGateButton.textContent = label;
+  window.setTimeout(() => {
+    if (state.installCompleted) return;
+    installGateButton.textContent = installGateButton.dataset.defaultLabel;
+  }, 2600);
+};
+
 const findSongIndexAtOrBeforePage = (pageNumber) => {
   let index = -1;
   for (let i = 0; i < state.songIndex.length; i += 1) {
@@ -139,7 +222,9 @@ const renderPage = (pageNumber) => {
 
 const setOverlayVisible = (visible) => {
   state.overlayVisible = visible;
-  overlayControls.classList.toggle("is-hidden", !visible);
+  if (!shouldShowInstallGate) {
+    overlayControls.classList.toggle("is-hidden", !visible);
+  }
 };
 
 const updateFullscreenButton = () => {
@@ -155,21 +240,6 @@ const updateFullscreenButton = () => {
   }
 
   fullscreenButton.textContent = isFullscreen() ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa";
-};
-
-const updateInstallButton = () => {
-  installButton.classList.toggle("is-hidden", isStandaloneApp);
-};
-
-const flashInstallButtonLabel = (label) => {
-  if (!installButton) return;
-  if (!installButton.dataset.defaultLabel) {
-    installButton.dataset.defaultLabel = installButton.textContent;
-  }
-  installButton.textContent = label;
-  window.setTimeout(() => {
-    installButton.textContent = installButton.dataset.defaultLabel;
-  }, 2800);
 };
 
 const appendDigit = (digit) => {
@@ -253,145 +323,172 @@ const triggerInstall = async () => {
     state.deferredInstallPrompt.prompt();
     await state.deferredInstallPrompt.userChoice.catch(() => null);
     state.deferredInstallPrompt = null;
-    updateInstallButton();
+    updateInstallGateUi();
     return;
   }
 
-  if (isIOS && !isStandaloneApp) {
-    flashInstallButtonLabel("Safari > Compartir > Agregar");
+  if (isIOS && isSafari) {
+    flashInstallGateButton("Usa Compartir de Safari");
     return;
   }
 
-  flashInstallButtonLabel("Instálala desde el navegador");
+  if (isIOS && !isSafari) {
+    flashInstallGateButton("Primero ábrelo en Safari");
+    return;
+  }
+
+  flashInstallGateButton("Instálala desde tu navegador");
 };
 
-numberpadGrid.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-digit]");
-  if (!button) return;
-  appendDigit(button.dataset.digit);
-});
-
-clearButton.addEventListener("click", clearDraft);
-backspaceButton.addEventListener("click", backspaceDraft);
-goButton.addEventListener("click", goToDraftSong);
-
-prevPageButton.addEventListener("click", () => {
-  turnSong(-1, { keepOverlay: true });
-});
-
-nextPageButton.addEventListener("click", () => {
-  turnSong(1, { keepOverlay: true });
-});
-
-fullscreenButton.addEventListener("click", () => {
-  toggleFullscreen().catch((error) => {
-    console.error("No se pudo activar la pantalla completa", error);
+const bindReaderEvents = () => {
+  numberpadGrid.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-digit]");
+    if (!button) return;
+    appendDigit(button.dataset.digit);
   });
-});
 
-installButton.addEventListener("click", () => {
+  clearButton.addEventListener("click", clearDraft);
+  backspaceButton.addEventListener("click", backspaceDraft);
+  goButton.addEventListener("click", goToDraftSong);
+
+  prevPageButton.addEventListener("click", () => {
+    turnSong(-1, { keepOverlay: true });
+  });
+
+  nextPageButton.addEventListener("click", () => {
+    turnSong(1, { keepOverlay: true });
+  });
+
+  fullscreenButton.addEventListener("click", () => {
+    toggleFullscreen().catch((error) => {
+      console.error("No se pudo activar la pantalla completa", error);
+    });
+  });
+
+  pageImage.addEventListener("load", () => {
+    setLoading(false);
+  });
+
+  pageImage.addEventListener("error", () => {
+    setLoading(true, "No se pudo cargar esta página.");
+  });
+
+  viewerShell.addEventListener("click", (event) => {
+    if (Date.now() - state.lastTouchEndedAt < 450) return;
+    if (event.target !== viewerShell && event.target !== pageImage) return;
+    if (event.detail > 1) return;
+    setOverlayVisible(!state.overlayVisible);
+  });
+
+  viewerShell.addEventListener("touchstart", (event) => {
+    if (event.touches.length !== 1) {
+      state.touchStart = null;
+      return;
+    }
+
+    const touch = event.touches[0];
+    state.touchStart = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+  }, { passive: true });
+
+  viewerShell.addEventListener("touchend", (event) => {
+    if (!state.touchStart || event.changedTouches.length !== 1) return;
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - state.touchStart.x;
+    const deltaY = touch.clientY - state.touchStart.y;
+    const elapsed = Date.now() - state.touchStart.time;
+    state.lastTouchEndedAt = Date.now();
+    state.touchStart = null;
+
+    if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      event.preventDefault();
+      turnSong(deltaX < 0 ? 1 : -1);
+      return;
+    }
+
+    if (Math.abs(deltaX) < 14 && Math.abs(deltaY) < 14 && elapsed < 360) {
+      event.preventDefault();
+      setOverlayVisible(!state.overlayVisible);
+    }
+  }, { passive: false });
+
+  window.addEventListener("keydown", (event) => {
+    if (/^[0-9]$/.test(event.key)) {
+      appendDigit(event.key);
+      return;
+    }
+
+    if (event.key === "Backspace") {
+      backspaceDraft();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      clearDraft();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      goToDraftSong();
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      turnSong(1);
+    }
+
+    if (event.key === "ArrowLeft") {
+      turnSong(-1);
+    }
+  });
+
+  ["fullscreenchange", "webkitfullscreenchange"].forEach((eventName) => {
+    document.addEventListener(eventName, updateFullscreenButton);
+  });
+};
+
+const initReader = async () => {
+  const manifestResponse = await fetch("./pages.json");
+  const manifest = await manifestResponse.json();
+  state.totalPages = manifest.totalPages;
+  state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
+  state.totalSongs = state.songIndex.length;
+  renderDraft();
+  renderStatus();
+  state.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp;
+  setInstallGateVisible(false);
+  setOverlayVisible(!state.immersiveMode);
+  updateFullscreenButton();
+  renderPage(1);
+};
+
+installGateButton.addEventListener("click", () => {
   triggerInstall().catch((error) => {
     console.error("No se pudo iniciar la instalación", error);
   });
 });
 
-pageImage.addEventListener("load", () => {
-  setLoading(false);
-});
-
-pageImage.addEventListener("error", () => {
-  setLoading(true, "No se pudo cargar esta página.");
-});
-
-viewerShell.addEventListener("click", (event) => {
-  if (Date.now() - state.lastTouchEndedAt < 450) return;
-  if (event.target !== viewerShell && event.target !== pageImage) return;
-  if (event.detail > 1) return;
-  setOverlayVisible(!state.overlayVisible);
-});
-
-viewerShell.addEventListener("touchstart", (event) => {
-  if (event.touches.length !== 1) {
-    state.touchStart = null;
-    return;
-  }
-
-  const touch = event.touches[0];
-  state.touchStart = { x: touch.clientX, y: touch.clientY, time: Date.now() };
-}, { passive: true });
-
-viewerShell.addEventListener("touchend", (event) => {
-  if (!state.touchStart || event.changedTouches.length !== 1) return;
-  const touch = event.changedTouches[0];
-  const deltaX = touch.clientX - state.touchStart.x;
-  const deltaY = touch.clientY - state.touchStart.y;
-  const elapsed = Date.now() - state.touchStart.time;
-  state.lastTouchEndedAt = Date.now();
-  state.touchStart = null;
-
-  if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY)) {
-    event.preventDefault();
-    turnSong(deltaX < 0 ? 1 : -1);
-    return;
-  }
-
-  if (Math.abs(deltaX) < 14 && Math.abs(deltaY) < 14 && elapsed < 360) {
-    event.preventDefault();
-    setOverlayVisible(!state.overlayVisible);
-  }
-}, { passive: false });
-
-window.addEventListener("keydown", (event) => {
-  if (/^[0-9]$/.test(event.key)) {
-    appendDigit(event.key);
-    return;
-  }
-
-  if (event.key === "Backspace") {
-    backspaceDraft();
-    return;
-  }
-
-  if (event.key === "Escape") {
-    clearDraft();
-    return;
-  }
-
-  if (event.key === "Enter") {
-    goToDraftSong();
-    return;
-  }
-
-  if (event.key === "ArrowRight") {
-    turnSong(1);
-  }
-
-  if (event.key === "ArrowLeft") {
-    turnSong(-1);
-  }
-});
-
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   state.deferredInstallPrompt = event;
-  updateInstallButton();
+  updateInstallGateUi();
 });
 
 window.addEventListener("appinstalled", () => {
   state.deferredInstallPrompt = null;
-  installButton.classList.add("is-hidden");
-});
-
-["fullscreenchange", "webkitfullscreenchange"].forEach((eventName) => {
-  document.addEventListener(eventName, updateFullscreenButton);
+  state.installCompleted = true;
+  updateInstallGateUi();
 });
 
 clearInitialUrl();
-renderDraft();
-renderStatus();
-state.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp;
-setOverlayVisible(!state.immersiveMode);
-updateFullscreenButton();
-updateInstallButton();
-renderPage(1);
+updateInstallGateUi();
 registerServiceWorker();
+
+if (shouldShowInstallGate) {
+  setInstallGateVisible(true);
+} else {
+  bindReaderEvents();
+  initReader().catch((error) => {
+    console.error("No se pudo iniciar el lector", error);
+    setLoading(true, "No se pudo cargar Signo Vivo.");
+  });
+}
