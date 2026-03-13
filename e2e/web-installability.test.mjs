@@ -33,9 +33,7 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, />Ir</);
   assert.match(source, /id="prev-page"/);
   assert.match(source, /class="nav-arrow" aria-hidden="true">←/);
-  assert.match(source, /class="nav-label">Anterior/);
   assert.match(source, /id="next-page"/);
-  assert.match(source, /class="nav-label">Siguiente/);
   assert.match(source, /class="nav-arrow" aria-hidden="true">→/);
   assert.match(source, /id="fullscreen-button"/);
   assert.match(source, /Pantalla completa/);
@@ -129,6 +127,7 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /\.nav-button-right/);
   assert.match(source, /\.nav-arrow/);
   assert.match(source, /\.nav-label/);
+  assert.match(source, /display: none/);
   assert.match(source, /touch-action: manipulation/);
   assert.doesNotMatch(source, /\.install-gate/);
 });
