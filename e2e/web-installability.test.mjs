@@ -22,9 +22,9 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /id="song-status"/);
   assert.match(source, /Canción 0/);
   assert.match(source, /id="song-display"[^>]*readonly/);
-  assert.match(source, /Busca tu canción/);
-  assert.match(source, /placeholder="Canción"/);
-  assert.match(source, /aria-label="Canción"/);
+  assert.match(source, /¿Cuál canción\?/);
+  assert.match(source, /placeholder="¿Cuál canción\?"/);
+  assert.match(source, /aria-label="¿Cuál canción\?"/);
   assert.match(source, /id="numberpad-grid"/);
   assert.match(source, /Navigation numberpad/);
   assert.match(source, />Borrar todo</);
@@ -125,6 +125,7 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /\.numberpad-display/);
   assert.match(source, /\.go-button/);
   assert.match(source, /\.fullscreen-button/);
+  assert.match(source, /\.numberpad-key\[data-digit\]/);
   assert.match(source, /\.nav-button-left/);
   assert.match(source, /\.nav-button-right/);
   assert.match(source, /\.nav-arrow/);
