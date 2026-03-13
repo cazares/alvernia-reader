@@ -9,6 +9,7 @@
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
     "build:web": "node ./web/build.mjs",
+    "promote:watch": "node ./scripts/keynote-promote.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "node --test ./e2e/*.test.mjs"
   },
@@ -38,6 +39,7 @@
     "react-native-webview": "13.15.0"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1009.0",
     "@expo/ngrok": "^4.1.0",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "^54.0.10",
