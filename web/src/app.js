@@ -2,8 +2,8 @@ const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
 const loading = document.getElementById("loading");
 const overlayControls = document.getElementById("overlay-controls");
-const pageStatus = document.getElementById("page-status");
-const pageDisplay = document.getElementById("page-display");
+const songStatus = document.getElementById("song-status");
+const songDisplay = document.getElementById("song-display");
 const numberpadGrid = document.getElementById("numberpad-grid");
 const clearButton = document.getElementById("clear-button");
 const backspaceButton = document.getElementById("backspace-button");
@@ -14,8 +14,10 @@ const fullscreenButton = document.getElementById("fullscreen-button");
 
 const state = {
   totalPages: 1,
+  totalSongs: 0,
   currentPage: 1,
-  pageDraft: "",
+  songDraft: "",
+  songIndex: [],
   overlayVisible: true,
   touchStart: null,
   lastTouchEndedAt: 0,
@@ -33,9 +35,12 @@ const supportsFullscreen = Boolean(
 const manifestResponse = await fetch("./pages.json");
 const manifest = await manifestResponse.json();
 state.totalPages = manifest.totalPages;
+state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
+state.totalSongs = state.songIndex.length;
 
 const pageFileName = (pageNumber) => `./pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
+const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 const isFullscreen = () => Boolean(getFullscreenElement());
 
@@ -80,14 +85,37 @@ const clearInitialUrl = () => {
   window.history.replaceState({}, "", initialUrl.pathname || "/");
 };
 
+const findSongIndexAtOrBeforePage = (pageNumber) => {
+  let index = -1;
+  for (let i = 0; i < state.songIndex.length; i += 1) {
+    if (state.songIndex[i].page > pageNumber) break;
+    index = i;
+  }
+  return index;
+};
+
+const findSongPage = (songNumber) => {
+  if (songNumber <= 0) return 1;
+  const exact = state.songIndex.find((entry) => entry.song === songNumber);
+  if (exact) return exact.page;
+  const next = state.songIndex.find((entry) => entry.song >= songNumber);
+  return next ? next.page : state.totalPages;
+};
+
+const getCurrentSongNumber = () => {
+  const index = findSongIndexAtOrBeforePage(state.currentPage);
+  return index >= 0 ? state.songIndex[index].song : 0;
+};
+
 const renderStatus = () => {
-  pageStatus.textContent = `Pagina ${state.currentPage} de ${state.totalPages}`;
-  prevPageButton.disabled = state.currentPage <= 1;
-  nextPageButton.disabled = state.currentPage >= state.totalPages;
+  songStatus.textContent = `Canción ${getCurrentSongNumber()} de ${state.totalSongs}`;
+  const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
+  prevPageButton.disabled = currentSongIndex <= 0;
+  nextPageButton.disabled = currentSongIndex >= state.totalSongs - 1;
 };
 
 const renderDraft = () => {
-  pageDisplay.value = state.pageDraft;
+  songDisplay.value = state.songDraft;
 };
 
 const renderPage = (pageNumber) => {
@@ -116,32 +144,45 @@ const updateFullscreenButton = () => {
 };
 
 const appendDigit = (digit) => {
-  if (state.pageDraft.length >= 4) return;
-  state.pageDraft = `${state.pageDraft}${digit}`;
+  if (state.songDraft.length >= 4) return;
+  state.songDraft = `${state.songDraft}${digit}`;
   renderDraft();
 };
 
 const clearDraft = () => {
-  state.pageDraft = "";
+  state.songDraft = "";
   renderDraft();
 };
 
 const backspaceDraft = () => {
-  state.pageDraft = state.pageDraft.slice(0, -1);
+  state.songDraft = state.songDraft.slice(0, -1);
   renderDraft();
 };
 
-const goToDraftPage = () => {
-  const pageNumber = Number.parseInt(state.pageDraft, 10);
-  if (!Number.isFinite(pageNumber)) return;
-  renderPage(pageNumber);
+const goToDraftSong = () => {
+  const songNumber = Number.parseInt(state.songDraft, 10);
+  if (!Number.isFinite(songNumber)) return;
+  renderPage(findSongPage(songNumber));
   clearDraft();
   setOverlayVisible(false);
 };
 
-const turnPage = (direction) => {
-  if (direction === 0) return;
-  renderPage(state.currentPage + direction);
+const turnSong = (direction) => {
+  if (direction === 0 || state.totalSongs === 0) return;
+  const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
+
+  if (currentSongIndex < 0) {
+    if (direction > 0) {
+      renderPage(state.songIndex[0].page);
+      clearDraft();
+      setOverlayVisible(false);
+    }
+    return;
+  }
+
+  const nextIndex = clampSongIndex(currentSongIndex + direction);
+  if (nextIndex === currentSongIndex) return;
+  renderPage(state.songIndex[nextIndex].page);
   clearDraft();
   setOverlayVisible(false);
 };
@@ -179,14 +220,14 @@ numberpadGrid.addEventListener("click", (event) => {
 
 clearButton.addEventListener("click", clearDraft);
 backspaceButton.addEventListener("click", backspaceDraft);
-goButton.addEventListener("click", goToDraftPage);
+goButton.addEventListener("click", goToDraftSong);
 
 prevPageButton.addEventListener("click", () => {
-  turnPage(-1);
+  turnSong(-1);
 });
 
 nextPageButton.addEventListener("click", () => {
-  turnPage(1);
+  turnSong(1);
 });
 
 fullscreenButton.addEventListener("click", () => {
@@ -200,7 +241,7 @@ pageImage.addEventListener("load", () => {
 });
 
 pageImage.addEventListener("error", () => {
-  setLoading(true, "No se pudo cargar esta pagina.");
+  setLoading(true, "No se pudo cargar esta página.");
 });
 
 viewerShell.addEventListener("click", (event) => {
@@ -231,7 +272,7 @@ viewerShell.addEventListener("touchend", (event) => {
 
   if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY)) {
     event.preventDefault();
-    turnPage(deltaX < 0 ? 1 : -1);
+    turnSong(deltaX < 0 ? 1 : -1);
     return;
   }
 
@@ -258,16 +299,16 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (event.key === "Enter") {
-    goToDraftPage();
+    goToDraftSong();
     return;
   }
 
   if (event.key === "ArrowRight") {
-    turnPage(1);
+    turnSong(1);
   }
 
   if (event.key === "ArrowLeft") {
-    turnPage(-1);
+    turnSong(-1);
   }
 });
 

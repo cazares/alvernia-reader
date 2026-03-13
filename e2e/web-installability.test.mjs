@@ -16,16 +16,20 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /maximum-scale=1, user-scalable=no/);
   assert.match(source, /id="overlay-controls"/);
   assert.match(source, /id="navigation-numberpad"/);
-  assert.match(source, /id="page-status"/);
-  assert.match(source, /id="page-display"[^>]*readonly/);
+  assert.match(source, /id="song-status"/);
+  assert.match(source, /Canción 0 de 0/);
+  assert.match(source, /id="song-display"[^>]*readonly/);
+  assert.match(source, /Número de canción/);
   assert.match(source, /id="numberpad-grid"/);
   assert.match(source, /Navigation numberpad/);
+  assert.match(source, />Limpiar</);
+  assert.match(source, />Borrar</);
   assert.match(source, /id="go-button"/);
   assert.match(source, />Ir</);
   assert.match(source, /id="prev-page"/);
-  assert.match(source, /Anterior/);
+  assert.match(source, /&larr; Anterior/);
   assert.match(source, /id="next-page"/);
-  assert.match(source, /Siguiente/);
+  assert.match(source, /Siguiente &rarr;/);
   assert.match(source, /id="fullscreen-button"/);
   assert.match(source, /Pantalla completa/);
   assert.doesNotMatch(source, /launch-screen/);
@@ -33,16 +37,19 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.doesNotMatch(source, /install-sheet/);
 });
 
-test("web app script supports first-page startup, navigation numberpad input, and simple fullscreen", () => {
+test("web app script supports first-page startup, song-based navigation numberpad input, and simple fullscreen", () => {
   const source = readText("web/src/app.js");
 
-  assert.match(source, /const state = \{[\s\S]*currentPage: 1,[\s\S]*pageDraft: ""/);
+  assert.match(source, /const state = \{[\s\S]*currentPage: 1,[\s\S]*songDraft: ""/);
   assert.match(source, /renderPage\(1\)/);
   assert.match(source, /numberpadGrid\.addEventListener\("click"/);
   assert.match(source, /appendDigit/);
   assert.match(source, /clearDraft/);
   assert.match(source, /backspaceDraft/);
-  assert.match(source, /goToDraftPage/);
+  assert.match(source, /goToDraftSong/);
+  assert.match(source, /findSongPage/);
+  assert.match(source, /findSongIndexAtOrBeforePage/);
+  assert.match(source, /turnSong/);
   assert.match(source, /setOverlayVisible\(false\)/);
   assert.match(source, /requestFullscreen/);
   assert.match(source, /exitFullscreen/);
@@ -50,7 +57,7 @@ test("web app script supports first-page startup, navigation numberpad input, an
   assert.match(source, /viewerShell\.addEventListener\("touchend"/);
   assert.match(source, /viewerShell\.addEventListener\("click"/);
   assert.match(source, /serviceWorker\.register/);
-  assert.doesNotMatch(source, /songIndex/);
+  assert.match(source, /songIndex/);
   assert.doesNotMatch(source, /beforeinstallprompt/);
   assert.doesNotMatch(source, /fullscreenGuard/);
 });
@@ -97,6 +104,8 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /\.numberpad-display/);
   assert.match(source, /\.go-button/);
   assert.match(source, /\.overlay-actions/);
+  assert.match(source, /\.nav-button-left/);
+  assert.match(source, /\.nav-button-right/);
   assert.match(source, /touch-action: manipulation/);
   assert.doesNotMatch(source, /\.install-sheet/);
 });
