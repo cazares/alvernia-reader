@@ -262,8 +262,8 @@ button:disabled {
   justify-content: center;
   gap: 0.9rem;
   padding: 1.2rem 0.95rem;
-  background: linear-gradient(180deg, rgba(116, 120, 128, 0.3), rgba(89, 92, 98, 0.24));
-  border-color: rgba(176, 176, 176, 0.22);
+  background: linear-gradient(180deg, rgba(28, 34, 43, 0.58), rgba(13, 17, 24, 0.5));
+  border-color: rgba(158, 170, 187, 0.18);
   align-self: stretch;
 }
 
@@ -339,7 +339,7 @@ button:disabled {
   .nav-button-side {
     gap: 0.65rem;
     padding: 0.9rem 0.5rem;
-    background: linear-gradient(180deg, rgba(116, 120, 128, 0.28), rgba(89, 92, 98, 0.22));
+    background: linear-gradient(180deg, rgba(28, 34, 43, 0.56), rgba(13, 17, 24, 0.48));
   }
 
   .nav-arrow {
