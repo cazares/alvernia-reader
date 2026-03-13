@@ -102,6 +102,7 @@ test("web build emits install assets and generated icons", () => {
 test("web styles include the centered navigation numberpad and overlay controls", () => {
   const source = readText("web/src/styles.css");
 
+  assert.match(source, /Avenir Next/);
   assert.match(source, /\.overlay-controls/);
   assert.match(source, /\.navigation-numberpad/);
   assert.match(source, /\.numberpad-grid/);
