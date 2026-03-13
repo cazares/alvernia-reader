@@ -19,14 +19,17 @@ fs.copyFileSync(path.join(rootDir, "assets", "icon.png"), path.join(distDir, "ic
 fs.copyFileSync(path.join(srcDir, "sw.js"), path.join(distDir, "sw.js"));
 
 const generateIcon = (size, outputName) => {
-  const result = spawnSync(
-    "sips",
-    ["-z", String(size), String(size), path.join(rootDir, "assets", "icon.png"), "--out", path.join(distDir, outputName)],
-    { stdio: "inherit" },
-  );
+  const iconPath = path.join(rootDir, "assets", "icon.png");
+  const outPath = path.join(distDir, outputName);
+
+  // Try sips (macOS), fall back to ImageMagick convert (Linux)
+  let result = spawnSync("sips", ["-z", String(size), String(size), iconPath, "--out", outPath], { stdio: "inherit" });
+  if (result.status !== 0) {
+    result = spawnSync("convert", [iconPath, "-resize", `${size}x${size}`, outPath], { stdio: "inherit" });
+  }
 
   if (result.status !== 0) {
-    throw new Error(`sips failed while generating ${outputName}`);
+    throw new Error(`Icon generation failed for ${outputName}`);
   }
 };
 
