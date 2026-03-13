@@ -113,9 +113,9 @@ button:disabled {
   top: 50%;
   transform: translateY(-50%);
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(320px, 410px) minmax(120px, 1fr);
+  grid-template-columns: minmax(148px, 1.1fr) minmax(320px, 410px) minmax(148px, 1.1fr);
   align-items: stretch;
-  gap: 1rem;
+  gap: 0.9rem;
   padding: 0 1rem;
 }
 
@@ -124,8 +124,8 @@ button:disabled {
   width: 100%;
   padding: 1.2rem;
   border-radius: 30px;
-  border: 1px solid var(--border);
-  background: var(--surface-strong);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(12, 12, 12, 0.86);
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -145,6 +145,8 @@ button:disabled {
   margin: 0 0 0.9rem;
   text-align: center;
   font-size: 1rem;
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 600;
 }
 
 .numberpad-display {
@@ -152,8 +154,8 @@ button:disabled {
   margin: 0 0 0.9rem;
   padding: 1rem 1.1rem;
   border-radius: 22px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
   color: var(--text);
   font-size: clamp(1.52rem, 4.4vw, 2.15rem);
   text-align: center;
@@ -184,13 +186,15 @@ button:disabled {
 
 .numberpad-key {
   min-height: 70px;
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.09);
   font-size: 1.32rem;
   font-weight: 600;
 }
 
 .numberpad-key-muted {
   font-size: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(245, 243, 238, 0.92);
 }
 
 .go-button {
@@ -221,7 +225,8 @@ button:disabled {
   min-height: 64px;
   padding: 0.9rem 1rem;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.11);
   font-size: 1rem;
   font-weight: 700;
 }
@@ -230,10 +235,13 @@ button:disabled {
   height: 100%;
   min-height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
-  background: rgba(132, 132, 132, 0.16);
+  justify-content: center;
+  gap: 0.9rem;
+  padding: 1.2rem 0.95rem;
+  background: rgba(118, 118, 118, 0.28);
+  border-color: rgba(176, 176, 176, 0.24);
   align-self: stretch;
 }
 
@@ -246,21 +254,23 @@ button:disabled {
 }
 
 .nav-arrow {
-  font-size: 2rem;
+  font-size: 2.9rem;
   line-height: 1;
-  opacity: 0.92;
+  font-weight: 700;
+  opacity: 0.98;
 }
 
 .nav-label {
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 1.06rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 @media (max-width: 720px) {
   .navigation-stage {
-    grid-template-columns: minmax(72px, 1fr) minmax(0, 390px) minmax(72px, 1fr);
-    gap: 0.55rem;
-    padding: 0 0.65rem;
+    grid-template-columns: minmax(92px, 1fr) minmax(0, 390px) minmax(92px, 1fr);
+    gap: 0.5rem;
+    padding: 0 0.5rem;
   }
 
   .navigation-numberpad {
@@ -287,12 +297,18 @@ button:disabled {
     font-size: 0.92rem;
   }
 
+  .nav-button-side {
+    gap: 0.65rem;
+    padding: 0.9rem 0.5rem;
+    background: rgba(118, 118, 118, 0.26);
+  }
+
   .nav-arrow {
-    font-size: 1.6rem;
+    font-size: 2.25rem;
   }
 
   .nav-label {
-    font-size: 0.92rem;
+    font-size: 0.94rem;
   }
 
   .fullscreen-button {
