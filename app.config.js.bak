@@ -31,7 +31,7 @@ module.exports = ({ config }) => {
     version: baseVersion,
     runtimeVersion: baseVersion,
     newArchEnabled: false,
-    platforms: ["ios", "android", "web"],
+    platforms: ["ios", "android"],
     icon: "./assets/icon.png",
     splash: {
       image: "./assets/splash.png",
