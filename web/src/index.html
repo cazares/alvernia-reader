@@ -6,12 +6,12 @@
     <meta name="theme-color" content="#0a0a0a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Signo Vivo" />
+    <meta name="apple-mobile-web-app-title" content="Nuestro Coro" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="application-name" content="Signo Vivo" />
+    <meta name="application-name" content="Nuestro Coro" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="description" content="Manual Alvernia con lector simple y navegacion rapida." />
-    <title>Signo Vivo</title>
+    <title>Nuestro Coro</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon-192.png" />
     <link rel="apple-touch-icon" href="./icon-512.png" />
@@ -19,25 +19,12 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="install-gate is-hidden" id="install-gate">
-        <div class="install-gate-card">
-          <p class="install-gate-eyebrow">Signo Vivo</p>
-          <h1 class="install-gate-title">Instala la app</h1>
-          <p class="install-gate-copy" id="install-gate-copy">Ábrela desde tu pantalla de inicio para usarla como app.</p>
-          <ol class="install-gate-steps" id="install-gate-steps"></ol>
-          <button class="install-gate-button" id="install-gate-button" type="button" aria-label="Instalar Signo Vivo">
-            ⬇ Instalar Signo Vivo
-          </button>
-          <p class="install-gate-note" id="install-gate-note">Después, abre el ícono Signo Vivo.</p>
-        </div>
-      </section>
-
-      <section class="viewer-shell is-hidden" id="viewer-shell">
+      <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" alt="Pagina actual del manual" />
         <div class="loading" id="loading">Cargando...</div>
       </section>
 
-      <section class="overlay-controls is-hidden" id="overlay-controls">
+      <section class="overlay-controls" id="overlay-controls">
         <div class="navigation-stage">
           <button class="nav-button nav-button-side nav-button-left" id="prev-page" type="button" aria-label="Canción anterior">
             <span class="nav-arrow" aria-hidden="true">←</span>

@@ -14,17 +14,9 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /apple-mobile-web-app-capable/);
   assert.match(source, /apple-mobile-web-app-status-bar-style/);
   assert.match(source, /maximum-scale=1, user-scalable=no/);
-  assert.match(source, /id="install-gate"/);
-  assert.match(source, /class="install-gate is-hidden"/);
-  assert.match(source, /id="install-gate-copy"/);
-  assert.match(source, /id="install-gate-steps"/);
-  assert.match(source, /id="install-gate-button"/);
-  assert.match(source, /Instala la app/);
-  assert.match(source, /Instalar Signo Vivo/);
-  assert.match(source, /id="install-gate-note"/);
-  assert.match(source, /class="viewer-shell is-hidden"/);
+  assert.match(source, /class="viewer-shell"/);
   assert.match(source, /id="overlay-controls"/);
-  assert.match(source, /class="overlay-controls is-hidden"/);
+  assert.match(source, /class="overlay-controls"/);
   assert.match(source, /class="navigation-stage"/);
   assert.match(source, /id="navigation-numberpad"/);
   assert.match(source, /id="song-status"/);
@@ -45,6 +37,7 @@ test("web shell includes standalone metadata and the navigation numberpad UI", (
   assert.match(source, /class="nav-arrow" aria-hidden="true">→/);
   assert.match(source, /id="fullscreen-button"/);
   assert.match(source, /Pantalla completa/);
+  assert.doesNotMatch(source, /install-gate/);
   assert.doesNotMatch(source, /launch-screen/);
   assert.doesNotMatch(source, /go-modal/);
 });
@@ -53,10 +46,6 @@ test("web app script supports first-page startup, song-based navigation numberpa
   const source = readText("web/src/app.js");
 
   assert.match(source, /const state = \{[\s\S]*currentPage: 1,[\s\S]*songDraft: "",[\s\S]*immersiveMode: false/);
-  assert.match(source, /const shouldShowInstallGate = !isStandaloneApp/);
-  assert.match(source, /setInstallGateVisible/);
-  assert.match(source, /updateInstallGateUi/);
-  assert.match(source, /flashInstallGateButton/);
   assert.match(source, /bindReaderEvents/);
   assert.match(source, /initReader/);
   assert.match(source, /renderPage\(1\);/);
@@ -73,10 +62,6 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /setOverlayVisible\(false\)/);
   assert.match(source, /canOfferPseudoFullscreen/);
   assert.match(source, /window\.matchMedia\("\(display-mode: standalone\)"\)/);
-  assert.match(source, /beforeinstallprompt/);
-  assert.match(source, /appinstalled/);
-  assert.match(source, /state\.deferredInstallPrompt/);
-  assert.match(source, /triggerInstall/);
   assert.match(source, /state\.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp/);
   assert.match(source, /requestFullscreen/);
   assert.match(source, /exitFullscreen/);
@@ -84,17 +69,18 @@ test("web app script supports first-page startup, song-based navigation numberpa
   assert.match(source, /viewerShell\.addEventListener\("touchend"/);
   assert.match(source, /viewerShell\.addEventListener\("click"/);
   assert.match(source, /serviceWorker\.register/);
-  assert.match(source, /if \(shouldShowInstallGate\) \{/);
-  assert.match(source, /setInstallGateVisible\(true\)/);
+  assert.match(source, /bindReaderEvents\(\);/);
+  assert.match(source, /initReader\(\)\.catch/);
   assert.match(source, /songIndex/);
+  assert.doesNotMatch(source, /installGate/);
   assert.doesNotMatch(source, /fullscreenGuard/);
 });
 
 test("manifest is configured for standalone install from the domain root", () => {
   const manifest = JSON.parse(readText("web/src/manifest.webmanifest"));
 
-  assert.equal(manifest.name, "Signo Vivo");
-  assert.equal(manifest.short_name, "Signo Vivo");
+  assert.equal(manifest.name, "Nuestro Coro");
+  assert.equal(manifest.short_name, "Nuestro Coro");
   assert.deepEqual(manifest.display_override, ["fullscreen", "standalone"]);
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.scope, "/");
@@ -107,8 +93,8 @@ test("manifest is configured for standalone install from the domain root", () =>
 test("service worker caches shell assets and page images for faster reopen", () => {
   const source = readText("web/src/sw.js");
 
-  assert.match(source, /alvernia-static-v5/);
-  assert.match(source, /alvernia-pages-v5/);
+  assert.match(source, /alvernia-static-v6/);
+  assert.match(source, /alvernia-pages-v6/);
   assert.match(source, /NETWORK_FIRST_PATHS/);
   assert.match(source, /pages\.json/);
   assert.match(source, /icon-192\.png/);
@@ -131,8 +117,6 @@ test("web styles include the centered navigation numberpad and overlay controls"
 
   assert.match(source, /Avenir Next/);
   assert.match(source, /\.overlay-controls/);
-  assert.match(source, /\.install-gate/);
-  assert.match(source, /\.install-gate-button/);
   assert.match(source, /\.navigation-stage/);
   assert.match(source, /\.navigation-numberpad/);
   assert.match(source, /\.numberpad-grid/);
@@ -144,4 +128,5 @@ test("web styles include the centered navigation numberpad and overlay controls"
   assert.match(source, /\.nav-arrow/);
   assert.match(source, /\.nav-label/);
   assert.match(source, /touch-action: manipulation/);
+  assert.doesNotMatch(source, /\.install-gate/);
 });

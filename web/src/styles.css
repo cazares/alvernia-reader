@@ -106,86 +106,6 @@ button:disabled {
   pointer-events: none;
 }
 
-.install-gate {
-  position: fixed;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: calc(var(--safe-top) + 1rem) 1rem calc(var(--safe-bottom) + 1rem);
-  background:
-    radial-gradient(circle at top, rgba(43, 124, 255, 0.18), transparent 30%),
-    linear-gradient(180deg, rgba(4, 4, 4, 0.96) 0%, rgba(8, 8, 8, 0.98) 100%);
-}
-
-.install-gate-card {
-  width: min(92vw, 460px);
-  padding: 1.35rem;
-  border-radius: 30px;
-  border: 1px solid var(--border);
-  background: rgba(16, 16, 16, 0.94);
-  color: var(--text);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-
-.install-gate-eyebrow {
-  margin: 0 0 0.45rem;
-  color: var(--muted);
-  font-size: 0.84rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-align: center;
-}
-
-.install-gate-title {
-  margin: 0 0 0.9rem;
-  text-align: center;
-  font-size: clamp(2rem, 6vw, 2.8rem);
-  line-height: 0.98;
-}
-
-.install-gate-copy {
-  margin: 0 0 1rem;
-  color: var(--text);
-  font-size: 1.04rem;
-  line-height: 1.45;
-  text-align: center;
-}
-
-.install-gate-steps {
-  margin: 0 0 1rem;
-  padding-left: 1.25rem;
-  display: grid;
-  gap: 0.6rem;
-  color: var(--text);
-  font-size: 1rem;
-}
-
-.install-gate-button {
-  width: 100%;
-  min-height: 68px;
-  padding: 0.9rem 1.15rem;
-  border-radius: 22px;
-  border: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--blue) 0%, var(--blue-strong) 100%);
-  color: var(--text);
-  font-size: 1.08rem;
-  font-weight: 700;
-  box-shadow: var(--shadow);
-  pointer-events: auto;
-}
-
-.install-gate-note {
-  margin: 0.95rem 0 0;
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.4;
-  text-align: center;
-}
-
 .navigation-stage {
   position: absolute;
   left: 0;
@@ -337,26 +257,6 @@ button:disabled {
 }
 
 @media (max-width: 720px) {
-  .install-gate-card {
-    width: min(94vw, 420px);
-    padding: 1.05rem;
-    border-radius: 24px;
-  }
-
-  .install-gate-title {
-    font-size: clamp(1.8rem, 8vw, 2.3rem);
-  }
-
-  .install-gate-copy,
-  .install-gate-steps {
-    font-size: 0.96rem;
-  }
-
-  .install-gate-button {
-    min-height: 62px;
-    font-size: 1rem;
-  }
-
   .navigation-stage {
     grid-template-columns: minmax(72px, 1fr) minmax(0, 390px) minmax(72px, 1fr);
     gap: 0.55rem;
