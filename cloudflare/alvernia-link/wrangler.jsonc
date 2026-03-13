@@ -8,6 +8,9 @@
       "bucket_name": "alvernia-reader-uploads"
     }
   ],
+  "vars": {
+    "TUNNEL_ORIGIN": "https://upload.miguelcoro.com"
+  },
   "routes": [
     {
       "pattern": "miguelcoro.com",

@@ -114,13 +114,14 @@ test("manifest is configured for standalone install from the domain root", () =>
 test("service worker caches shell assets and page images for faster reopen", () => {
   const source = readText("web/src/sw.js");
 
-  assert.match(source, /alvernia-static-v7/);
-  assert.match(source, /alvernia-pages-v7/);
+  assert.match(source, /alvernia-static-v8/);
+  assert.match(source, /alvernia-pages-v8/);
   assert.match(source, /NETWORK_FIRST_PATHS/);
   assert.match(source, /pages\.json/);
   assert.match(source, /icon-192\.png/);
   assert.match(source, /icon-512\.png/);
   assert.match(source, /pathname\.startsWith\("\/pages\/"\)/);
+  assert.match(source, /shouldCacheResponse/);
   assert.match(source, /cache\.put/);
 });
 
