@@ -125,7 +125,7 @@ button:disabled {
   padding: 1.2rem;
   border-radius: 30px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(12, 12, 12, 0.95);
+  background: rgba(12, 12, 12, 0.86);
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -155,7 +155,7 @@ button:disabled {
   padding: 1rem 1.1rem;
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
   color: var(--text);
   font-size: clamp(1.52rem, 4.4vw, 2.15rem);
   text-align: center;
@@ -186,14 +186,14 @@ button:disabled {
 
 .numberpad-key {
   min-height: 70px;
-  background: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.09);
   font-size: 1.32rem;
   font-weight: 600;
 }
 
 .numberpad-key-muted {
   font-size: 1rem;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   color: rgba(245, 243, 238, 0.92);
 }
 
@@ -226,7 +226,7 @@ button:disabled {
   padding: 0.9rem 1rem;
   border-radius: 22px;
   border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.11);
   font-size: 1rem;
   font-weight: 700;
 }
