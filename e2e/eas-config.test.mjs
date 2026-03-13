@@ -43,7 +43,7 @@ test("EAS production build keeps store distribution and production channel", () 
 
 test("Static app config keeps standalone reader identity", () => {
   const appConfig = readJson(appConfigPath);
-  assert.equal(appConfig?.expo?.name, "Signo Vivo");
+  assert.equal(appConfig?.expo?.name, "Nuestro Coro");
   assert.equal(appConfig?.expo?.slug, "alvernia-reader");
   assert.equal(appConfig?.expo?.android?.package, "com.cazares.alverniareader");
   assert.equal(appConfig?.expo?.ios?.bundleIdentifier, "com.cazares.alverniareader");

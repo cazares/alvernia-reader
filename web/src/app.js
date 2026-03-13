@@ -351,5 +351,5 @@ registerServiceWorker();
 bindReaderEvents();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
-  setLoading(true, "No se pudo cargar Signo Vivo.");
+  setLoading(true, "No se pudo cargar Nuestro Coro.");
 });

@@ -79,8 +79,8 @@ test("web app script supports first-page startup, song-based navigation numberpa
 test("manifest is configured for standalone install from the domain root", () => {
   const manifest = JSON.parse(readText("web/src/manifest.webmanifest"));
 
-  assert.equal(manifest.name, "Signo Vivo");
-  assert.equal(manifest.short_name, "Signo Vivo");
+  assert.equal(manifest.name, "Nuestro Coro");
+  assert.equal(manifest.short_name, "Nuestro Coro");
   assert.deepEqual(manifest.display_override, ["fullscreen", "standalone"]);
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.scope, "/");
