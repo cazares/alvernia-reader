@@ -60,15 +60,12 @@
 
             <div class="numberpad-actions">
               <button class="go-button" id="go-button" type="button">Ir</button>
-              <div class="numberpad-tools">
-                <button class="search-mode-button" id="search-toggle" type="button">🔍 Buscar</button>
-                <button class="fullscreen-button" id="fullscreen-button" type="button" aria-label="Pantalla completa">
-                  ⛶ Pantalla completa
-                </button>
-              </div>
+              <button class="fullscreen-button" id="fullscreen-button" type="button" aria-label="Pantalla completa">
+                ⛶ Pantalla completa
+              </button>
             </div>
 
-            <div class="search-panel" id="search-panel">
+            <div class="search-section">
               <input
                 class="search-input"
                 id="search-input"
@@ -78,11 +75,10 @@
                 autocorrect="off"
                 autocapitalize="none"
                 spellcheck="false"
-                placeholder="Buscar letra o título..."
+                placeholder="🔍 Buscar letra o título..."
                 aria-label="Buscar en el manual"
               />
               <div class="search-results" id="search-results" role="list" aria-live="polite"></div>
-              <button class="search-back-button" id="search-back" type="button">← Número</button>
             </div>
           </div>
 
