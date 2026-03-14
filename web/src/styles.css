@@ -275,7 +275,7 @@ button:disabled {
 
 .numberpad-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0.7rem;
   margin-top: 0.8rem;
 }
@@ -368,6 +368,12 @@ button:disabled {
   -webkit-box-orient: vertical;
 }
 
+.search-result-snippet mark {
+  background: transparent;
+  color: #fff;
+  font-weight: 700;
+}
+
 .search-no-results {
   grid-column: 1 / -1;
   margin: 0;
@@ -386,14 +392,19 @@ button:disabled {
 }
 
 .fullscreen-button {
+  min-width: 64px;
   min-height: 64px;
-  padding: 0.9rem 1rem;
+  padding: 0;
   border-radius: 22px;
   border-color: rgba(255, 255, 255, 0.18);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.08));
-  font-size: 1.2rem;
-  font-weight: 700;
-  white-space: nowrap;
+  font-size: 0;
+}
+
+.fullscreen-button::before {
+  content: "⛶";
+  font-size: 1.34rem;
+  font-weight: 800;
 }
 
 .nav-button-side {
@@ -531,7 +542,6 @@ button:disabled {
 
   .fullscreen-button {
     min-height: 58px;
-    font-size: 1.12rem;
   }
 }
 
@@ -618,17 +628,8 @@ button:disabled {
   }
 
   .fullscreen-button {
-    min-width: 64px;
     min-height: 56px;
-    padding: 0;
     border-radius: 18px;
-    font-size: 0;
-  }
-
-  .fullscreen-button::before {
-    content: "⛶";
-    font-size: 1.34rem;
-    font-weight: 800;
   }
 
   .nav-button-corner-prev {

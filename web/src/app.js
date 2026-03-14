@@ -389,10 +389,23 @@ const renderSearchResults = (results, query) => {
     const snippet = document.createElement("span");
     snippet.className = "search-result-snippet";
     const lowerText = normalizeText(entry.text);
-    const matchIdx = lowerText.indexOf(normalizedQuery.split(/\s+/)[0]);
+    const normalizedQ = normalizedQuery.split(/\s+/)[0];
+    const matchIdx = lowerText.indexOf(normalizedQ);
     const start = Math.max(0, matchIdx - 40);
     const raw = entry.text.slice(start, start + 160).replace(/\s+/g, " ");
-    snippet.textContent = (start > 0 ? "…" : "") + raw;
+    const prefix = start > 0 ? "…" : "";
+    const normRaw = normalizeText(raw);
+    const matchInRaw = normRaw.indexOf(normalizedQ);
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    if (matchInRaw >= 0) {
+      snippet.innerHTML =
+        esc(prefix) +
+        esc(raw.slice(0, matchInRaw)) +
+        "<mark>" + esc(raw.slice(matchInRaw, matchInRaw + normalizedQ.length)) + "</mark>" +
+        esc(raw.slice(matchInRaw + normalizedQ.length));
+    } else {
+      snippet.textContent = prefix + raw;
+    }
 
     item.appendChild(label);
     item.appendChild(snippet);
