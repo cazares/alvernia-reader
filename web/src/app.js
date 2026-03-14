@@ -12,6 +12,7 @@ const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
 const prevCornerButton = document.getElementById("prev-corner");
+const navigationNumberpad = document.getElementById("navigation-numberpad");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
 
@@ -482,6 +483,14 @@ const bindReaderEvents = () => {
 
   prevCornerButton.addEventListener("click", () => {
     goBackInHistory();
+  });
+
+  searchInput.addEventListener("focus", () => {
+    navigationNumberpad.classList.add("search-focused");
+  });
+
+  searchInput.addEventListener("blur", () => {
+    navigationNumberpad.classList.remove("search-focused");
   });
 
   searchInput.addEventListener("input", handleSearchInput);
