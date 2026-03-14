@@ -12,12 +12,8 @@ const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
 const prevCornerButton = document.getElementById("prev-corner");
-const navigationNumberpad = document.getElementById("navigation-numberpad");
-const searchToggle = document.getElementById("search-toggle");
-const searchPanel = document.getElementById("search-panel");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
-const searchBack = document.getElementById("search-back");
 
 const state = {
   totalPages: 1,
@@ -326,7 +322,7 @@ const goToDraftSong = () => {
 const goBackInHistory = () => {
   if (state.pageHistory.length === 0) return;
   const prevPage = state.pageHistory.pop();
-  renderPage(prevPage, { pushToHistory: false });
+  renderPage(prevPage);
 };
 
 const normalizeText = (text) => text
@@ -400,15 +396,6 @@ const renderSearchResults = (results, query) => {
     item.appendChild(label);
     item.appendChild(snippet);
     searchResults.appendChild(item);
-  }
-};
-
-const setSearchMode = (active) => {
-  navigationNumberpad.classList.toggle("is-searching", active);
-  if (active) {
-    searchInput.value = "";
-    searchResults.innerHTML = "";
-    searchInput.focus();
   }
 };
 
@@ -497,14 +484,6 @@ const bindReaderEvents = () => {
     goBackInHistory();
   });
 
-  searchToggle.addEventListener("click", () => {
-    setSearchMode(true);
-  });
-
-  searchBack.addEventListener("click", () => {
-    setSearchMode(false);
-  });
-
   searchInput.addEventListener("input", handleSearchInput);
 
   searchResults.addEventListener("click", (event) => {
@@ -512,7 +491,8 @@ const bindReaderEvents = () => {
     if (!item) return;
     const pageNum = Number.parseInt(item.dataset.page, 10);
     if (!Number.isFinite(pageNum)) return;
-    setSearchMode(false);
+    searchInput.value = "";
+    searchResults.innerHTML = "";
     renderPage(pageNum);
     setOverlayVisible(false);
   });
