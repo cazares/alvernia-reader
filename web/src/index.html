@@ -31,6 +31,22 @@
           </button>
 
           <div class="navigation-numberpad" id="navigation-numberpad">
+            <div class="search-section">
+              <input
+                class="search-input"
+                id="search-input"
+                type="search"
+                inputmode="search"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="none"
+                spellcheck="false"
+                placeholder="🔍 Buscar letra o título..."
+                aria-label="Buscar en el manual"
+              />
+              <div class="search-results" id="search-results" role="list" aria-live="polite"></div>
+            </div>
+
             <p class="numberpad-status" id="song-status">Canción 0</p>
             <input
               class="numberpad-display"
@@ -63,22 +79,6 @@
               <button class="fullscreen-button" id="fullscreen-button" type="button" aria-label="Pantalla completa">
                 ⛶ Pantalla completa
               </button>
-            </div>
-
-            <div class="search-section">
-              <input
-                class="search-input"
-                id="search-input"
-                type="search"
-                inputmode="search"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="none"
-                spellcheck="false"
-                placeholder="🔍 Buscar letra o título..."
-                aria-label="Buscar en el manual"
-              />
-              <div class="search-results" id="search-results" role="list" aria-live="polite"></div>
             </div>
           </div>
 
