@@ -11,6 +11,7 @@ const goButton = document.getElementById("go-button");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
+const prevCornerButton = document.getElementById("prev-corner");
 
 const state = {
   totalPages: 1,
@@ -19,6 +20,7 @@ const state = {
   currentPageObjectUrl: "",
   songDraft: "",
   songIndex: [],
+  pageHistory: [],
   overlayVisible: true,
   immersiveMode: false,
   loadingTimer: 0,
@@ -186,10 +188,13 @@ const renderStatus = () => {
     ? state.totalSongs > 0
     : currentSongIndex < state.totalSongs - 1;
 
+  const hasHistory = state.pageHistory.length > 0;
   prevPageButton.disabled = !hasPreviousPage;
   nextPageButton.disabled = !hasNextSong;
+  prevCornerButton.disabled = !hasHistory;
   prevPageButton.classList.toggle("is-unavailable", !hasPreviousPage);
   nextPageButton.classList.toggle("is-unavailable", !hasNextSong);
+  prevCornerButton.classList.toggle("is-unavailable", !hasHistory);
 };
 
 const renderDraft = () => {
@@ -222,7 +227,7 @@ const loadPageImage = async (pageNumber, retryToken = "") => {
   }
 };
 
-const renderPage = async (pageNumber) => {
+const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
   const nextPage = clampPage(pageNumber);
   const requestId = state.pageLoadRequest + 1;
   state.pageLoadRequest = requestId;
@@ -241,6 +246,11 @@ const renderPage = async (pageNumber) => {
     if (requestId !== state.pageLoadRequest) {
       if (nextPageUrl) URL.revokeObjectURL(nextPageUrl);
       return;
+    }
+
+    if (pushToHistory && state.currentPage > 0 && state.currentPage !== nextPage) {
+      state.pageHistory.push(state.currentPage);
+      if (state.pageHistory.length > 50) state.pageHistory.shift();
     }
 
     state.currentPage = nextPage;
@@ -304,6 +314,12 @@ const goToDraftSong = () => {
   renderPage(findSongPage(songNumber));
   clearDraft();
   setOverlayVisible(false);
+};
+
+const goBackInHistory = () => {
+  if (state.pageHistory.length === 0) return;
+  const prevPage = state.pageHistory.pop();
+  renderPage(prevPage, { pushToHistory: false });
 };
 
 const turnSong = (direction, { keepOverlay = false } = {}) => {
@@ -375,6 +391,10 @@ const bindReaderEvents = () => {
 
   nextPageButton.addEventListener("click", () => {
     turnSong(1, { keepOverlay: true });
+  });
+
+  prevCornerButton.addEventListener("click", () => {
+    goBackInHistory();
   });
 
   fullscreenButton.addEventListener("click", () => {
@@ -467,7 +487,7 @@ const initReader = async () => {
   state.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp;
   setOverlayVisible(!state.immersiveMode);
   updateFullscreenButton();
-  renderPage(1);
+  renderPage(1, { pushToHistory: false });
 };
 
 clearInitialUrl();

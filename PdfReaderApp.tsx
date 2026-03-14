@@ -234,11 +234,10 @@ const PdfReaderApp = () => {
         <Pdf
           ref={pdfRef}
           enableAnnotationRendering
-          enableDoubleTapZoom={false}
           enablePaging
           fitPolicy={2}
           horizontal
-          maxScale={1}
+          maxScale={4}
           minScale={1}
           onError={(error) => {
             setIsLoading(false);
