@@ -12,6 +12,12 @@ const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
 const prevCornerButton = document.getElementById("prev-corner");
+const navigationNumberpad = document.getElementById("navigation-numberpad");
+const searchToggle = document.getElementById("search-toggle");
+const searchPanel = document.getElementById("search-panel");
+const searchInput = document.getElementById("search-input");
+const searchResults = document.getElementById("search-results");
+const searchBack = document.getElementById("search-back");
 
 const state = {
   totalPages: 1,
@@ -21,6 +27,7 @@ const state = {
   songDraft: "",
   songIndex: [],
   pageHistory: [],
+  searchIndexPages: [],
   overlayVisible: true,
   immersiveMode: false,
   loadingTimer: 0,
@@ -322,6 +329,99 @@ const goBackInHistory = () => {
   renderPage(prevPage, { pushToHistory: false });
 };
 
+const normalizeText = (text) => text
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase();
+
+const loadSearchIndex = async () => {
+  try {
+    const response = await fetch("/search-index.json", { cache: "no-store" });
+    const data = await response.json();
+    state.searchIndexPages = data.pages || [];
+  } catch (error) {
+    console.warn("No se pudo cargar el índice de búsqueda", error);
+  }
+};
+
+const getSongForPage = (pageNum) => {
+  let songNum = 0;
+  for (const entry of state.songIndex) {
+    if (entry.page > pageNum) break;
+    songNum = entry.song;
+  }
+  return songNum;
+};
+
+const searchPages = (query) => {
+  const normalizedQuery = normalizeText(query.trim());
+  if (!normalizedQuery) return [];
+  const words = normalizedQuery.split(/\s+/).filter(Boolean);
+  const results = [];
+  for (const entry of state.searchIndexPages) {
+    const normalizedText = normalizeText(entry.text);
+    if (words.every((word) => normalizedText.includes(word))) {
+      results.push(entry);
+    }
+  }
+  return results.slice(0, 30);
+};
+
+const renderSearchResults = (results, query) => {
+  searchResults.innerHTML = "";
+  if (results.length === 0) {
+    const p = document.createElement("p");
+    p.className = "search-no-results";
+    p.textContent = "Sin resultados.";
+    searchResults.appendChild(p);
+    return;
+  }
+
+  const normalizedQuery = normalizeText(query.trim());
+  for (const entry of results) {
+    const songNum = getSongForPage(entry.page);
+    const item = document.createElement("button");
+    item.className = "search-result-item";
+    item.type = "button";
+    item.dataset.page = String(entry.page);
+
+    const label = document.createElement("span");
+    label.className = "search-result-song";
+    label.textContent = songNum > 0 ? `Canción ${songNum}` : `Página ${entry.page}`;
+
+    const snippet = document.createElement("span");
+    snippet.className = "search-result-snippet";
+    const lowerText = normalizeText(entry.text);
+    const matchIdx = lowerText.indexOf(normalizedQuery.split(/\s+/)[0]);
+    const start = Math.max(0, matchIdx - 40);
+    const raw = entry.text.slice(start, start + 160).replace(/\s+/g, " ");
+    snippet.textContent = (start > 0 ? "…" : "") + raw;
+
+    item.appendChild(label);
+    item.appendChild(snippet);
+    searchResults.appendChild(item);
+  }
+};
+
+const setSearchMode = (active) => {
+  navigationNumberpad.classList.toggle("is-searching", active);
+  if (active) {
+    searchInput.value = "";
+    searchResults.innerHTML = "";
+    searchInput.focus();
+  }
+};
+
+const handleSearchInput = () => {
+  const query = searchInput.value;
+  if (!query.trim()) {
+    searchResults.innerHTML = "";
+    return;
+  }
+  const results = searchPages(query);
+  renderSearchResults(results, query);
+};
+
 const turnSong = (direction, { keepOverlay = false } = {}) => {
   if (direction === 0 || state.totalSongs === 0) return;
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
@@ -395,6 +495,26 @@ const bindReaderEvents = () => {
 
   prevCornerButton.addEventListener("click", () => {
     goBackInHistory();
+  });
+
+  searchToggle.addEventListener("click", () => {
+    setSearchMode(true);
+  });
+
+  searchBack.addEventListener("click", () => {
+    setSearchMode(false);
+  });
+
+  searchInput.addEventListener("input", handleSearchInput);
+
+  searchResults.addEventListener("click", (event) => {
+    const item = event.target.closest(".search-result-item[data-page]");
+    if (!item) return;
+    const pageNum = Number.parseInt(item.dataset.page, 10);
+    if (!Number.isFinite(pageNum)) return;
+    setSearchMode(false);
+    renderPage(pageNum);
+    setOverlayVisible(false);
   });
 
   fullscreenButton.addEventListener("click", () => {
@@ -488,6 +608,7 @@ const initReader = async () => {
   setOverlayVisible(!state.immersiveMode);
   updateFullscreenButton();
   renderPage(1, { pushToHistory: false });
+  loadSearchIndex();
 };
 
 clearInitialUrl();
