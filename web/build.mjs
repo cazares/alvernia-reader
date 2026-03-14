@@ -60,3 +60,27 @@ fs.writeFileSync(
   path.join(distDir, "pages.json"),
   JSON.stringify({ totalPages: pageFiles.length, songIndex }),
 );
+
+const pdfTextResult = spawnSync(
+  "pdftotext",
+  ["-layout", "-enc", "UTF-8", pdfPath, "-"],
+  { encoding: "utf8" },
+);
+
+if (pdfTextResult.status !== 0) {
+  throw new Error(`pdftotext failed with exit code ${pdfTextResult.status ?? 1}`);
+}
+
+const rawAllText = pdfTextResult.stdout || "";
+const pageTextsRaw = rawAllText.split("\f");
+const searchIndexPages = pageFiles.map((file, idx) => {
+  const pageNum = idx + 1;
+  const rawText = pageTextsRaw[idx] || "";
+  const text = rawText.replace(/\s+/g, " ").trim().slice(0, 600);
+  return { page: pageNum, text };
+}).filter((entry) => entry.text.length > 5);
+
+fs.writeFileSync(
+  path.join(distDir, "search-index.json"),
+  JSON.stringify({ pages: searchIndexPages }),
+);

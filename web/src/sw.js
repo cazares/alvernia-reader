@@ -1,5 +1,5 @@
-const STATIC_CACHE = "alvernia-static-v8";
-const PAGE_CACHE = "alvernia-pages-v8";
+const STATIC_CACHE = "alvernia-static-v9";
+const PAGE_CACHE = "alvernia-pages-v9";
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -7,6 +7,7 @@ const CORE_ASSETS = [
   "/app.js",
   "/manifest.webmanifest",
   "/pages.json",
+  "/search-index.json",
   "/icon.png",
   "/icon-192.png",
   "/icon-512.png",
@@ -18,6 +19,7 @@ const NETWORK_FIRST_PATHS = new Set([
   "/app.js",
   "/manifest.webmanifest",
   "/pages.json",
+  "/search-index.json",
 ]);
 
 self.addEventListener("install", (event) => {
