@@ -26,59 +26,53 @@
 
       <section class="overlay-controls" id="overlay-controls">
         <div class="navigation-stage">
-          <div class="navigation-spacer"></div>
+          <button class="nav-button nav-button-side nav-button-left" id="prev-page" type="button" aria-label="Canción anterior">
+            <span class="nav-arrow" aria-hidden="true">←</span>
+          </button>
 
-          <div class="navigation-main-row">
-            <button class="nav-button nav-button-side nav-button-left" id="prev-page" type="button" aria-label="Canción anterior">
-              <span class="nav-arrow" aria-hidden="true">←</span>
-            </button>
+          <div class="navigation-numberpad" id="navigation-numberpad">
+            <p class="numberpad-status" id="song-status">Canción 0</p>
+            <input
+              class="numberpad-display"
+              id="song-display"
+              type="text"
+              inputmode="none"
+              readonly
+              value=""
+              placeholder="¿Cuál canción?"
+              aria-label="¿Cuál canción?"
+            />
 
-            <div class="navigation-numberpad" id="navigation-numberpad">
-              <p class="numberpad-status" id="song-status">Canción 0</p>
-              <input
-                class="numberpad-display"
-                id="song-display"
-                type="text"
-                inputmode="none"
-                readonly
-                value=""
-                placeholder="¿Cuál canción?"
-                aria-label="¿Cuál canción?"
-              />
-
-              <div class="numberpad-grid" id="numberpad-grid" aria-label="Navigation numberpad">
-                <button class="numberpad-key" type="button" data-digit="1">1</button>
-                <button class="numberpad-key" type="button" data-digit="2">2</button>
-                <button class="numberpad-key" type="button" data-digit="3">3</button>
-                <button class="numberpad-key" type="button" data-digit="4">4</button>
-                <button class="numberpad-key" type="button" data-digit="5">5</button>
-                <button class="numberpad-key" type="button" data-digit="6">6</button>
-                <button class="numberpad-key" type="button" data-digit="7">7</button>
-                <button class="numberpad-key" type="button" data-digit="8">8</button>
-                <button class="numberpad-key" type="button" data-digit="9">9</button>
-                <button class="numberpad-key numberpad-key-muted" id="clear-button" type="button">Borrar todo</button>
-                <button class="numberpad-key" type="button" data-digit="0">0</button>
-                <button class="numberpad-key numberpad-key-muted" id="backspace-button" type="button">← Borrar</button>
-              </div>
-
-              <div class="numberpad-actions">
-                <button class="go-button" id="go-button" type="button">Ir</button>
-                <button class="fullscreen-button" id="fullscreen-button" type="button" aria-label="Pantalla completa">
-                  ⛶ Pantalla completa
-                </button>
-              </div>
+            <div class="numberpad-grid" id="numberpad-grid" aria-label="Navigation numberpad">
+              <button class="numberpad-key" type="button" data-digit="1">1</button>
+              <button class="numberpad-key" type="button" data-digit="2">2</button>
+              <button class="numberpad-key" type="button" data-digit="3">3</button>
+              <button class="numberpad-key" type="button" data-digit="4">4</button>
+              <button class="numberpad-key" type="button" data-digit="5">5</button>
+              <button class="numberpad-key" type="button" data-digit="6">6</button>
+              <button class="numberpad-key" type="button" data-digit="7">7</button>
+              <button class="numberpad-key" type="button" data-digit="8">8</button>
+              <button class="numberpad-key" type="button" data-digit="9">9</button>
+              <button class="numberpad-key numberpad-key-muted" id="clear-button" type="button">Borrar todo</button>
+              <button class="numberpad-key" type="button" data-digit="0">0</button>
+              <button class="numberpad-key numberpad-key-muted" id="backspace-button" type="button">← Borrar</button>
             </div>
 
-            <button class="nav-button nav-button-side nav-button-right" id="next-page" type="button" aria-label="Canción siguiente">
-              <span class="nav-arrow" aria-hidden="true">→</span>
-            </button>
+            <div class="numberpad-actions">
+              <button class="go-button" id="go-button" type="button">Ir</button>
+              <button class="fullscreen-button" id="fullscreen-button" type="button" aria-label="Pantalla completa">
+                ⛶ Pantalla completa
+              </button>
+            </div>
           </div>
 
-          <div class="navigation-footer-row">
-            <button class="nav-button nav-button-side nav-button-corner-prev" id="prev-corner" type="button" aria-label="Canción anterior">
-              <span class="nav-label-corner">← Anterior</span>
-            </button>
-          </div>
+          <button class="nav-button nav-button-side nav-button-right" id="next-page" type="button" aria-label="Canción siguiente">
+            <span class="nav-arrow" aria-hidden="true">→</span>
+          </button>
+
+          <button class="nav-button nav-button-side nav-button-corner-prev" id="prev-corner" type="button" aria-label="Canción anterior">
+            <span class="nav-label-corner">← Anterior</span>
+          </button>
         </div>
       </section>
     </main>

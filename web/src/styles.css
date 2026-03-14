@@ -122,29 +122,23 @@ button:disabled {
 .navigation-stage {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(148px, 1.1fr) minmax(320px, 410px) minmax(148px, 1.1fr);
+  grid-template-rows: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 0.9rem;
   padding: 0 1rem;
-  gap: 0.9rem;
 }
 
-.navigation-spacer {
-  flex: 1;
+.nav-button-left,
+.navigation-numberpad,
+.nav-button-right {
+  grid-row: 2;
 }
 
-.navigation-main-row {
-  display: grid;
-  grid-template-columns: minmax(148px, 1.1fr) minmax(320px, 410px) minmax(148px, 1.1fr);
-  align-items: stretch;
-  gap: 0.9rem;
-}
-
-.navigation-footer-row {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(148px, 1.1fr) minmax(320px, 410px) minmax(148px, 1.1fr);
-  align-items: stretch;
-  gap: 0.9rem;
+.nav-button-corner-prev {
+  grid-row: 3;
+  grid-column: 1;
   padding-bottom: 0.9rem;
 }
 
@@ -392,18 +386,12 @@ button:disabled {
 
 @media (max-width: 720px) {
   .navigation-stage {
+    grid-template-columns: minmax(92px, 1fr) minmax(0, 390px) minmax(92px, 1fr);
     padding: 0 0.5rem;
     gap: 0.5rem;
   }
 
-  .navigation-main-row {
-    grid-template-columns: minmax(92px, 1fr) minmax(0, 390px) minmax(92px, 1fr);
-    gap: 0.5rem;
-  }
-
-  .navigation-footer-row {
-    grid-template-columns: minmax(92px, 1fr) minmax(0, 390px) minmax(92px, 1fr);
-    gap: 0.5rem;
+  .nav-button-corner-prev {
     padding-bottom: 0.5rem;
   }
 
@@ -453,29 +441,34 @@ button:disabled {
 
 @media (max-width: 560px) {
   .navigation-stage {
-    justify-content: flex-end;
-    padding: 0 0.6rem calc(0.55rem + var(--safe-bottom));
-    gap: 0.55rem;
-  }
-
-  .navigation-spacer {
-    display: none;
-  }
-
-  .navigation-main-row {
+    position: absolute;
+    inset: auto;
+    left: 0;
+    right: 0;
+    bottom: calc(0.55rem + var(--safe-bottom));
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
     grid-template-areas:
       "pad pad"
       "prev next";
     align-items: end;
     gap: 0.55rem;
+    padding: 0 0.6rem;
   }
 
-  .navigation-footer-row {
-    display: none;
+  .nav-button-left {
+    grid-row: unset;
+    grid-area: prev;
+  }
+
+  .nav-button-right {
+    grid-row: unset;
+    grid-area: next;
   }
 
   .navigation-numberpad {
+    grid-row: unset;
     grid-area: pad;
     padding: 0.95rem;
     border-radius: 26px;
@@ -548,12 +541,8 @@ button:disabled {
     font-weight: 800;
   }
 
-  .nav-button-left {
-    grid-area: prev;
-  }
-
-  .nav-button-right {
-    grid-area: next;
+  .nav-button-corner-prev {
+    display: none;
   }
 
   .nav-button-side {
