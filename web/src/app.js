@@ -20,7 +20,6 @@ const state = {
   totalPages: 1,
   totalSongs: 0,
   currentPage: 1,
-  currentPageObjectUrl: "",
   songDraft: "",
   songIndex: [],
   pageHistory: [],
@@ -214,21 +213,13 @@ const decodeImage = (src) => new Promise((resolve, reject) => {
 });
 
 const loadPageImage = async (pageNumber, retryToken = "") => {
-  const response = await fetch(pageFileUrl(pageNumber, retryToken), { cache: "force-cache" });
+  const url = pageFileUrl(pageNumber, retryToken);
+  const response = await fetch(url, { cache: "force-cache" });
   if (!response.ok) {
     throw new Error(`No se pudo cargar la página ${pageNumber}`);
   }
-
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-
-  try {
-    await decodeImage(objectUrl);
-    return objectUrl;
-  } catch (error) {
-    URL.revokeObjectURL(objectUrl);
-    throw error;
-  }
+  await decodeImage(url);
+  return url;
 };
 
 const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
@@ -248,7 +239,6 @@ const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
     }
 
     if (requestId !== state.pageLoadRequest) {
-      if (nextPageUrl) URL.revokeObjectURL(nextPageUrl);
       return;
     }
 
@@ -260,10 +250,6 @@ const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
     state.currentPage = nextPage;
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
-    if (state.currentPageObjectUrl) {
-      URL.revokeObjectURL(state.currentPageObjectUrl);
-    }
-    state.currentPageObjectUrl = nextPageUrl;
     renderStatus();
     hideLoadingIndicator();
     getAdjacentSongPages().forEach(prefetchSongPage);
@@ -332,6 +318,12 @@ const normalizeText = (text) => text
   .toLowerCase();
 
 const loadSearchIndex = async () => {
+  const inlined = document.getElementById("search-data");
+  if (inlined) {
+    const data = JSON.parse(inlined.textContent);
+    state.searchIndexPages = data.pages || [];
+    return;
+  }
   try {
     const response = await fetch("/search-index.json", { cache: "no-store" });
     const data = await response.json();
@@ -599,8 +591,10 @@ const bindReaderEvents = () => {
 };
 
 const initReader = async () => {
-  const manifestResponse = await fetch("/pages.json", { cache: "no-store" });
-  const manifest = await manifestResponse.json();
+  const inlinedPages = document.getElementById("pages-data");
+  const manifest = inlinedPages
+    ? JSON.parse(inlinedPages.textContent)
+    : await fetch("/pages.json", { cache: "no-store" }).then((r) => r.json());
   state.totalPages = manifest.totalPages;
   state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
   state.totalSongs = state.songIndex.length;
