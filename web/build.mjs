@@ -11,9 +11,10 @@ fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
 fs.mkdirSync(pagesDir, { recursive: true });
 
-for (const file of ["index.html", "styles.css", "app.js", "manifest.webmanifest"]) {
+for (const file of ["styles.css", "app.js", "manifest.webmanifest"]) {
   fs.copyFileSync(path.join(srcDir, file), path.join(distDir, file));
 }
+// index.html is written later with inlined JSON data
 
 fs.copyFileSync(path.join(rootDir, "assets", "icon.png"), path.join(distDir, "icon.png"));
 fs.copyFileSync(path.join(srcDir, "sw.js"), path.join(distDir, "sw.js"));
@@ -83,4 +84,16 @@ const searchIndexPages = pageFiles.map((file, idx) => {
 fs.writeFileSync(
   path.join(distDir, "search-index.json"),
   JSON.stringify({ pages: searchIndexPages }),
+);
+
+// Inject page manifest and search index into HTML for .webarchive compatibility
+const pagesJson = JSON.stringify({ totalPages: pageFiles.length, songIndex });
+const searchJson = JSON.stringify({ pages: searchIndexPages });
+const inlineScripts =
+  `  <script id="pages-data" type="application/json">${pagesJson}</script>\n` +
+  `  <script id="search-data" type="application/json">${searchJson}</script>\n`;
+const htmlSrc = fs.readFileSync(path.join(srcDir, "index.html"), "utf8");
+fs.writeFileSync(
+  path.join(distDir, "index.html"),
+  htmlSrc.replace("</head>", `${inlineScripts}</head>`),
 );
