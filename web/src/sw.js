@@ -1,5 +1,5 @@
-const STATIC_CACHE = "alvernia-static-v9";
-const PAGE_CACHE = "alvernia-pages-v9";
+const STATIC_CACHE = "alvernia-static-v10";
+const PAGE_CACHE = "alvernia-pages-v10";
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -22,6 +22,26 @@ const NETWORK_FIRST_PATHS = new Set([
   "/search-index.json",
 ]);
 
+const backgroundCacheAllPages = async () => {
+  try {
+    const manifest = await fetch("/pages.json").then((r) => r.json());
+    const cache = await caches.open(PAGE_CACHE);
+    for (let i = 1; i <= manifest.totalPages; i++) {
+      const url = `/pages/page-${String(i).padStart(3, "0")}.jpg`;
+      if (!(await cache.match(url))) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) await cache.put(url, res);
+        } catch {
+          // skip individual failures silently
+        }
+      }
+    }
+  } catch {
+    // ignore if offline or manifest unavailable
+  }
+};
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => cache.addAll(CORE_ASSETS)),
@@ -31,11 +51,13 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys
-        .filter((key) => ![STATIC_CACHE, PAGE_CACHE].includes(key))
-        .map((key) => caches.delete(key)),
-    )),
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => ![STATIC_CACHE, PAGE_CACHE].includes(key))
+          .map((key) => caches.delete(key)),
+      ))
+      .then(() => backgroundCacheAllPages()),
   );
   self.clients.claim();
 });
