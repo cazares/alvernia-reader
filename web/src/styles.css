@@ -546,6 +546,10 @@ button:disabled {
 }
 
 @media (max-width: 560px) {
+  #page-image {
+    object-position: top center;
+  }
+
   .navigation-stage {
     position: absolute;
     inset: auto;
