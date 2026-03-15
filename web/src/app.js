@@ -51,9 +51,10 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 
 const pageFileName = (pageNumber) => `/pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
-const pageFileUrl = (pageNumber, retryToken = "") => retryToken
-  ? `${pageFileName(pageNumber)}?reload=${retryToken}`
-  : pageFileName(pageNumber);
+const pageFileUrl = (pageNumber, retryToken = "") => {
+  if (window.OFFLINE_PAGES?.[pageNumber]) return window.OFFLINE_PAGES[pageNumber];
+  return retryToken ? `${pageFileName(pageNumber)}?reload=${retryToken}` : pageFileName(pageNumber);
+};
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
