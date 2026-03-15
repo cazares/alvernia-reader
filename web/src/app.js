@@ -169,17 +169,16 @@ const prefetchSongPage = (pageNumber) => {
   if (state.prefetchedPages.has(pageNumber) || state.prefetchingPages.has(pageNumber)) return;
 
   state.prefetchingPages.add(pageNumber);
-  scheduleIdleWork(async () => {
-    try {
-      const response = await fetch(pageFileName(pageNumber), { cache: "force-cache" });
-      if (response.ok) {
-        state.prefetchedPages.add(pageNumber);
-      }
-    } catch (error) {
-      console.warn("No se pudo precargar la página", pageNumber, error);
-    } finally {
+  scheduleIdleWork(() => {
+    const img = new Image();
+    img.onload = () => {
+      state.prefetchedPages.add(pageNumber);
       state.prefetchingPages.delete(pageNumber);
-    }
+    };
+    img.onerror = () => {
+      state.prefetchingPages.delete(pageNumber);
+    };
+    img.src = pageFileName(pageNumber);
   });
 };
 
@@ -214,10 +213,6 @@ const decodeImage = (src) => new Promise((resolve, reject) => {
 
 const loadPageImage = async (pageNumber, retryToken = "") => {
   const url = pageFileUrl(pageNumber, retryToken);
-  const response = await fetch(url, { cache: "force-cache" });
-  if (!response.ok) {
-    throw new Error(`No se pudo cargar la página ${pageNumber}`);
-  }
   await decodeImage(url);
   return url;
 };
