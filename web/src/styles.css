@@ -122,24 +122,63 @@ button:disabled {
 .navigation-stage {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: minmax(148px, 1.1fr) minmax(320px, 410px) minmax(148px, 1.1fr);
-  grid-template-rows: 1fr auto 1fr;
-  align-items: stretch;
-  gap: 0.9rem;
-  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
 }
 
-.nav-button-left,
-.navigation-numberpad,
-.nav-button-right {
-  grid-row: 2;
+.dismiss-btn {
+  flex: 1;
+  width: 100%;
+  pointer-events: auto;
+  touch-action: manipulation;
+  background: linear-gradient(180deg, rgba(22, 26, 34, 0.87), rgba(9, 12, 18, 0.87));
+  border: 0;
+  border-radius: 0;
+  color: rgba(247, 244, 239, 0.6);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.dismiss-btn:active {
+  background: linear-gradient(180deg, rgba(30, 36, 48, 0.9), rgba(18, 22, 30, 0.9));
+  color: rgba(247, 244, 239, 0.82);
+}
+
+.nav-middle-row {
+  display: grid;
+  grid-template-columns: 15vw 1fr 15vw;
+  align-items: stretch;
+  gap: 0.9rem;
+  padding: 0;
+  pointer-events: none;
+}
+
+.nav-side {
+  display: flex;
+  flex-direction: column;
 }
 
 .nav-button-corner-prev {
-  grid-row: 3;
-  grid-column: 1;
-  padding-bottom: 0.9rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.nav-side .nav-button-side {
+  flex: 0 0 85%;
+  height: auto;
+  min-height: 0;
+  align-self: auto;
+}
+
+.nav-side-right .nav-button-side {
+  flex: 1;
 }
 
 .nav-label-corner {
@@ -156,7 +195,9 @@ button:disabled {
 .navigation-numberpad {
   position: relative;
   width: 100%;
-  padding: 1.2rem;
+  max-width: 410px;
+  justify-self: center;
+  padding: 1rem;
   border-radius: 30px;
   border: 1px solid var(--panel-border);
   background:
@@ -177,16 +218,16 @@ button:disabled {
 }
 
 .numberpad-status {
-  margin: 0 0 0.9rem;
+  margin: 0 0 0.75rem;
   text-align: center;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   color: rgba(255, 255, 255, 0.96);
   font-weight: 600;
 }
 
 .numberpad-display {
   width: 100%;
-  margin: 0 0 0.9rem;
+  margin: 0 0 0.75rem;
   padding: 1rem 1.1rem;
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -230,9 +271,9 @@ button:disabled {
 }
 
 .numberpad-key {
-  min-height: 70px;
+  min-height: 60px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.07));
-  font-size: 1.58rem;
+  font-size: 1.48rem;
   font-weight: 600;
 }
 
@@ -266,9 +307,9 @@ button:disabled {
 
 .go-button {
   width: 100%;
-  min-height: 72px;
+  min-height: 62px;
   background: linear-gradient(180deg, var(--blue) 0%, var(--blue-strong) 100%);
-  font-size: 1.44rem;
+  font-size: 1.18rem;
   font-weight: 700;
   box-shadow: 0 16px 38px rgba(18, 99, 218, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
@@ -277,7 +318,22 @@ button:disabled {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.7rem;
-  margin-top: 0.8rem;
+  margin-top: 0.65rem;
+}
+
+.numberpad-actions:has(.fullscreen-button.is-hidden) {
+  grid-template-columns: 1fr;
+}
+
+.search-theme-header {
+  grid-column: 1 / -1;
+  margin: 0 0 0.3rem;
+  padding: 0 0.1rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--blue);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .search-section {
@@ -408,8 +464,6 @@ button:disabled {
 }
 
 .nav-button-side {
-  height: 100%;
-  min-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -418,16 +472,9 @@ button:disabled {
   background: linear-gradient(180deg, rgba(22, 26, 34, 0.85), rgba(9, 12, 18, 0.85));
   border-color: rgba(158, 170, 187, 0.16);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-soft);
-  align-self: stretch;
 }
 
-.nav-button-left {
-  justify-self: stretch;
-}
-
-.nav-button-right {
-  justify-self: stretch;
-}
+/* nav-side flex handles button sizing; justify-self no longer needed */
 
 .nav-arrow {
   font-size: 4.85rem;
@@ -492,18 +539,12 @@ button:disabled {
 }
 
 @media (max-width: 720px) {
-  .navigation-stage {
-    grid-template-columns: minmax(92px, 1fr) minmax(0, 390px) minmax(92px, 1fr);
-    padding: 0 0.5rem;
+  .nav-middle-row {
     gap: 0.5rem;
   }
 
-  .nav-button-corner-prev {
-    padding-bottom: 0.5rem;
-  }
-
   .navigation-numberpad {
-    padding: 1rem;
+    padding: 0.9rem;
     border-radius: 26px;
   }
 
@@ -512,21 +553,22 @@ button:disabled {
   }
 
   .numberpad-key {
-    min-height: 62px;
-    font-size: 1.44rem;
+    min-height: 56px;
+    font-size: 1.38rem;
   }
 
   .numberpad-key[data-digit] {
-    font-size: 1.8rem;
+    font-size: 1.72rem;
   }
 
   .go-button {
-    min-height: 64px;
+    min-height: 56px;
+    font-size: 1.08rem;
   }
 
   .nav-button {
     min-width: 0;
-    min-height: 60px;
+    min-height: 56px;
     font-size: 0.92rem;
   }
 
@@ -541,7 +583,7 @@ button:disabled {
   }
 
   .fullscreen-button {
-    min-height: 58px;
+    min-height: 54px;
   }
 }
 
@@ -550,37 +592,36 @@ button:disabled {
     object-position: top center;
   }
 
+  /* Dismiss buttons hidden at small sizes */
+  .dismiss-btn {
+    display: none;
+  }
+
+  /* Stage becomes bottom-anchored (height = nav-middle-row height) */
   .navigation-stage {
-    position: absolute;
-    inset: auto;
-    left: 0;
-    right: 0;
+    top: auto;
     bottom: calc(0.55rem + var(--safe-bottom));
+    display: block;
+  }
+
+  /* Numpad + prev/next in 2-col grid */
+  .nav-middle-row {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto;
+    grid-template-rows: auto auto;
     grid-template-areas:
       "pad pad"
       "prev next";
-    align-items: end;
     gap: 0.55rem;
     padding: 0 0.6rem;
-  }
-
-  .nav-button-left {
-    grid-row: unset;
-    grid-area: prev;
-  }
-
-  .nav-button-right {
-    grid-row: unset;
-    grid-area: next;
+    align-items: stretch;
   }
 
   .navigation-numberpad {
-    grid-row: unset;
     grid-area: pad;
-    padding: 0.95rem;
+    max-width: none;
+    justify-self: stretch;
+    padding: 0.9rem;
     border-radius: 26px;
     background: linear-gradient(180deg, rgba(20, 24, 32, 0.94), rgba(8, 11, 16, 0.94));
     backdrop-filter: blur(10px);
@@ -588,16 +629,42 @@ button:disabled {
     box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
   }
 
+  .nav-side-left {
+    grid-area: prev;
+    height: 56px;
+  }
+
+  .nav-side-right {
+    grid-area: next;
+    height: 56px;
+  }
+
+  .nav-button-corner-prev {
+    display: none;
+  }
+
+  /* Both arrows fill their nav-side cell */
+  .nav-side .nav-button-side,
+  .nav-side-right .nav-button-side {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+    min-width: 0;
+    border-radius: 18px;
+    padding: 0;
+    background: linear-gradient(180deg, rgba(24, 29, 38, 0.92), rgba(10, 12, 16, 0.92));
+  }
+
   .numberpad-status {
-    margin-bottom: 0.6rem;
-    font-size: 1rem;
+    margin-bottom: 0.55rem;
+    font-size: 0.95rem;
   }
 
   .numberpad-display {
-    margin-bottom: 0.65rem;
-    padding: 0.82rem 0.95rem;
+    margin-bottom: 0.6rem;
+    padding: 0.78rem 0.9rem;
     border-radius: 18px;
-    font-size: clamp(1.34rem, 6vw, 1.7rem);
+    font-size: clamp(1.3rem, 6vw, 1.6rem);
   }
 
   .numberpad-display::placeholder {
@@ -606,47 +673,34 @@ button:disabled {
   }
 
   .numberpad-grid {
-    gap: 0.45rem;
+    gap: 0.42rem;
   }
 
   .numberpad-key {
-    min-height: 54px;
+    min-height: 50px;
     border-radius: 18px;
-    font-size: 1rem;
+    font-size: 0.98rem;
   }
 
   .numberpad-key[data-digit] {
-    font-size: 1.62rem;
+    font-size: 1.58rem;
   }
 
   .numberpad-key-muted {
     padding: 0 0.35rem;
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     line-height: 1.05;
   }
 
   .go-button {
-    min-height: 56px;
+    min-height: 52px;
     border-radius: 18px;
-    font-size: 1.2rem;
+    font-size: 1.05rem;
   }
 
   .fullscreen-button {
-    min-height: 56px;
+    min-height: 52px;
     border-radius: 18px;
-  }
-
-  .nav-button-corner-prev {
-    display: none;
-  }
-
-  .nav-button-side {
-    min-width: 0;
-    min-height: 56px;
-    height: 56px;
-    border-radius: 18px;
-    padding: 0;
-    background: linear-gradient(180deg, rgba(24, 29, 38, 0.92), rgba(10, 12, 16, 0.92));
   }
 
   .nav-arrow {

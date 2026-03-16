@@ -12,6 +12,8 @@ const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
 const prevCornerButton = document.getElementById("prev-corner");
+const dismissTop = document.getElementById("dismiss-top");
+const dismissBottom = document.getElementById("dismiss-bottom");
 const navigationNumberpad = document.getElementById("navigation-numberpad");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
@@ -22,6 +24,7 @@ const state = {
   currentPage: 1,
   songDraft: "",
   songIndex: [],
+  themeIndex: [],
   pageHistory: [],
   searchIndexPages: [],
   overlayVisible: true,
@@ -183,7 +186,13 @@ const prefetchSongPage = (pageNumber) => {
 };
 
 const renderStatus = () => {
-  songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
+  const index = findSongIndexAtOrBeforePage(state.currentPage);
+  const entry = index >= 0 ? state.songIndex[index] : null;
+  if (entry && entry.title) {
+    songStatus.textContent = `${entry.song}. ${entry.title}`;
+  } else {
+    songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
+  }
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
   const hasPreviousPage = state.currentPage > 1;
   const hasNextSong = currentSongIndex < 0
@@ -201,6 +210,7 @@ const renderStatus = () => {
 
 const renderDraft = () => {
   songDisplay.value = state.songDraft;
+  goButton.textContent = state.songDraft ? `Ir a canción ${state.songDraft}` : "Ir";
 };
 
 const decodeImage = (src) => new Promise((resolve, reject) => {
@@ -400,10 +410,63 @@ const renderSearchResults = (results, query) => {
   }
 };
 
+const searchByTheme = (query) => {
+  if (!state.themeIndex.length) return null;
+  const norm = normalizeText(query.trim());
+  if (!norm) return null;
+  for (const theme of state.themeIndex) {
+    const normId = normalizeText(theme.id.replace(/_/g, " "));
+    const normLabel = normalizeText(theme.label);
+    if (normLabel.includes(norm) || normId.includes(norm) || norm === theme.emoji) {
+      const songs = state.songIndex.filter((entry) => entry.themes && entry.themes.includes(theme.id));
+      return { theme, songs };
+    }
+  }
+  return null;
+};
+
+const renderThemeResults = (songs, themeLabel) => {
+  searchResults.innerHTML = "";
+  const header = document.createElement("p");
+  header.className = "search-theme-header";
+  header.textContent = themeLabel;
+  searchResults.appendChild(header);
+  if (songs.length === 0) {
+    const p = document.createElement("p");
+    p.className = "search-no-results";
+    p.textContent = "Sin canciones etiquetadas.";
+    searchResults.appendChild(p);
+    return;
+  }
+  for (const entry of songs) {
+    const item = document.createElement("button");
+    item.className = "search-result-item";
+    item.type = "button";
+    item.dataset.page = String(entry.page);
+
+    const label = document.createElement("span");
+    label.className = "search-result-song";
+    label.textContent = `Canción ${entry.song}`;
+
+    const snippet = document.createElement("span");
+    snippet.className = "search-result-snippet";
+    snippet.textContent = entry.title || "";
+
+    item.appendChild(label);
+    item.appendChild(snippet);
+    searchResults.appendChild(item);
+  }
+};
+
 const handleSearchInput = () => {
   const query = searchInput.value;
   if (!query.trim()) {
     searchResults.innerHTML = "";
+    return;
+  }
+  const themeResult = searchByTheme(query);
+  if (themeResult) {
+    renderThemeResults(themeResult.songs, `${themeResult.theme.emoji} ${themeResult.theme.label}`);
     return;
   }
   const results = searchPages(query);
@@ -485,6 +548,9 @@ const bindReaderEvents = () => {
     goBackInHistory();
   });
 
+  dismissTop.addEventListener("click", () => setOverlayVisible(false));
+  dismissBottom.addEventListener("click", () => setOverlayVisible(false));
+
   searchInput.addEventListener("focus", () => {
     navigationNumberpad.classList.add("search-focused");
   });
@@ -494,6 +560,23 @@ const bindReaderEvents = () => {
   });
 
   searchInput.addEventListener("input", handleSearchInput);
+
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchInput.blur();
+      const firstItem = searchResults.querySelector(".search-result-item[data-page]");
+      if (firstItem) {
+        const pageNum = Number.parseInt(firstItem.dataset.page, 10);
+        if (Number.isFinite(pageNum)) {
+          searchInput.value = "";
+          searchResults.innerHTML = "";
+          renderPage(pageNum);
+          setOverlayVisible(false);
+        }
+      }
+    }
+  });
 
   searchResults.addEventListener("click", (event) => {
     const item = event.target.closest(".search-result-item[data-page]");
@@ -593,6 +676,7 @@ const initReader = async () => {
   state.totalPages = manifest.totalPages;
   state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
   state.totalSongs = state.songIndex.length;
+  state.themeIndex = manifest.themeIndex || [];
   renderDraft();
   renderStatus();
   state.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp;
