@@ -37,11 +37,12 @@
 
             <!-- Left side: Anterior (fills top) + ← arrow (85% height) -->
             <div class="nav-side nav-side-left">
-              <button class="nav-button nav-button-corner-prev" id="prev-corner" type="button" aria-label="Canción anterior">
-                <span class="nav-label-corner">← Anterior</span>
+              <button class="nav-button nav-button-corner-prev" id="prev-corner" type="button" aria-label="Volver atrás">
+                <span class="return-icon" aria-hidden="true">↩</span>
               </button>
               <button class="nav-button nav-button-side nav-button-left" id="prev-page" type="button" aria-label="Canción anterior">
                 <span class="nav-arrow" aria-hidden="true">←</span>
+                <span class="nav-label">Anterior</span>
               </button>
             </div>
 
@@ -71,8 +72,8 @@
                 inputmode="none"
                 readonly
                 value=""
-                placeholder="¿Qué Nº de canción?"
-                aria-label="¿Qué Nº de canción?"
+                placeholder="No. de canción"
+                aria-label="No. de canción"
               />
 
               <div class="numberpad-grid" id="numberpad-grid" aria-label="Navigation numberpad">
@@ -100,6 +101,7 @@
             <div class="nav-side nav-side-right">
               <button class="nav-button nav-button-side nav-button-right" id="next-page" type="button" aria-label="Canción siguiente">
                 <span class="nav-arrow" aria-hidden="true">→</span>
+                <span class="nav-label">Siguiente</span>
               </button>
             </div>
 

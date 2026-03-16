@@ -194,16 +194,16 @@ const renderStatus = () => {
     songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
   }
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
-  const hasPreviousPage = state.currentPage > 1;
+  const hasPrevSong = currentSongIndex > 0;
   const hasNextSong = currentSongIndex < 0
     ? state.totalSongs > 0
     : currentSongIndex < state.totalSongs - 1;
 
   const hasHistory = state.pageHistory.length > 0;
-  prevPageButton.disabled = !hasPreviousPage;
+  prevPageButton.disabled = !hasPrevSong;
   nextPageButton.disabled = !hasNextSong;
   prevCornerButton.disabled = !hasHistory;
-  prevPageButton.classList.toggle("is-unavailable", !hasPreviousPage);
+  prevPageButton.classList.toggle("is-unavailable", !hasPrevSong);
   nextPageButton.classList.toggle("is-unavailable", !hasNextSong);
   prevCornerButton.classList.toggle("is-unavailable", !hasHistory);
 };
