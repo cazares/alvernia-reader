@@ -22,6 +22,18 @@
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" src="/pages/page-002.jpg" alt="Pagina actual del manual" />
         <div class="loading" id="loading">Cargando...</div>
+        <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
+          <div class="offline-gate-card">
+            <p class="offline-gate-eyebrow">Modo sin internet</p>
+            <h1 class="offline-gate-title" id="offline-gate-title">Preparando Signo Vino</h1>
+            <p class="offline-gate-body" id="offline-gate-body">Descargando todo el manual para que funcione 100% offline.</p>
+            <div class="offline-progress" aria-hidden="true">
+              <div class="offline-progress-bar" id="offline-progress-bar"></div>
+            </div>
+            <p class="offline-progress-value" id="offline-progress-value">0 / 0 páginas</p>
+            <button class="offline-retry-button is-hidden" id="offline-retry-button" type="button">Reintentar descarga</button>
+          </div>
+        </div>
       </section>
 
       <!-- Drawer handle: left-edge pull-tab -->

@@ -22,9 +22,12 @@ fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
 fs.mkdirSync(pagesDir, { recursive: true });
 
-for (const file of ["styles.css", "app.js", "manifest.webmanifest"]) {
-  fs.copyFileSync(path.join(srcDir, file), path.join(distDir, file));
-}
+fs.copyFileSync(path.join(srcDir, "styles.css"), path.join(distDir, "styles.css"));
+const appSource = fs
+  .readFileSync(path.join(srcDir, "app.js"), "utf8")
+  .replaceAll("__CACHE_VERSION__", cacheVersion);
+fs.writeFileSync(path.join(distDir, "app.js"), appSource);
+fs.copyFileSync(path.join(srcDir, "manifest.webmanifest"), path.join(distDir, "manifest.webmanifest"));
 // index.html is written later with inlined JSON data
 
 fs.copyFileSync(path.join(rootDir, "assets", "icon.png"), path.join(distDir, "icon.png"));
