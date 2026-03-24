@@ -190,6 +190,13 @@ button:disabled {
   font-weight: 700;
 }
 
+.offline-meta-note {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
 .offline-continue-button,
 .offline-retry-button {
   margin-top: 18px;

@@ -8,6 +8,7 @@ const offlineGateBody = document.getElementById("offline-gate-body");
 const offlineProgressBar = document.getElementById("offline-progress-bar");
 const offlineProgressValue = document.getElementById("offline-progress-value");
 const offlineReadyNote = document.getElementById("offline-ready-note");
+const offlineMetaNote = document.getElementById("offline-meta-note");
 const offlineContinueButton = document.getElementById("offline-continue-button");
 const offlineRetryButton = document.getElementById("offline-retry-button");
 const overlayControls = document.getElementById("overlay-controls");
@@ -115,6 +116,9 @@ const CACHE_VERSION = "__CACHE_VERSION__";
 const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
+const OFFLINE_DB_NAME = "signo-vino-offline";
+const OFFLINE_DB_STORE = "bundle-status";
+const OFFLINE_DB_RECORD_ID = "current";
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -149,6 +153,63 @@ const normalizeText = (text) => text
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
   .toLowerCase();
+
+const formatVerifiedAt = (isoString) => {
+  if (!isoString) return "";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("es-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
+
+const openOfflineDb = () => new Promise((resolve, reject) => {
+  if (!("indexedDB" in window)) {
+    reject(new Error("IndexedDB no disponible"));
+    return;
+  }
+  const request = indexedDB.open(OFFLINE_DB_NAME, 1);
+  request.onupgradeneeded = () => {
+    const database = request.result;
+    if (!database.objectStoreNames.contains(OFFLINE_DB_STORE)) {
+      database.createObjectStore(OFFLINE_DB_STORE, { keyPath: "id" });
+    }
+  };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error || new Error("No se pudo abrir IndexedDB"));
+});
+
+const readOfflineMetadata = async () => {
+  try {
+    const database = await openOfflineDb();
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(OFFLINE_DB_STORE, "readonly");
+      const store = transaction.objectStore(OFFLINE_DB_STORE);
+      const request = store.get(OFFLINE_DB_RECORD_ID);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("No se pudo leer el estado offline"));
+      transaction.oncomplete = () => database.close();
+    });
+  } catch {
+    return null;
+  }
+};
+
+const writeOfflineMetadata = async (payload) => {
+  try {
+    const database = await openOfflineDb();
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(OFFLINE_DB_STORE, "readwrite");
+      const store = transaction.objectStore(OFFLINE_DB_STORE);
+      store.put({ id: OFFLINE_DB_RECORD_ID, ...payload });
+      transaction.oncomplete = () => resolve(true);
+      transaction.onerror = () => reject(transaction.error || new Error("No se pudo guardar el estado offline"));
+      transaction.onabort = () => reject(transaction.error || new Error("No se pudo guardar el estado offline"));
+    });
+    database.close();
+  } catch {}
+};
 
 // ── Haptic feedback ───────────────────────────────────────────────────────────
 const HAPTIC_PREF_KEY = "sv-haptic";
@@ -235,6 +296,7 @@ const setOfflineGateState = ({
   progress = 0,
   total = 0,
   ready = false,
+  metadataText = "",
   canRetry = false,
 } = {}) => {
   offlineGate.classList.toggle("is-hidden", !visible);
@@ -246,6 +308,8 @@ const setOfflineGateState = ({
     ? `${progress} / ${total} páginas`
     : "Esperando conexión";
   offlineReadyNote.classList.toggle("is-hidden", !ready);
+  offlineMetaNote.textContent = metadataText;
+  offlineMetaNote.classList.toggle("is-hidden", !metadataText);
   offlineContinueButton.classList.toggle("is-hidden", !ready);
   offlineRetryButton.classList.toggle("is-hidden", !canRetry);
 };
@@ -308,12 +372,22 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
 
   await Promise.all(workers);
   localStorage.setItem(OFFLINE_READY_KEY, "ready");
+  await writeOfflineMetadata({
+    version: CACHE_VERSION,
+    totalPages,
+    verifiedAt: new Date().toISOString(),
+  });
 };
 
 const isOfflineBundleReady = async (totalPages) => {
   if (!("caches" in window)) return false;
   if (localStorage.getItem(OFFLINE_READY_KEY) !== "ready") return false;
   try {
+    const metadata = await readOfflineMetadata();
+    if (!metadata) return false;
+    if (metadata.version !== CACHE_VERSION) return false;
+    if (metadata.totalPages !== totalPages) return false;
+
     const staticCache = await caches.open(STATIC_CACHE);
     const coreMatches = await Promise.all(CORE_ASSETS.map((asset) => staticCache.match(asset)));
     if (coreMatches.some((match) => !match)) return false;
@@ -368,6 +442,9 @@ const requireOfflineBundle = async (totalPages) => {
     });
   });
 
+  const metadata = await readOfflineMetadata();
+  const verifiedAtText = formatVerifiedAt(metadata?.verifiedAt);
+
   setOfflineGateState({
     visible: true,
     title: "Offline listo",
@@ -375,6 +452,9 @@ const requireOfflineBundle = async (totalPages) => {
     progress: totalPages,
     total: totalPages,
     ready: true,
+    metadataText: verifiedAtText
+      ? `Verificado: ${verifiedAtText} · Versión ${CACHE_VERSION} · ${totalPages} páginas`
+      : `Versión ${CACHE_VERSION} · ${totalPages} páginas`,
     canRetry: false,
   });
 };
