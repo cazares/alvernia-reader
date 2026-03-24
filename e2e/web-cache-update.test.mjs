@@ -21,6 +21,7 @@ test("web app registration forces service worker refresh, blocks until full offl
   const source = readText("web/src/app.js");
 
   assert.match(source, /const DEFAULT_START_PAGE = 2;/);
+  assert.match(source, /const isAdminSetupMode = initialUrl\.searchParams\.get\("admin"\) === "1";/);
   assert.match(source, /const SW_RELOAD_FLAG = "sv-sw-reload-pending";/);
   assert.match(source, /const CACHE_VERSION = "__CACHE_VERSION__";/);
   assert.match(source, /const STATIC_CACHE = `signo-vino-static-\$\{CACHE_VERSION\}`;/);
@@ -47,6 +48,8 @@ test("web app registration forces service worker refresh, blocks until full offl
   assert.match(source, /ready: true/);
   assert.match(source, /Verificado: \$\{verifiedAtText\}/);
   assert.match(source, /offlineContinueButton\.addEventListener\("click"/);
+  assert.match(source, /showAdminNote && isAdminSetupMode/);
+  assert.match(source, /canTestOffline && isAdminSetupMode/);
   assert.match(source, /pageImageMatches\(nextPage\) && pageImage\.complete && pageImage\.naturalWidth > 0/);
   assert.match(source, /state\.currentPage = DEFAULT_START_PAGE;/);
   assert.match(source, /hideLoadingIndicator\(\);\s+await requireOfflineBundle\(state\.totalPages\);/);
