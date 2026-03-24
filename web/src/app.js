@@ -2,6 +2,12 @@
 const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
 const loading = document.getElementById("loading");
+const offlineGate = document.getElementById("offline-gate");
+const offlineGateTitle = document.getElementById("offline-gate-title");
+const offlineGateBody = document.getElementById("offline-gate-body");
+const offlineProgressBar = document.getElementById("offline-progress-bar");
+const offlineProgressValue = document.getElementById("offline-progress-value");
+const offlineRetryButton = document.getElementById("offline-retry-button");
 const overlayControls = document.getElementById("overlay-controls");
 const drawerHandle = document.getElementById("drawer-handle");
 const drawerBackdrop = document.getElementById("drawer-backdrop");
@@ -103,6 +109,22 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
+const CACHE_VERSION = "__CACHE_VERSION__";
+const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
+const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
+const CORE_ASSETS = [
+  "/",
+  "/index.html",
+  "/styles.css",
+  "/app.js",
+  "/manifest.webmanifest",
+  "/pages.json",
+  "/search-index.json",
+  "/icon.png",
+  "/icon-192.png",
+  "/icon-512.png",
+];
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 const pageFileName = (pageNumber) => `/pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
@@ -127,40 +149,11 @@ const normalizeText = (text) => text
   .toLowerCase();
 
 // ── Haptic feedback ───────────────────────────────────────────────────────────
-// navigator.vibrate() works on Android/Chrome but is unsupported on iOS Safari.
-// We layer in an AudioContext "click" as a tactile-feel substitute on iOS.
 const HAPTIC_PREF_KEY = "sv-haptic";
 let hapticEnabled = localStorage.getItem(HAPTIC_PREF_KEY) !== "off";
-let _hapticCtx = null;
-const _getHapticCtx = () => {
-  if (!_hapticCtx) {
-    try { _hapticCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
-  }
-  return _hapticCtx;
-};
 const haptic = (ms = 10) => {
   if (!hapticEnabled) return;
-  // Android vibration
   try { navigator.vibrate?.(ms); } catch {}
-  // iOS AudioContext click (30 ms decaying noise burst — feels like a tap)
-  try {
-    const ctx = _getHapticCtx();
-    if (!ctx) return;
-    if (ctx.state === "suspended") ctx.resume();
-    const duration = 0.03;
-    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * duration), ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) * 0.35;
-    }
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.6;
-    src.connect(gain);
-    gain.connect(ctx.destination);
-    src.start();
-  } catch {}
 };
 
 // ── Tip dismissal ─────────────────────────────────────────────────────────────
@@ -231,6 +224,146 @@ const hideLoadingIndicator = () => {
   clearLoadingTimer();
   loading.classList.add("is-hidden");
   pageImage.classList.remove("is-loading");
+};
+
+const setOfflineGateState = ({
+  visible,
+  title = "Preparando Signo Vino",
+  body = "Descargando todo el manual para que funcione 100% offline.",
+  progress = 0,
+  total = 0,
+  canRetry = false,
+} = {}) => {
+  offlineGate.classList.toggle("is-hidden", !visible);
+  offlineGateTitle.textContent = title;
+  offlineGateBody.textContent = body;
+  const percent = total > 0 ? Math.max(0, Math.min(100, (progress / total) * 100)) : 0;
+  offlineProgressBar.style.width = `${percent}%`;
+  offlineProgressValue.textContent = total > 0
+    ? `${progress} / ${total} páginas`
+    : "Esperando conexión";
+  offlineRetryButton.classList.toggle("is-hidden", !canRetry);
+};
+
+const extractCachedPageNumber = (request) => {
+  const pathname = new URL(request.url).pathname;
+  const match = pathname.match(/^\/pages\/page-(\d+)\.jpg$/);
+  return match ? Number.parseInt(match[1], 10) : null;
+};
+
+const getCachedPageSet = async (cache) => {
+  const keys = await cache.keys();
+  return new Set(
+    keys
+      .map(extractCachedPageNumber)
+      .filter((pageNumber) => Number.isFinite(pageNumber)),
+  );
+};
+
+const ensureCoreAssetsCached = async () => {
+  const cache = await caches.open(STATIC_CACHE);
+  await cache.addAll(CORE_ASSETS);
+};
+
+const cacheSinglePage = async (cache, pageNumber) => {
+  const url = pageFileName(pageNumber);
+  if (await cache.match(url)) return false;
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`No se pudo descargar la página ${pageNumber}`);
+  }
+  await cache.put(url, response.clone());
+  return true;
+};
+
+const ensureOfflineBundle = async (totalPages, onProgress) => {
+  await ensureCoreAssetsCached();
+  const cache = await caches.open(PAGE_CACHE);
+  const cachedPages = await getCachedPageSet(cache);
+  let completed = cachedPages.size;
+  onProgress(completed, totalPages);
+
+  const missingPages = [];
+  for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+    if (!cachedPages.has(pageNumber)) {
+      missingPages.push(pageNumber);
+    }
+  }
+
+  const concurrency = Math.min(4, Math.max(1, missingPages.length));
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (missingPages.length > 0) {
+      const pageNumber = missingPages.shift();
+      if (!pageNumber) return;
+      await cacheSinglePage(cache, pageNumber);
+      completed += 1;
+      onProgress(completed, totalPages);
+    }
+  });
+
+  await Promise.all(workers);
+  localStorage.setItem(OFFLINE_READY_KEY, "ready");
+};
+
+const isOfflineBundleReady = async (totalPages) => {
+  if (!("caches" in window)) return false;
+  if (localStorage.getItem(OFFLINE_READY_KEY) !== "ready") return false;
+  try {
+    const staticCache = await caches.open(STATIC_CACHE);
+    const coreMatches = await Promise.all(CORE_ASSETS.map((asset) => staticCache.match(asset)));
+    if (coreMatches.some((match) => !match)) return false;
+
+    const pageCache = await caches.open(PAGE_CACHE);
+    const cachedPages = await getCachedPageSet(pageCache);
+    return cachedPages.size >= totalPages;
+  } catch {
+    return false;
+  }
+};
+
+const requireOfflineBundle = async (totalPages) => {
+  if (!("caches" in window)) return;
+
+  if (await isOfflineBundleReady(totalPages)) {
+    setOfflineGateState({ visible: false });
+    return;
+  }
+
+  if (!navigator.onLine) {
+    setOfflineGateState({
+      visible: true,
+      title: "Conéctate una vez",
+      body: "Este iPad todavía no ha descargado todo el manual. Conéctalo a internet y abre la app para completar la descarga offline.",
+      progress: 0,
+      total: totalPages,
+      canRetry: true,
+    });
+    throw new Error("La descarga offline completa todavía no está lista.");
+  }
+
+  setOfflineGateState({
+    visible: true,
+    title: "Descargando todo el manual",
+    body: "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+    progress: 0,
+    total: totalPages,
+    canRetry: false,
+  });
+
+  await ensureOfflineBundle(totalPages, (progress, total) => {
+    setOfflineGateState({
+      visible: true,
+      title: progress >= total ? "Verificando descarga" : "Descargando todo el manual",
+      body: progress >= total
+        ? "Comprobando que todas las páginas ya quedaron guardadas en este iPad."
+        : "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+      progress,
+      total,
+      canRetry: false,
+    });
+  });
+
+  setOfflineGateState({ visible: false });
 };
 
 // ── History helpers ───────────────────────────────────────────────────────────
@@ -1525,6 +1658,10 @@ const activateTab = (tabId) => {
 
 // ── Event binding ─────────────────────────────────────────────────────────────
 const bindReaderEvents = () => {
+  offlineRetryButton.addEventListener("click", () => {
+    window.location.reload();
+  });
+
   // Numpad digit press
   numberpadGrid.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-digit]");
@@ -1926,6 +2063,8 @@ const initReader = async () => {
   renderDraft();
   renderStatus();
   updateFullscreenButton();
+  hideLoadingIndicator();
+  await requireOfflineBundle(state.totalPages);
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   loadSearchIndex();
   renderActiveTab();
