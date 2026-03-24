@@ -8,7 +8,7 @@
     "ios": "expo run:ios",
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
-    "build:web": "node ./web/build.mjs",
+    "build:web": "node ./web/build.mjs && node ./web/build-offline.mjs",
     "upload:server": "node ./scripts/upload-server.mjs",
     "promote:watch": "node ./scripts/keynote-promote.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

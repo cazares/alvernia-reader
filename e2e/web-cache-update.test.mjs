@@ -29,6 +29,8 @@ test("web app registration forces service worker refresh, blocks until full offl
   assert.match(source, /const OFFLINE_DB_NAME = "signo-vino-offline";/);
   assert.match(source, /const OFFLINE_DB_STORE = "bundle-status";/);
   assert.match(source, /const OFFLINE_DB_RECORD_ID = "current";/);
+  assert.match(source, /const OFFLINE_PAGES = window\.OFFLINE_PAGES \|\| null;/);
+  assert.match(source, /const resolvePageSrc = \(pageNumber, retryToken = ""\) =>/);
   assert.match(source, /const pageImageMatches = \(pageNumber\) =>/);
   assert.match(source, /updateViaCache:\s*"none"/);
   assert.match(source, /registration\.waiting/);
@@ -39,6 +41,7 @@ test("web app registration forces service worker refresh, blocks until full offl
   assert.match(source, /const readOfflineMetadata = async \(\) =>/);
   assert.match(source, /const writeOfflineMetadata = async \(payload\) =>/);
   assert.match(source, /await ensureOfflineBundle\(totalPages, \(progress, total\) =>/);
+  assert.match(source, /if \(OFFLINE_PAGES\) \{/);
   assert.match(source, /Conéctate una vez/);
   assert.match(source, /title: "Offline listo"/);
   assert.match(source, /ready: true/);
@@ -62,6 +65,16 @@ test("web build injects a cache version into the generated service worker", () =
   assert.match(source, /replaceAll\("__CACHE_VERSION__", cacheVersion\)/);
   assert.match(source, /writeFileSync\(path\.join\(distDir, "sw\.js"\), serviceWorkerSource\)/);
   assert.match(source, /writeFileSync\(path\.join\(distDir, "app\.js"\), appSource\)/);
+});
+
+test("offline html build emits the Signo Vino self-contained artifact", () => {
+  const pkg = JSON.parse(readText("package.json"));
+  const source = readText("web/build-offline.mjs");
+
+  assert.match(pkg.scripts["build:web"], /build-offline\.mjs/);
+  assert.match(source, /signo-vino-offline\.html/);
+  assert.match(source, /window\.OFFLINE_PAGES=/);
+  assert.match(source, /src="\/pages\/page-002\.jpg"/);
 });
 
 test("initial web shell points directly at page 2", () => {

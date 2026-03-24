@@ -119,6 +119,7 @@ const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
 const OFFLINE_DB_NAME = "signo-vino-offline";
 const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
+const OFFLINE_PAGES = window.OFFLINE_PAGES || null;
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -137,8 +138,15 @@ const pageFileName = (pageNumber) => `/pages/page-${String(pageNumber).padStart(
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
   : pageFileName(pageNumber);
+const resolvePageSrc = (pageNumber, retryToken = "") => {
+  if (OFFLINE_PAGES?.[pageNumber]) return OFFLINE_PAGES[pageNumber];
+  return pageFileUrl(pageNumber, retryToken);
+};
 const pageImageMatches = (pageNumber) => {
   const currentSrc = pageImage.getAttribute("src") || "";
+  if (OFFLINE_PAGES?.[pageNumber]) {
+    return currentSrc === OFFLINE_PAGES[pageNumber];
+  }
   return currentSrc.startsWith(pageFileName(pageNumber));
 };
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
@@ -401,6 +409,10 @@ const isOfflineBundleReady = async (totalPages) => {
 };
 
 const requireOfflineBundle = async (totalPages) => {
+  if (OFFLINE_PAGES) {
+    setOfflineGateState({ visible: false });
+    return;
+  }
   if (!("caches" in window)) return;
 
   if (await isOfflineBundleReady(totalPages)) {
@@ -565,7 +577,7 @@ const decodeImage = (src) => new Promise((resolve, reject) => {
 });
 
 const loadPageImage = async (pageNumber, retryToken = "") => {
-  const url = pageFileUrl(pageNumber, retryToken);
+  const url = resolvePageSrc(pageNumber, retryToken);
   await decodeImage(url);
   return url;
 };
