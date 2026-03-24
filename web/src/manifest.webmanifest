@@ -1,13 +1,13 @@
 {
-  "name": "Nuestro Coro",
-  "short_name": "Nuestro Coro",
-  "description": "Manual Alvernia con navegacion rapida por numero de cancion.",
+  "name": "Signo Vino",
+  "short_name": "Signo Vino",
+  "description": "Manual de coro Signo Vino — navegacion rapida por numero de cancion.",
   "display_override": ["fullscreen", "standalone"],
   "display": "standalone",
   "scope": "/",
   "start_url": "/",
-  "background_color": "#050505",
-  "theme_color": "#050505",
+  "background_color": "#060a18",
+  "theme_color": "#060a18",
   "orientation": "any",
   "icons": [
     {

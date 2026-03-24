@@ -1,0 +1,39 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+
+const APP_ROOT = path.resolve(import.meta.dirname, "..");
+
+const readText = (relativePath) => fs.readFileSync(path.join(APP_ROOT, relativePath), "utf8");
+
+test("service worker source uses a build-injected cache version and supports skip-waiting activation", () => {
+  const source = readText("web/src/sw.js");
+
+  assert.match(source, /const CACHE_VERSION = "__CACHE_VERSION__";/);
+  assert.match(source, /signo-vino-static-\$\{CACHE_VERSION\}/);
+  assert.match(source, /signo-vino-pages-\$\{CACHE_VERSION\}/);
+  assert.match(source, /cache:\s*"no-store"/);
+  assert.match(source, /event\.data\?\.type === "SKIP_WAITING"/);
+});
+
+test("web app registration forces service worker refresh and reloads after activation", () => {
+  const source = readText("web/src/app.js");
+
+  assert.match(source, /const DEFAULT_START_PAGE = 2;/);
+  assert.match(source, /const SW_RELOAD_FLAG = "sv-sw-reload-pending";/);
+  assert.match(source, /updateViaCache:\s*"none"/);
+  assert.match(source, /registration\.waiting/);
+  assert.match(source, /navigator\.serviceWorker\.addEventListener\("controllerchange"/);
+  assert.match(source, /window\.location\.reload\(\)/);
+  assert.match(source, /worker\.postMessage\(\{ type: "SKIP_WAITING" \}\)/);
+  assert.match(source, /renderPage\(DEFAULT_START_PAGE, \{ pushToHistory: false \}\);/);
+});
+
+test("web build injects a cache version into the generated service worker", () => {
+  const source = readText("web/build.mjs");
+
+  assert.match(source, /git", \["rev-parse", "--short", "HEAD"\]/);
+  assert.match(source, /replaceAll\("__CACHE_VERSION__", cacheVersion\)/);
+  assert.match(source, /writeFileSync\(path\.join\(distDir, "sw\.js"\), serviceWorkerSource\)/);
+});
