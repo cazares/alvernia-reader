@@ -21,13 +21,15 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("pdf reader uses gesture-handler based single-finger tap detection", () => {
+test("pdf reader leaves PDF taps alone and uses an explicit jump button for song navigation", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /GestureHandlerRootView/);
-  assert.match(source, /onTouchStartCapture/);
-  assert.match(source, /onTouchMoveCapture/);
-  assert.match(source, /onTouchEndCapture/);
-  assert.match(source, /activeTouches > 1 \|\| changedTouches > 1/);
+  assert.match(source, /accessibilityLabel="Ir a canción"/);
+  assert.match(source, /style=\{styles\.jumpButton\}/);
+  assert.match(source, /onPress=\{openGoModal\}/);
+  assert.doesNotMatch(source, /onTouchStartCapture/);
+  assert.doesNotMatch(source, /onTouchMoveCapture/);
+  assert.doesNotMatch(source, /onTouchEndCapture/);
 });

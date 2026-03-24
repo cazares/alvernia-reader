@@ -18,8 +18,6 @@ import { clampPdfPage } from "./src/pdfReaderUrl";
 import { findSongEntryOrNext } from "./src/songNavigation";
 
 const ALVERNIA_PDF_ASSET = require("./assets/alvernia_manual_2.pdf");
-const TAP_MAX_DURATION_MS = 220;
-const TAP_MAX_MOVE_PX = 20;
 const UNKNOWN_PAGE_MAX = 10000;
 
 type SongEntry = {
@@ -30,13 +28,6 @@ type SongEntry = {
 const PdfReaderApp = () => {
   const pdfRef = useRef<PdfRef | null>(null);
   const modalInputRef = useRef<TextInput | null>(null);
-  const touchStateRef = useRef<{
-    multiTouch: boolean;
-    moved: boolean;
-    time: number;
-    x: number;
-    y: number;
-  } | null>(null);
 
   const [activePage, setActivePage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -129,108 +120,11 @@ const PdfReaderApp = () => {
     setModalInput(value.replace(/\D+/g, "").slice(0, 4));
   }, []);
 
-  const isMultiTouchEvent = (nativeEvent: any) => {
-    const activeTouches =
-      typeof nativeEvent?.touches?.length === "number"
-        ? nativeEvent.touches.length
-        : 0;
-    const changedTouches =
-      typeof nativeEvent?.changedTouches?.length === "number"
-        ? nativeEvent.changedTouches.length
-        : 0;
-
-    return activeTouches > 1 || changedTouches > 1;
-  };
-
-  const getTouchPoint = (nativeEvent: any) => {
-    if (Array.isArray(nativeEvent?.changedTouches) && nativeEvent.changedTouches.length > 0) {
-      return nativeEvent.changedTouches[0];
-    }
-
-    if (Array.isArray(nativeEvent?.touches) && nativeEvent.touches.length > 0) {
-      return nativeEvent.touches[0];
-    }
-
-    return nativeEvent;
-  };
-
-  const onRootTouchStart = (event: any) => {
-    const nativeEvent = event?.nativeEvent;
-    const currentTouch = getTouchPoint(nativeEvent);
-    if (!currentTouch) return;
-
-    if (!touchStateRef.current) {
-      touchStateRef.current = {
-        multiTouch: isMultiTouchEvent(nativeEvent),
-        moved: false,
-        time: Date.now(),
-        x: Number(currentTouch?.pageX || 0),
-        y: Number(currentTouch?.pageY || 0),
-      };
-      return;
-    }
-
-    if (isMultiTouchEvent(nativeEvent)) {
-      touchStateRef.current.multiTouch = true;
-    }
-  };
-
-  const onRootTouchMove = (event: any) => {
-    const touchState = touchStateRef.current;
-    if (!touchState) return;
-
-    const nativeEvent = event?.nativeEvent;
-    if (isMultiTouchEvent(nativeEvent)) {
-      touchState.multiTouch = true;
-    }
-
-    const currentTouch = getTouchPoint(nativeEvent);
-    if (!currentTouch) return;
-
-    const dx = Number(currentTouch?.pageX || 0) - touchState.x;
-    const dy = Number(currentTouch?.pageY || 0) - touchState.y;
-    const travel = Math.sqrt((dx * dx) + (dy * dy));
-    if (travel > TAP_MAX_MOVE_PX) {
-      touchState.moved = true;
-    }
-  };
-
-  const onRootTouchEnd = (event: any) => {
-    const touchState = touchStateRef.current;
-    touchStateRef.current = null;
-
-    if (!touchState || isGoModalVisible) return;
-
-    const nativeEvent = event?.nativeEvent;
-    const currentTouch = getTouchPoint(nativeEvent);
-    if (!currentTouch) return;
-
-    if (isMultiTouchEvent(nativeEvent)) {
-      touchState.multiTouch = true;
-    }
-
-    const elapsedMs = Date.now() - touchState.time;
-    const dx = Number(currentTouch?.pageX || 0) - touchState.x;
-    const dy = Number(currentTouch?.pageY || 0) - touchState.y;
-    const travel = Math.sqrt((dx * dx) + (dy * dy));
-
-    if (touchState.multiTouch || touchState.moved) return;
-    if (elapsedMs > TAP_MAX_DURATION_MS || travel > TAP_MAX_MOVE_PX) return;
-
-    openGoModal();
-  };
-
-  const rootTouchHandlers: any = {
-    onTouchEndCapture: onRootTouchEnd,
-    onTouchMoveCapture: onRootTouchMove,
-    onTouchStartCapture: onRootTouchStart,
-  };
-
   return (
     <GestureHandlerRootView style={styles.root}>
       <StatusBar animated hidden />
 
-      <View {...rootTouchHandlers} style={styles.viewerLayer}>
+      <View style={styles.viewerLayer}>
         <Pdf
           ref={pdfRef}
           enableAnnotationRendering
@@ -294,6 +188,17 @@ const PdfReaderApp = () => {
         <View style={styles.hintPill}>
           <Text style={styles.hintText}>{hintMessage}</Text>
         </View>
+      ) : null}
+
+      {!isGoModalVisible ? (
+        <Pressable
+          accessibilityHint="Abre el cuadro para ir a una canción"
+          accessibilityLabel="Ir a canción"
+          onPress={openGoModal}
+          style={styles.jumpButton}
+        >
+          <Text style={styles.jumpButtonText}>Ir</Text>
+        </Pressable>
       ) : null}
 
       <Modal
@@ -394,6 +299,23 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "500",
+  },
+  jumpButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(10, 132, 255, 0.96)",
+    borderRadius: 26,
+    bottom: 16,
+    height: 52,
+    justifyContent: "center",
+    position: "absolute",
+    right: 16,
+    width: 52,
+    zIndex: 6,
+  },
+  jumpButtonText: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
   },
   modalBackdrop: {
     alignItems: "center",
