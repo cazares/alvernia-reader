@@ -31,6 +31,10 @@ test("web app registration forces service worker refresh, blocks until full offl
   assert.match(source, /const OFFLINE_DB_STORE = "bundle-status";/);
   assert.match(source, /const OFFLINE_DB_RECORD_ID = "current";/);
   assert.match(source, /const OFFLINE_PAGES = window\.OFFLINE_PAGES \|\| null;/);
+  assert.match(source, /const setViewportCssVars = \(\) =>/);
+  assert.match(source, /window\.visualViewport\?\.addEventListener\("resize", setViewportCssVars/);
+  assert.match(source, /window\.addEventListener\("orientationchange", setViewportCssVars/);
+  assert.match(source, /document\.documentElement\.style\.setProperty\("--viewport-height", `\$\{height\}px`\)/);
   assert.match(source, /const resolvePageSrc = \(pageNumber, retryToken = ""\) =>/);
   assert.match(source, /const pageImageMatches = \(pageNumber\) =>/);
   assert.match(source, /updateViaCache:\s*"none"/);
@@ -100,4 +104,9 @@ test("loading pill stays above the drawer overlay", () => {
   assert.match(source, /\.offline-ready-note \{/);
   assert.match(source, /\.offline-meta-note \{/);
   assert.match(source, /\.offline-continue-button,/);
+  assert.match(source, /--viewport-width: 100vw;/);
+  assert.match(source, /--viewport-height: 100dvh;/);
+  assert.match(source, /\.viewer-shell \{[\s\S]*height: var\(--viewport-height\);/);
+  assert.match(source, /#page-image \{[\s\S]*max-height: calc\(var\(--viewport-height\) - var\(--safe-top\) - var\(--safe-bottom\)\);/);
+  assert.match(source, /@media \(orientation: landscape\) \{/);
 });
