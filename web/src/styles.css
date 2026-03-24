@@ -183,6 +183,13 @@ button:disabled {
   font-weight: 700;
 }
 
+.offline-admin-note {
+  margin: 16px 0 0;
+  color: #ffe2a8;
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+
 .offline-ready-note {
   margin: 16px 0 0;
   color: #dfffe7;
@@ -197,6 +204,7 @@ button:disabled {
   line-height: 1.4;
 }
 
+.offline-test-button,
 .offline-continue-button,
 .offline-retry-button {
   margin-top: 18px;
@@ -211,6 +219,10 @@ button:disabled {
 
 .offline-continue-button {
   background: linear-gradient(135deg, #c8ffcf, #9fe9ff);
+}
+
+.offline-test-button {
+  background: linear-gradient(135deg, #ffe2a8, #ffd28c);
 }
 
 /* ── Overlay shell ───────────────────────────────────────────────────────────── */
