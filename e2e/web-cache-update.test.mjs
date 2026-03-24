@@ -71,7 +71,8 @@ test("offline html build emits the Signo Vino self-contained artifact", () => {
   const pkg = JSON.parse(readText("package.json"));
   const source = readText("web/build-offline.mjs");
 
-  assert.match(pkg.scripts["build:web"], /build-offline\.mjs/);
+  assert.doesNotMatch(pkg.scripts["build:web"], /build-offline\.mjs/);
+  assert.match(pkg.scripts["build:web:offline"], /build-offline\.mjs/);
   assert.match(source, /signo-vino-offline\.html/);
   assert.match(source, /window\.OFFLINE_PAGES=/);
   assert.match(source, /src="\/pages\/page-002\.jpg"/);
