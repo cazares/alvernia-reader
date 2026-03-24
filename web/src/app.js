@@ -159,6 +159,20 @@ const isFullscreen = () => Boolean(getFullscreenElement());
 const scheduleIdleWork = window.requestIdleCallback
   ? window.requestIdleCallback.bind(window)
   : (callback) => window.setTimeout(callback, 140);
+const setViewportCssVars = () => {
+  const viewport = window.visualViewport;
+  const width = Math.max(1, Math.round((viewport?.width || window.innerWidth) * 100) / 100);
+  const height = Math.max(1, Math.round((viewport?.height || window.innerHeight) * 100) / 100);
+  document.documentElement.style.setProperty("--viewport-width", `${width}px`);
+  document.documentElement.style.setProperty("--viewport-height", `${height}px`);
+};
+const bindViewportMetrics = () => {
+  setViewportCssVars();
+  window.addEventListener("resize", setViewportCssVars, { passive: true });
+  window.addEventListener("orientationchange", setViewportCssVars, { passive: true });
+  window.visualViewport?.addEventListener("resize", setViewportCssVars, { passive: true });
+  window.visualViewport?.addEventListener("scroll", setViewportCssVars, { passive: true });
+};
 
 const normalizeText = (text) => text
   .normalize("NFD")
@@ -2226,6 +2240,7 @@ const initReader = async () => {
 
 clearInitialUrl();
 registerServiceWorker();
+bindViewportMetrics();
 bindReaderEvents();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
