@@ -106,7 +106,7 @@ button:disabled {
   font-size: 0.85rem;
   font-weight: 700;
   box-shadow: var(--shadow-soft);
-  z-index: 3;
+  z-index: 30;
 }
 
 .loading.is-hidden,

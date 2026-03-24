@@ -39,6 +39,7 @@ test("web app registration forces service worker refresh, blocks until full offl
   assert.match(source, /state\.currentPage = DEFAULT_START_PAGE;/);
   assert.match(source, /hideLoadingIndicator\(\);\s+await requireOfflineBundle\(state\.totalPages\);/);
   assert.match(source, /renderPage\(DEFAULT_START_PAGE, \{ pushToHistory: false \}\);/);
+  assert.match(source, /setLoading\(true, "No se pudo cargar esta página\."\);\s+closeDrawer\(\);/);
   assert.match(source, /navigator\.vibrate\?\.\(ms\)/);
   assert.doesNotMatch(source, /AudioContext/);
   assert.doesNotMatch(source, /createBuffer/);
@@ -61,4 +62,10 @@ test("initial web shell points directly at page 2", () => {
   assert.match(source, /id="offline-gate"/);
   assert.match(source, /id="offline-progress-bar"/);
   assert.match(source, /id="offline-retry-button"/);
+});
+
+test("loading pill stays above the drawer overlay", () => {
+  const source = readText("web/src/styles.css");
+
+  assert.match(source, /\.loading \{[\s\S]*z-index: 30;/);
 });
