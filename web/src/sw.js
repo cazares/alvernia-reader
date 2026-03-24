@@ -1,5 +1,6 @@
-const STATIC_CACHE = "alvernia-static-v10";
-const PAGE_CACHE = "alvernia-pages-v10";
+const CACHE_VERSION = "__CACHE_VERSION__";
+const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -24,7 +25,7 @@ const NETWORK_FIRST_PATHS = new Set([
 
 const backgroundCacheAllPages = async () => {
   try {
-    const manifest = await fetch("/pages.json").then((r) => r.json());
+    const manifest = await fetch("/pages.json", { cache: "no-store" }).then((r) => r.json());
     const cache = await caches.open(PAGE_CACHE);
     for (let i = 1; i <= manifest.totalPages; i++) {
       const url = `/pages/page-${String(i).padStart(3, "0")}.jpg`;
@@ -60,6 +61,12 @@ self.addEventListener("activate", (event) => {
       .then(() => backgroundCacheAllPages()),
   );
   self.clients.claim();
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 const isPageImageRequest = (requestUrl) => requestUrl.pathname.startsWith("/pages/");

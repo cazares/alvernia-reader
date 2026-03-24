@@ -1,22 +1,54 @@
+// ── DOM references ────────────────────────────────────────────────────────────
 const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
 const loading = document.getElementById("loading");
 const overlayControls = document.getElementById("overlay-controls");
+const drawerHandle = document.getElementById("drawer-handle");
+const drawerBackdrop = document.getElementById("drawer-backdrop");
+const navigationDrawer = document.getElementById("navigation-drawer");
+const drawerBack = document.getElementById("drawer-back");
 const songStatus = document.getElementById("song-status");
+const songIntroEl = document.getElementById("song-intro");
 const songDisplay = document.getElementById("song-display");
+const displayClearButton = document.getElementById("display-clear");
 const numberpadGrid = document.getElementById("numberpad-grid");
-const clearButton = document.getElementById("clear-button");
 const backspaceButton = document.getElementById("backspace-button");
 const goButton = document.getElementById("go-button");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
 const prevCornerButton = document.getElementById("prev-corner");
-const dismissTop = document.getElementById("dismiss-top");
-const dismissBottom = document.getElementById("dismiss-bottom");
-const navigationNumberpad = document.getElementById("navigation-numberpad");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
+const searchClearButton = document.getElementById("search-clear");
+const searchIndexButton = document.getElementById("search-index");
+const searchColHeader = document.getElementById("search-col-header");
+const helpButton = document.getElementById("help-button");
+const helpPanel = document.getElementById("help-panel");
+const helpCloseButton = document.getElementById("help-close");
+const hapticToggleButton = document.getElementById("haptic-toggle");
+const numpadTipWrap = document.getElementById("numpad-tip-wrap");
+const tipDismissButton = document.getElementById("tip-dismiss");
+const drawerCloseButton = document.getElementById("drawer-close");
+const searchCancelButton = document.getElementById("search-cancel"); // kept for compat (hidden)
+const drawerTabRail    = document.getElementById("drawer-tab-rail");
+const drawerPaneContent = document.getElementById("drawer-pane-content");
+const searchRow        = document.getElementById("search-row");
+const searchBackButton = document.getElementById("search-back");
+const modeBtnNumpad    = document.getElementById("mode-btn-numpad");
+const modeBtnBrowse    = document.getElementById("mode-btn-browse");
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const PREFS_KEY = "nc-sort-prefs";
+
+const loadSortPrefs = () => {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY) || "{}"); } catch { return {}; }
+};
+const saveSortPrefs = () => {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(state.indexSortPrefs)); } catch {}
+};
+
+const savedPrefs = loadSortPrefs();
 
 const state = {
   totalPages: 1,
@@ -27,16 +59,33 @@ const state = {
   themeIndex: [],
   pageHistory: [],
   searchIndexPages: [],
-  overlayVisible: true,
-  immersiveMode: false,
+  drawerOpen: false,
+  indexDrillDown: false,
   loadingTimer: 0,
   pageLoadRequest: 0,
   prefetchedPages: new Set(),
   prefetchingPages: new Set(),
   touchStart: null,
   lastTouchEndedAt: 0,
+  indexVisible: false,
+  indexTab: "themes",
+  indexSortPrefs: {
+    themes:     savedPrefs.themes     || "az",
+    alpha:      savedPrefs.alpha      || "az",
+    length:     savedPrefs.length     || "longest",
+    keywords:   savedPrefs.keywords   || "freq",
+    complexity: savedPrefs.complexity || "simple",
+  },
+  activeTab: "todas",
+  prevTab: "todas",     // where to return when exiting search fullscreen
+  drawerMode: "numpad", // "numpad" | "browse"
 };
 
+let cachedSongKeys = null;
+let cachedSongLengths = null;
+let cachedKeywords = null;
+
+// ── Environment detection ─────────────────────────────────────────────────────
 const initialUrl = new URL(window.location.href);
 const userAgent = navigator.userAgent;
 const isIOS = /iphone|ipad|ipod/i.test(userAgent);
@@ -52,7 +101,10 @@ const nativeFullscreenSupported = Boolean(
 );
 const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
+const DEFAULT_START_PAGE = 2;
+const SW_RELOAD_FLAG = "sv-sw-reload-pending";
 
+// ── Utilities ────────────────────────────────────────────────────────────────
 const pageFileName = (pageNumber) => `/pages/page-${String(pageNumber).padStart(3, "0")}.jpg`;
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
@@ -65,30 +117,90 @@ const scheduleIdleWork = window.requestIdleCallback
   ? window.requestIdleCallback.bind(window)
   : (callback) => window.setTimeout(callback, 140);
 
+const normalizeText = (text) => text
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase();
+
+// ── Haptic feedback ───────────────────────────────────────────────────────────
+// navigator.vibrate() works on Android/Chrome but is unsupported on iOS Safari.
+// We layer in an AudioContext "click" as a tactile-feel substitute on iOS.
+const HAPTIC_PREF_KEY = "sv-haptic";
+let hapticEnabled = localStorage.getItem(HAPTIC_PREF_KEY) !== "off";
+let _hapticCtx = null;
+const _getHapticCtx = () => {
+  if (!_hapticCtx) {
+    try { _hapticCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+  }
+  return _hapticCtx;
+};
+const haptic = (ms = 10) => {
+  if (!hapticEnabled) return;
+  // Android vibration
+  try { navigator.vibrate?.(ms); } catch {}
+  // iOS AudioContext click (30 ms decaying noise burst — feels like a tap)
+  try {
+    const ctx = _getHapticCtx();
+    if (!ctx) return;
+    if (ctx.state === "suspended") ctx.resume();
+    const duration = 0.03;
+    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * duration), ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) * 0.35;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.6;
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    src.start();
+  } catch {}
+};
+
+// ── Tip dismissal ─────────────────────────────────────────────────────────────
+const TIP_KEY = "sv-tip";
+if (localStorage.getItem(TIP_KEY) === "dismissed") {
+  numpadTipWrap.classList.add("is-hidden");
+  tipDismissButton.classList.add("is-hidden");
+}
+
+// ── Recientes (recently viewed songs) ────────────────────────────────────────
+const RECIENTES_KEY = "sv-recientes";
+const MAX_RECIENTES = 15;
+
+const getRecientes = () => {
+  try { return JSON.parse(localStorage.getItem(RECIENTES_KEY) || "[]"); } catch { return []; }
+};
+
+const addToRecientes = (songNum) => {
+  try {
+    let list = getRecientes().filter((n) => n !== songNum);
+    list.unshift(songNum);
+    if (list.length > MAX_RECIENTES) list = list.slice(0, MAX_RECIENTES);
+    localStorage.setItem(RECIENTES_KEY, JSON.stringify(list));
+  } catch {}
+};
+
+// ── Fullscreen helpers ────────────────────────────────────────────────────────
 const requestFullscreen = async () => {
   if (fullscreenTarget.requestFullscreen) {
     return fullscreenTarget.requestFullscreen({ navigationUI: "hide" }).catch(() => fullscreenTarget.requestFullscreen());
   }
-
   if (fullscreenTarget.webkitRequestFullscreen) {
     return fullscreenTarget.webkitRequestFullscreen();
   }
-
   return null;
 };
 
 const exitFullscreen = async () => {
-  if (document.exitFullscreen) {
-    return document.exitFullscreen();
-  }
-
-  if (document.webkitExitFullscreen) {
-    return document.webkitExitFullscreen();
-  }
-
+  if (document.exitFullscreen) return document.exitFullscreen();
+  if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
   return null;
 };
 
+// ── Loading state ─────────────────────────────────────────────────────────────
 const setLoading = (active, text = "Cargando...") => {
   loading.textContent = text;
   loading.classList.toggle("is-hidden", !active);
@@ -117,6 +229,7 @@ const hideLoadingIndicator = () => {
   pageImage.classList.remove("is-loading");
 };
 
+// ── History helpers ───────────────────────────────────────────────────────────
 const clearInitialUrl = () => {
   if (!initialUrl.search) return;
   window.history.replaceState({}, "", initialUrl.pathname || "/");
@@ -147,22 +260,12 @@ const getCurrentSongNumber = () => {
 const getAdjacentSongPages = () => {
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
   const pages = [];
-
   if (currentSongIndex < 0) {
-    if (state.totalSongs > 0) {
-      pages.push(state.songIndex[0].page);
-    }
+    if (state.totalSongs > 0) pages.push(state.songIndex[0].page);
     return pages;
   }
-
-  if (currentSongIndex > 0) {
-    pages.push(state.songIndex[currentSongIndex - 1].page);
-  }
-
-  if (currentSongIndex < state.totalSongs - 1) {
-    pages.push(state.songIndex[currentSongIndex + 1].page);
-  }
-
+  if (currentSongIndex > 0) pages.push(state.songIndex[currentSongIndex - 1].page);
+  if (currentSongIndex < state.totalSongs - 1) pages.push(state.songIndex[currentSongIndex + 1].page);
   return [...new Set(pages)];
 };
 
@@ -170,7 +273,6 @@ const prefetchSongPage = (pageNumber) => {
   if (pageNumber < 1 || pageNumber > state.totalPages) return;
   if (pageNumber === state.currentPage) return;
   if (state.prefetchedPages.has(pageNumber) || state.prefetchingPages.has(pageNumber)) return;
-
   state.prefetchingPages.add(pageNumber);
   scheduleIdleWork(() => {
     const img = new Image();
@@ -178,21 +280,33 @@ const prefetchSongPage = (pageNumber) => {
       state.prefetchedPages.add(pageNumber);
       state.prefetchingPages.delete(pageNumber);
     };
-    img.onerror = () => {
-      state.prefetchingPages.delete(pageNumber);
-    };
+    img.onerror = () => { state.prefetchingPages.delete(pageNumber); };
     img.src = pageFileName(pageNumber);
   });
 };
 
+// ── Status rendering ──────────────────────────────────────────────────────────
 const renderStatus = () => {
   const index = findSongIndexAtOrBeforePage(state.currentPage);
   const entry = index >= 0 ? state.songIndex[index] : null;
+
   if (entry && entry.title) {
     songStatus.textContent = `${entry.song}. ${entry.title}`;
   } else {
     songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
   }
+
+  // Intro chord display
+  if (entry && entry.intro) {
+    const { key, solfege, chords, capo } = entry.intro;
+    let introText = `Intro en ${key} (${solfege}): ${chords.join(", ")}`;
+    if (capo) introText += ` – Capo ${capo}`;
+    songIntroEl.textContent = introText;
+    songIntroEl.classList.remove("is-hidden");
+  } else {
+    songIntroEl.classList.add("is-hidden");
+  }
+
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
   const hasPrevSong = currentSongIndex > 0;
   const hasNextSong = currentSongIndex < 0
@@ -203,16 +317,15 @@ const renderStatus = () => {
   prevPageButton.disabled = !hasPrevSong;
   nextPageButton.disabled = !hasNextSong;
   prevCornerButton.disabled = !hasHistory;
-  prevPageButton.classList.toggle("is-unavailable", !hasPrevSong);
-  nextPageButton.classList.toggle("is-unavailable", !hasNextSong);
   prevCornerButton.classList.toggle("is-unavailable", !hasHistory);
 };
 
 const renderDraft = () => {
-  songDisplay.value = state.songDraft;
-  goButton.textContent = state.songDraft ? `Ir a canción ${state.songDraft}` : "Ir";
+  songDisplay.textContent = state.songDraft;
+  displayClearButton.classList.toggle("is-hidden", !state.songDraft);
 };
 
+// ── Image loading ─────────────────────────────────────────────────────────────
 const decodeImage = (src) => new Promise((resolve, reject) => {
   const loader = new Image();
   loader.decoding = "async";
@@ -227,7 +340,7 @@ const loadPageImage = async (pageNumber, retryToken = "") => {
   return url;
 };
 
-const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
+const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = {}) => {
   const nextPage = clampPage(pageNumber);
   const requestId = state.pageLoadRequest + 1;
   state.pageLoadRequest = requestId;
@@ -235,7 +348,6 @@ const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
 
   try {
     let nextPageUrl = "";
-
     try {
       nextPageUrl = await loadPageImage(nextPage);
     } catch (firstError) {
@@ -243,9 +355,7 @@ const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
       nextPageUrl = await loadPageImage(nextPage, Date.now());
     }
 
-    if (requestId !== state.pageLoadRequest) {
-      return;
-    }
+    if (requestId !== state.pageLoadRequest) return;
 
     if (pushToHistory && state.currentPage > 0 && state.currentPage !== nextPage) {
       state.pageHistory.push(state.currentPage);
@@ -255,6 +365,13 @@ const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
     state.currentPage = nextPage;
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
+    if (direction !== 0) {
+      const animClass = direction > 0 ? "slide-from-right" : "slide-from-left";
+      pageImage.classList.remove("slide-from-right", "slide-from-left");
+      void pageImage.offsetWidth;
+      pageImage.classList.add(animClass);
+      pageImage.addEventListener("animationend", () => pageImage.classList.remove(animClass), { once: true });
+    }
     renderStatus();
     hideLoadingIndicator();
     getAdjacentSongPages().forEach(prefetchSongPage);
@@ -263,30 +380,33 @@ const renderPage = async (pageNumber, { pushToHistory = true } = {}) => {
     clearLoadingTimer();
     console.error("No se pudo cargar la página solicitada", nextPage, error);
     setLoading(true, "No se pudo cargar esta página.");
-    setOverlayVisible(true);
+    openDrawer();
   }
 };
 
-const setOverlayVisible = (visible) => {
-  state.overlayVisible = visible;
-  overlayControls.classList.toggle("is-hidden", !visible);
+// ── Drawer open / close ───────────────────────────────────────────────────────
+const openDrawer = () => {
+  state.drawerOpen = true;
+  overlayControls.classList.add("drawer-open");
+  drawerHandle.classList.add("is-hidden");
 };
 
+const closeDrawer = () => {
+  state.drawerOpen = false;
+  overlayControls.classList.remove("drawer-open");
+  drawerHandle.classList.remove("is-hidden");
+};
+
+// ── Fullscreen ────────────────────────────────────────────────────────────────
 const updateFullscreenButton = () => {
   if (!supportsFullscreen) {
     fullscreenButton.classList.add("is-hidden");
     return;
   }
-
   fullscreenButton.classList.remove("is-hidden");
-  if (canOfferPseudoFullscreen) {
-    fullscreenButton.textContent = state.immersiveMode ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa";
-    return;
-  }
-
-  fullscreenButton.textContent = isFullscreen() ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa";
 };
 
+// ── Draft management ──────────────────────────────────────────────────────────
 const appendDigit = (digit) => {
   if (state.songDraft.length >= 4) return;
   state.songDraft = `${state.songDraft}${digit}`;
@@ -307,21 +427,18 @@ const goToDraftSong = () => {
   const songNumber = Number.parseInt(state.songDraft, 10);
   if (!Number.isFinite(songNumber)) return;
   renderPage(findSongPage(songNumber));
+  addToRecientes(songNumber);
   clearDraft();
-  setOverlayVisible(false);
+  closeDrawer();
 };
 
 const goBackInHistory = () => {
   if (state.pageHistory.length === 0) return;
   const prevPage = state.pageHistory.pop();
-  renderPage(prevPage);
+  renderPage(prevPage, { pushToHistory: false });
 };
 
-const normalizeText = (text) => text
-  .normalize("NFD")
-  .replace(/[\u0300-\u036f]/g, "")
-  .toLowerCase();
-
+// ── Search index loading ──────────────────────────────────────────────────────
 const loadSearchIndex = async () => {
   const inlined = document.getElementById("search-data");
   if (inlined) {
@@ -347,6 +464,7 @@ const getSongForPage = (pageNum) => {
   return songNum;
 };
 
+// ── Search ────────────────────────────────────────────────────────────────────
 const searchPages = (query) => {
   const normalizedQuery = normalizeText(query.trim());
   if (!normalizedQuery) return [];
@@ -372,28 +490,42 @@ const renderSearchResults = (results, query) => {
   }
 
   const normalizedQuery = normalizeText(query.trim());
+  const normalizedQ = normalizedQuery.split(/\s+/)[0];
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   for (const entry of results) {
     const songNum = getSongForPage(entry.page);
+    const songEntry = songNum > 0 ? state.songIndex.find((e) => e.song === songNum) : null;
+    const title = songEntry?.title || "";
+
     const item = document.createElement("button");
     item.className = "search-result-item";
     item.type = "button";
     item.dataset.page = String(entry.page);
 
-    const label = document.createElement("span");
-    label.className = "search-result-song";
-    label.textContent = songNum > 0 ? `Canción ${songNum}` : `Página ${entry.page}`;
+    const header = document.createElement("div");
+    header.className = "search-result-header";
+
+    const numBadge = document.createElement("span");
+    numBadge.className = "search-result-num";
+    numBadge.textContent = songNum > 0 ? String(songNum) : `p.${entry.page}`;
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "search-result-title";
+    titleSpan.textContent = title;
+
+    header.appendChild(numBadge);
+    header.appendChild(titleSpan);
 
     const snippet = document.createElement("span");
     snippet.className = "search-result-snippet";
     const lowerText = normalizeText(entry.text);
-    const normalizedQ = normalizedQuery.split(/\s+/)[0];
     const matchIdx = lowerText.indexOf(normalizedQ);
-    const start = Math.max(0, matchIdx - 40);
-    const raw = entry.text.slice(start, start + 160).replace(/\s+/g, " ");
+    const start = Math.max(0, matchIdx - 30);
+    const raw = entry.text.slice(start, start + 140).replace(/\s+/g, " ");
     const prefix = start > 0 ? "…" : "";
     const normRaw = normalizeText(raw);
     const matchInRaw = normRaw.indexOf(normalizedQ);
-    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     if (matchInRaw >= 0) {
       snippet.innerHTML =
         esc(prefix) +
@@ -404,7 +536,7 @@ const renderSearchResults = (results, query) => {
       snippet.textContent = prefix + raw;
     }
 
-    item.appendChild(label);
+    item.appendChild(header);
     item.appendChild(snippet);
     searchResults.appendChild(item);
   }
@@ -444,26 +576,572 @@ const renderThemeResults = (songs, themeLabel) => {
     item.type = "button";
     item.dataset.page = String(entry.page);
 
-    const label = document.createElement("span");
-    label.className = "search-result-song";
-    label.textContent = `Canción ${entry.song}`;
+    const hdr = document.createElement("div");
+    hdr.className = "search-result-header";
 
-    const snippet = document.createElement("span");
-    snippet.className = "search-result-snippet";
-    snippet.textContent = entry.title || "";
+    const numBadge = document.createElement("span");
+    numBadge.className = "search-result-num";
+    numBadge.textContent = String(entry.song);
 
-    item.appendChild(label);
-    item.appendChild(snippet);
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "search-result-title";
+    titleSpan.textContent = entry.title || "";
+
+    hdr.appendChild(numBadge);
+    hdr.appendChild(titleSpan);
+    item.appendChild(hdr);
     searchResults.appendChild(item);
   }
 };
 
+// ── Index panel helpers ───────────────────────────────────────────────────────
+
+// Use pre-computed keys from pages.json
+const computeSongKeys = () => {
+  if (cachedSongKeys) return cachedSongKeys;
+  cachedSongKeys = new Map(state.songIndex.map((e) => [e.song, e.key || null]));
+  return cachedSongKeys;
+};
+
+const computeSongLengths = () => {
+  if (cachedSongLengths) return cachedSongLengths;
+  cachedSongLengths = new Map(
+    state.songIndex.map((e) => {
+      const next = state.songIndex.find((n) => n.song > e.song);
+      const end = next ? next.page - 1 : state.totalPages;
+      const len = state.searchIndexPages
+        .filter((p) => p.page >= e.page && p.page <= end)
+        .reduce((s, p) => s + p.text.length, 0);
+      return [e.song, len];
+    }),
+  );
+  return cachedSongLengths;
+};
+
+// Build a "No. 142" song button for index panels
+const makeSongButton = (entry) => {
+  const btn = document.createElement("button");
+  btn.className = "search-result-item";
+  btn.type = "button";
+  btn.dataset.page = String(entry.page);
+  const hdr = document.createElement("div");
+  hdr.className = "search-result-header";
+  const num = document.createElement("span");
+  num.className = "search-result-num";
+  num.textContent = `No. ${entry.song}`;
+  const title = document.createElement("span");
+  title.className = "search-result-title";
+  title.textContent = entry.title || `Canción ${entry.song}`;
+  hdr.appendChild(num);
+  hdr.appendChild(title);
+  btn.appendChild(hdr);
+  return btn;
+};
+
+// Render a row of sort tab pills at the top of an index content area.
+const renderSortTabs = (container, tabs, currentSort, context) => {
+  const row = document.createElement("div");
+  row.className = "index-sort-tabs";
+  for (const tab of tabs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.context = context;
+    if (tab.isAlphaToggle) {
+      const isActive = currentSort === "az" || currentSort === "za";
+      btn.className = `index-sort-tab${isActive ? " is-active" : ""}`;
+      btn.textContent = currentSort === "za" ? "↓ Z–A" : "↑ A–Z";
+      btn.dataset.sortId = currentSort === "az" ? "za" : "az";
+    } else {
+      btn.className = `index-sort-tab${tab.id === currentSort ? " is-active" : ""}`;
+      btn.textContent = tab.label;
+      btn.dataset.sortId = tab.id;
+    }
+    row.appendChild(btn);
+  }
+  container.appendChild(row);
+};
+
+const INDEX_TABS = [
+  { id: "themes",     emoji: "🎵", label: "Temas"      },
+  { id: "alpha",      emoji: "📋", label: "Todas"      },
+  { id: "key",        emoji: "🎸", label: "Tono"       },
+  { id: "length",     emoji: "📏", label: "Largo"      },
+  { id: "keywords",   emoji: "💬", label: "Palabras"   },
+  { id: "complexity", emoji: "🎯", label: "Dificultad" },
+];
+
+// ── Liturgical calendar ──────────────────────────────────────────────────────
+const computeEaster = (year) => {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mo = Math.floor((h + l - 7 * m + 114) / 31) - 1;
+  const dy = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, mo, dy);
+};
+
+const getLiturgicalSeason = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const add = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+  const MONTHS = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+  const fmt = (d) => MONTHS[d.getMonth()];
+
+  const easter = computeEaster(year);
+  const ashWed = add(easter, -46);
+  const holyThursday = add(easter, -3);
+  const pentecost = add(easter, 49);
+  const dec25 = new Date(year, 11, 25);
+  const dow = dec25.getDay();
+  const advent = add(dec25, dow === 0 ? -28 : -(dow + 21));
+  const baptismOfLord = new Date(year, 0, 13);
+
+  const seasonMonths = {
+    adviento:    `${fmt(advent)}–Dic`,
+    navidad:     "Dic–Ene",
+    cuaresma:    `${fmt(ashWed)}–${fmt(add(easter, -1))}`,
+    pascua:      `${fmt(easter)}–${fmt(pentecost)}`,
+    espiritu_santo: fmt(pentecost),
+    resurreccion:   `${fmt(easter)}–${fmt(pentecost)}`,
+  };
+
+  let season;
+  const t = today;
+  if (t >= advent && t < dec25)                            season = "adviento";
+  else if (t >= dec25 || (t.getMonth() === 0 && t <= baptismOfLord)) season = "navidad";
+  else if (t >= ashWed && t < holyThursday)                season = "cuaresma";
+  else if (t >= holyThursday && t < add(pentecost, 1))     season = "pascua";
+  else                                                      season = "ordinario";
+
+  const nextMap = {
+    adviento: "navidad", navidad: "ordinario",
+    cuaresma: "pascua",  pascua: "ordinario",
+    ordinario: t < ashWed ? "cuaresma" : t < advent ? "adviento" : "navidad",
+  };
+  const next = nextMap[season];
+
+  const currentThemeIds = {
+    adviento: ["adviento", "navidad"],
+    navidad:  ["navidad"],
+    cuaresma: ["cuaresma"],
+    pascua:   ["resurreccion", "espiritu_santo"],
+    ordinario: [],
+  }[season] ?? [];
+
+  const nextThemeIds = {
+    adviento: ["navidad"],
+    navidad:  [],
+    cuaresma: ["resurreccion"],
+    pascua:   ["espiritu_santo"],
+    ordinario: next === "cuaresma" ? ["cuaresma"] : next === "adviento" ? ["adviento"] : [],
+  }[season] ?? [];
+
+  return { season, next, currentThemeIds, nextThemeIds, seasonMonths };
+};
+
+// ── Index content renderers ───────────────────────────────────────────────────
+
+const renderIndexThemesContent = (container) => {
+  renderSortTabs(container, [
+    { isAlphaToggle: true },
+    { id: "count", label: "Cantidad" },
+  ], state.indexSortPrefs.themes, "themes");
+
+  const allThemes = state.themeIndex
+    .map((t) => ({
+      ...t,
+      songs: state.songIndex.filter((e) => e.themes?.includes(t.id)),
+    }))
+    .filter((t) => t.songs.length > 0);
+
+  const { currentThemeIds, nextThemeIds, seasonMonths } = getLiturgicalSeason();
+
+  let themes;
+  if (state.indexSortPrefs.themes === "count") {
+    themes = [...allThemes].sort((a, b) => b.songs.length - a.songs.length);
+  } else if (state.indexSortPrefs.themes === "za") {
+    themes = [...allThemes].sort((a, b) => normalizeText(b.label).localeCompare(normalizeText(a.label)));
+  } else {
+    const seasonal = new Set([...currentThemeIds, ...nextThemeIds]);
+    const seasonalThemes = allThemes
+      .filter((t) => seasonal.has(t.id))
+      .sort((a, b) => {
+        const ia = currentThemeIds.indexOf(a.id) >= 0 ? 0 : 1;
+        const ib = currentThemeIds.indexOf(b.id) >= 0 ? 0 : 1;
+        return ia - ib;
+      });
+    const restThemes = allThemes
+      .filter((t) => !seasonal.has(t.id))
+      .sort((a, b) => normalizeText(a.label).localeCompare(normalizeText(b.label)));
+    themes = [...seasonalThemes, ...restThemes];
+  }
+
+  const makeThemeChip = (theme, badge) => {
+    const chip = document.createElement("button");
+    chip.className = "index-theme-chip";
+    chip.type = "button";
+    chip.dataset.themeLabel = theme.label;
+    const months = seasonMonths[theme.id] || null;
+    const monthsHtml = months ? `<span class="index-chip-months">${months}</span>` : "";
+    const badgeHtml = badge ? `<span class="index-chip-badge">${badge}</span>` : "";
+    chip.innerHTML = `<span class="index-chip-emoji">${theme.emoji}</span><span class="index-chip-label">${theme.label}${monthsHtml}</span>${badgeHtml}<span class="index-chip-count">${theme.songs.length}</span>`;
+    return chip;
+  };
+
+  const grid = document.createElement("div");
+  grid.className = "index-themes-grid";
+
+  if (state.indexSortPrefs.themes !== "count" && state.indexSortPrefs.themes !== "za"
+      && (currentThemeIds.length > 0 || nextThemeIds.length > 0)) {
+    const hdr = document.createElement("p");
+    hdr.className = "index-group-header";
+    hdr.textContent = "🗓 Tiempo Litúrgico";
+    grid.appendChild(hdr);
+    const seasonSet = new Set([...currentThemeIds, ...nextThemeIds]);
+    for (const theme of themes.filter((t) => seasonSet.has(t.id))) {
+      const isCurrent = currentThemeIds.includes(theme.id);
+      grid.appendChild(makeThemeChip(theme, isCurrent ? "AHORA" : "PRÓX."));
+    }
+    const restHdr = document.createElement("p");
+    restHdr.className = "index-group-header";
+    restHdr.textContent = "Todos los temas";
+    grid.appendChild(restHdr);
+    for (const theme of themes.filter((t) => !seasonSet.has(t.id))) {
+      grid.appendChild(makeThemeChip(theme, null));
+    }
+  } else {
+    for (const theme of themes) {
+      grid.appendChild(makeThemeChip(theme, null));
+    }
+  }
+
+  container.appendChild(grid);
+};
+
+const renderIndexAlphaContent = (container) => {
+  renderSortTabs(container, [
+    { isAlphaToggle: true },
+  ], state.indexSortPrefs.alpha, "alpha");
+
+  const dir = state.indexSortPrefs.alpha === "za" ? -1 : 1;
+  const withTitle = [...state.songIndex]
+    .filter((e) => e.title)
+    .sort((a, b) => dir * normalizeText(a.title).localeCompare(normalizeText(b.title)));
+  const noTitle = state.songIndex.filter((e) => !e.title).sort((a, b) => a.song - b.song);
+  const sorted = dir > 0 ? [...withTitle, ...noTitle] : [...noTitle, ...withTitle];
+
+  const groups = {};
+  for (const entry of sorted) {
+    const letter = (entry.title
+      ? normalizeText(entry.title[0]).toUpperCase()
+      : "#");
+    if (!groups[letter]) groups[letter] = [];
+    groups[letter].push(entry);
+  }
+  const letters = Object.keys(groups).sort((a, b) => dir * a.localeCompare(b));
+  for (const letter of letters) {
+    const hdr = document.createElement("p");
+    hdr.className = "index-group-header";
+    hdr.textContent = letter;
+    container.appendChild(hdr);
+    for (const entry of groups[letter]) {
+      container.appendChild(makeSongButton(entry));
+    }
+  }
+};
+
+const renderIndexKeyContent = (container) => {
+  const keys = computeSongKeys();
+  const grouped = {};
+  for (const entry of state.songIndex) {
+    const k = keys.get(entry.song) || "—";
+    if (!grouped[k]) grouped[k] = [];
+    grouped[k].push(entry);
+  }
+
+  const KEY_ORDER = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  const sortedKeys = Object.keys(grouped).sort((a, b) => {
+    if (a === "—") return 1;
+    if (b === "—") return -1;
+    const ia = KEY_ORDER.indexOf(a), ib = KEY_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+
+  const SOLFEGE = {
+    C: "Do", D: "Re", E: "Mi", F: "Fa", G: "Sol", A: "La", B: "Si",
+    "C#": "Do sostenido", "D#": "Re sostenido", "F#": "Fa sostenido",
+    "G#": "Sol sostenido", "A#": "La sostenido",
+    Db: "Re bemol", Eb: "Mi bemol", Gb: "Sol bemol", Ab: "La bemol", Bb: "Si bemol",
+  };
+
+  for (const k of sortedKeys) {
+    const hdr = document.createElement("p");
+    hdr.className = "index-group-header index-group-header--sticky";
+    if (k === "—") {
+      hdr.textContent = "Sin tono";
+    } else {
+      const sol = SOLFEGE[k] || k;
+      hdr.textContent = sol !== k ? `${sol} (${k})` : k;
+    }
+    container.appendChild(hdr);
+    for (const entry of grouped[k].sort((a, b) => a.song - b.song)) {
+      container.appendChild(makeSongButton(entry));
+    }
+  }
+};
+
+const renderIndexLengthContent = (container) => {
+  renderSortTabs(container, [
+    { id: "longest",  label: "Más largo" },
+    { id: "shortest", label: "Más corto" },
+    { id: "medium",   label: "Mediana" },
+  ], state.indexSortPrefs.length, "length");
+
+  const lengths = computeSongLengths();
+  const mode = state.indexSortPrefs.length;
+
+  if (mode === "medium") {
+    const allLens = [...lengths.values()].sort((a, b) => b - a);
+    const p25 = allLens[Math.floor(allLens.length * 0.25)] ?? 0;
+    const p75 = allLens[Math.floor(allLens.length * 0.75)] ?? 0;
+    const sorted = [...state.songIndex]
+      .filter((e) => {
+        const len = lengths.get(e.song) ?? 0;
+        return len >= p75 && len <= p25;
+      })
+      .sort((a, b) => (lengths.get(b.song) ?? 0) - (lengths.get(a.song) ?? 0));
+
+    const hdr = document.createElement("p");
+    hdr.className = "index-group-header";
+    hdr.textContent = "Largo mediano";
+    container.appendChild(hdr);
+    for (const entry of sorted) container.appendChild(makeSongButton(entry));
+  } else {
+    const dir = mode === "shortest" ? 1 : -1;
+    const sorted = [...state.songIndex]
+      .sort((a, b) => dir * ((lengths.get(b.song) ?? 0) - (lengths.get(a.song) ?? 0)));
+
+    const bannerHdr = document.createElement("p");
+    bannerHdr.className = "index-group-header";
+    bannerHdr.textContent = mode === "shortest" ? "Canción más corta →" : "Canción más larga →";
+    container.appendChild(bannerHdr);
+    for (const entry of sorted) container.appendChild(makeSongButton(entry));
+  }
+};
+
+// Keyword helpers
+const STOPWORDS = new Set([
+  "de","la","el","en","y","a","que","es","los","las","por","para","un","una","con",
+  "del","al","se","su","tu","me","te","le","lo","mi","si","mas","pero","o","ni",
+  "muy","ya","nos","como","sus","son","fue","oh","ti","hay","no","e","u","les",
+  "han","era","ser","bien","aun","pues","tan","vez","este","esta","cada","todo",
+  "toda","cuando","donde","quien","cual","eres","somos","voy",
+]);
+
+const getKeywordFreq = (text) => {
+  const freq = new Map();
+  for (const w of normalizeText(text).split(/\W+/)) {
+    if (w.length >= 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w)) {
+      freq.set(w, (freq.get(w) || 0) + 1);
+    }
+  }
+  return [...freq.entries()].sort((a, b) => b[1] - a[1]);
+};
+
+const getTopKeywords = () => {
+  if (cachedKeywords) return cachedKeywords;
+  const freq = new Map();
+  for (const page of state.searchIndexPages) {
+    for (const w of normalizeText(page.text).split(/\W+/)) {
+      if (w.length >= 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w)) {
+        freq.set(w, (freq.get(w) || 0) + 1);
+      }
+    }
+  }
+  cachedKeywords = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([w]) => w);
+  return cachedKeywords;
+};
+
+const makeKeywordChip = (word) => {
+  const chip = document.createElement("button");
+  chip.className = "index-keyword-chip";
+  chip.type = "button";
+  chip.dataset.keyword = word;
+  chip.textContent = word;
+  return chip;
+};
+
+const renderIndexKeywordsContent = (container) => {
+  const currentSort = state.indexSortPrefs.keywords;
+  renderSortTabs(container, [
+    { id: "freq",  label: "Frecuencia" },
+    { id: "theme", label: "Por Tema" },
+    { isAlphaToggle: true },
+  ], currentSort, "keywords");
+
+  if (currentSort === "theme") {
+    for (const theme of state.themeIndex) {
+      const themeSongs = state.songIndex.filter((e) => e.themes?.includes(theme.id));
+      if (!themeSongs.length) continue;
+
+      const themeText = themeSongs.flatMap((e) => {
+        const next = state.songIndex.find((n) => n.song > e.song);
+        const end = next ? next.page - 1 : state.totalPages;
+        return state.searchIndexPages
+          .filter((p) => p.page >= e.page && p.page <= end)
+          .map((p) => p.text);
+      }).join(" ");
+
+      const themeWords = getKeywordFreq(themeText).slice(0, 8).map(([w]) => w);
+      if (!themeWords.length) continue;
+
+      const hdr = document.createElement("p");
+      hdr.className = "index-group-header";
+      hdr.textContent = `${theme.emoji} ${theme.label}`;
+      container.appendChild(hdr);
+
+      const wrap = document.createElement("div");
+      wrap.className = "index-keywords-wrap";
+      for (const word of themeWords) wrap.appendChild(makeKeywordChip(word));
+      container.appendChild(wrap);
+    }
+  } else {
+    let words = getTopKeywords();
+    if (currentSort === "az") words = [...words].sort((a, b) => a.localeCompare(b));
+    else if (currentSort === "za") words = [...words].sort((a, b) => b.localeCompare(a));
+
+    const wrap = document.createElement("div");
+    wrap.className = "index-keywords-wrap";
+    for (const word of words) wrap.appendChild(makeKeywordChip(word));
+    container.appendChild(wrap);
+  }
+};
+
+const COMPLEXITY_LABELS = {
+  simple:   { label: "Simple",    emoji: "🟢", desc: "1–3 acordes únicos" },
+  medio:    { label: "Medio",     emoji: "🟡", desc: "4–5 acordes únicos" },
+  avanzado: { label: "Avanzado",  emoji: "🔴", desc: "6+ acordes o complejos" },
+};
+
+const renderIndexComplexityContent = (container) => {
+  renderSortTabs(container, [
+    { id: "simple",   label: "🟢 Simple"  },
+    { id: "medio",    label: "🟡 Medio"   },
+    { id: "avanzado", label: "🔴 Avanzado"},
+  ], state.indexSortPrefs.complexity || "simple", "complexity");
+
+  const mode = state.indexSortPrefs.complexity || "simple";
+  const order = mode === "avanzado" ? ["avanzado","medio","simple"]
+              : mode === "medio"    ? ["medio","avanzado","simple"]
+              :                       ["simple","medio","avanzado"];
+
+  for (const c of order) {
+    const info = COMPLEXITY_LABELS[c];
+    const songs = state.songIndex.filter((e) => (e.complexity || "simple") === c);
+    if (!songs.length) continue;
+    const hdr = document.createElement("p");
+    hdr.className = "index-group-header index-group-header--sticky";
+    hdr.textContent = `${info.emoji} ${info.label} — ${info.desc} (${songs.length})`;
+    container.appendChild(hdr);
+    for (const entry of songs.sort((a, b) => a.song - b.song)) {
+      container.appendChild(makeSongButton(entry));
+    }
+  }
+};
+
+const renderIndexTabContent = (container) => {
+  container.innerHTML = "";
+  switch (state.indexTab) {
+    case "themes":     renderIndexThemesContent(container);     break;
+    case "alpha":      renderIndexAlphaContent(container);      break;
+    case "key":        renderIndexKeyContent(container);        break;
+    case "length":     renderIndexLengthContent(container);     break;
+    case "keywords":   renderIndexKeywordsContent(container);   break;
+    case "complexity": renderIndexComplexityContent(container); break;
+  }
+};
+
+// ── Index panel ───────────────────────────────────────────────────────────────
+const renderIndexPanel = () => {
+  state.indexVisible = true;
+  state.indexDrillDown = false;
+  drawerBack.classList.add("is-hidden");
+  searchInput.value = "";
+  searchClearButton.classList.add("is-hidden");
+  searchIndexButton?.classList.add("is-active");
+  navigationDrawer.classList.add("search-focused", "index-visible");
+  searchColHeader.classList.add("is-hidden");
+
+  searchResults.innerHTML = "";
+  const layout = document.createElement("div");
+  layout.className = "index-layout";
+
+  const sidebar = document.createElement("nav");
+  sidebar.className = "index-sidebar";
+  for (const tab of INDEX_TABS) {
+    const isActive = state.indexTab === tab.id;
+    const btn = document.createElement("button");
+    btn.className = `index-tab-btn${isActive ? " is-active" : ""}`;
+    btn.type = "button";
+    btn.dataset.tabId = tab.id;
+    btn.innerHTML = `<span class="index-tab-emoji">${tab.emoji}</span><span class="index-tab-label">${tab.label}</span>`;
+    sidebar.appendChild(btn);
+  }
+
+  const content = document.createElement("div");
+  content.className = "index-content";
+  renderIndexTabContent(content);
+
+  layout.appendChild(sidebar);
+  layout.appendChild(content);
+  searchResults.appendChild(layout);
+};
+
+const activateSearchFromIndex = (query) => {
+  state.indexVisible = false;
+  state.indexDrillDown = true;
+  drawerBack.classList.remove("is-hidden");
+  searchIndexButton?.classList.remove("is-active");
+  navigationDrawer.classList.remove("index-visible");
+  navigationDrawer.classList.add("search-focused");
+  searchInput.value = query;
+  searchClearButton.classList.remove("is-hidden");
+  searchColHeader.classList.remove("is-hidden");
+  handleSearchInput();
+};
+
+const clearSearch = () => {
+  state.indexVisible = false;
+  state.indexDrillDown = false;
+  drawerBack.classList.add("is-hidden");
+  searchIndexButton?.classList.remove("is-active");
+  navigationDrawer.classList.remove("index-visible");
+  // Return to where the user came from (or todas as fallback)
+  activateTab(state.prevTab || "todas");
+};
+
 const handleSearchInput = () => {
+  if (state.indexVisible) {
+    state.indexVisible = false;
+    searchIndexButton?.classList.remove("is-active");
+    navigationDrawer.classList.remove("index-visible");
+  }
   const query = searchInput.value;
+  searchClearButton.classList.toggle("is-hidden", !query);
+
   if (!query.trim()) {
     searchResults.innerHTML = "";
+    searchColHeader.classList.add("is-hidden");
+    renderActiveTab();
     return;
   }
+
+  searchColHeader.classList.remove("is-hidden");
   const themeResult = searchByTheme(query);
   if (themeResult) {
     renderThemeResults(themeResult.songs, `${themeResult.theme.emoji} ${themeResult.theme.label}`);
@@ -473,42 +1151,41 @@ const handleSearchInput = () => {
   renderSearchResults(results, query);
 };
 
+// ── Song / page navigation ────────────────────────────────────────────────────
 const turnSong = (direction, { keepOverlay = false } = {}) => {
   if (direction === 0 || state.totalSongs === 0) return;
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
-
   if (currentSongIndex < 0) {
     if (direction > 0) {
-      renderPage(state.songIndex[0].page);
+      renderPage(state.songIndex[0].page, { direction });
       clearDraft();
-      setOverlayVisible(keepOverlay);
+      if (!keepOverlay) closeDrawer();
     }
     return;
   }
-
   const nextIndex = clampSongIndex(currentSongIndex + direction);
   if (nextIndex === currentSongIndex) return;
-  renderPage(state.songIndex[nextIndex].page);
+  renderPage(state.songIndex[nextIndex].page, { direction });
   clearDraft();
-  setOverlayVisible(keepOverlay);
+  if (!keepOverlay) closeDrawer();
 };
 
+const turnPage = (direction) => {
+  const nextPage = clampPage(state.currentPage + direction);
+  if (nextPage === state.currentPage) return;
+  renderPage(nextPage, { direction });
+};
+
+// ── Fullscreen toggle ─────────────────────────────────────────────────────────
 const toggleFullscreen = async () => {
   if (!supportsFullscreen) return;
-
   if (canOfferPseudoFullscreen) {
-    state.immersiveMode = !state.immersiveMode;
-    setOverlayVisible(!state.immersiveMode);
-    updateFullscreenButton();
+    // For iOS standalone, just try to go fullscreen (limited effect)
     return;
   }
-
   try {
-    if (isFullscreen()) {
-      await exitFullscreen();
-    } else {
-      await requestFullscreen();
-    }
+    if (isFullscreen()) await exitFullscreen();
+    else await requestFullscreen();
   } catch (error) {
     console.error("No se pudo cambiar la pantalla completa", error);
   } finally {
@@ -516,47 +1193,411 @@ const toggleFullscreen = async () => {
   }
 };
 
+// ── Service worker ────────────────────────────────────────────────────────────
+const requestServiceWorkerActivation = (worker) => {
+  if (!worker) return;
+  try {
+    sessionStorage.setItem(SW_RELOAD_FLAG, "1");
+  } catch {}
+  worker.postMessage({ type: "SKIP_WAITING" });
+};
+
+const wireServiceWorkerRegistration = (registration) => {
+  if (!registration) return;
+
+  if (registration.waiting) {
+    requestServiceWorkerActivation(registration.waiting);
+  }
+
+  registration.addEventListener("updatefound", () => {
+    const installing = registration.installing;
+    if (!installing) return;
+
+    installing.addEventListener("statechange", () => {
+      if (installing.state === "installed" && navigator.serviceWorker.controller) {
+        requestServiceWorkerActivation(installing);
+      }
+    });
+  });
+
+  const refreshRegistration = () => registration.update().catch(() => {});
+  window.addEventListener("online", refreshRegistration);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refreshRegistration();
+    }
+  });
+};
+
 const registerServiceWorker = async () => {
   if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register("/sw.js");
+    let hasReloadedForUpdate = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hasReloadedForUpdate) return;
+      hasReloadedForUpdate = true;
+      const shouldReload = sessionStorage.getItem(SW_RELOAD_FLAG) === "1";
+      if (!shouldReload) return;
+      sessionStorage.removeItem(SW_RELOAD_FLAG);
+      window.location.reload();
+    });
+
+    const registration = await navigator.serviceWorker.register("/sw.js", {
+      updateViaCache: "none",
+    });
+    wireServiceWorkerRegistration(registration);
+    await registration.update();
   } catch (error) {
     console.error("No se pudo registrar el service worker", error);
   }
 };
 
+// ── Swipe gesture tracking ────────────────────────────────────────────────────
+// State for edge-swipe (right edge → open drawer)
+let edgeSwipe = null;
+// State for drawer swipe (swipe right inside drawer → close)
+let drawerSwipe = null;
+
+// ── Tab rendering functions ──────────────────────────────────────────────────
+
+const MISA_PARTS = [
+  // ── Ordered by liturgical sequence ──────────────────────────────────────────
+  { label: "🚪 Entrada",
+    check: (s) => s.themes.includes("entrada") || (s.title && /\bentrada\b/i.test(s.title)) },
+  { label: "🙏 Señor Ten Piedad (Kyrie)",
+    check: (s) => s.title && /piedad|kyrie|ten\s+piedad/i.test(s.title) },
+  { label: "✨ Gloria",
+    check: (s) => s.title && /\bgloria\b/i.test(s.title) },
+  { label: "📖 Salmo Responsorial",
+    check: (s) => s.title && /\bsalmo\b/i.test(s.title) },
+  { label: "🎺 Aleluya",
+    check: (s) => s.title && /\baleluya\b|\baluluya\b/i.test(s.title) },
+  { label: "🕊️ Santo / Hosanna",
+    check: (s) => s.title && /\bsanto\b|\bhosanna\b|\bsanctus\b/i.test(s.title) },
+  { label: "🥖 Cordero de Dios (Agnus Dei)",
+    check: (s) => s.title && /cordero|agnus/i.test(s.title) },
+  { label: "🍞 Comunión / Eucaristía",
+    check: (s) => s.themes.includes("eucaristia") },
+  { label: "🕯️ Ofertorio / Presentación",
+    check: (s) => s.themes.includes("ofertorio") || (s.title && /ofertorio/i.test(s.title)) },
+  { label: "🚶 Procesión",
+    check: (s) => s.themes.includes("procesion") },
+  { label: "🌟 Envío / Salida",
+    check: (s) => s.themes.includes("envio") || (s.title && /\benvio\b|\bsalida\b/i.test(s.title)) },
+  { label: "⛪ General de Misa",
+    check: (s) => s.themes.includes("misa") },
+];
+
+const TEMPORADA_GROUPS = [
+  { label: "Adviento 🕯️",        check: (s) => s.themes.includes("adviento") },
+  { label: "Navidad 🎄",          check: (s) => s.themes.includes("navidad") },
+  { label: "Cuaresma / Semana Santa ✝️", check: (s) => s.themes.includes("cuaresma") },
+  { label: "Pascua / Resurrección 🌅", check: (s) => s.themes.includes("resurreccion") },
+  { label: "Tiempo Ordinario ⭐", check: (s) => !s.themes.some((t) => ["adviento","navidad","cuaresma","resurreccion"].includes(t)) },
+];
+
+// 8-color cycling palette — headers and number badges share the same gc class
+const GC = ["gc-0","gc-1","gc-2","gc-3","gc-4","gc-5","gc-6","gc-7"];
+
+const renderSongItem = (song, container, gc = "") => {
+  const btn = document.createElement("button");
+  btn.className = ["search-result-item", gc].filter(Boolean).join(" ");
+  btn.type = "button";
+  btn.dataset.page = String(song.page);
+  const keyBadge = song.key
+    ? `<span class="search-result-key">${song.key}</span>`
+    : "";
+  btn.innerHTML = `
+    <div class="search-result-header">
+      <span class="search-result-num">${song.song}</span>
+      <span class="search-result-title">${song.title || `Canción ${song.song}`}</span>
+      ${keyBadge}
+    </div>`;
+  container.appendChild(btn);
+};
+
+const renderGroupedSongs = (groups, allSongs, container) => {
+  const assigned = new Set();
+  let ci = 0;
+  for (const group of groups) {
+    const songs = allSongs.filter((s) => !assigned.has(s.song) && group.check(s));
+    if (!songs.length) continue;
+    songs.forEach((s) => assigned.add(s.song));
+    const gc = GC[ci % GC.length]; ci++;
+    const header = document.createElement("p");
+    header.className = `browse-group-header ${gc}`;
+    header.textContent = group.label;
+    container.appendChild(header);
+    songs.forEach((s) => renderSongItem(s, container, gc));
+  }
+};
+
+const renderTabMisa = () => {
+  searchColHeader.classList.add("is-hidden");
+  searchResults.innerHTML = "";
+  renderGroupedSongs(MISA_PARTS, state.songIndex, searchResults);
+  if (!searchResults.children.length) {
+    const p = document.createElement("p");
+    p.className = "browse-empty";
+    p.textContent = "No hay canciones con temas de misa asignados aún.";
+    searchResults.appendChild(p);
+  }
+};
+
+const renderTabRecientes = () => {
+  searchColHeader.classList.add("is-hidden");
+  searchResults.innerHTML = "";
+  const nums = getRecientes();
+  if (!nums.length) {
+    const p = document.createElement("p");
+    p.className = "browse-empty";
+    p.textContent = "Aquí aparecerán las canciones que hayas visitado recientemente.";
+    searchResults.appendChild(p);
+    return;
+  }
+  for (const num of nums) {
+    const song = state.songIndex.find((s) => s.song === num);
+    if (song) renderSongItem(song, searchResults);
+  }
+};
+
+const renderTabTemas = () => {
+  searchColHeader.classList.add("is-hidden");
+  searchResults.innerHTML = "";
+  const themes = state.themeIndex
+    .map((t) => ({ ...t, songs: state.songIndex.filter((s) => s.themes?.includes(t.id)) }))
+    .filter((t) => t.songs.length > 0)
+    .sort((a, b) => a.label.localeCompare(b.label, "es"));
+  themes.forEach((theme, i) => {
+    const gc = GC[i % GC.length];
+    const hdr = document.createElement("p");
+    hdr.className = `browse-group-header ${gc}`;
+    hdr.textContent = `${theme.emoji} ${theme.label}  (${theme.songs.length})`;
+    searchResults.appendChild(hdr);
+    theme.songs
+      .sort((a, b) => (a.title || "").localeCompare(b.title || "", "es"))
+      .forEach((s) => renderSongItem(s, searchResults, gc));
+  });
+};
+
+const renderTabTemporada = () => {
+  searchColHeader.classList.add("is-hidden");
+  searchResults.innerHTML = "";
+  renderGroupedSongs(TEMPORADA_GROUPS, state.songIndex, searchResults);
+};
+
+const renderTabTodas = () => {
+  searchColHeader.classList.add("is-hidden");
+  searchResults.innerHTML = "";
+  // Sort A-Z by title (Spanish locale), numbers at bottom
+  const titled = [...state.songIndex].filter((s) => s.title).sort((a, b) => a.title.localeCompare(b.title, "es", { sensitivity: "base" }));
+  const untitled = state.songIndex.filter((s) => !s.title).sort((a, b) => a.song - b.song);
+  let currentLetter = null;
+  for (const s of titled) {
+    const letter = s.title[0].toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // strip accent for grouping
+    if (letter !== currentLetter) {
+      currentLetter = letter;
+      const hdr = document.createElement("p");
+      hdr.className = "browse-group-header browse-letter-header";
+      hdr.textContent = letter;
+      searchResults.appendChild(hdr);
+    }
+    renderSongItem(s, searchResults);
+  }
+  if (untitled.length) {
+    const hdr = document.createElement("p");
+    hdr.className = "browse-group-header gc-4";
+    hdr.textContent = "Sin título";
+    searchResults.appendChild(hdr);
+    untitled.forEach((s) => renderSongItem(s, searchResults, "gc-4"));
+  }
+};
+
+const SOLFEGE_MAP = { C:"Do", Db:"Re♭", D:"Re", Eb:"Mi♭", E:"Mi", F:"Fa", "F#":"Fa#", G:"Sol", Ab:"La♭", A:"La", Bb:"Si♭", B:"Si" };
+const renderTabTono = () => {
+  searchColHeader.classList.add("is-hidden");
+  searchResults.innerHTML = "";
+  const KEY_ORDER = ["C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+  const byKey = {};
+  for (const s of state.songIndex) {
+    const k = s.key || "?";
+    if (!byKey[k]) byKey[k] = [];
+    byKey[k].push(s);
+  }
+  const groups = KEY_ORDER.filter((k) => byKey[k]);
+  groups.forEach((k, i) => {
+    const gc = GC[i % GC.length];
+    const solfege = SOLFEGE_MAP[k] || k;
+    const header = document.createElement("p");
+    header.className = `browse-group-header ${gc}`;
+    header.textContent = `${solfege}  (${k})  — ${byKey[k].length} canción${byKey[k].length !== 1 ? "es" : ""}`;
+    searchResults.appendChild(header);
+    byKey[k].forEach((s) => renderSongItem(s, searchResults, gc));
+  });
+  if (byKey["?"]) {
+    const gc = GC[groups.length % GC.length];
+    const header = document.createElement("p");
+    header.className = `browse-group-header ${gc}`;
+    header.textContent = `Tonalidad no especificada — ${byKey["?"].length} canciones`;
+    searchResults.appendChild(header);
+    byKey["?"].forEach((s) => renderSongItem(s, searchResults, gc));
+  }
+};
+
+const renderActiveTab = () => {
+  switch (state.activeTab) {
+    case "buscar":    renderTabBuscar();    break;
+    case "misa":      renderTabMisa();      break;
+    case "recientes": renderTabRecientes(); break;
+    case "temas":     renderTabTemas();     break;
+    case "temporada": renderTabTemporada(); break;
+    case "todas":     renderTabTodas();     break;
+    case "tono":      renderTabTono();      break;
+    default:          renderTabTodas();
+  }
+};
+
+const renderTabBuscar = () => {
+  searchRow.classList.remove("is-hidden");
+  if (!searchInput.value.trim()) {
+    searchResults.innerHTML = "";
+    searchColHeader.classList.add("is-hidden");
+    const p = document.createElement("p");
+    p.className = "browse-empty";
+    p.textContent = "Escribe para buscar por título, letra o tema…";
+    searchResults.appendChild(p);
+  }
+  // If there's already a query, results are kept as-is from handleSearchInput
+};
+
+// ── Drawer mode switcher: "numpad" ↔ "browse" ────────────────────────────────
+const switchDrawerMode = (mode) => {
+  state.drawerMode = mode;
+  const isBrowse = mode === "browse";
+  navigationDrawer.classList.toggle("mode-browse", isBrowse);
+  modeBtnNumpad.classList.toggle("is-active", !isBrowse);
+  modeBtnBrowse.classList.toggle("is-active", isBrowse);
+  modeBtnNumpad.setAttribute("aria-selected", String(!isBrowse));
+  modeBtnBrowse.setAttribute("aria-selected", String(isBrowse));
+  if (isBrowse) renderActiveTab();
+};
+
+// ── Tab activation helper ─────────────────────────────────────────────────────
+const activateTab = (tabId) => {
+  const isBuscar = tabId === "buscar";
+  // Remember where we came from so the back button can return there
+  if (isBuscar && state.activeTab !== "buscar") {
+    state.prevTab = state.activeTab;
+  }
+  state.activeTab = tabId;
+
+  // Update rail highlight
+  drawerTabRail.querySelectorAll(".rail-tab").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.tab === tabId);
+  });
+
+  // Full-screen search: hide rail, expand pane; also hides numpad via search-focused
+  navigationDrawer.classList.toggle("search-focused", isBuscar);
+  navigationDrawer.classList.toggle("search-fullscreen", isBuscar);
+
+  // Show/hide search row (contains back button + input)
+  searchRow.classList.toggle("is-hidden", !isBuscar);
+
+  if (!isBuscar) {
+    searchInput.value = "";
+    searchClearButton.classList.add("is-hidden");
+    searchColHeader.classList.add("is-hidden");
+  }
+  renderActiveTab();
+  if (isBuscar) {
+    // Small delay to let layout settle before focusing (iOS keyboard timing)
+    setTimeout(() => searchInput.focus(), 60);
+  }
+};
+
+// ── Event binding ─────────────────────────────────────────────────────────────
 const bindReaderEvents = () => {
+  // Numpad digit press
   numberpadGrid.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-digit]");
     if (!button) return;
+    haptic();
     appendDigit(button.dataset.digit);
   });
 
-  clearButton.addEventListener("click", clearDraft);
-  backspaceButton.addEventListener("click", backspaceDraft);
-  goButton.addEventListener("click", goToDraftSong);
+  backspaceButton.addEventListener("click", () => { haptic(); backspaceDraft(); });
+  displayClearButton.addEventListener("click", () => { haptic(); clearDraft(); });
+  goButton.addEventListener("click", () => { haptic(12); goToDraftSong(); });
 
+  // Drawer nav prev/next (stay in drawer so keepOverlay=true)
   prevPageButton.addEventListener("click", () => {
+    haptic(12);
     turnSong(-1, { keepOverlay: true });
   });
 
   nextPageButton.addEventListener("click", () => {
+    haptic(12);
     turnSong(1, { keepOverlay: true });
   });
 
+  // History back
   prevCornerButton.addEventListener("click", () => {
+    haptic();
     goBackInHistory();
   });
 
-  dismissTop.addEventListener("click", () => setOverlayVisible(false));
-  dismissBottom.addEventListener("click", () => setOverlayVisible(false));
+  // Drawer close button
+  drawerCloseButton.addEventListener("click", () => {
+    haptic();
+    closeDrawer();
+  });
 
+  // Mode switch buttons: 🔢 Teclado ↔ 📚 Explorar
+  modeBtnNumpad.addEventListener("click", () => {
+    haptic();
+    switchDrawerMode("numpad");
+  });
+  modeBtnBrowse.addEventListener("click", () => {
+    haptic();
+    switchDrawerMode("browse");
+  });
+
+  // Search back button → exit fullscreen search, return to previous tab (stay in browse mode)
+  searchBackButton.addEventListener("click", () => {
+    haptic();
+    searchInput.blur();
+    activateTab(state.prevTab || "todas");
+  });
+
+  // Drawer handle tap → open
+  drawerHandle.addEventListener("click", () => {
+    haptic();
+    openDrawer();
+  });
+
+  // Backdrop tap → close
+  drawerBackdrop.addEventListener("click", () => {
+    haptic();
+    closeDrawer();
+  });
+
+  // Drawer back breadcrumb → return to index
+  drawerBack.addEventListener("click", () => {
+    haptic();
+    renderIndexPanel();
+  });
+
+  // Search input
   searchInput.addEventListener("focus", () => {
-    navigationNumberpad.classList.add("search-focused");
+    navigationDrawer.classList.add("search-focused");
   });
 
   searchInput.addEventListener("blur", () => {
-    navigationNumberpad.classList.remove("search-focused");
+    // Only collapse if no value and not in drill-down or index mode
+    if (!searchInput.value.trim() && !state.indexVisible && !state.indexDrillDown) {
+      navigationDrawer.classList.remove("search-focused");
+      searchColHeader.classList.add("is-hidden");
+    }
   });
 
   searchInput.addEventListener("input", handleSearchInput);
@@ -565,49 +1606,183 @@ const bindReaderEvents = () => {
     if (event.key === "Enter") {
       event.preventDefault();
       searchInput.blur();
-      const firstItem = searchResults.querySelector(".search-result-item[data-page]");
-      if (firstItem) {
-        const pageNum = Number.parseInt(firstItem.dataset.page, 10);
-        if (Number.isFinite(pageNum)) {
-          searchInput.value = "";
-          searchResults.innerHTML = "";
-          renderPage(pageNum);
-          setOverlayVisible(false);
-        }
-      }
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      clearSearch();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const first = searchResults.querySelector(".search-result-item");
+      if (first) first.focus();
     }
   });
 
-  searchResults.addEventListener("click", (event) => {
-    const item = event.target.closest(".search-result-item[data-page]");
-    if (!item) return;
-    const pageNum = Number.parseInt(item.dataset.page, 10);
-    if (!Number.isFinite(pageNum)) return;
-    searchInput.value = "";
-    searchResults.innerHTML = "";
-    renderPage(pageNum);
-    setOverlayVisible(false);
+  searchResults.addEventListener("keydown", (event) => {
+    const items = [...searchResults.querySelectorAll(".search-result-item")];
+    const idx = items.indexOf(document.activeElement);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (idx < items.length - 1) items[idx + 1].focus();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (idx > 0) items[idx - 1].focus();
+      else searchInput.focus();
+    } else if (event.key === "Escape") {
+      clearSearch();
+    }
   });
 
+  searchClearButton.addEventListener("click", () => {
+    haptic();
+    if (state.indexDrillDown) {
+      // Go back to index instead of fully clearing
+      renderIndexPanel();
+    } else {
+      clearSearch();
+    }
+  });
+
+  // Search cancel — hidden in new design (rail handles this), kept for compat
+  searchCancelButton?.addEventListener("click", () => {
+    haptic();
+    clearSearch();
+    searchInput.blur();
+  });
+
+  searchResults.addEventListener("click", (event) => {
+    // Song result — navigate, keep drawer open
+    const item = event.target.closest(".search-result-item[data-page]");
+    if (item) {
+      haptic();
+      const pageNum = Number.parseInt(item.dataset.page, 10);
+      if (Number.isFinite(pageNum)) {
+        renderPage(pageNum);
+        // Find song for this page and track it
+        const songForPage = state.songIndex.find((s) => s.page === pageNum);
+        if (songForPage) addToRecientes(songForPage.song);
+        // Return to numpad mode so the user can see song context + navigate
+        switchDrawerMode("numpad");
+      }
+      return;
+    }
+
+    // Sort tab click
+    const sortTab = event.target.closest(".index-sort-tab[data-sort-id]");
+    if (sortTab) {
+      haptic();
+      const sortId = sortTab.dataset.sortId;
+      const context = sortTab.dataset.context;
+      if (context && sortId) {
+        state.indexSortPrefs[context] = sortId;
+        saveSortPrefs();
+        const layout = searchResults.querySelector(".index-layout");
+        if (layout) {
+          const content = layout.querySelector(".index-content");
+          if (content) renderIndexTabContent(content);
+        }
+      }
+      return;
+    }
+
+    // Index: tab button (sidebar)
+    const tabBtn = event.target.closest(".index-tab-btn[data-tab-id]");
+    if (tabBtn) {
+      haptic();
+      const tabId = tabBtn.dataset.tabId;
+      state.indexTab = tabId;
+      const layout = searchResults.querySelector(".index-layout");
+      if (layout) {
+        layout.querySelectorAll(".index-tab-btn").forEach((btn) => {
+          btn.classList.toggle("is-active", btn.dataset.tabId === tabId);
+        });
+        const content = layout.querySelector(".index-content");
+        if (content) renderIndexTabContent(content);
+      }
+      return;
+    }
+
+    // Index: theme chip → drill in
+    const themeChip = event.target.closest(".index-theme-chip[data-theme-label]");
+    if (themeChip) {
+      haptic();
+      activateSearchFromIndex(themeChip.dataset.themeLabel);
+      return;
+    }
+
+    // Index: keyword chip → drill in
+    const kwChip = event.target.closest(".index-keyword-chip[data-keyword]");
+    if (kwChip) {
+      haptic();
+      activateSearchFromIndex(kwChip.dataset.keyword);
+      return;
+    }
+  });
+
+  // Index toggle button (button removed from HTML; guard against null)
+  searchIndexButton?.addEventListener("click", () => {
+    haptic();
+    if (state.indexVisible) {
+      clearSearch();
+    } else {
+      renderIndexPanel();
+    }
+  });
+
+  // Tab rail — persistent left-side navigation
+  drawerTabRail.addEventListener("click", (event) => {
+    const tab = event.target.closest(".rail-tab[data-tab]");
+    if (!tab) return;
+    haptic();
+    activateTab(tab.dataset.tab);
+  });
+
+  // Help panel
+  helpButton.addEventListener("click", () => {
+    haptic();
+    helpPanel.classList.remove("is-hidden");
+  });
+
+  helpCloseButton.addEventListener("click", () => {
+    haptic();
+    helpPanel.classList.add("is-hidden");
+  });
+
+  // Tip dismiss (× button on the banner itself)
+  tipDismissButton.addEventListener("click", () => {
+    haptic();
+    numpadTipWrap.classList.add("is-hidden");
+    try { localStorage.setItem(TIP_KEY, "dismissed"); } catch {}
+  });
+
+  // Haptic toggle
+  const syncHapticToggle = () => {
+    hapticToggleButton.setAttribute("aria-pressed", hapticEnabled ? "true" : "false");
+  };
+  syncHapticToggle();
+  hapticToggleButton.addEventListener("click", () => {
+    hapticEnabled = !hapticEnabled;
+    try { localStorage.setItem(HAPTIC_PREF_KEY, hapticEnabled ? "on" : "off"); } catch {}
+    syncHapticToggle();
+    haptic(12); // Give immediate feedback when turning ON
+  });
+
+  // Fullscreen
   fullscreenButton.addEventListener("click", () => {
+    haptic();
     toggleFullscreen().catch((error) => {
       console.error("No se pudo activar la pantalla completa", error);
     });
   });
 
-  viewerShell.addEventListener("click", (event) => {
-    if (Date.now() - state.lastTouchEndedAt < 450) return;
-    if (event.target !== viewerShell && event.target !== pageImage) return;
-    if (event.detail > 1) return;
-    setOverlayVisible(!state.overlayVisible);
-  });
-
+  // ── Touch: page-swipe on viewer ────────────────────────────────────────────
   viewerShell.addEventListener("touchstart", (event) => {
     if (event.touches.length !== 1) {
       state.touchStart = null;
       return;
     }
-
     const touch = event.touches[0];
     state.touchStart = { x: touch.clientX, y: touch.clientY, time: Date.now() };
   }, { passive: true });
@@ -617,50 +1792,111 @@ const bindReaderEvents = () => {
     const touch = event.changedTouches[0];
     const deltaX = touch.clientX - state.touchStart.x;
     const deltaY = touch.clientY - state.touchStart.y;
-    const elapsed = Date.now() - state.touchStart.time;
+    const startX = state.touchStart.x;
     state.lastTouchEndedAt = Date.now();
     state.touchStart = null;
 
-    if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY)) {
+    // Left-edge swipe inward → open drawer
+    // Must start within 44px of left edge AND move at least 40px right
+    if (startX < 44 && deltaX > 40 && Math.abs(deltaX) > Math.abs(deltaY)) {
       event.preventDefault();
-      turnSong(deltaX < 0 ? 1 : -1);
+      haptic();
+      openDrawer();
       return;
     }
 
-    if (Math.abs(deltaX) < 14 && Math.abs(deltaY) < 14 && elapsed < 360) {
+    // Horizontal page swipe (not from edge zone)
+    if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY) && startX >= 44) {
       event.preventDefault();
-      setOverlayVisible(!state.overlayVisible);
+      turnPage(deltaX < 0 ? 1 : -1);
+      return;
     }
+
+    // No single-tap toggle (Keynote-style: drawer only opens via swipe or handle)
   }, { passive: false });
 
+  // ── Touch: swipe right on drawer → close ──────────────────────────────────
+  navigationDrawer.addEventListener("touchstart", (event) => {
+    if (event.touches.length !== 1) return;
+    const t = event.touches[0];
+    drawerSwipe = { x: t.clientX, y: t.clientY };
+  }, { passive: true });
+
+  navigationDrawer.addEventListener("touchmove", (event) => {
+    if (!drawerSwipe || event.touches.length !== 1) return;
+    const t = event.touches[0];
+    const dx = t.clientX - drawerSwipe.x;
+    const dy = t.clientY - drawerSwipe.y;
+    // If gesture is clearly vertical, abandon swipe tracking so native scroll works
+    if (Math.abs(dy) > Math.abs(dx) * 1.2) { drawerSwipe = null; return; }
+    // Live drag: only if clearly horizontal left-ward (closing)
+    if (dx < -12 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      navigationDrawer.classList.add("is-dragging");
+      const clampedDx = Math.max(dx, -navigationDrawer.offsetWidth);
+      navigationDrawer.style.transform = `translateX(${clampedDx}px)`;
+      const progress = 1 - Math.abs(clampedDx) / navigationDrawer.offsetWidth;
+      drawerBackdrop.style.background = `rgba(0,0,0,${(0.38 * progress).toFixed(3)})`;
+    }
+  }, { passive: true });
+
+  navigationDrawer.addEventListener("touchend", (event) => {
+    if (!drawerSwipe || event.changedTouches.length !== 1) return;
+    const t = event.changedTouches[0];
+    const dx = t.clientX - drawerSwipe.x;
+    const dy = t.clientY - drawerSwipe.y;
+    drawerSwipe = null;
+
+    // Reset any live-drag styles
+    navigationDrawer.classList.remove("is-dragging");
+    navigationDrawer.style.transform = "";
+    drawerBackdrop.style.background = "";
+
+    // If swiped left far enough, close
+    if (dx < -60 && Math.abs(dx) > Math.abs(dy)) {
+      haptic();
+      closeDrawer();
+    }
+    // else snap back (CSS transition handles it automatically)
+  }, { passive: true });
+
+  // ── Touch: edge swipe (window level) to open drawer ───────────────────────
+  // This handles the case where the touch starts at the right edge
+  // but viewerShell may not cover the full width
+  window.addEventListener("touchstart", (event) => {
+    if (event.touches.length !== 1) return;
+    const t = event.touches[0];
+    if (t.clientX < 44) {
+      edgeSwipe = { x: t.clientX, y: t.clientY };
+    } else {
+      edgeSwipe = null;
+    }
+  }, { passive: true });
+
+  window.addEventListener("touchend", (event) => {
+    if (!edgeSwipe || event.changedTouches.length !== 1) return;
+    const t = event.changedTouches[0];
+    const dx = t.clientX - edgeSwipe.x;
+    const dy = t.clientY - edgeSwipe.y;
+    edgeSwipe = null;
+
+    if (dx > 40 && Math.abs(dx) > Math.abs(dy) && !state.drawerOpen) {
+      haptic();
+      openDrawer();
+    }
+  }, { passive: true });
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   window.addEventListener("keydown", (event) => {
-    if (/^[0-9]$/.test(event.key)) {
-      appendDigit(event.key);
-      return;
-    }
-
-    if (event.key === "Backspace") {
-      backspaceDraft();
-      return;
-    }
-
+    if (/^[0-9]$/.test(event.key)) { appendDigit(event.key); return; }
+    if (event.key === "Backspace") { backspaceDraft(); return; }
     if (event.key === "Escape") {
+      if (state.drawerOpen) { closeDrawer(); return; }
       clearDraft();
       return;
     }
-
-    if (event.key === "Enter") {
-      goToDraftSong();
-      return;
-    }
-
-    if (event.key === "ArrowRight") {
-      turnSong(1);
-    }
-
-    if (event.key === "ArrowLeft") {
-      turnSong(-1);
-    }
+    if (event.key === "Enter") { goToDraftSong(); return; }
+    if (event.key === "ArrowRight") turnSong(1);
+    if (event.key === "ArrowLeft") turnSong(-1);
   });
 
   ["fullscreenchange", "webkitfullscreenchange"].forEach((eventName) => {
@@ -668,6 +1904,7 @@ const bindReaderEvents = () => {
   });
 };
 
+// ── Init ──────────────────────────────────────────────────────────────────────
 const initReader = async () => {
   const inlinedPages = document.getElementById("pages-data");
   const manifest = inlinedPages
@@ -679,11 +1916,10 @@ const initReader = async () => {
   state.themeIndex = manifest.themeIndex || [];
   renderDraft();
   renderStatus();
-  state.immersiveMode = canOfferPseudoFullscreen && isStandaloneApp;
-  setOverlayVisible(!state.immersiveMode);
   updateFullscreenButton();
-  renderPage(1, { pushToHistory: false });
+  renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   loadSearchIndex();
+  renderActiveTab();
 };
 
 clearInitialUrl();
@@ -691,5 +1927,5 @@ registerServiceWorker();
 bindReaderEvents();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
-  setLoading(true, "No se pudo cargar Nuestro Coro.");
+  setLoading(true, "No se pudo cargar Signo Vino.");
 });
