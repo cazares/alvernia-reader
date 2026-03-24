@@ -35,6 +35,9 @@ test("web app registration forces service worker refresh, blocks until full offl
   assert.match(source, /const requireOfflineBundle = async \(totalPages\) =>/);
   assert.match(source, /await ensureOfflineBundle\(totalPages, \(progress, total\) =>/);
   assert.match(source, /Conéctate una vez/);
+  assert.match(source, /title: "Offline listo"/);
+  assert.match(source, /ready: true/);
+  assert.match(source, /offlineContinueButton\.addEventListener\("click"/);
   assert.match(source, /pageImageMatches\(nextPage\) && pageImage\.complete && pageImage\.naturalWidth > 0/);
   assert.match(source, /state\.currentPage = DEFAULT_START_PAGE;/);
   assert.match(source, /hideLoadingIndicator\(\);\s+await requireOfflineBundle\(state\.totalPages\);/);
@@ -61,6 +64,8 @@ test("initial web shell points directly at page 2", () => {
   assert.match(source, /id="page-image" src="\/pages\/page-002\.jpg"/);
   assert.match(source, /id="offline-gate"/);
   assert.match(source, /id="offline-progress-bar"/);
+  assert.match(source, /id="offline-ready-note"/);
+  assert.match(source, /id="offline-continue-button"/);
   assert.match(source, /id="offline-retry-button"/);
 });
 
@@ -68,4 +73,6 @@ test("loading pill stays above the drawer overlay", () => {
   const source = readText("web/src/styles.css");
 
   assert.match(source, /\.loading \{[\s\S]*z-index: 30;/);
+  assert.match(source, /\.offline-ready-note \{/);
+  assert.match(source, /\.offline-continue-button,/);
 });

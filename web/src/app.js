@@ -7,6 +7,8 @@ const offlineGateTitle = document.getElementById("offline-gate-title");
 const offlineGateBody = document.getElementById("offline-gate-body");
 const offlineProgressBar = document.getElementById("offline-progress-bar");
 const offlineProgressValue = document.getElementById("offline-progress-value");
+const offlineReadyNote = document.getElementById("offline-ready-note");
+const offlineContinueButton = document.getElementById("offline-continue-button");
 const offlineRetryButton = document.getElementById("offline-retry-button");
 const overlayControls = document.getElementById("overlay-controls");
 const drawerHandle = document.getElementById("drawer-handle");
@@ -232,6 +234,7 @@ const setOfflineGateState = ({
   body = "Descargando todo el manual para que funcione 100% offline.",
   progress = 0,
   total = 0,
+  ready = false,
   canRetry = false,
 } = {}) => {
   offlineGate.classList.toggle("is-hidden", !visible);
@@ -242,6 +245,8 @@ const setOfflineGateState = ({
   offlineProgressValue.textContent = total > 0
     ? `${progress} / ${total} páginas`
     : "Esperando conexión";
+  offlineReadyNote.classList.toggle("is-hidden", !ready);
+  offlineContinueButton.classList.toggle("is-hidden", !ready);
   offlineRetryButton.classList.toggle("is-hidden", !canRetry);
 };
 
@@ -363,7 +368,15 @@ const requireOfflineBundle = async (totalPages) => {
     });
   });
 
-  setOfflineGateState({ visible: false });
+  setOfflineGateState({
+    visible: true,
+    title: "Offline listo",
+    body: "La descarga terminó. Este iPad ya puede abrir Signo Vino sin internet.",
+    progress: totalPages,
+    total: totalPages,
+    ready: true,
+    canRetry: false,
+  });
 };
 
 // ── History helpers ───────────────────────────────────────────────────────────
@@ -1658,6 +1671,10 @@ const activateTab = (tabId) => {
 
 // ── Event binding ─────────────────────────────────────────────────────────────
 const bindReaderEvents = () => {
+  offlineContinueButton.addEventListener("click", () => {
+    setOfflineGateState({ visible: false });
+  });
+
   offlineRetryButton.addEventListener("click", () => {
     window.location.reload();
   });
