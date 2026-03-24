@@ -1,10 +1,10 @@
 /**
- * Generates a fully self-contained alvernia-offline.html for AirDrop to iPad.
+ * Generates a fully self-contained signo-vino-offline.html for AirDrop to iPad.
  *
  * Run AFTER the main build:
  *   node web/build.mjs && node web/build-offline.mjs
  *
- * The output file has everything embedded — CSS, JS, and all 368 page images
+ * The output file has everything embedded — CSS, JS, and all page images
  * as base64 data URIs (re-compressed to ~q55 to reduce size). Open it on iPad
  * by tapping it in Files after AirDrop; Safari opens it with full offline support.
  */
@@ -69,10 +69,10 @@ html = html.replace(
   `${offlineScript}\n    ${appScript}`,
 );
 
-// Point initial <img src> at page 1 data URI so it's immediately visible
+// Point initial <img src> at page 2 data URI so it's immediately visible
 html = html.replace(
-  'src="/pages/page-001.jpg"',
-  `src="${pagesData[1]}"`,
+  'src="/pages/page-002.jpg"',
+  `src="${pagesData[2]}"`,
 );
 
 // Strip external resource references that don't work offline
@@ -81,10 +81,10 @@ html = html
   .replace(/\s*<link rel="icon"[^>]*>\n?/, "\n")
   .replace(/\s*<link rel="apple-touch-icon"[^>]*>\n?/, "\n");
 
-const outPath = path.join(distDir, "alvernia-offline.html");
+const outPath = path.join(distDir, "signo-vino-offline.html");
 fs.writeFileSync(outPath, html);
 
 const sizeMB = (fs.statSync(outPath).size / 1024 / 1024).toFixed(1);
 console.log(`\nWrote ${outPath}`);
 console.log(`File size: ${sizeMB} MB`);
-console.log("\nAirDrop alvernia-offline.html to iPad, tap it in Files → opens in Safari.");
+console.log("\nAirDrop signo-vino-offline.html to iPad, tap it in Files → opens in Safari.");
