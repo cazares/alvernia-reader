@@ -10,6 +10,8 @@ const PAGES_MANIFEST_PATH = "/pages.json";
 const ROOT_PROXY_HOSTS = new Set([
   "miguelcoro.com",
   "www.miguelcoro.com",
+  "signovino.com",
+  "www.signovino.com",
   "miguelbase.com",
   "www.miguelbase.com",
   "miguelworld.com",
