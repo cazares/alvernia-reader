@@ -7,8 +7,10 @@ const offlineGateTitle = document.getElementById("offline-gate-title");
 const offlineGateBody = document.getElementById("offline-gate-body");
 const offlineProgressBar = document.getElementById("offline-progress-bar");
 const offlineProgressValue = document.getElementById("offline-progress-value");
+const offlineAdminNote = document.getElementById("offline-admin-note");
 const offlineReadyNote = document.getElementById("offline-ready-note");
 const offlineMetaNote = document.getElementById("offline-meta-note");
+const offlineTestButton = document.getElementById("offline-test-button");
 const offlineContinueButton = document.getElementById("offline-continue-button");
 const offlineRetryButton = document.getElementById("offline-retry-button");
 const overlayControls = document.getElementById("overlay-controls");
@@ -96,6 +98,7 @@ let cachedKeywords = null;
 
 // ── Environment detection ─────────────────────────────────────────────────────
 const initialUrl = new URL(window.location.href);
+const isAdminSetupMode = initialUrl.searchParams.get("admin") === "1";
 const userAgent = navigator.userAgent;
 const isIOS = /iphone|ipad|ipod/i.test(userAgent);
 const isStandaloneApp = window.matchMedia("(display-mode: standalone)").matches
@@ -303,8 +306,10 @@ const setOfflineGateState = ({
   body = "Descargando todo el manual para que funcione 100% offline.",
   progress = 0,
   total = 0,
+  showAdminNote = false,
   ready = false,
   metadataText = "",
+  canTestOffline = false,
   canRetry = false,
 } = {}) => {
   offlineGate.classList.toggle("is-hidden", !visible);
@@ -315,9 +320,11 @@ const setOfflineGateState = ({
   offlineProgressValue.textContent = total > 0
     ? `${progress} / ${total} páginas`
     : "Esperando conexión";
+  offlineAdminNote.classList.toggle("is-hidden", !(showAdminNote && isAdminSetupMode));
   offlineReadyNote.classList.toggle("is-hidden", !ready);
   offlineMetaNote.textContent = metadataText;
   offlineMetaNote.classList.toggle("is-hidden", !metadataText);
+  offlineTestButton.classList.toggle("is-hidden", !(canTestOffline && isAdminSetupMode));
   offlineContinueButton.classList.toggle("is-hidden", !ready);
   offlineRetryButton.classList.toggle("is-hidden", !canRetry);
 };
@@ -427,6 +434,7 @@ const requireOfflineBundle = async (totalPages) => {
       body: "Este iPad todavía no ha descargado todo el manual. Conéctalo a internet y abre la app para completar la descarga offline.",
       progress: 0,
       total: totalPages,
+      showAdminNote: true,
       canRetry: true,
     });
     throw new Error("La descarga offline completa todavía no está lista.");
@@ -438,6 +446,7 @@ const requireOfflineBundle = async (totalPages) => {
     body: "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
     progress: 0,
     total: totalPages,
+    showAdminNote: true,
     canRetry: false,
   });
 
@@ -450,6 +459,7 @@ const requireOfflineBundle = async (totalPages) => {
         : "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
       progress,
       total,
+      showAdminNote: true,
       canRetry: false,
     });
   });
@@ -463,10 +473,12 @@ const requireOfflineBundle = async (totalPages) => {
     body: "La descarga terminó. Este iPad ya puede abrir Signo Vino sin internet.",
     progress: totalPages,
     total: totalPages,
+    showAdminNote: true,
     ready: true,
     metadataText: verifiedAtText
       ? `Verificado: ${verifiedAtText} · Versión ${CACHE_VERSION} · ${totalPages} páginas`
       : `Versión ${CACHE_VERSION} · ${totalPages} páginas`,
+    canTestOffline: true,
     canRetry: false,
   });
 };
@@ -1763,6 +1775,39 @@ const activateTab = (tabId) => {
 
 // ── Event binding ─────────────────────────────────────────────────────────────
 const bindReaderEvents = () => {
+  offlineTestButton.addEventListener("click", async () => {
+    const wasVisible = !offlineGate.classList.contains("is-hidden");
+    setOfflineGateState({ visible: false });
+    try {
+      await renderPage(state.currentPage || DEFAULT_START_PAGE, { pushToHistory: false });
+      const wasOnline = navigator.onLine ? "Con internet activo" : "Sin internet detectado";
+      setOfflineGateState({
+        visible: true,
+        title: "Prueba completada",
+        body: "La página actual cargó correctamente. Si quieres, ahora apaga Wi‑Fi y vuelve a tocar este botón para confirmar la prueba real offline.",
+        progress: state.totalPages,
+        total: state.totalPages,
+        showAdminNote: true,
+        ready: true,
+        metadataText: wasOnline,
+        canTestOffline: true,
+        canRetry: false,
+      });
+    } catch {
+      setOfflineGateState({
+        visible: true,
+        title: "Prueba falló",
+        body: "Todavía no está listo para entregarse. Mantén este iPad conectado y vuelve a intentarlo cuando termine la descarga.",
+        progress: 0,
+        total: state.totalPages,
+        showAdminNote: true,
+        canTestOffline: true,
+        canRetry: true,
+      });
+    }
+    if (!wasVisible) setLoading(false);
+  });
+
   offlineContinueButton.addEventListener("click", () => {
     setOfflineGateState({ visible: false });
   });
