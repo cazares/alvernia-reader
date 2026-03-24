@@ -521,7 +521,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     clearLoadingTimer();
     console.error("No se pudo cargar la página solicitada", nextPage, error);
     setLoading(true, "No se pudo cargar esta página.");
-    openDrawer();
+    closeDrawer();
   }
 };
 
