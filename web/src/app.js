@@ -109,6 +109,10 @@ const pageFileName = (pageNumber) => `/pages/page-${String(pageNumber).padStart(
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
   : pageFileName(pageNumber);
+const pageImageMatches = (pageNumber) => {
+  const currentSrc = pageImage.getAttribute("src") || "";
+  return currentSrc.startsWith(pageFileName(pageNumber));
+};
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -348,11 +352,15 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
 
   try {
     let nextPageUrl = "";
-    try {
-      nextPageUrl = await loadPageImage(nextPage);
-    } catch (firstError) {
-      console.warn("Primer intento falló al cargar la página", nextPage, firstError);
-      nextPageUrl = await loadPageImage(nextPage, Date.now());
+    if (pageImageMatches(nextPage) && pageImage.complete && pageImage.naturalWidth > 0) {
+      nextPageUrl = pageFileName(nextPage);
+    } else {
+      try {
+        nextPageUrl = await loadPageImage(nextPage);
+      } catch (firstError) {
+        console.warn("Primer intento falló al cargar la página", nextPage, firstError);
+        nextPageUrl = await loadPageImage(nextPage, Date.now());
+      }
     }
 
     if (requestId !== state.pageLoadRequest) return;
@@ -1914,6 +1922,7 @@ const initReader = async () => {
   state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
   state.totalSongs = state.songIndex.length;
   state.themeIndex = manifest.themeIndex || [];
+  state.currentPage = DEFAULT_START_PAGE;
   renderDraft();
   renderStatus();
   updateFullscreenButton();

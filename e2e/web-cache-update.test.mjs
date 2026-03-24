@@ -22,11 +22,14 @@ test("web app registration forces service worker refresh and reloads after activ
 
   assert.match(source, /const DEFAULT_START_PAGE = 2;/);
   assert.match(source, /const SW_RELOAD_FLAG = "sv-sw-reload-pending";/);
+  assert.match(source, /const pageImageMatches = \(pageNumber\) =>/);
   assert.match(source, /updateViaCache:\s*"none"/);
   assert.match(source, /registration\.waiting/);
   assert.match(source, /navigator\.serviceWorker\.addEventListener\("controllerchange"/);
   assert.match(source, /window\.location\.reload\(\)/);
   assert.match(source, /worker\.postMessage\(\{ type: "SKIP_WAITING" \}\)/);
+  assert.match(source, /pageImageMatches\(nextPage\) && pageImage\.complete && pageImage\.naturalWidth > 0/);
+  assert.match(source, /state\.currentPage = DEFAULT_START_PAGE;/);
   assert.match(source, /renderPage\(DEFAULT_START_PAGE, \{ pushToHistory: false \}\);/);
 });
 
@@ -36,4 +39,10 @@ test("web build injects a cache version into the generated service worker", () =
   assert.match(source, /git", \["rev-parse", "--short", "HEAD"\]/);
   assert.match(source, /replaceAll\("__CACHE_VERSION__", cacheVersion\)/);
   assert.match(source, /writeFileSync\(path\.join\(distDir, "sw\.js"\), serviceWorkerSource\)/);
+});
+
+test("initial web shell points directly at page 2", () => {
+  const source = readText("web/src/index.html");
+
+  assert.match(source, /id="page-image" src="\/pages\/page-002\.jpg"/);
 });
