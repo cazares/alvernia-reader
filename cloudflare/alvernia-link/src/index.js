@@ -8,14 +8,8 @@ const SPECIAL_ROUTES = new Set(["/upload", "/download", "/promote"]);
 const PAGE_PATH_PREFIX = "/pages/";
 const PAGES_MANIFEST_PATH = "/pages.json";
 const ROOT_PROXY_HOSTS = new Set([
-  "miguelcoro.com",
-  "www.miguelcoro.com",
   "signovino.com",
   "www.signovino.com",
-  "miguelbase.com",
-  "www.miguelbase.com",
-  "miguelworld.com",
-  "www.miguelworld.com",
 ]);
 
 export const normalizeProxyPath = ({ host, pathname }) => {
@@ -117,7 +111,7 @@ const buildUploadPage = () => `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Subir archivo - Nuestro Coro</title>
+    <title>Subir archivo - Signo Vino</title>
     <style>
       body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0b0b; color: #f7f7f7; margin: 0; display: grid; place-items: center; min-height: 100vh; }
       .card { width: min(520px, 92vw); background: #14171d; border: 1px solid #2b2f38; border-radius: 20px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
@@ -155,7 +149,7 @@ const buildPromotePage = (latest) => {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Promote - Nuestro Coro</title>
+    <title>Promote - Signo Vino</title>
     <style>
       body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0b0b; color: #f7f7f7; margin: 0; display: grid; place-items: center; min-height: 100vh; }
       .card { width: min(520px, 92vw); background: #14171d; border: 1px solid #2b2f38; border-radius: 20px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
@@ -190,7 +184,7 @@ const buildDownloadPage = (latest) => {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Descargar - Nuestro Coro</title>
+    <title>Descargar - Signo Vino</title>
     <style>
       body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0b0b; color: #f7f7f7; margin: 0; display: grid; place-items: center; min-height: 100vh; }
       .card { width: min(520px, 92vw); background: #14171d; border: 1px solid #2b2f38; border-radius: 20px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); text-align: center; }

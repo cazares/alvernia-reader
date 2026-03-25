@@ -23,15 +23,8 @@ test("normalizeProxyPath keeps nested asset paths under the reader route", () =>
   });
 });
 
-test("normalizeProxyPath keeps miguelcoro.com at the domain root", () => {
-  assert.deepEqual(normalizeProxyPath({ host: "miguelcoro.com", pathname: "/pages/page-052.jpg" }), {
-    redirectToTrailingSlash: false,
-    proxiedPath: "/pages/page-052.jpg",
-  });
-});
-
-test("normalizeProxyPath still accepts legacy root domains", () => {
-  assert.deepEqual(normalizeProxyPath({ host: "miguelbase.com", pathname: "/pages/page-052.jpg" }), {
+test("normalizeProxyPath keeps signovino.com at the domain root", () => {
+  assert.deepEqual(normalizeProxyPath({ host: "signovino.com", pathname: "/pages/page-052.jpg" }), {
     redirectToTrailingSlash: false,
     proxiedPath: "/pages/page-052.jpg",
   });
@@ -39,20 +32,20 @@ test("normalizeProxyPath still accepts legacy root domains", () => {
 
 test("buildProxyUrl forwards root and assets to the live Pages deployment", () => {
   assert.equal(
-    buildProxyUrl("https://miguelcoro.com/").toString(),
+    buildProxyUrl("https://signovino.com/").toString(),
     "https://alvernia-reader.pages.dev/",
   );
 
   assert.equal(
-    buildProxyUrl("https://miguelcoro.com/pages.json?cache=1").toString(),
+    buildProxyUrl("https://signovino.com/pages.json?cache=1").toString(),
     "https://alvernia-reader.pages.dev/pages.json?cache=1",
   );
 });
 
 test("buildTunnelUrl targets the upload tunnel origin", () => {
   assert.equal(
-    buildTunnelUrl("https://miguelcoro.com/upload?foo=1", "https://upload.miguelcoro.com").toString(),
-    "https://upload.miguelcoro.com/upload?foo=1",
+    buildTunnelUrl("https://signovino.com/upload?foo=1", "https://upload.signovino.com").toString(),
+    "https://upload.signovino.com/upload?foo=1",
   );
 });
 

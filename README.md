@@ -37,7 +37,7 @@ npx expo run:ios -d 'mPad' --configuration Release
 
 - The reader is currently configured around the hardcoded Alvernia PDF flow.
 - The fastest public distribution path is Cloudflare Pages from `web/dist/`.
-- The friendliest share path is the Worker custom domain at `https://miguelcoro.com/`.
+- The friendliest share path is the Worker custom domain at `https://signovino.com/`.
 - On iPhone or iPad, the intended install flow is Safari -> Compartir -> Agregar a pantalla de inicio.
 - Deploy that route with `npx wrangler deploy -c cloudflare/alvernia-link/wrangler.jsonc`.
 - Generated folders like `node_modules`, `ios/Pods`, and build output are intentionally not tracked.
@@ -68,11 +68,11 @@ npm run upload:server
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create nuestro-coro-upload
-cloudflared tunnel route dns nuestro-coro-upload upload.miguelcoro.com
+cloudflared tunnel route dns nuestro-coro-upload upload.signovino.com
 cloudflared tunnel run --url http://localhost:8787 nuestro-coro-upload
 ```
 
-Once the tunnel is up, `https://miguelcoro.com/upload` and `https://miguelcoro.com/promote` will proxy to your Mac.
+Once the tunnel is up, `https://signovino.com/upload` and `https://signovino.com/promote` will proxy to your Mac.
 
 ## Upload + Promote pipeline (R2 fallback)
 

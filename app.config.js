@@ -26,7 +26,7 @@ module.exports = ({ config }) => {
 
   return {
     ...config,
-    name: "Nuestro Coro",
+    name: "Signo Vino",
     slug: "alvernia-reader",
     version: baseVersion,
     runtimeVersion: baseVersion,

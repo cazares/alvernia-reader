@@ -3,31 +3,15 @@
   "main": "src/index.js",
   "compatibility_date": "2026-03-12",
   "vars": {
-    "TUNNEL_ORIGIN": "https://upload.miguelcoro.com"
+    "TUNNEL_ORIGIN": "https://upload.signovino.com"
   },
   "routes": [
-    {
-      "pattern": "miguelcoro.com",
-      "custom_domain": true
-    },
-    {
-      "pattern": "www.miguelcoro.com",
-      "custom_domain": true
-    },
     {
       "pattern": "signovino.com",
       "custom_domain": true
     },
     {
       "pattern": "www.signovino.com",
-      "custom_domain": true
-    },
-    {
-      "pattern": "miguelbase.com",
-      "custom_domain": true
-    },
-    {
-      "pattern": "www.miguelbase.com",
       "custom_domain": true
     }
   ]
