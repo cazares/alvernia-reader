@@ -47,7 +47,7 @@ test("Static app config keeps standalone reader identity", () => {
   assert.equal(appConfig?.expo?.slug, "alvernia-reader");
   assert.equal(appConfig?.expo?.android?.package, "com.cazares.alverniareader");
   assert.equal(appConfig?.expo?.ios?.bundleIdentifier, "com.cazares.alverniareader");
-  assert.equal(appConfig?.expo?.extra?.eas?.projectId, "8f4aeff3-940f-4ec2-b82d-89b430f5c8be");
+  assert.equal(appConfig?.expo?.extra?.eas?.projectId, "8973a6b2-a2e5-4268-97ab-4a1b2c4cb555");
 });
 
 test("Release assets required by app config exist in-repo", () => {

@@ -21,7 +21,7 @@ test("Android gradle properties disable new architecture and network inspector",
 
 test("Expo.plist disables OTA updates for the embedded-only reader build", () => {
   const source = fs.readFileSync(
-    path.join(APP_ROOT, "ios", "Mixterious", "Supporting", "Expo.plist"),
+    path.join(APP_ROOT, "ios", "SignoVivo", "Supporting", "Expo.plist"),
     "utf8",
   );
 
@@ -31,7 +31,7 @@ test("Expo.plist disables OTA updates for the embedded-only reader build", () =>
 });
 
 test("Info.plist disables new architecture and background audio mode", () => {
-  const source = fs.readFileSync(path.join(APP_ROOT, "ios", "Mixterious", "Info.plist"), "utf8");
+  const source = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "Info.plist"), "utf8");
 
   assert.match(source, /<key>RCTNewArchEnabled<\/key>\s*<false\/>/);
   assert.doesNotMatch(source, /<key>UIBackgroundModes<\/key>/);

@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-               BuildableName = "AlverniaReader.app"
-               BlueprintName = "Mixterious"
-               ReferencedContainer = "container:Mixterious.xcodeproj">
+               BuildableName = "SignoVivo.app"
+               BlueprintName = "SignoVivo"
+               ReferencedContainer = "container:SignoVivo.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "MixteriousTests.xctest"
-               BlueprintName = "MixteriousTests"
-               ReferencedContainer = "container:Mixterious.xcodeproj">
+               BuildableName = "SignoVivoTests.xctest"
+               BlueprintName = "SignoVivoTests"
+               ReferencedContainer = "container:SignoVivo.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -55,9 +55,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "AlverniaReader.app"
-            BlueprintName = "Mixterious"
-            ReferencedContainer = "container:Mixterious.xcodeproj">
+            BuildableName = "SignoVivo.app"
+            BlueprintName = "SignoVivo"
+            ReferencedContainer = "container:SignoVivo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,9 +72,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "AlverniaReader.app"
-            BlueprintName = "Mixterious"
-            ReferencedContainer = "container:Mixterious.xcodeproj">
+            BuildableName = "SignoVivo.app"
+            BlueprintName = "SignoVivo"
+            ReferencedContainer = "container:SignoVivo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

@@ -12,28 +12,28 @@
 		4AA18D770A0B4B4B82A0C001 /* DirectorSyncModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */; };
 		4AA18D790A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */; };
 		7ECBF155D8DED1D95472C67D /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A2D06BCA20833798453115A /* ExpoModulesProvider.swift */; };
-		9F6484269B1ECB75CFF56BE4 /* libPods-Mixterious.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E3E72BACEA00598521D05160 /* libPods-Mixterious.a */; };
+		9F6484269B1ECB75CFF56BE4 /* libPods-SignoVivo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E3E72BACEA00598521D05160 /* libPods-SignoVivo.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		C79D44C646AB29CBAE665752 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 05AEA00A1B64EF04F512A5F2 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		05AEA00A1B64EF04F512A5F2 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = Mixterious/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		13B07F961A680F5B00A75B9A /* Mixterious.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mixterious.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Mixterious/Images.xcassets; sourceTree = "<group>"; };
-		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Mixterious/Info.plist; sourceTree = "<group>"; };
-		3A2D06BCA20833798453115A /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Mixterious/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectorSyncModule.swift; path = Mixterious/DirectorSyncModule.swift; sourceTree = "<group>"; };
-		4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DirectorSyncModuleBridge.m; path = Mixterious/DirectorSyncModuleBridge.m; sourceTree = "<group>"; };
-		5682B67185E9D24B66F071DB /* Pods-Mixterious.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Mixterious.release.xcconfig"; path = "Target Support Files/Pods-Mixterious/Pods-Mixterious.release.xcconfig"; sourceTree = "<group>"; };
-		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Mixterious/SplashScreen.storyboard; sourceTree = "<group>"; };
+		05AEA00A1B64EF04F512A5F2 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = SignoVivo/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		13B07F961A680F5B00A75B9A /* SignoVivo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SignoVivo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = SignoVivo/Images.xcassets; sourceTree = "<group>"; };
+		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = SignoVivo/Info.plist; sourceTree = "<group>"; };
+		3A2D06BCA20833798453115A /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-SignoVivo/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectorSyncModule.swift; path = SignoVivo/DirectorSyncModule.swift; sourceTree = "<group>"; };
+		4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DirectorSyncModuleBridge.m; path = SignoVivo/DirectorSyncModuleBridge.m; sourceTree = "<group>"; };
+		5682B67185E9D24B66F071DB /* Pods-SignoVivo.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SignoVivo.release.xcconfig"; path = "Target Support Files/Pods-SignoVivo/Pods-SignoVivo.release.xcconfig"; sourceTree = "<group>"; };
+		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = SignoVivo/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		E2BD5878F8A2B08225E0F0DC /* Pods-Mixterious.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Mixterious.debug.xcconfig"; path = "Target Support Files/Pods-Mixterious/Pods-Mixterious.debug.xcconfig"; sourceTree = "<group>"; };
-		E3E72BACEA00598521D05160 /* libPods-Mixterious.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Mixterious.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E2BD5878F8A2B08225E0F0DC /* Pods-SignoVivo.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SignoVivo.debug.xcconfig"; path = "Target Support Files/Pods-SignoVivo/Pods-SignoVivo.debug.xcconfig"; sourceTree = "<group>"; };
+		E3E72BACEA00598521D05160 /* libPods-SignoVivo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-SignoVivo.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Mixterious/AppDelegate.swift; sourceTree = "<group>"; };
-		F11748442D0722820044C1D9 /* Mixterious-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Mixterious-Bridging-Header.h"; path = "Mixterious/Mixterious-Bridging-Header.h"; sourceTree = "<group>"; };
+		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = SignoVivo/AppDelegate.swift; sourceTree = "<group>"; };
+		F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "SignoVivo-Bridging-Header.h"; path = "SignoVivo/SignoVivo-Bridging-Header.h"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -41,34 +41,34 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9F6484269B1ECB75CFF56BE4 /* libPods-Mixterious.a in Frameworks */,
+				9F6484269B1ECB75CFF56BE4 /* libPods-SignoVivo.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		13B07FAE1A68108700A75B9A /* Mixterious */ = {
+		13B07FAE1A68108700A75B9A /* SignoVivo */ = {
 			isa = PBXGroup;
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
 				4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */,
 				4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */,
-				F11748442D0722820044C1D9 /* Mixterious-Bridging-Header.h */,
+				F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
 				05AEA00A1B64EF04F512A5F2 /* PrivacyInfo.xcprivacy */,
 			);
-			name = Mixterious;
+			name = SignoVivo;
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				E3E72BACEA00598521D05160 /* libPods-Mixterious.a */,
+				E3E72BACEA00598521D05160 /* libPods-SignoVivo.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -83,7 +83,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
-				13B07FAE1A68108700A75B9A /* Mixterious */,
+				13B07FAE1A68108700A75B9A /* SignoVivo */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -98,7 +98,7 @@
 		83CBBA001A601CBA00E9B192 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				13B07F961A680F5B00A75B9A /* Mixterious.app */,
+				13B07F961A680F5B00A75B9A /* SignoVivo.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -106,8 +106,8 @@
 		883493D3DFB7EAD73F28B9DC /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				E2BD5878F8A2B08225E0F0DC /* Pods-Mixterious.debug.xcconfig */,
-				5682B67185E9D24B66F071DB /* Pods-Mixterious.release.xcconfig */,
+				E2BD5878F8A2B08225E0F0DC /* Pods-SignoVivo.debug.xcconfig */,
+				5682B67185E9D24B66F071DB /* Pods-SignoVivo.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -115,7 +115,7 @@
 		A05EE24E2E9BBF1471EAB60E /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				BD4E84B71E7E705BF3D00D39 /* Mixterious */,
+				BD4E84B71E7E705BF3D00D39 /* SignoVivo */,
 			);
 			name = ExpoModulesProviders;
 			sourceTree = "<group>";
@@ -126,23 +126,23 @@
 				BB2F792C24A3F905000567C9 /* Expo.plist */,
 			);
 			name = Supporting;
-			path = Mixterious/Supporting;
+			path = SignoVivo/Supporting;
 			sourceTree = "<group>";
 		};
-		BD4E84B71E7E705BF3D00D39 /* Mixterious */ = {
+		BD4E84B71E7E705BF3D00D39 /* SignoVivo */ = {
 			isa = PBXGroup;
 			children = (
 				3A2D06BCA20833798453115A /* ExpoModulesProvider.swift */,
 			);
-			name = Mixterious;
+			name = SignoVivo;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		13B07F861A680F5B00A75B9A /* Mixterious */ = {
+		13B07F861A680F5B00A75B9A /* SignoVivo */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Mixterious" */;
+			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "SignoVivo" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
 				257CC1135E6E9342AF0E3677 /* [Expo] Configure project */,
@@ -157,9 +157,9 @@
 			);
 			dependencies = (
 			);
-			name = Mixterious;
-			productName = Mixterious;
-			productReference = 13B07F961A680F5B00A75B9A /* Mixterious.app */;
+			name = SignoVivo;
+			productName = SignoVivo;
+			productReference = 13B07F961A680F5B00A75B9A /* SignoVivo.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -175,7 +175,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "Mixterious" */;
+			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "SignoVivo" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -188,7 +188,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				13B07F861A680F5B00A75B9A /* Mixterious */,
+				13B07F861A680F5B00A75B9A /* SignoVivo */,
 			);
 		};
 /* End PBXProject section */
@@ -240,7 +240,7 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-Mixterious-checkManifestLockResult.txt",
+				"$(DERIVED_FILE_DIR)/Pods-SignoVivo-checkManifestLockResult.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -258,17 +258,17 @@
 			inputPaths = (
 				"$(SRCROOT)/.xcode.env",
 				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/Pods/Target Support Files/Pods-Mixterious/expo-configure-project.sh",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-SignoVivo/expo-configure-project.sh",
 			);
 			name = "[Expo] Configure project";
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(SRCROOT)/Pods/Target Support Files/Pods-Mixterious/ExpoModulesProvider.swift",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-SignoVivo/ExpoModulesProvider.swift",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Mixterious/expo-configure-project.sh\"\n";
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-SignoVivo/expo-configure-project.sh\"\n";
 		};
 		6CBE83DA46B918CFBA0C79A6 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -276,7 +276,7 @@
 			files = (
 			);
 			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-Mixterious/Pods-Mixterious-frameworks.sh",
+				"${PODS_ROOT}/Target Support Files/Pods-SignoVivo/Pods-SignoVivo-frameworks.sh",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
 			);
 			name = "[CP] Embed Pods Frameworks";
@@ -285,7 +285,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Mixterious/Pods-Mixterious-frameworks.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-SignoVivo/Pods-SignoVivo-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
@@ -294,18 +294,12 @@
 			files = (
 			);
 			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-Mixterious/Pods-Mixterious-resources.sh",
-				"${PODS_CONFIGURATION_BUILD_DIR}/EXApplication/ExpoApplication_privacy.bundle",
+				"${PODS_ROOT}/Target Support Files/Pods-SignoVivo/Pods-SignoVivo-resources.sh",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/EXConstants.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/ExpoConstants_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/EXNotifications/ExpoNotifications_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/EXTaskManager/ExpoTaskManager_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/EXUpdates/EXUpdates.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoFileSystem/ExpoFileSystem_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoMediaLibrary/ExpoMediaLibrary_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/RCT-Folly/RCT-Folly_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/RNCAsyncStorage/RNCAsyncStorage_resources.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/ReachabilitySwift/ReachabilitySwift.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-Core/React-Core_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-cxxreact/React-cxxreact_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/boost/boost_privacy.bundle",
@@ -314,17 +308,11 @@
 			);
 			name = "[CP] Copy Pods Resources";
 			outputPaths = (
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoApplication_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXConstants.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoConstants_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoNotifications_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoTaskManager_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXUpdates.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoFileSystem_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoMediaLibrary_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RCT-Folly_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RNCAsyncStorage_resources.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ReachabilitySwift.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-Core_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-cxxreact_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/boost_privacy.bundle",
@@ -333,7 +321,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Mixterious/Pods-Mixterious-resources.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-SignoVivo/Pods-SignoVivo-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -355,7 +343,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = E2BD5878F8A2B08225E0F0DC /* Pods-Mixterious.debug.xcconfig */;
+			baseConfigurationReference = E2BD5878F8A2B08225E0F0DC /* Pods-SignoVivo.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -366,7 +354,7 @@
 					"$(inherited)",
 					"FB_SONARKIT_ENABLED=1",
 				);
-				INFOPLIST_FILE = Mixterious/Info.plist;
+				INFOPLIST_FILE = SignoVivo/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -380,8 +368,8 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cazares.alverniareader;
-				PRODUCT_NAME = AlverniaReader;
-				SWIFT_OBJC_BRIDGING_HEADER = "Mixterious/Mixterious-Bridging-Header.h";
+				PRODUCT_NAME = SignoVivo;
+				SWIFT_OBJC_BRIDGING_HEADER = "SignoVivo/SignoVivo-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -391,13 +379,13 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 5682B67185E9D24B66F071DB /* Pods-Mixterious.release.xcconfig */;
+			baseConfigurationReference = 5682B67185E9D24B66F071DB /* Pods-SignoVivo.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 112;
 				DEVELOPMENT_TEAM = 7QRW68DD5X;
-				INFOPLIST_FILE = Mixterious/Info.plist;
+				INFOPLIST_FILE = SignoVivo/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -411,8 +399,8 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cazares.alverniareader;
-				PRODUCT_NAME = AlverniaReader;
-				SWIFT_OBJC_BRIDGING_HEADER = "Mixterious/Mixterious-Bridging-Header.h";
+				PRODUCT_NAME = SignoVivo;
+				SWIFT_OBJC_BRIDGING_HEADER = "SignoVivo/SignoVivo-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VERSIONING_SYSTEM = "apple-generic";
@@ -540,7 +528,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Mixterious" */ = {
+		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "SignoVivo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
@@ -549,7 +537,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "Mixterious" */ = {
+		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "SignoVivo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,

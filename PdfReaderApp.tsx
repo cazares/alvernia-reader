@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Constants from "expo-constants";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -16,17 +15,6 @@ import {
 } from "react-native";
 import Pdf, { type PdfRef } from "react-native-pdf";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
-import {
-  DEFAULT_DIRECTOR_HEARTBEAT_MS,
-  createDefaultSyncSessionCode,
-  createDirectorKey,
-  normalizeSyncSessionCode,
-  publishDirectorSyncState,
-  releaseDirectorSyncState,
-  readDirectorSyncState,
-  resolveDirectorSyncEndpoint,
-} from "./src/directorSync";
 import {
   addNearbyDirectorSyncListener,
   isNearbyDirectorSyncAvailable,
@@ -35,70 +23,53 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
-import { clampPdfPage } from "./src/pdfReaderUrl";
-import { findSongEntryOrNext } from "./src/songNavigation";
 
 const ALVERNIA_PDF_ASSET = require("./assets/alvernia_manual_2.pdf");
-const UNKNOWN_PAGE_MAX = 10000;
 const DIRECTOR_SYNC_STORAGE_KEY = "@alvernia-reader/director-sync";
-const DIRECTOR_SYNC_POLL_MS = 1500;
 const DIRECTOR_LONG_PRESS_MS = 1400;
-const MAX_SYNC_FAILURES_BEFORE_BACKOFF = 3;
 
 type SyncRole = "off" | "director" | "follower";
 
-type SongEntry = {
-  page: number;
-  song: number;
+const clampPage = (value: number, totalPages: number) => {
+  const safeTotalPages = Math.max(1, totalPages || 1);
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(Math.max(Math.trunc(value), 1), safeTotalPages);
 };
+
+const createDefaultSyncSessionCode = () => `CORO${Math.floor(1000 + Math.random() * 9000)}`;
+
+const normalizeSyncSessionCode = (value = "") => value
+  .toUpperCase()
+  .replace(/[^A-Z0-9]/g, "")
+  .slice(0, 12);
 
 const PdfReaderApp = () => {
   const pdfRef = useRef<PdfRef | null>(null);
-  const modalInputRef = useRef<TextInput | null>(null);
 
   const [activePage, setActivePage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [hintMessage, setHintMessage] = useState("");
-  const [isGoModalVisible, setIsGoModalVisible] = useState(false);
   const [isSyncModalVisible, setIsSyncModalVisible] = useState(false);
-  const [modalInput, setModalInput] = useState("1");
   const [syncRole, setSyncRole] = useState<SyncRole>("off");
   const [syncSessionCode, setSyncSessionCode] = useState(createDefaultSyncSessionCode());
-  const [syncDirectorKey, setSyncDirectorKey] = useState(createDirectorKey());
   const [syncStatusMessage, setSyncStatusMessage] = useState("");
   const [syncErrorMessage, setSyncErrorMessage] = useState("");
   const [isSyncBusy, setIsSyncBusy] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
 
-  const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncHeartbeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncFailureCountRef = useRef(0);
-  const syncRoleRef = useRef<SyncRole>("off");
-  const syncSessionCodeRef = useRef(syncSessionCode);
-  const syncDirectorKeyRef = useRef(syncDirectorKey);
   const activePageRef = useRef(activePage);
-  const syncEndpoint = useMemo(
-    () => resolveDirectorSyncEndpoint(Constants.expoConfig?.extra),
-    [],
-  );
-  const usesNearbyDirectorSync = useMemo(
-    () => Platform.OS === "ios" && isNearbyDirectorSyncAvailable(),
-    [],
-  );
-
-  const songEntries = ALVERNIA_MANUAL_2_SONG_INDEX as readonly SongEntry[];
+  const syncSessionCodeRef = useRef(syncSessionCode);
+  const usesNearbyDirectorSync = Platform.OS === "ios" && isNearbyDirectorSyncAvailable();
 
   useEffect(() => {
     activePageRef.current = activePage;
   }, [activePage]);
 
   useEffect(() => {
-    syncRoleRef.current = syncRole;
     syncSessionCodeRef.current = syncSessionCode;
-    syncDirectorKeyRef.current = syncDirectorKey;
-  }, [syncDirectorKey, syncRole, syncSessionCode]);
+  }, [syncSessionCode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -112,16 +83,12 @@ const PdfReaderApp = () => {
           ? parsed.role
           : "off";
         const nextSessionCode = normalizeSyncSessionCode(parsed?.sessionCode || "");
-        const nextDirectorKey = String(parsed?.directorKey || "").trim();
 
         if (nextRole !== "off") {
           setSyncRole(nextRole);
         }
         if (nextSessionCode) {
           setSyncSessionCode(nextSessionCode);
-        }
-        if (nextDirectorKey) {
-          setSyncDirectorKey(nextDirectorKey);
         }
       } catch {}
     };
@@ -137,9 +104,8 @@ const PdfReaderApp = () => {
     AsyncStorage.setItem(DIRECTOR_SYNC_STORAGE_KEY, JSON.stringify({
       role: syncRole,
       sessionCode: syncSessionCode,
-      directorKey: syncDirectorKey,
     })).catch(() => {});
-  }, [syncDirectorKey, syncRole, syncSessionCode]);
+  }, [syncRole, syncSessionCode]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
@@ -150,94 +116,22 @@ const PdfReaderApp = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isGoModalVisible) return;
-    const focusTimeout = setTimeout(() => {
-      modalInputRef.current?.focus();
-    }, 60);
-    return () => {
-      clearTimeout(focusTimeout);
-    };
-  }, [isGoModalVisible]);
-
-  const goToPage = useCallback((value: number | string) => {
-    const maxPage = totalPages > 0 ? totalPages : UNKNOWN_PAGE_MAX;
-    const nextPage = clampPdfPage(value, 1, maxPage);
-    setActivePage(nextPage);
-    setModalInput(String(nextPage));
+  const goToPage = useCallback((nextPage: number) => {
+    const clampedPage = clampPage(nextPage, totalPages);
+    setActivePage(clampedPage);
     setErrorMessage("");
-    setHintMessage("");
     requestAnimationFrame(() => {
-      pdfRef.current?.setPage(nextPage);
+      pdfRef.current?.setPage(clampedPage);
     });
   }, [totalPages]);
-
-  const goToSong = useCallback((value: number | string) => {
-    const rawInput = String(value || "").trim();
-    const parsedInput = Number.parseInt(rawInput || "1", 10);
-    if (Number.isFinite(parsedInput) && parsedInput <= 0) {
-      goToPage(1);
-      setModalInput("0");
-      setErrorMessage("");
-      setHintMessage("Mostrando la introduccion antes de la cancion 1.");
-      return;
-    }
-
-    const requestedSong = clampPdfPage(parsedInput, 1, UNKNOWN_PAGE_MAX);
-    const targetEntry = findSongEntryOrNext(songEntries, requestedSong);
-    const exact = targetEntry?.song === requestedSong ? targetEntry : null;
-    const maxPage = totalPages > 0 ? totalPages : UNKNOWN_PAGE_MAX;
-    const targetPage = targetEntry
-      ? targetEntry.page
-      : clampPdfPage(requestedSong, 1, maxPage);
-
-    setActivePage(targetPage);
-    setModalInput(String(requestedSong));
-    setErrorMessage("");
-
-    if (!exact && targetEntry) {
-      setHintMessage(`La cancion ${requestedSong} no existe. Saltamos a la cancion ${targetEntry.song}.`);
-    } else if (!targetEntry) {
-      setHintMessage("Indice de canciones no disponible. Usando numero de pagina.");
-    } else {
-      setHintMessage("");
-    }
-
-    requestAnimationFrame(() => {
-      pdfRef.current?.setPage(targetPage);
-    });
-  }, [goToPage, songEntries, totalPages]);
-
-  const openGoModal = useCallback(() => {
-    setModalInput("");
-    setIsGoModalVisible(true);
-  }, []);
 
   const openSyncModal = useCallback(() => {
     setSyncErrorMessage("");
     setIsSyncModalVisible(true);
   }, []);
 
-  const closeGoModal = useCallback(() => {
-    setIsGoModalVisible(false);
-  }, []);
-
   const closeSyncModal = useCallback(() => {
     setIsSyncModalVisible(false);
-  }, []);
-
-  const confirmGoModal = useCallback(() => {
-    const trimmedValue = String(modalInput || "").trim();
-    if (!trimmedValue) {
-      setHintMessage("Ingresa un numero de cancion.");
-      return;
-    }
-    goToSong(trimmedValue);
-    setIsGoModalVisible(false);
-  }, [goToSong, modalInput]);
-
-  const normalizeSongInput = useCallback((value: string) => {
-    setModalInput(value.replace(/\D+/g, "").slice(0, 4));
   }, []);
 
   const normalizeSyncCodeInput = useCallback((value: string) => {
@@ -246,6 +140,7 @@ const PdfReaderApp = () => {
 
   useEffect(() => {
     if (!usesNearbyDirectorSync) return;
+
     const subscription = addNearbyDirectorSyncListener((event) => {
       if (event?.type === "page" && typeof event.page === "number") {
         goToPage(event.page);
@@ -302,312 +197,105 @@ const PdfReaderApp = () => {
         }
       }
     });
+
     return () => {
       subscription.remove();
     };
   }, [goToPage, usesNearbyDirectorSync]);
 
-  const getFriendlySyncErrorMessage = useCallback((error: unknown, fallbackMessage: string) => {
-    if (!(error instanceof Error)) return fallbackMessage;
-    if ("code" in error && error.code === "DIRECTOR_CONFLICT") {
-      return "Ya hay otro director usando ese código. Usa otro o espera a que salga.";
-    }
-    if ("code" in error && error.code === "DIRECTOR_TIMEOUT") {
-      return "La sesión tardó demasiado en responder. Revisa la conexión e intenta otra vez.";
-    }
-    if ("code" in error && error.code === "DIRECTOR_NETWORK") {
-      return "No hay conexión con la sesión del director. Revisa internet o la red local.";
-    }
-    return error.message || fallbackMessage;
-  }, []);
-
-  const publishCurrentDirectorPage = useCallback(async (pageNumber: number) => {
-    const sessionCode = normalizeSyncSessionCode(syncSessionCodeRef.current);
-    const directorKey = String(syncDirectorKeyRef.current || "").trim();
-
-    if (syncRoleRef.current !== "director" || !sessionCode || !directorKey) {
-      return;
-    }
-
-    try {
-      const payload = await publishDirectorSyncState({
-        endpoint: syncEndpoint,
-        sessionCode,
-        directorKey,
-        page: pageNumber,
-        totalPages,
-      });
-      syncFailureCountRef.current = 0;
-      setSyncStatusMessage(`Director conectado en ${payload.session}.`);
-      setSyncErrorMessage("");
-    } catch (error) {
-      syncFailureCountRef.current += 1;
-      const message = getFriendlySyncErrorMessage(error, "No se pudo sincronizar.");
-      setSyncErrorMessage(message);
-      if (error instanceof Error && "code" in error && error.code === "DIRECTOR_CONFLICT") {
-        setSyncRole("off");
-        setSyncStatusMessage("");
-        setHintMessage("Otro director tomó esa sesión. Elige otro código o espera.");
-      }
-    }
-  }, [getFriendlySyncErrorMessage, syncEndpoint, totalPages]);
-
   const enableDirectorMode = useCallback(async () => {
     if (isSyncBusy) return;
-    const nextSessionCode = normalizeSyncSessionCode(syncSessionCode) || createDefaultSyncSessionCode();
-    const nextDirectorKey = String(syncDirectorKey || "").trim() || createDirectorKey();
 
+    const nextSessionCode = normalizeSyncSessionCode(syncSessionCode) || createDefaultSyncSessionCode();
     setIsSyncBusy(true);
     setSyncSessionCode(nextSessionCode);
-    setSyncDirectorKey(nextDirectorKey);
 
     try {
-      if (usesNearbyDirectorSync) {
-        await startNearbyDirector(nextSessionCode);
-        setSyncRole("director");
-        setSyncStatusMessage(`Director offline listo en ${nextSessionCode}.`);
-        setSyncErrorMessage("");
-        setHintMessage("Modo director offline activado. Funciona sin internet con iPads cercanas.");
-        setIsSyncModalVisible(false);
+      if (!usesNearbyDirectorSync) {
+        setSyncErrorMessage("La sincronización offline solo está disponible en iPad.");
         return;
       }
 
-      const payload = await publishDirectorSyncState({
-        endpoint: syncEndpoint,
-        sessionCode: nextSessionCode,
-        directorKey: nextDirectorKey,
-        page: activePageRef.current,
-        totalPages,
-      });
-
+      await startNearbyDirector(nextSessionCode);
       setSyncRole("director");
-      setSyncStatusMessage(`Modo director activo en ${payload.session}.`);
+      setSyncStatusMessage(`Director offline listo en ${nextSessionCode}.`);
       setSyncErrorMessage("");
-      setHintMessage("Modo director oculto activado. Tus cambios de página se sincronizan.");
+      setHintMessage("Modo director offline activado. Funciona sin internet con iPads cercanas.");
       setIsSyncModalVisible(false);
     } catch (error) {
-      setSyncErrorMessage(getFriendlySyncErrorMessage(error, "No se pudo activar el modo director."));
+      setSyncErrorMessage(
+        error instanceof Error ? error.message : "No se pudo activar el modo director.",
+      );
     } finally {
       setIsSyncBusy(false);
     }
-  }, [getFriendlySyncErrorMessage, isSyncBusy, syncDirectorKey, syncEndpoint, syncSessionCode, totalPages, usesNearbyDirectorSync]);
+  }, [isSyncBusy, syncSessionCode, usesNearbyDirectorSync]);
 
   const enableFollowerMode = useCallback(async () => {
     if (isSyncBusy) return;
+
     const nextSessionCode = normalizeSyncSessionCode(syncSessionCode);
     if (!nextSessionCode) {
-      setSyncErrorMessage("Ingresa un codigo de sesion.");
+      setSyncErrorMessage("Ingresa un código de sesión.");
       return;
     }
 
     setIsSyncBusy(true);
     try {
-      if (usesNearbyDirectorSync) {
-        await startNearbyFollower(nextSessionCode);
-        setSyncSessionCode(nextSessionCode);
-        setSyncRole("follower");
-        setSyncStatusMessage(`Buscando director cerca de ${nextSessionCode}...`);
-        setSyncErrorMessage("");
-        setHintMessage("Modo seguidor offline activado. Esta iPad buscará un director cercano sin internet.");
-        setIsSyncModalVisible(false);
+      if (!usesNearbyDirectorSync) {
+        setSyncErrorMessage("La sincronización offline solo está disponible en iPad.");
         return;
       }
 
-      const payload = await readDirectorSyncState({
-        endpoint: syncEndpoint,
-        sessionCode: nextSessionCode,
-      });
-
+      await startNearbyFollower(nextSessionCode);
       setSyncSessionCode(nextSessionCode);
       setSyncRole("follower");
-      setSyncStatusMessage(
-        payload?.directorPresent
-          ? `Siguiendo la sesión ${payload.session}.`
-          : `Buscando director en ${nextSessionCode}...`,
-      );
+      setSyncStatusMessage(`Buscando director cerca de ${nextSessionCode}...`);
       setSyncErrorMessage("");
-      setHintMessage(
-        payload?.directorPresent
-          ? "Modo seguidor activado. Esta iPad seguirá la página del director."
-          : "Modo seguidor activado. Esperando a que un director entre a la sesión.",
-      );
+      setHintMessage("Modo seguidor offline activado. Esta iPad buscará un director cercano sin internet.");
       setIsSyncModalVisible(false);
-
-      if (payload?.directorPresent && payload?.page) {
-        goToPage(payload.page);
-      }
     } catch (error) {
-      setSyncErrorMessage(getFriendlySyncErrorMessage(error, "No se pudo seguir la sesion."));
+      setSyncErrorMessage(
+        error instanceof Error ? error.message : "No se pudo seguir la sesión.",
+      );
     } finally {
       setIsSyncBusy(false);
     }
-  }, [getFriendlySyncErrorMessage, goToPage, isSyncBusy, syncEndpoint, syncSessionCode, usesNearbyDirectorSync]);
+  }, [isSyncBusy, syncSessionCode, usesNearbyDirectorSync]);
 
   const disableSyncMode = useCallback(async () => {
     if (isSyncBusy) return;
-    const previousRole = syncRoleRef.current;
-    const sessionCode = syncSessionCodeRef.current;
-    const directorKey = syncDirectorKeyRef.current;
 
     setIsSyncBusy(true);
-    if (syncHeartbeatTimeoutRef.current) {
-      clearTimeout(syncHeartbeatTimeoutRef.current);
-      syncHeartbeatTimeoutRef.current = null;
-    }
     setSyncRole("off");
     setSyncStatusMessage("");
     setSyncErrorMessage("");
-    setHintMessage("Sincronizacion desactivada.");
-    if (syncPollTimeoutRef.current) {
-      clearTimeout(syncPollTimeoutRef.current);
-      syncPollTimeoutRef.current = null;
-    }
-    if (usesNearbyDirectorSync) {
+    setHintMessage("Sincronización desactivada.");
+
+    try {
       await stopNearbyDirectorSync();
-    } else if (previousRole === "director") {
-      try {
-        await releaseDirectorSyncState({
-          endpoint: syncEndpoint,
-          sessionCode,
-          directorKey,
-        });
-      } catch {
-        setHintMessage("El director salió, pero la sesión se cerrará sola en unos segundos si quedó colgada.");
-      }
+    } finally {
+      setIsSyncModalVisible(false);
+      setIsSyncBusy(false);
     }
-    setIsSyncModalVisible(false);
-    setIsSyncBusy(false);
-  }, [isSyncBusy, syncEndpoint, usesNearbyDirectorSync]);
+  }, [isSyncBusy]);
 
   useEffect(() => {
-    if (usesNearbyDirectorSync) {
-      return;
-    }
-    if (syncRole !== "director" || isLoading || errorMessage || !isAppActive) {
-      if (syncHeartbeatTimeoutRef.current) {
-        clearTimeout(syncHeartbeatTimeoutRef.current);
-        syncHeartbeatTimeoutRef.current = null;
-      }
+    if (!usesNearbyDirectorSync || syncRole !== "director" || isLoading || errorMessage || !isAppActive) {
       return;
     }
 
-    publishCurrentDirectorPage(activePage);
-  }, [activePage, errorMessage, isAppActive, isLoading, publishCurrentDirectorPage, syncRole, usesNearbyDirectorSync]);
-
-  useEffect(() => {
-    if (usesNearbyDirectorSync) {
-      return;
-    }
-    if (syncRole !== "director" || isLoading || errorMessage || !isAppActive) {
-      return;
-    }
-
-    let cancelled = false;
-    const heartbeat = async () => {
-      try {
-        await publishCurrentDirectorPage(activePageRef.current);
-      } finally {
-        if (!cancelled) {
-          syncHeartbeatTimeoutRef.current = setTimeout(heartbeat, DEFAULT_DIRECTOR_HEARTBEAT_MS);
-        }
-      }
-    };
-
-    syncHeartbeatTimeoutRef.current = setTimeout(heartbeat, DEFAULT_DIRECTOR_HEARTBEAT_MS);
-
-    return () => {
-      cancelled = true;
-      if (syncHeartbeatTimeoutRef.current) {
-        clearTimeout(syncHeartbeatTimeoutRef.current);
-        syncHeartbeatTimeoutRef.current = null;
-      }
-    };
-  }, [errorMessage, isAppActive, isLoading, publishCurrentDirectorPage, syncRole, usesNearbyDirectorSync]);
-
-  useEffect(() => {
-    if (usesNearbyDirectorSync) {
-      return;
-    }
-    if (syncRole !== "follower" || !isAppActive) {
-      if (syncPollTimeoutRef.current) {
-        clearTimeout(syncPollTimeoutRef.current);
-        syncPollTimeoutRef.current = null;
-      }
-      return;
-    }
-
-    let cancelled = false;
-
-    const pollDirector = async () => {
-      try {
-        const payload = await readDirectorSyncState({
-          endpoint: syncEndpoint,
-          sessionCode: syncSessionCodeRef.current,
-        });
-
-        if (cancelled) return;
-
-        if (payload?.directorPresent && payload?.session) {
-          setSyncStatusMessage(`Siguiendo la sesión ${payload.session}.`);
-        } else {
-          setSyncStatusMessage(`Esperando director en ${syncSessionCodeRef.current}...`);
-          if (payload?.staleDirectorExpired) {
-            setHintMessage("La sesión del director anterior expiró. Esperando un director nuevo.");
-          }
-        }
-
-        if (payload?.directorPresent && payload?.page && payload.page !== activePageRef.current) {
-          goToPage(payload.page);
-          setHintMessage(`Director cambió a la página ${payload.page}.`);
-        }
-
-        syncFailureCountRef.current = 0;
-        setSyncErrorMessage("");
-      } catch (error) {
-        if (!cancelled) {
-          syncFailureCountRef.current += 1;
-          setSyncErrorMessage(getFriendlySyncErrorMessage(error, "No se pudo sincronizar."));
-          if (syncFailureCountRef.current >= MAX_SYNC_FAILURES_BEFORE_BACKOFF) {
-            setSyncStatusMessage(`Reconectando a ${syncSessionCodeRef.current}...`);
-            setHintMessage("La conexión está inestable. Seguiremos intentando en segundo plano.");
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          const nextDelay = syncFailureCountRef.current >= MAX_SYNC_FAILURES_BEFORE_BACKOFF
-            ? DEFAULT_DIRECTOR_HEARTBEAT_MS
-            : DIRECTOR_SYNC_POLL_MS;
-          syncPollTimeoutRef.current = setTimeout(pollDirector, nextDelay);
-        }
-      }
-    };
-
-    pollDirector();
-
-    return () => {
-      cancelled = true;
-      if (syncPollTimeoutRef.current) {
-        clearTimeout(syncPollTimeoutRef.current);
-        syncPollTimeoutRef.current = null;
-      }
-    };
-  }, [getFriendlySyncErrorMessage, goToPage, isAppActive, syncEndpoint, syncRole, usesNearbyDirectorSync]);
-
-  useEffect(() => {
-    if (!usesNearbyDirectorSync) return;
-    if (syncRole !== "director" || isLoading || errorMessage) return;
     sendNearbyDirectorPageUpdate(activePage, totalPages).catch((error) => {
-      setSyncErrorMessage(getFriendlySyncErrorMessage(error, "No se pudo enviar la página al resto del coro."));
+      setSyncErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "No se pudo enviar la página al resto del coro.",
+      );
     });
-  }, [activePage, errorMessage, getFriendlySyncErrorMessage, isLoading, syncRole, totalPages, usesNearbyDirectorSync]);
+  }, [activePage, errorMessage, isAppActive, isLoading, syncRole, totalPages, usesNearbyDirectorSync]);
 
   useEffect(() => () => {
-    if (syncHeartbeatTimeoutRef.current) {
-      clearTimeout(syncHeartbeatTimeoutRef.current);
-    }
-    if (syncPollTimeoutRef.current) {
-      clearTimeout(syncPollTimeoutRef.current);
-    }
+    stopNearbyDirectorSync().catch(() => {});
   }, []);
 
   return (
@@ -629,14 +317,14 @@ const PdfReaderApp = () => {
           }}
           onLoadComplete={(numberOfPages) => {
             const safeTotalPages = numberOfPages || 0;
-            const clampedPage = clampPdfPage(activePage, 1, safeTotalPages || 1);
+            const clampedPage = clampPage(activePageRef.current, safeTotalPages);
 
             setIsLoading(false);
             setTotalPages(safeTotalPages);
             setErrorMessage("");
             setHintMessage("");
 
-            if (clampedPage !== activePage) {
+            if (clampedPage !== activePageRef.current) {
               setActivePage(clampedPage);
               requestAnimationFrame(() => {
                 pdfRef.current?.setPage(clampedPage);
@@ -646,9 +334,6 @@ const PdfReaderApp = () => {
           onPageChanged={(page, numberOfPages) => {
             setActivePage(page);
             setTotalPages(numberOfPages || 0);
-            if (!isGoModalVisible) {
-              setModalInput("");
-            }
           }}
           page={activePage}
           renderActivityIndicator={() => (
@@ -667,6 +352,19 @@ const PdfReaderApp = () => {
           <ActivityIndicator color="#ffffff" size="small" />
         </View>
       ) : null}
+
+      <Pressable
+        accessibilityHint="Mantén presionado para abrir el modo oculto de sincronización"
+        accessibilityLabel="Página actual"
+        delayLongPress={DIRECTOR_LONG_PRESS_MS}
+        onLongPress={openSyncModal}
+        style={styles.pageBadge}
+      >
+        <Text style={styles.pageBadgeText}>
+          {activePage}
+          {totalPages > 0 ? ` / ${totalPages}` : ""}
+        </Text>
+      </Pressable>
 
       {errorMessage ? (
         <View style={styles.errorPill}>
@@ -692,58 +390,6 @@ const PdfReaderApp = () => {
         </View>
       ) : null}
 
-      {!isGoModalVisible ? (
-        <Pressable
-          accessibilityHint="Abre el cuadro para ir a una canción"
-          accessibilityLabel="Ir a canción"
-          delayLongPress={DIRECTOR_LONG_PRESS_MS}
-          onLongPress={openSyncModal}
-          onPress={openGoModal}
-          style={styles.jumpButton}
-        >
-          <Text style={styles.jumpButtonText}>Ir</Text>
-        </Pressable>
-      ) : null}
-
-      <Modal
-        animationType="fade"
-        onRequestClose={closeGoModal}
-        transparent
-        visible={isGoModalVisible}
-      >
-        <View style={styles.modalBackdrop}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={styles.modalCard}
-          >
-            <Text style={styles.modalTitle}>Ir a cancion</Text>
-            <TextInput
-              autoFocus
-              blurOnSubmit={false}
-              inputMode="numeric"
-              keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
-              maxLength={4}
-              onChangeText={normalizeSongInput}
-              onSubmitEditing={confirmGoModal}
-              placeholder="Numero de cancion"
-              placeholderTextColor="#7a8daa"
-              ref={modalInputRef}
-              returnKeyType="go"
-              style={styles.modalInput}
-              value={modalInput}
-            />
-            <View style={styles.modalButtonRow}>
-              <Pressable onPress={closeGoModal} style={styles.modalCancelButton}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </Pressable>
-              <Pressable onPress={confirmGoModal} style={styles.modalConfirmButton}>
-                <Text style={styles.modalConfirmText}>Ir</Text>
-              </Pressable>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
       <Modal
         animationType="fade"
         onRequestClose={closeSyncModal}
@@ -757,26 +403,38 @@ const PdfReaderApp = () => {
           >
             <Text style={styles.modalTitle}>Sincronizar iPads</Text>
             <Text style={styles.syncDescription}>
-              Mantén presionado el botón Ir para abrir este modo oculto. En iPad usa conexión cercana sin internet.
+              Este lector solo muestra el PDF. Mantén presionado el contador de página para abrir este modo oculto.
             </Text>
             <TextInput
               autoCapitalize="characters"
               autoCorrect={false}
               onChangeText={normalizeSyncCodeInput}
-              placeholder="Codigo de sesion"
+              placeholder="Código de sesión"
               placeholderTextColor="#7a8daa"
               style={styles.modalInput}
               value={syncSessionCode}
             />
             <View style={styles.syncActionColumn}>
-              <Pressable disabled={isSyncBusy} onPress={enableDirectorMode} style={[styles.modalConfirmButton, isSyncBusy && styles.disabledButton]}>
+              <Pressable
+                disabled={isSyncBusy}
+                onPress={enableDirectorMode}
+                style={[styles.modalConfirmButton, isSyncBusy && styles.disabledButton]}
+              >
                 <Text style={styles.modalConfirmText}>Entrar como director</Text>
               </Pressable>
-              <Pressable disabled={isSyncBusy} onPress={enableFollowerMode} style={[styles.syncFollowerButton, isSyncBusy && styles.disabledButton]}>
+              <Pressable
+                disabled={isSyncBusy}
+                onPress={enableFollowerMode}
+                style={[styles.syncFollowerButton, isSyncBusy && styles.disabledButton]}
+              >
                 <Text style={styles.syncFollowerText}>Seguir director</Text>
               </Pressable>
-              <Pressable disabled={isSyncBusy} onPress={disableSyncMode} style={[styles.modalCancelButton, isSyncBusy && styles.disabledButton]}>
-                <Text style={styles.modalCancelText}>Apagar sincronizacion</Text>
+              <Pressable
+                disabled={isSyncBusy}
+                onPress={disableSyncMode}
+                style={[styles.modalCancelButton, isSyncBusy && styles.disabledButton]}
+              >
+                <Text style={styles.modalCancelText}>Apagar sincronización</Text>
               </Pressable>
             </View>
             <Pressable onPress={closeSyncModal} style={styles.syncCloseButton}>
@@ -813,6 +471,21 @@ const styles = StyleSheet.create({
     right: 0,
     top: 42,
     zIndex: 2,
+  },
+  pageBadge: {
+    backgroundColor: "rgba(18, 28, 44, 0.82)",
+    borderRadius: 999,
+    bottom: 16,
+    left: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    position: "absolute",
+    zIndex: 6,
+  },
+  pageBadgeText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
   },
   errorPill: {
     backgroundColor: "rgba(155, 21, 55, 0.92)",
@@ -873,23 +546,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
-  jumpButton: {
-    alignItems: "center",
-    backgroundColor: "rgba(10, 132, 255, 0.96)",
-    borderRadius: 26,
-    bottom: 16,
-    height: 52,
-    justifyContent: "center",
-    position: "absolute",
-    right: 16,
-    width: 52,
-    zIndex: 6,
-  },
-  jumpButtonText: {
-    color: "#ffffff",
-    fontSize: 17,
-    fontWeight: "800",
-  },
   modalBackdrop: {
     alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -901,11 +557,11 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     backgroundColor: "#ffffff",
     borderRadius: 14,
+    maxWidth: 360,
+    minWidth: 280,
     padding: 16,
     paddingBottom: 22,
     width: "72%",
-    maxWidth: 360,
-    minWidth: 280,
   },
   modalTitle: {
     color: "#14233a",
@@ -932,11 +588,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     textAlign: "center",
   },
-  modalButtonRow: {
-    flexDirection: "row",
-    gap: 10,
-    justifyContent: "flex-end",
-  },
   syncActionColumn: {
     gap: 10,
     marginTop: 4,
@@ -951,6 +602,7 @@ const styles = StyleSheet.create({
     color: "#20314f",
     fontSize: 15,
     fontWeight: "700",
+    textAlign: "center",
   },
   modalConfirmButton: {
     backgroundColor: "#0a84ff",
@@ -962,6 +614,7 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 15,
     fontWeight: "700",
+    textAlign: "center",
   },
   syncFollowerButton: {
     backgroundColor: "#123a73",

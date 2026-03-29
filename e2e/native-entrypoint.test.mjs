@@ -21,17 +21,18 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("pdf reader leaves PDF taps alone and uses an explicit jump button for song navigation", () => {
+test("pdf reader stays focused on the embedded PDF with a hidden long-press sync entry", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /GestureHandlerRootView/);
-  assert.match(source, /accessibilityLabel="Ir a canción"/);
-  assert.match(source, /style=\{styles\.jumpButton\}/);
-  assert.match(source, /onPress=\{openGoModal\}/);
+  assert.match(source, /accessibilityLabel="Página actual"/);
+  assert.match(source, /style=\{styles\.pageBadge\}/);
   assert.doesNotMatch(source, /onTouchStartCapture/);
   assert.doesNotMatch(source, /onTouchMoveCapture/);
   assert.doesNotMatch(source, /onTouchEndCapture/);
+  assert.doesNotMatch(source, /Ir a cancion/);
+  assert.doesNotMatch(source, /songNavigation/);
 });
 
 test("pdf reader includes a hidden long-press director sync mode", () => {
@@ -43,12 +44,13 @@ test("pdf reader includes a hidden long-press director sync mode", () => {
   assert.match(source, /Entrar como director/);
   assert.match(source, /Seguir director/);
   assert.match(source, /sin internet/);
+  assert.doesNotMatch(source, /directorSync/);
 });
 
 test("iOS app includes nearby offline director sync permissions and native bridge", () => {
-  const plistPath = path.join(APP_ROOT, "ios", "Mixterious", "Info.plist");
+  const plistPath = path.join(APP_ROOT, "ios", "SignoVivo", "Info.plist");
   const plistSource = fs.readFileSync(plistPath, "utf8");
-  const swiftModulePath = path.join(APP_ROOT, "ios", "Mixterious", "DirectorSyncModule.swift");
+  const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
   const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
 
   assert.match(plistSource, /NSLocalNetworkUsageDescription/);
@@ -61,7 +63,7 @@ test("iOS app includes nearby offline director sync permissions and native bridg
 test("offline director mode remains usable even with zero connected iPads", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const appSource = fs.readFileSync(appPath, "utf8");
-  const swiftModulePath = path.join(APP_ROOT, "ios", "Mixterious", "DirectorSyncModule.swift");
+  const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
   const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
 
   assert.match(appSource, /Director offline listo en/);

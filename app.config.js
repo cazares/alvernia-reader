@@ -55,7 +55,6 @@ module.exports = ({ config }) => {
     },
     extra: {
       ...(config.extra || {}),
-      directorSyncEndpoint: "https://signovino.com/director-sync",
       eas: {
         projectId: "8973a6b2-a2e5-4268-97ab-4a1b2c4cb555",
       },

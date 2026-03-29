@@ -1,76 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
-import {
-  normalizeSyncSessionCode,
-  publishDirectorSyncState,
-  readDirectorSyncState,
-  releaseDirectorSyncState,
-} from "../src/directorSync.js";
+const APP_ROOT = path.resolve(import.meta.dirname, "..");
 
-test("normalizeSyncSessionCode strips punctuation and caps length", () => {
-  assert.equal(normalizeSyncSessionCode(" coro-uno 2026 !!! "), "COROUNO2026");
+test("nearby director sync bridge stays native-only", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "src", "nearbyDirectorSync.js"), "utf8");
+
+  assert.match(source, /NativeModules\.DirectorSyncModule/);
+  assert.match(source, /Platform\.OS === "ios"/);
+  assert.match(source, /startDirector/);
+  assert.match(source, /startFollower/);
+  assert.doesNotMatch(source, /fetch\(/);
+  assert.doesNotMatch(source, /https?:\/\//);
 });
 
-test("publishDirectorSyncState sanitizes outgoing page values", async () => {
-  const originalFetch = globalThis.fetch;
-  let requestBody = null;
+test("app source no longer includes remote or songbook sync paths", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
 
-  globalThis.fetch = async (_url, options) => {
-    requestBody = JSON.parse(options.body);
-    return {
-      ok: true,
-      json: async () => ({
-        session: "CORO1234",
-        page: 1,
-        totalPages: 0,
-        updatedAt: "2026-03-29T00:00:00.000Z",
-      }),
-    };
-  };
-
-  try {
-    await publishDirectorSyncState({
-      endpoint: "https://signovino.com/director-sync",
-      sessionCode: "coro1234",
-      directorKey: "director-1",
-      page: -99,
-      totalPages: -5,
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-
-  assert.deepEqual(requestBody, {
-    directorKey: "director-1",
-    page: 1,
-    totalPages: 0,
-  });
-});
-
-test("readDirectorSyncState converts network failures into friendly errors", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => {
-    throw new Error("socket hang up");
-  };
-
-  try {
-    await assert.rejects(
-      () => readDirectorSyncState({
-        endpoint: "https://signovino.com/director-sync",
-        sessionCode: "CORO1234",
-      }),
-      (error) => error?.code === "DIRECTOR_NETWORK",
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("releaseDirectorSyncState returns null for empty session codes", async () => {
-  assert.equal(await releaseDirectorSyncState({
-    endpoint: "https://signovino.com/director-sync",
-    sessionCode: "",
-    directorKey: "director-1",
-  }), null);
+  assert.doesNotMatch(source, /resolveDirectorSyncEndpoint/);
+  assert.doesNotMatch(source, /publishDirectorSyncState/);
+  assert.doesNotMatch(source, /readDirectorSyncState/);
+  assert.doesNotMatch(source, /releaseDirectorSyncState/);
+  assert.doesNotMatch(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
+  assert.doesNotMatch(source, /findSongEntryOrNext/);
 });
