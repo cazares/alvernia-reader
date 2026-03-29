@@ -316,7 +316,7 @@ const hideLoadingIndicator = () => {
 
 const setOfflineGateState = ({
   visible,
-  title = "Preparando Signo Vino",
+  title = "Preparando SignoVivo",
   body = "Descargando todo el manual para que funcione 100% offline.",
   progress = 0,
   total = 0,
@@ -457,7 +457,7 @@ const requireOfflineBundle = async (totalPages) => {
   setOfflineGateState({
     visible: true,
     title: "Descargando todo el manual",
-    body: "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+    body: "No cierres la app. Cuando termine, SignoVivo quedará listo para usarse sin internet.",
     progress: 0,
     total: totalPages,
     showAdminNote: true,
@@ -470,7 +470,7 @@ const requireOfflineBundle = async (totalPages) => {
       title: progress >= total ? "Verificando descarga" : "Descargando todo el manual",
       body: progress >= total
         ? "Comprobando que todas las páginas ya quedaron guardadas en este iPad."
-        : "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+        : "No cierres la app. Cuando termine, SignoVivo quedará listo para usarse sin internet.",
       progress,
       total,
       showAdminNote: true,
@@ -484,7 +484,7 @@ const requireOfflineBundle = async (totalPages) => {
   setOfflineGateState({
     visible: true,
     title: "Offline listo",
-    body: "La descarga terminó. Este iPad ya puede abrir Signo Vino sin internet.",
+    body: "La descarga terminó. Este iPad ya puede abrir SignoVivo sin internet.",
     progress: totalPages,
     total: totalPages,
     showAdminNote: true,
@@ -2244,5 +2244,5 @@ bindViewportMetrics();
 bindReaderEvents();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
-  setLoading(true, "No se pudo cargar Signo Vino.");
+  setLoading(true, "No se pudo cargar SignoVivo.");
 });

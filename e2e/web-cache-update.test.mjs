@@ -74,7 +74,7 @@ test("web build injects a cache version into the generated service worker", () =
   assert.match(source, /writeFileSync\(path\.join\(distDir, "app\.js"\), appSource\)/);
 });
 
-test("offline html build emits the Signo Vino self-contained artifact", () => {
+test("offline html build emits the SignoVivo self-contained artifact", () => {
   const pkg = JSON.parse(readText("package.json"));
   const source = readText("web/build-offline.mjs");
 

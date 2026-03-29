@@ -1,7 +1,7 @@
 {
-  "name": "Signo Vino",
-  "short_name": "Signo Vino",
-  "description": "Manual de coro Signo Vino — navegacion rapida por numero de cancion.",
+  "name": "SignoVivo",
+  "short_name": "SignoVivo",
+  "description": "Manual de coro SignoVivo — navegacion rapida por numero de cancion.",
   "display_override": ["fullscreen", "standalone"],
   "display": "standalone",
   "scope": "/",

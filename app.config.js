@@ -26,7 +26,7 @@ module.exports = ({ config }) => {
 
   return {
     ...config,
-    name: "Signo Vino",
+    name: "SignoVivo",
     slug: "alvernia-reader",
     version: baseVersion,
     runtimeVersion: baseVersion,
@@ -55,6 +55,7 @@ module.exports = ({ config }) => {
     },
     extra: {
       ...(config.extra || {}),
+      directorSyncEndpoint: "https://signovino.com/director-sync",
       eas: {
         projectId: "8f4aeff3-940f-4ec2-b82d-89b430f5c8be",
       },

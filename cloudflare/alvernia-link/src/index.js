@@ -3,8 +3,10 @@ const LEGACY_ROUTE_PREFIX = "/alvernia";
 const UPLOAD_PREFIX = "uploads/";
 const ACTIVE_PREFIX = "active";
 const LATEST_KEY = "latest.json";
+const DIRECTOR_SYNC_PREFIX = "director-sync/";
+const DIRECTOR_STALE_MS = 12000;
 const ALLOWED_UPLOAD_EXTENSIONS = new Set(["pdf", "key"]);
-const SPECIAL_ROUTES = new Set(["/upload", "/download", "/promote"]);
+const SPECIAL_ROUTES = new Set(["/upload", "/download", "/promote", "/director-sync"]);
 const PAGE_PATH_PREFIX = "/pages/";
 const PAGES_MANIFEST_PATH = "/pages.json";
 const ROOT_PROXY_HOSTS = new Set([
@@ -81,6 +83,13 @@ const extractExtension = (name = "") => {
   return parts.length > 1 ? parts.pop() : "";
 };
 
+export const normalizeDirectorSessionCode = (value = "") => value
+  .toUpperCase()
+  .replace(/[^A-Z0-9]/g, "")
+  .slice(0, 12);
+export const isValidDirectorPage = (value) => Number.isInteger(value) && value >= 1;
+export const isValidDirectorTotalPages = (value) => Number.isInteger(value) && value >= 0;
+
 const readLatest = async (env) => {
   const object = await env.ALVERNIA_UPLOADS.get(LATEST_KEY);
   if (!object) return null;
@@ -93,6 +102,37 @@ const writeLatest = async (env, payload) => {
     httpMetadata: { contentType: "application/json" },
   });
 };
+
+const readDirectorSyncState = async (env, sessionCode) => {
+  const object = await env.ALVERNIA_UPLOADS.get(`${DIRECTOR_SYNC_PREFIX}${sessionCode}.json`);
+  if (!object) return null;
+  const text = await object.text();
+  return JSON.parse(text);
+};
+
+const writeDirectorSyncState = async (env, sessionCode, payload) => {
+  await env.ALVERNIA_UPLOADS.put(`${DIRECTOR_SYNC_PREFIX}${sessionCode}.json`, JSON.stringify(payload), {
+    httpMetadata: { contentType: "application/json" },
+  });
+};
+
+const deleteDirectorSyncState = async (env, sessionCode) => {
+  await env.ALVERNIA_UPLOADS.delete(`${DIRECTOR_SYNC_PREFIX}${sessionCode}.json`);
+};
+
+export const isDirectorSyncStateStale = (payload) => {
+  const lastSeenAt = new Date(payload?.lastSeenAt || payload?.updatedAt || 0).getTime();
+  if (!lastSeenAt) return true;
+  return (Date.now() - lastSeenAt) > DIRECTOR_STALE_MS;
+};
+
+export const buildDirectorSyncPayload = (sessionCode, payload) => ({
+  session: sessionCode,
+  page: payload.page,
+  totalPages: payload.totalPages || 0,
+  updatedAt: payload.updatedAt,
+  directorPresent: true,
+});
 
 const createR2Response = (object, fallbackStatus = 404) => {
   if (!object) {
@@ -111,7 +151,7 @@ const buildUploadPage = () => `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Subir archivo - Signo Vino</title>
+    <title>Subir archivo - SignoVivo</title>
     <style>
       body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0b0b; color: #f7f7f7; margin: 0; display: grid; place-items: center; min-height: 100vh; }
       .card { width: min(520px, 92vw); background: #14171d; border: 1px solid #2b2f38; border-radius: 20px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
@@ -149,7 +189,7 @@ const buildPromotePage = (latest) => {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Promote - Signo Vino</title>
+    <title>Promote - SignoVivo</title>
     <style>
       body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0b0b; color: #f7f7f7; margin: 0; display: grid; place-items: center; min-height: 100vh; }
       .card { width: min(520px, 92vw); background: #14171d; border: 1px solid #2b2f38; border-radius: 20px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
@@ -184,7 +224,7 @@ const buildDownloadPage = (latest) => {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Descargar - Signo Vino</title>
+    <title>Descargar - SignoVivo</title>
     <style>
       body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0b0b; color: #f7f7f7; margin: 0; display: grid; place-items: center; min-height: 100vh; }
       .card { width: min(520px, 92vw); background: #14171d; border: 1px solid #2b2f38; border-radius: 20px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); text-align: center; }
@@ -305,6 +345,103 @@ const handleDownload = async (request, env) => {
   return new Response(object.body, { status: 200, headers });
 };
 
+const handleDirectorSync = async (request, env) => {
+  if (!env?.ALVERNIA_UPLOADS) {
+    return jsonResponse({ error: "R2 no configurado" }, 500);
+  }
+
+  const requestUrl = new URL(request.url);
+  const sessionCode = normalizeDirectorSessionCode(requestUrl.searchParams.get("session") || "");
+  if (!sessionCode) {
+    return jsonResponse({ error: "Sesion invalida" }, 400);
+  }
+
+  if (request.method === "GET") {
+    const currentState = await readDirectorSyncState(env, sessionCode);
+    if (!currentState) {
+      return jsonResponse({
+        session: sessionCode,
+        directorPresent: false,
+        waitingForDirector: true,
+      });
+    }
+
+    if (isDirectorSyncStateStale(currentState)) {
+      await deleteDirectorSyncState(env, sessionCode);
+      return jsonResponse({
+        session: sessionCode,
+        directorPresent: false,
+        waitingForDirector: true,
+        staleDirectorExpired: true,
+      });
+    }
+
+    return jsonResponse(buildDirectorSyncPayload(sessionCode, currentState));
+  }
+
+  if (request.method === "DELETE") {
+    const payload = await request.json().catch(() => null);
+    const directorKey = String(payload?.directorKey || "").trim();
+    if (!directorKey) {
+      return jsonResponse({ error: "directorKey requerido", code: "DIRECTOR_KEY_REQUIRED" }, 400);
+    }
+
+    const currentState = await readDirectorSyncState(env, sessionCode);
+    if (!currentState) {
+      return jsonResponse({ released: true, session: sessionCode });
+    }
+
+    if (currentState.directorKey !== directorKey && !isDirectorSyncStateStale(currentState)) {
+      return jsonResponse({ error: "No puedes cerrar la sesión de otro director.", code: "DIRECTOR_KEY_MISMATCH" }, 409);
+    }
+
+    await deleteDirectorSyncState(env, sessionCode);
+    return jsonResponse({ released: true, session: sessionCode });
+  }
+
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Metodo no permitido" }, 405);
+  }
+
+  const payload = await request.json().catch(() => null);
+  const directorKey = String(payload?.directorKey || "").trim();
+  const page = Number.parseInt(String(payload?.page || ""), 10);
+  const totalPages = Number.parseInt(String(payload?.totalPages || "0"), 10);
+
+  if (!directorKey) {
+    return jsonResponse({ error: "directorKey requerido", code: "DIRECTOR_KEY_REQUIRED" }, 400);
+  }
+  if (!isValidDirectorPage(page)) {
+    return jsonResponse({ error: "page inválida", code: "DIRECTOR_PAGE_INVALID" }, 400);
+  }
+  if (!isValidDirectorTotalPages(totalPages)) {
+    return jsonResponse({ error: "totalPages inválido", code: "DIRECTOR_TOTAL_PAGES_INVALID" }, 400);
+  }
+
+  const currentState = await readDirectorSyncState(env, sessionCode);
+  if (currentState?.directorKey && currentState.directorKey !== directorKey && !isDirectorSyncStateStale(currentState)) {
+    return jsonResponse({
+      error: "La sesion ya tiene otro director activo. Espera o usa otro codigo.",
+      code: "DIRECTOR_CONFLICT",
+      session: sessionCode,
+      updatedAt: currentState.updatedAt,
+    }, 409);
+  }
+
+  const nextState = {
+    session: sessionCode,
+    directorKey,
+    page,
+    totalPages,
+    lastSeenAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeDirectorSyncState(env, sessionCode, nextState);
+
+  return jsonResponse(buildDirectorSyncPayload(sessionCode, nextState));
+};
+
 const tryServeActivePages = async (requestUrl, env) => {
   if (!env.ALVERNIA_UPLOADS) return null;
   const path = requestUrl.pathname;
@@ -367,6 +504,10 @@ export default {
 
       if (pathname === "/download") {
         return handleDownload(request, env);
+      }
+
+      if (pathname === "/director-sync") {
+        return handleDirectorSync(request, env);
       }
     }
 

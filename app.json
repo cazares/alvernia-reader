@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Signo Vino",
+    "name": "SignoVivo",
     "description": "Single-purpose PDF reader for the Alvernia manual.",
     "slug": "alvernia-reader",
     "version": "1.0",
@@ -18,11 +18,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cazares.alverniareader",
-      "buildNumber": "121"
+      "buildNumber": "122"
     },
     "android": {
       "package": "com.cazares.alverniareader",
-      "versionCode": 121
+      "versionCode": 122
     },
     "extra": {
       "eas": {

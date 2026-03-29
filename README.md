@@ -40,6 +40,8 @@ npx expo run:ios -d 'mPad' --configuration Release
 - The friendliest share path is the Worker custom domain at `https://signovino.com/`.
 - On iPhone or iPad, the intended install flow is Safari -> Compartir -> Agregar a pantalla de inicio.
 - Deploy that route with `npx wrangler deploy -c cloudflare/alvernia-link/wrangler.jsonc`.
+- On native iPads, mantener presionado el botón `Ir` abre el modo oculto de sincronización para elegir Director o Seguidor usando un código compartido.
+- Native iPad sync now uses nearby device discovery and works with zero internet as long as the iPads are physically near each other.
 - Generated folders like `node_modules`, `ios/Pods`, and build output are intentionally not tracked.
 
 ## Upload + Promote pipeline (Tunnel)
