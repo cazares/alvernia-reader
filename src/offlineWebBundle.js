@@ -1,4 +1,4 @@
-const OFFLINE_WEB_BUNDLE_VERSION = "be3e6fe";
+const OFFLINE_WEB_BUNDLE_VERSION = "4c50fd3";
 
 const OFFLINE_WEB_BUNDLE_ASSETS = {
   "app.js": require("../assets/offline-web/app.js"),
@@ -377,7 +377,6 @@ const OFFLINE_WEB_BUNDLE_ASSETS = {
   "pages/page-368.jpg": require("../assets/offline-web/pages/page-368.jpg"),
   "pages.json": require("../assets/offline-web/pages.json"),
   "search-index.json": require("../assets/offline-web/search-index.json"),
-  "signo-vino-offline.html": require("../assets/offline-web/signo-vino-offline.html"),
   "styles.css": require("../assets/offline-web/styles.css"),
   "sw.js": require("../assets/offline-web/sw.js"),
 };

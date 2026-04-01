@@ -29,6 +29,7 @@ const bundleVersion = gitSha.status === 0 && gitSha.stdout.trim()
 const copyDir = (sourceDir, targetDir) => {
   fs.mkdirSync(targetDir, { recursive: true });
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    if (entry.name === "signo-vino-offline.html") continue;
     const sourcePath = path.join(sourceDir, entry.name);
     const targetPath = path.join(targetDir, entry.name);
     if (entry.isDirectory()) {
