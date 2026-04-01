@@ -21,24 +21,21 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("pdf reader keeps a tap-to-jump numpad and hidden long-press sync entry", () => {
+test("pdf reader restores the old Ir flow while keeping hidden long-press sync", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /GestureHandlerRootView/);
   assert.match(source, /accessibilityLabel="Página actual"/);
   assert.match(source, /style=\{styles\.pageBadge\}/);
-  assert.match(source, /onPress=\{openPageJumpModal\}/);
-  assert.match(source, /Ir a página/);
-  assert.match(source, /Toca el contador de página para abrir este teclado rápido/);
-  assert.match(source, /styles\.numpadGrid/);
-  assert.match(source, /Borrar/);
-  assert.match(source, />Ir</);
+  assert.match(source, /accessibilityLabel="Ir a canción"/);
+  assert.match(source, /Ir a cancion/);
+  assert.match(source, /keyboardType=\{Platform\.OS === "ios" \? "number-pad" : "numeric"\}/);
+  assert.match(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
+  assert.match(source, /findSongEntryOrNext/);
   assert.doesNotMatch(source, /onTouchStartCapture/);
   assert.doesNotMatch(source, /onTouchMoveCapture/);
   assert.doesNotMatch(source, /onTouchEndCapture/);
-  assert.doesNotMatch(source, /Ir a cancion/);
-  assert.doesNotMatch(source, /songNavigation/);
 });
 
 test("pdf reader includes a hidden long-press director sync mode", () => {

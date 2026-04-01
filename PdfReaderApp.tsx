@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import Pdf, { type PdfRef } from "react-native-pdf";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
   addNearbyDirectorSyncListener,
   isNearbyDirectorSyncAvailable,
@@ -23,36 +24,40 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
+import { clampPdfPage } from "./src/pdfReaderUrl";
+import { findSongEntryOrNext } from "./src/songNavigation";
 
 const ALVERNIA_PDF_ASSET = require("./assets/alvernia_manual_2.pdf");
 const DIRECTOR_SYNC_STORAGE_KEY = "@alvernia-reader/director-sync";
 const DIRECTOR_LONG_PRESS_MS = 1400;
+const UNKNOWN_PAGE_MAX = 10000;
+
+type SongEntry = {
+  page: number;
+  song: number;
+};
 
 type SyncRole = "off" | "director" | "follower";
 
-const clampPage = (value: number, totalPages: number) => {
-  const safeTotalPages = Math.max(1, totalPages || 1);
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(Math.max(Math.trunc(value), 1), safeTotalPages);
-};
-
 const createDefaultSyncSessionCode = () => `CORO${Math.floor(1000 + Math.random() * 9000)}`;
 
-const normalizeSyncSessionCode = (value = "") => value
-  .toUpperCase()
-  .replace(/[^A-Z0-9]/g, "")
-  .slice(0, 12);
+const normalizeSyncSessionCode = (value = "") =>
+  value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 12);
 
 const PdfReaderApp = () => {
   const pdfRef = useRef<PdfRef | null>(null);
+  const modalInputRef = useRef<TextInput | null>(null);
 
   const [activePage, setActivePage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [hintMessage, setHintMessage] = useState("");
-  const [isPageJumpModalVisible, setIsPageJumpModalVisible] = useState(false);
-  const [pageJumpValue, setPageJumpValue] = useState("");
+  const [isGoModalVisible, setIsGoModalVisible] = useState(false);
+  const [modalInput, setModalInput] = useState("1");
   const [isSyncModalVisible, setIsSyncModalVisible] = useState(false);
   const [syncRole, setSyncRole] = useState<SyncRole>("off");
   const [syncSessionCode, setSyncSessionCode] = useState(createDefaultSyncSessionCode());
@@ -64,6 +69,7 @@ const PdfReaderApp = () => {
   const activePageRef = useRef(activePage);
   const syncSessionCodeRef = useRef(syncSessionCode);
   const usesNearbyDirectorSync = Platform.OS === "ios" && isNearbyDirectorSyncAvailable();
+  const songEntries = ALVERNIA_MANUAL_2_SONG_INDEX as readonly SongEntry[];
 
   useEffect(() => {
     activePageRef.current = activePage;
@@ -74,6 +80,16 @@ const PdfReaderApp = () => {
   }, [syncSessionCode]);
 
   useEffect(() => {
+    if (!isGoModalVisible) return;
+    const focusTimeout = setTimeout(() => {
+      modalInputRef.current?.focus();
+    }, 60);
+    return () => {
+      clearTimeout(focusTimeout);
+    };
+  }, [isGoModalVisible]);
+
+  useEffect(() => {
     let isMounted = true;
 
     const loadPersistedSyncState = async () => {
@@ -81,9 +97,8 @@ const PdfReaderApp = () => {
         const rawValue = await AsyncStorage.getItem(DIRECTOR_SYNC_STORAGE_KEY);
         if (!rawValue || !isMounted) return;
         const parsed = JSON.parse(rawValue);
-        const nextRole = parsed?.role === "director" || parsed?.role === "follower"
-          ? parsed.role
-          : "off";
+        const nextRole =
+          parsed?.role === "director" || parsed?.role === "follower" ? parsed.role : "off";
         const nextSessionCode = normalizeSyncSessionCode(parsed?.sessionCode || "");
 
         if (nextRole !== "off") {
@@ -103,10 +118,13 @@ const PdfReaderApp = () => {
   }, []);
 
   useEffect(() => {
-    AsyncStorage.setItem(DIRECTOR_SYNC_STORAGE_KEY, JSON.stringify({
-      role: syncRole,
-      sessionCode: syncSessionCode,
-    })).catch(() => {});
+    AsyncStorage.setItem(
+      DIRECTOR_SYNC_STORAGE_KEY,
+      JSON.stringify({
+        role: syncRole,
+        sessionCode: syncSessionCode,
+      }),
+    ).catch(() => {});
   }, [syncRole, syncSessionCode]);
 
   useEffect(() => {
@@ -118,57 +136,86 @@ const PdfReaderApp = () => {
     };
   }, []);
 
-  const goToPage = useCallback((nextPage: number) => {
-    const clampedPage = clampPage(nextPage, totalPages);
-    setActivePage(clampedPage);
-    setErrorMessage("");
-    requestAnimationFrame(() => {
-      pdfRef.current?.setPage(clampedPage);
-    });
-  }, [totalPages]);
+  const goToPage = useCallback(
+    (value: number | string) => {
+      const maxPage = totalPages > 0 ? totalPages : UNKNOWN_PAGE_MAX;
+      const nextPage = clampPdfPage(value, 1, maxPage);
+      setActivePage(nextPage);
+      setModalInput(String(nextPage));
+      setErrorMessage("");
+      requestAnimationFrame(() => {
+        pdfRef.current?.setPage(nextPage);
+      });
+    },
+    [totalPages],
+  );
+
+  const goToSong = useCallback(
+    (value: number | string) => {
+      const rawInput = String(value || "").trim();
+      const parsedInput = Number.parseInt(rawInput || "1", 10);
+      if (Number.isFinite(parsedInput) && parsedInput <= 0) {
+        goToPage(1);
+        setModalInput("0");
+        setErrorMessage("");
+        setHintMessage("Mostrando la introduccion antes de la cancion 1.");
+        return;
+      }
+
+      const requestedSong = clampPdfPage(parsedInput, 1, UNKNOWN_PAGE_MAX);
+      const targetEntry = findSongEntryOrNext(songEntries, requestedSong);
+      const exact = targetEntry?.song === requestedSong ? targetEntry : null;
+      const maxPage = totalPages > 0 ? totalPages : UNKNOWN_PAGE_MAX;
+      const targetPage = targetEntry ? targetEntry.page : clampPdfPage(requestedSong, 1, maxPage);
+
+      setActivePage(targetPage);
+      setModalInput(String(requestedSong));
+      setErrorMessage("");
+
+      if (!exact && targetEntry) {
+        setHintMessage(
+          `La cancion ${requestedSong} no existe. Saltamos a la cancion ${targetEntry.song}.`,
+        );
+      } else if (!targetEntry) {
+        setHintMessage("Indice de canciones no disponible. Usando numero de pagina.");
+      } else {
+        setHintMessage("");
+      }
+
+      requestAnimationFrame(() => {
+        pdfRef.current?.setPage(targetPage);
+      });
+    },
+    [goToPage, songEntries, totalPages],
+  );
+
+  const openGoModal = useCallback(() => {
+    setModalInput("");
+    setIsGoModalVisible(true);
+  }, []);
+
+  const closeGoModal = useCallback(() => {
+    setIsGoModalVisible(false);
+  }, []);
+
+  const confirmGoModal = useCallback(() => {
+    const trimmedValue = String(modalInput || "").trim();
+    if (!trimmedValue) {
+      setHintMessage("Ingresa un numero de cancion.");
+      return;
+    }
+    goToSong(trimmedValue);
+    setIsGoModalVisible(false);
+  }, [goToSong, modalInput]);
+
+  const normalizeSongInput = useCallback((value: string) => {
+    setModalInput(value.replace(/\D+/g, "").slice(0, 4));
+  }, []);
 
   const openSyncModal = useCallback(() => {
     setSyncErrorMessage("");
     setIsSyncModalVisible(true);
   }, []);
-
-  const openPageJumpModal = useCallback(() => {
-    setPageJumpValue(String(activePageRef.current || 1));
-    setIsPageJumpModalVisible(true);
-  }, []);
-
-  const closePageJumpModal = useCallback(() => {
-    setIsPageJumpModalVisible(false);
-  }, []);
-
-  const appendPageJumpDigit = useCallback((digit: string) => {
-    setPageJumpValue((currentValue) => {
-      const nextValue = `${currentValue}${digit}`.replace(/\D/g, "").slice(0, 4);
-      return nextValue.replace(/^0+(?=\d)/, "");
-    });
-  }, []);
-
-  const backspacePageJumpDigit = useCallback(() => {
-    setPageJumpValue((currentValue) => currentValue.slice(0, -1));
-  }, []);
-
-  const submitPageJump = useCallback(() => {
-    const parsedPage = Number.parseInt(pageJumpValue, 10);
-    const targetPage = clampPage(parsedPage, totalPages);
-
-    if (!Number.isFinite(parsedPage) || parsedPage < 1) {
-      setHintMessage("Escribe un número de página válido.");
-      return;
-    }
-
-    goToPage(targetPage);
-    setHintMessage(
-      targetPage === parsedPage
-        ? `Saltaste a la página ${targetPage}.`
-        : `La página ${parsedPage} no existe. Fui a la ${targetPage}.`,
-    );
-    setIsPageJumpModalVisible(false);
-  }, [goToPage, pageJumpValue, totalPages]);
 
   const closeSyncModal = useCallback(() => {
     setIsSyncModalVisible(false);
@@ -246,7 +293,8 @@ const PdfReaderApp = () => {
   const enableDirectorMode = useCallback(async () => {
     if (isSyncBusy) return;
 
-    const nextSessionCode = normalizeSyncSessionCode(syncSessionCode) || createDefaultSyncSessionCode();
+    const nextSessionCode =
+      normalizeSyncSessionCode(syncSessionCode) || createDefaultSyncSessionCode();
     setIsSyncBusy(true);
     setSyncSessionCode(nextSessionCode);
 
@@ -292,7 +340,9 @@ const PdfReaderApp = () => {
       setSyncRole("follower");
       setSyncStatusMessage(`Buscando director cerca de ${nextSessionCode}...`);
       setSyncErrorMessage("");
-      setHintMessage("Modo seguidor offline activado. Esta iPad buscará un director cercano sin internet.");
+      setHintMessage(
+        "Modo seguidor offline activado. Esta iPad buscará un director cercano sin internet.",
+      );
       setIsSyncModalVisible(false);
     } catch (error) {
       setSyncErrorMessage(
@@ -327,16 +377,17 @@ const PdfReaderApp = () => {
 
     sendNearbyDirectorPageUpdate(activePage, totalPages).catch((error) => {
       setSyncErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudo enviar la página al resto del coro.",
+        error instanceof Error ? error.message : "No se pudo enviar la página al resto del coro.",
       );
     });
   }, [activePage, errorMessage, isAppActive, isLoading, syncRole, totalPages, usesNearbyDirectorSync]);
 
-  useEffect(() => () => {
-    stopNearbyDirectorSync().catch(() => {});
-  }, []);
+  useEffect(
+    () => () => {
+      stopNearbyDirectorSync().catch(() => {});
+    },
+    [],
+  );
 
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -357,14 +408,14 @@ const PdfReaderApp = () => {
           }}
           onLoadComplete={(numberOfPages) => {
             const safeTotalPages = numberOfPages || 0;
-            const clampedPage = clampPage(activePageRef.current, safeTotalPages);
+            const clampedPage = clampPdfPage(activePage, 1, safeTotalPages || 1);
 
             setIsLoading(false);
             setTotalPages(safeTotalPages);
             setErrorMessage("");
             setHintMessage("");
 
-            if (clampedPage !== activePageRef.current) {
+            if (clampedPage !== activePage) {
               setActivePage(clampedPage);
               requestAnimationFrame(() => {
                 pdfRef.current?.setPage(clampedPage);
@@ -374,6 +425,9 @@ const PdfReaderApp = () => {
           onPageChanged={(page, numberOfPages) => {
             setActivePage(page);
             setTotalPages(numberOfPages || 0);
+            if (!isGoModalVisible) {
+              setModalInput("");
+            }
           }}
           page={activePage}
           renderActivityIndicator={() => (
@@ -397,7 +451,6 @@ const PdfReaderApp = () => {
         accessibilityHint="Mantén presionado para abrir el modo oculto de sincronización"
         accessibilityLabel="Página actual"
         delayLongPress={DIRECTOR_LONG_PRESS_MS}
-        onPress={openPageJumpModal}
         onLongPress={openSyncModal}
         style={styles.pageBadge}
       >
@@ -431,50 +484,53 @@ const PdfReaderApp = () => {
         </View>
       ) : null}
 
+      {!isGoModalVisible ? (
+        <Pressable
+          accessibilityHint="Abre el cuadro para ir a una canción"
+          accessibilityLabel="Ir a canción"
+          onPress={openGoModal}
+          style={styles.jumpButton}
+        >
+          <Text style={styles.jumpButtonText}>Ir</Text>
+        </Pressable>
+      ) : null}
+
       <Modal
         animationType="fade"
-        onRequestClose={closePageJumpModal}
+        onRequestClose={closeGoModal}
         transparent
-        visible={isPageJumpModalVisible}
+        visible={isGoModalVisible}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Ir a página</Text>
-            <Text style={styles.syncDescription}>
-              Toca el contador de página para abrir este teclado rápido. Mantén presionado ese mismo botón para Director.
-            </Text>
-            <Pressable onPress={backspacePageJumpDigit} style={styles.pageJumpDisplay}>
-              <Text style={styles.pageJumpValue}>
-                {pageJumpValue || "—"}
-              </Text>
-              <Text style={styles.pageJumpMeta}>
-                {totalPages > 0 ? `de ${totalPages}` : "sin total todavía"}
-              </Text>
-            </Pressable>
-            <View style={styles.numpadGrid}>
-              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((digit) => (
-                <Pressable
-                  key={digit}
-                  onPress={() => appendPageJumpDigit(digit)}
-                  style={[
-                    styles.numpadButton,
-                    digit === "0" && styles.numpadZeroButton,
-                  ]}
-                >
-                  <Text style={styles.numpadButtonText}>{digit}</Text>
-                </Pressable>
-              ))}
-              <Pressable onPress={backspacePageJumpDigit} style={styles.numpadUtilityButton}>
-                <Text style={styles.numpadUtilityText}>Borrar</Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.modalCard}
+          >
+            <Text style={styles.modalTitle}>Ir a cancion</Text>
+            <TextInput
+              autoFocus
+              blurOnSubmit={false}
+              inputMode="numeric"
+              keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+              maxLength={4}
+              onChangeText={normalizeSongInput}
+              onSubmitEditing={confirmGoModal}
+              placeholder="Numero de cancion"
+              placeholderTextColor="#7a8daa"
+              ref={modalInputRef}
+              returnKeyType="go"
+              style={styles.modalInput}
+              value={modalInput}
+            />
+            <View style={styles.modalButtonRow}>
+              <Pressable onPress={closeGoModal} style={styles.modalCancelButton}>
+                <Text style={styles.modalCancelText}>Cancelar</Text>
               </Pressable>
-              <Pressable onPress={submitPageJump} style={styles.numpadConfirmButton}>
-                <Text style={styles.numpadConfirmText}>Ir</Text>
+              <Pressable onPress={confirmGoModal} style={styles.modalConfirmButton}>
+                <Text style={styles.modalConfirmText}>Ir</Text>
               </Pressable>
             </View>
-            <Pressable onPress={closePageJumpModal} style={styles.syncCloseButton}>
-              <Text style={styles.syncCloseText}>Cerrar</Text>
-            </Pressable>
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -491,7 +547,7 @@ const PdfReaderApp = () => {
           >
             <Text style={styles.modalTitle}>Sincronizar iPads</Text>
             <Text style={styles.syncDescription}>
-              Este lector solo muestra el PDF. Mantén presionado el contador de página para abrir este modo oculto.
+              Mantén presionado el contador de página para abrir este modo oculto sin quitar el botón de Ir.
             </Text>
             <TextInput
               autoCapitalize="characters"
@@ -618,6 +674,11 @@ const styles = StyleSheet.create({
     right: 12,
     zIndex: 4,
   },
+  syncText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   syncErrorPill: {
     backgroundColor: "rgba(155, 77, 21, 0.92)",
     borderRadius: 10,
@@ -629,10 +690,22 @@ const styles = StyleSheet.create({
     right: 12,
     zIndex: 4,
   },
-  syncText: {
+  jumpButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(10, 132, 255, 0.96)",
+    borderRadius: 26,
+    bottom: 16,
+    height: 52,
+    justifyContent: "center",
+    position: "absolute",
+    right: 16,
+    width: 52,
+    zIndex: 6,
+  },
+  jumpButtonText: {
     color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "800",
   },
   modalBackdrop: {
     alignItems: "center",
@@ -676,79 +749,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     textAlign: "center",
   },
+  modalButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "flex-end",
+  },
   syncActionColumn: {
     gap: 10,
     marginTop: 4,
-  },
-  pageJumpDisplay: {
-    alignItems: "center",
-    backgroundColor: "#f3f6fb",
-    borderColor: "#c8d5ea",
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-  },
-  pageJumpValue: {
-    color: "#14233a",
-    fontSize: 30,
-    fontWeight: "800",
-  },
-  pageJumpMeta: {
-    color: "#5e7592",
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 4,
-  },
-  numpadGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    justifyContent: "center",
-    marginTop: 4,
-  },
-  numpadButton: {
-    alignItems: "center",
-    backgroundColor: "#edf3fb",
-    borderRadius: 12,
-    justifyContent: "center",
-    minHeight: 58,
-    width: "30%",
-  },
-  numpadZeroButton: {
-    width: "30%",
-  },
-  numpadButtonText: {
-    color: "#102038",
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  numpadUtilityButton: {
-    alignItems: "center",
-    backgroundColor: "#e8edf5",
-    borderRadius: 12,
-    justifyContent: "center",
-    minHeight: 58,
-    width: "30%",
-  },
-  numpadUtilityText: {
-    color: "#20314f",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  numpadConfirmButton: {
-    alignItems: "center",
-    backgroundColor: "#0a84ff",
-    borderRadius: 12,
-    justifyContent: "center",
-    minHeight: 58,
-    width: "30%",
-  },
-  numpadConfirmText: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "800",
   },
   modalCancelButton: {
     backgroundColor: "#e8edf5",

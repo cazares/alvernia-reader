@@ -63,11 +63,19 @@ test("repo removes old web, cloud, and upload entrypoints", () => {
     "scripts/keynote-promote.mjs",
     "src/directorSync.js",
     "src/directorSync.d.ts",
+  ]) {
+    assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), false, `Unexpected leftover path: ${relativePath}`);
+  }
+});
+
+test("repo keeps the local song jump helpers used by the native reader", () => {
+  for (const relativePath of [
     "src/songNavigation.js",
     "src/songNavigation.d.ts",
     "src/alverniaManual2SongIndex.js",
     "src/alverniaManual2SongIndex.d.ts",
+    "src/pdfReaderUrl.js",
   ]) {
-    assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), false, `Unexpected leftover path: ${relativePath}`);
+    assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected helper path missing: ${relativePath}`);
   }
 });

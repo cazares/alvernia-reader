@@ -16,13 +16,11 @@ test("nearby director sync bridge stays native-only", () => {
   assert.doesNotMatch(source, /https?:\/\//);
 });
 
-test("app source no longer includes remote or songbook sync paths", () => {
+test("app source no longer includes remote sync paths", () => {
   const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
 
   assert.doesNotMatch(source, /resolveDirectorSyncEndpoint/);
   assert.doesNotMatch(source, /publishDirectorSyncState/);
   assert.doesNotMatch(source, /readDirectorSyncState/);
   assert.doesNotMatch(source, /releaseDirectorSyncState/);
-  assert.doesNotMatch(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
-  assert.doesNotMatch(source, /findSongEntryOrNext/);
 });
