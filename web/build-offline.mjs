@@ -1,12 +1,10 @@
 /**
- * Generates a fully self-contained signo-vino-offline.html for AirDrop to iPad.
+ * Generates:
+ * 1. A fully self-contained signo-vino-offline.html for AirDrop/Safari use.
+ * 2. A small native HTML shell plus bundled page-image assets for the iOS app.
  *
  * Run AFTER the main build:
  *   node web/build.mjs && node web/build-offline.mjs
- *
- * The output file has everything embedded — CSS, JS, and all page images
- * as base64 data URIs (re-compressed to ~q55 to reduce size). Open it on iPad
- * by tapping it in Files after AirDrop; Safari opens it with full offline support.
  */
 
 import fs from "node:fs";
@@ -17,6 +15,10 @@ const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
 const distDir = path.join(rootDir, "web", "dist");
 const pagesDir = path.join(distDir, "pages");
 const tmpDir = path.join(rootDir, "web", ".offline-tmp");
+const nativePagesDir = path.join(rootDir, "assets", "offline-pages");
+const nativeHtmlPath = path.join(rootDir, "assets", "signo-vino-native.html");
+const nativeAssetsModulePath = path.join(rootDir, "src", "offlineWebAssets.js");
+const nativeAssetsTypesPath = path.join(rootDir, "src", "offlineWebAssets.d.ts");
 
 fs.mkdirSync(tmpDir, { recursive: true });
 
@@ -39,7 +41,12 @@ for (let i = 0; i < pageFiles.length; i++) {
     ["-s", "format", "jpeg", "-s", "formatOptions", "55", src, "--out", tmp],
     { stdio: "pipe" },
   );
-  if (result.status !== 0) throw new Error(`sips failed on ${file}`);
+  const recompressedExists = fs.existsSync(tmp);
+  if (result.status !== 0 || !recompressedExists) {
+    const fallback = fs.readFileSync(src);
+    pagesData[num] = `data:image/jpeg;base64,${fallback.toString("base64")}`;
+    continue;
+  }
 
   const data = fs.readFileSync(tmp);
   pagesData[num] = `data:image/jpeg;base64,${data.toString("base64")}`;
@@ -88,3 +95,55 @@ const sizeMB = (fs.statSync(outPath).size / 1024 / 1024).toFixed(1);
 console.log(`\nWrote ${outPath}`);
 console.log(`File size: ${sizeMB} MB`);
 console.log("\nAirDrop signo-vino-offline.html to iPad, tap it in Files → opens in Safari.");
+
+let nativeHtml = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
+nativeHtml = nativeHtml.replace(
+  '<link rel="stylesheet" href="/styles.css" />',
+  `<style>\n${css}\n</style>`,
+);
+nativeHtml = nativeHtml.replace(
+  '<script defer src="/app.js"></script>',
+  `<script>\n${js}\n</script>`,
+);
+nativeHtml = nativeHtml
+  .replace(/\s*<link rel="manifest"[^>]*>\n?/, "\n")
+  .replace(/\s*<link rel="icon"[^>]*>\n?/, "\n")
+  .replace(/\s*<link rel="apple-touch-icon"[^>]*>\n?/, "\n")
+  .replace('src="/pages/page-002.jpg"', 'src=""');
+
+fs.writeFileSync(nativeHtmlPath, nativeHtml);
+console.log(`Wrote ${nativeHtmlPath}`);
+
+fs.rmSync(nativePagesDir, { recursive: true, force: true });
+fs.mkdirSync(nativePagesDir, { recursive: true });
+for (const file of pageFiles) {
+  fs.copyFileSync(path.join(pagesDir, file), path.join(nativePagesDir, file));
+}
+console.log(`Copied ${pageFiles.length} page images to ${nativePagesDir}`);
+
+const moduleLines = [
+  'const OFFLINE_READER_HTML_MODULE = require("../assets/signo-vino-native.html");',
+  "",
+  "const OFFLINE_PAGE_MODULES = {",
+  ...pageFiles.map((file) => {
+    const match = file.match(/(\d+)/);
+    const pageNumber = match ? Number.parseInt(match[1], 10) : 0;
+    return `  ${pageNumber}: require("../assets/offline-pages/${file}"),`;
+  }),
+  "};",
+  "",
+  "module.exports = {",
+  "  OFFLINE_READER_HTML_MODULE,",
+  "  OFFLINE_PAGE_MODULES,",
+  "};",
+  "",
+];
+fs.writeFileSync(nativeAssetsModulePath, moduleLines.join("\n"));
+
+const typeLines = [
+  "export const OFFLINE_READER_HTML_MODULE: number;",
+  "export const OFFLINE_PAGE_MODULES: Record<number, number>;",
+  "",
+];
+fs.writeFileSync(nativeAssetsTypesPath, typeLines.join("\n"));
+console.log(`Wrote ${nativeAssetsModulePath}`);

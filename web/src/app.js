@@ -1653,6 +1653,7 @@ const wireServiceWorkerRegistration = (registration) => {
 };
 
 const registerServiceWorker = async () => {
+  if (window.__SIGNO_VINO_NATIVE_FILE_MODE || window.location.protocol === "file:") return;
   if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
   try {
     let hasReloadedForUpdate = false;

@@ -25,10 +25,15 @@ test("native app entrypoint registers the root App component", () => {
 test("native shell loads the bundled offline web reader as the source of truth", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
+  const assetsPath = path.join(APP_ROOT, "src", "offlineWebAssets.js");
+  const assetsSource = fs.readFileSync(assetsPath, "utf8");
 
   assert.match(source, /react-native-webview/);
-  assert.match(source, /signo-vino-offline\.html/);
+  assert.match(source, /OFFLINE_PAGE_MODULES/);
+  assert.match(source, /injectedJavaScriptBeforeContentLoaded/);
+  assert.match(source, /window\.OFFLINE_PAGES/);
   assert.match(source, /Asset\.fromModule/);
+  assert.match(assetsSource, /signo-vino-native\.html/);
   assert.match(source, /<WebView/);
   assert.match(source, /onMessage=\{handleWebMessage\}/);
   assert.match(source, /sendNearbyDirectorPageUpdate/);

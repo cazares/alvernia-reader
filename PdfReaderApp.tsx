@@ -10,8 +10,8 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
+import { OFFLINE_PAGE_MODULES, OFFLINE_READER_HTML_MODULE } from "./src/offlineWebAssets";
 
-const OFFLINE_READER_MODULE = require("./web/dist/signo-vino-offline.html");
 const BRIDGE_CHANNEL = "signovivo-native";
 
 type SyncRole = "off" | "director" | "follower";
@@ -26,6 +26,7 @@ const toInjectedScript = (payload: Record<string, unknown>) =>
 
 export default function App() {
   const [readerUri, setReaderUri] = useState<string | null>(null);
+  const [offlinePagesScript, setOfflinePagesScript] = useState("true;");
   const [errorMessage, setErrorMessage] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const webViewRef = useRef<WebView>(null);
@@ -53,13 +54,32 @@ export default function App() {
       try {
         setErrorMessage("");
         setReaderUri(null);
-        const asset = Asset.fromModule(OFFLINE_READER_MODULE);
-        await asset.downloadAsync();
-        const nextUri = asset.localUri || asset.uri;
+        const pageEntries = Object.entries(OFFLINE_PAGE_MODULES);
+        const assetModules = [OFFLINE_READER_HTML_MODULE, ...pageEntries.map(([, moduleId]) => moduleId)];
+        await Asset.loadAsync(assetModules);
+
+        const htmlAsset = Asset.fromModule(OFFLINE_READER_HTML_MODULE);
+        const nextUri = htmlAsset.localUri || htmlAsset.uri;
         if (!nextUri) {
           throw new Error("No encontramos el archivo del lector offline.");
         }
+
+        const offlinePages = Object.fromEntries(
+          pageEntries.map(([page, moduleId]) => {
+            const asset = Asset.fromModule(moduleId);
+            const uri = asset.localUri || asset.uri;
+            if (!uri) {
+              throw new Error(`No encontramos la página offline ${page}.`);
+            }
+            return [page, uri];
+          }),
+        );
+
         if (!cancelled) {
+          setOfflinePagesScript(
+            `window.OFFLINE_PAGES = ${JSON.stringify(offlinePages)};` +
+              "window.__SIGNO_VINO_NATIVE_FILE_MODE = true; true;",
+          );
           setReaderUri(nextUri);
         }
       } catch (error) {
@@ -178,6 +198,7 @@ export default function App() {
           bounces={false}
           decelerationRate="normal"
           domStorageEnabled
+          injectedJavaScriptBeforeContentLoaded={offlinePagesScript}
           onLoadEnd={sendBridgeState}
           onMessage={handleWebMessage}
           originWhitelist={["*"]}
