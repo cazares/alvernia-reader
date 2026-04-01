@@ -21,13 +21,19 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("pdf reader stays focused on the embedded PDF with a hidden long-press sync entry", () => {
+test("pdf reader keeps a tap-to-jump numpad and hidden long-press sync entry", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /GestureHandlerRootView/);
   assert.match(source, /accessibilityLabel="Página actual"/);
   assert.match(source, /style=\{styles\.pageBadge\}/);
+  assert.match(source, /onPress=\{openPageJumpModal\}/);
+  assert.match(source, /Ir a página/);
+  assert.match(source, /Toca el contador de página para abrir este teclado rápido/);
+  assert.match(source, /styles\.numpadGrid/);
+  assert.match(source, /Borrar/);
+  assert.match(source, />Ir</);
   assert.doesNotMatch(source, /onTouchStartCapture/);
   assert.doesNotMatch(source, /onTouchMoveCapture/);
   assert.doesNotMatch(source, /onTouchEndCapture/);

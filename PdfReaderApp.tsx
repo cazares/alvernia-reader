@@ -51,6 +51,8 @@ const PdfReaderApp = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [hintMessage, setHintMessage] = useState("");
+  const [isPageJumpModalVisible, setIsPageJumpModalVisible] = useState(false);
+  const [pageJumpValue, setPageJumpValue] = useState("");
   const [isSyncModalVisible, setIsSyncModalVisible] = useState(false);
   const [syncRole, setSyncRole] = useState<SyncRole>("off");
   const [syncSessionCode, setSyncSessionCode] = useState(createDefaultSyncSessionCode());
@@ -129,6 +131,44 @@ const PdfReaderApp = () => {
     setSyncErrorMessage("");
     setIsSyncModalVisible(true);
   }, []);
+
+  const openPageJumpModal = useCallback(() => {
+    setPageJumpValue(String(activePageRef.current || 1));
+    setIsPageJumpModalVisible(true);
+  }, []);
+
+  const closePageJumpModal = useCallback(() => {
+    setIsPageJumpModalVisible(false);
+  }, []);
+
+  const appendPageJumpDigit = useCallback((digit: string) => {
+    setPageJumpValue((currentValue) => {
+      const nextValue = `${currentValue}${digit}`.replace(/\D/g, "").slice(0, 4);
+      return nextValue.replace(/^0+(?=\d)/, "");
+    });
+  }, []);
+
+  const backspacePageJumpDigit = useCallback(() => {
+    setPageJumpValue((currentValue) => currentValue.slice(0, -1));
+  }, []);
+
+  const submitPageJump = useCallback(() => {
+    const parsedPage = Number.parseInt(pageJumpValue, 10);
+    const targetPage = clampPage(parsedPage, totalPages);
+
+    if (!Number.isFinite(parsedPage) || parsedPage < 1) {
+      setHintMessage("Escribe un número de página válido.");
+      return;
+    }
+
+    goToPage(targetPage);
+    setHintMessage(
+      targetPage === parsedPage
+        ? `Saltaste a la página ${targetPage}.`
+        : `La página ${parsedPage} no existe. Fui a la ${targetPage}.`,
+    );
+    setIsPageJumpModalVisible(false);
+  }, [goToPage, pageJumpValue, totalPages]);
 
   const closeSyncModal = useCallback(() => {
     setIsSyncModalVisible(false);
@@ -357,6 +397,7 @@ const PdfReaderApp = () => {
         accessibilityHint="Mantén presionado para abrir el modo oculto de sincronización"
         accessibilityLabel="Página actual"
         delayLongPress={DIRECTOR_LONG_PRESS_MS}
+        onPress={openPageJumpModal}
         onLongPress={openSyncModal}
         style={styles.pageBadge}
       >
@@ -389,6 +430,53 @@ const PdfReaderApp = () => {
           <Text style={styles.errorText}>{syncErrorMessage}</Text>
         </View>
       ) : null}
+
+      <Modal
+        animationType="fade"
+        onRequestClose={closePageJumpModal}
+        transparent
+        visible={isPageJumpModalVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Ir a página</Text>
+            <Text style={styles.syncDescription}>
+              Toca el contador de página para abrir este teclado rápido. Mantén presionado ese mismo botón para Director.
+            </Text>
+            <Pressable onPress={backspacePageJumpDigit} style={styles.pageJumpDisplay}>
+              <Text style={styles.pageJumpValue}>
+                {pageJumpValue || "—"}
+              </Text>
+              <Text style={styles.pageJumpMeta}>
+                {totalPages > 0 ? `de ${totalPages}` : "sin total todavía"}
+              </Text>
+            </Pressable>
+            <View style={styles.numpadGrid}>
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((digit) => (
+                <Pressable
+                  key={digit}
+                  onPress={() => appendPageJumpDigit(digit)}
+                  style={[
+                    styles.numpadButton,
+                    digit === "0" && styles.numpadZeroButton,
+                  ]}
+                >
+                  <Text style={styles.numpadButtonText}>{digit}</Text>
+                </Pressable>
+              ))}
+              <Pressable onPress={backspacePageJumpDigit} style={styles.numpadUtilityButton}>
+                <Text style={styles.numpadUtilityText}>Borrar</Text>
+              </Pressable>
+              <Pressable onPress={submitPageJump} style={styles.numpadConfirmButton}>
+                <Text style={styles.numpadConfirmText}>Ir</Text>
+              </Pressable>
+            </View>
+            <Pressable onPress={closePageJumpModal} style={styles.syncCloseButton}>
+              <Text style={styles.syncCloseText}>Cerrar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         animationType="fade"
@@ -591,6 +679,76 @@ const styles = StyleSheet.create({
   syncActionColumn: {
     gap: 10,
     marginTop: 4,
+  },
+  pageJumpDisplay: {
+    alignItems: "center",
+    backgroundColor: "#f3f6fb",
+    borderColor: "#c8d5ea",
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+  },
+  pageJumpValue: {
+    color: "#14233a",
+    fontSize: 30,
+    fontWeight: "800",
+  },
+  pageJumpMeta: {
+    color: "#5e7592",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  numpadGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  numpadButton: {
+    alignItems: "center",
+    backgroundColor: "#edf3fb",
+    borderRadius: 12,
+    justifyContent: "center",
+    minHeight: 58,
+    width: "30%",
+  },
+  numpadZeroButton: {
+    width: "30%",
+  },
+  numpadButtonText: {
+    color: "#102038",
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  numpadUtilityButton: {
+    alignItems: "center",
+    backgroundColor: "#e8edf5",
+    borderRadius: 12,
+    justifyContent: "center",
+    minHeight: 58,
+    width: "30%",
+  },
+  numpadUtilityText: {
+    color: "#20314f",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  numpadConfirmButton: {
+    alignItems: "center",
+    backgroundColor: "#0a84ff",
+    borderRadius: 12,
+    justifyContent: "center",
+    minHeight: 58,
+    width: "30%",
+  },
+  numpadConfirmText: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "800",
   },
   modalCancelButton: {
     backgroundColor: "#e8edf5",
