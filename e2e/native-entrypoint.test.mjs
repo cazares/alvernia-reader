@@ -71,3 +71,12 @@ test("offline director mode remains usable even with zero connected iPads", () =
   assert.match(swiftSource, /emitState\(status: "waiting-followers"\)/);
   assert.match(swiftSource, /resolve\(\["deliveredPeers": 0\]\)/);
 });
+
+test("native sync module does not shadow the emitState method during reset", () => {
+  const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
+  const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
+
+  assert.match(swiftSource, /private func resetTransport\(emitState shouldEmitState: Bool\)/);
+  assert.match(swiftSource, /if shouldEmitState \{\s*emitState\(status: "idle"\)/s);
+  assert.doesNotMatch(swiftSource, /private func resetTransport\(emitState: Bool\)/);
+});

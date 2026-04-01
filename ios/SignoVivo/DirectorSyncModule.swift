@@ -167,7 +167,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     self.browser = browser
   }
 
-  private func resetTransport(emitState: Bool) {
+  private func resetTransport(emitState shouldEmitState: Bool) {
     advertiser?.stopAdvertisingPeer()
     advertiser?.delegate = nil
     advertiser = nil
@@ -188,7 +188,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     currentSessionCode = ""
     currentDirectorToken = ""
 
-    if emitState {
+    if shouldEmitState {
       emitState(status: "idle")
     }
   }
