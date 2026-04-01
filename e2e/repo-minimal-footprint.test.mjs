@@ -62,10 +62,10 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "web/src/app.js",
     "web/src/styles.css",
     "web/dist/signo-vino-offline.html",
-    "assets/signo-vino-native.html",
-    "assets/offline-pages/page-001.jpg",
-    "src/offlineWebAssets.js",
-    "src/offlineWebAssets.d.ts",
+    "assets/offline-web/index.html",
+    "assets/offline-web/pages/page-001.jpg",
+    "src/offlineWebBundle.js",
+    "src/offlineWebBundle.d.ts",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected web path missing: ${relativePath}`);
   }
@@ -77,6 +77,9 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "scripts/keynote-promote.mjs",
     "src/directorSync.js",
     "src/directorSync.d.ts",
+    "assets/signo-vino-native.html",
+    "src/offlineWebAssets.js",
+    "src/offlineWebAssets.d.ts",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), false, `Unexpected leftover path: ${relativePath}`);
   }

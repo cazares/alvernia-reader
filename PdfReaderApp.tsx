@@ -1,6 +1,7 @@
 import { Asset } from "expo-asset";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
+import ReactNativeBlobUtil from "react-native-blob-util";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import {
   addNearbyDirectorSyncListener,
@@ -10,9 +11,11 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
-import { OFFLINE_PAGE_MODULES, OFFLINE_READER_HTML_MODULE } from "./src/offlineWebAssets";
+import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
 
 const BRIDGE_CHANNEL = "signovivo-native";
+const OFFLINE_BUNDLE_DIR = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/signovivo-offline-web`;
+const OFFLINE_BUNDLE_VERSION_PATH = `${OFFLINE_BUNDLE_DIR}/.bundle-version`;
 
 type SyncRole = "off" | "director" | "follower";
 
@@ -26,7 +29,6 @@ const toInjectedScript = (payload: Record<string, unknown>) =>
 
 export default function App() {
   const [readerUri, setReaderUri] = useState<string | null>(null);
-  const [offlinePagesScript, setOfflinePagesScript] = useState("true;");
   const [errorMessage, setErrorMessage] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const webViewRef = useRef<WebView>(null);
@@ -50,36 +52,64 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
+    const ensureParentDirectory = async (filePath: string) => {
+      const parentPath = filePath.slice(0, filePath.lastIndexOf("/"));
+      if (!parentPath) return;
+      const exists = await ReactNativeBlobUtil.fs.exists(parentPath);
+      if (!exists) {
+        await ReactNativeBlobUtil.fs.mkdir(parentPath);
+      }
+    };
+
+    const buildOfflineBundle = async () => {
+      const bundleEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS);
+      await Asset.loadAsync(bundleEntries.map(([, moduleId]) => moduleId));
+
+      const versionExists = await ReactNativeBlobUtil.fs.exists(OFFLINE_BUNDLE_VERSION_PATH);
+      const currentVersion = versionExists
+        ? await ReactNativeBlobUtil.fs.readFile(OFFLINE_BUNDLE_VERSION_PATH, "utf8")
+        : "";
+      const needsRefresh = currentVersion.trim() !== OFFLINE_WEB_BUNDLE_VERSION;
+
+      if (needsRefresh) {
+        const bundleDirExists = await ReactNativeBlobUtil.fs.exists(OFFLINE_BUNDLE_DIR);
+        if (bundleDirExists) {
+          await ReactNativeBlobUtil.fs.unlink(OFFLINE_BUNDLE_DIR);
+        }
+        await ReactNativeBlobUtil.fs.mkdir(OFFLINE_BUNDLE_DIR);
+
+        for (const [relativePath, moduleId] of bundleEntries) {
+          const asset = Asset.fromModule(moduleId);
+          const sourceUri = asset.localUri || asset.uri;
+          if (!sourceUri) {
+            throw new Error(`No encontramos el recurso offline ${relativePath}.`);
+          }
+
+          const destinationPath = `${OFFLINE_BUNDLE_DIR}/${relativePath}`;
+          await ensureParentDirectory(destinationPath);
+          await ReactNativeBlobUtil.fs.cp(sourceUri.replace(/^file:\/\//, ""), destinationPath);
+        }
+
+        await ReactNativeBlobUtil.fs.writeFile(
+          OFFLINE_BUNDLE_VERSION_PATH,
+          OFFLINE_WEB_BUNDLE_VERSION,
+          "utf8",
+        );
+      }
+
+      return `file://${OFFLINE_BUNDLE_DIR}/index.html`;
+    };
+
     const loadOfflineReader = async () => {
       try {
         setErrorMessage("");
         setReaderUri(null);
-        const pageEntries = Object.entries(OFFLINE_PAGE_MODULES);
-        const assetModules = [OFFLINE_READER_HTML_MODULE, ...pageEntries.map(([, moduleId]) => moduleId)];
-        await Asset.loadAsync(assetModules);
-
-        const htmlAsset = Asset.fromModule(OFFLINE_READER_HTML_MODULE);
-        const nextUri = htmlAsset.localUri || htmlAsset.uri;
-        if (!nextUri) {
-          throw new Error("No encontramos el archivo del lector offline.");
-        }
-
-        const offlinePages = Object.fromEntries(
-          pageEntries.map(([page, moduleId]) => {
-            const asset = Asset.fromModule(moduleId);
-            const uri = asset.localUri || asset.uri;
-            if (!uri) {
-              throw new Error(`No encontramos la página offline ${page}.`);
-            }
-            return [page, uri];
-          }),
-        );
+        const nextUri = await buildOfflineBundle();
 
         if (!cancelled) {
-          setOfflinePagesScript(
-            `window.OFFLINE_PAGES = ${JSON.stringify(offlinePages)};` +
-              "window.__SIGNO_VINO_NATIVE_FILE_MODE = true; true;",
-          );
+          if (!nextUri) {
+            throw new Error("No encontramos el archivo del lector offline.");
+          }
           setReaderUri(nextUri);
         }
       } catch (error) {
@@ -198,7 +228,7 @@ export default function App() {
           bounces={false}
           decelerationRate="normal"
           domStorageEnabled
-          injectedJavaScriptBeforeContentLoaded={offlinePagesScript}
+          injectedJavaScriptBeforeContentLoaded={"window.__SIGNO_VINO_NATIVE_FILE_MODE = true; true;"}
           onLoadEnd={sendBridgeState}
           onMessage={handleWebMessage}
           originWhitelist={["*"]}

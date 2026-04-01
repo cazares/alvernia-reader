@@ -1,7 +1,7 @@
 /**
  * Generates:
  * 1. A fully self-contained signo-vino-offline.html for AirDrop/Safari use.
- * 2. A small native HTML shell plus bundled page-image assets for the iOS app.
+ * 2. A native offline-web bundle for the iOS app.
  *
  * Run AFTER the main build:
  *   node web/build.mjs && node web/build-offline.mjs
@@ -15,10 +15,29 @@ const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
 const distDir = path.join(rootDir, "web", "dist");
 const pagesDir = path.join(distDir, "pages");
 const tmpDir = path.join(rootDir, "web", ".offline-tmp");
-const nativePagesDir = path.join(rootDir, "assets", "offline-pages");
-const nativeHtmlPath = path.join(rootDir, "assets", "signo-vino-native.html");
-const nativeAssetsModulePath = path.join(rootDir, "src", "offlineWebAssets.js");
-const nativeAssetsTypesPath = path.join(rootDir, "src", "offlineWebAssets.d.ts");
+const nativeBundleDir = path.join(rootDir, "assets", "offline-web");
+const nativeAssetsModulePath = path.join(rootDir, "src", "offlineWebBundle.js");
+const nativeAssetsTypesPath = path.join(rootDir, "src", "offlineWebBundle.d.ts");
+const gitSha = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+const bundleVersion = gitSha.status === 0 && gitSha.stdout.trim()
+  ? gitSha.stdout.trim()
+  : `${Date.now()}`;
+
+const copyDir = (sourceDir, targetDir) => {
+  fs.mkdirSync(targetDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDir(sourcePath, targetPath);
+    } else {
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+};
 
 fs.mkdirSync(tmpDir, { recursive: true });
 
@@ -96,53 +115,49 @@ console.log(`\nWrote ${outPath}`);
 console.log(`File size: ${sizeMB} MB`);
 console.log("\nAirDrop signo-vino-offline.html to iPad, tap it in Files → opens in Safari.");
 
-let nativeHtml = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
-nativeHtml = nativeHtml.replace(
-  '<link rel="stylesheet" href="/styles.css" />',
-  `<style>\n${css}\n</style>`,
-);
-nativeHtml = nativeHtml.replace(
-  '<script defer src="/app.js"></script>',
-  `<script>\n${js}\n</script>`,
-);
+fs.rmSync(nativeBundleDir, { recursive: true, force: true });
+copyDir(distDir, nativeBundleDir);
+
+const nativeIndexPath = path.join(nativeBundleDir, "index.html");
+let nativeHtml = fs.readFileSync(nativeIndexPath, "utf8");
 nativeHtml = nativeHtml
-  .replace(/\s*<link rel="manifest"[^>]*>\n?/, "\n")
-  .replace(/\s*<link rel="icon"[^>]*>\n?/, "\n")
-  .replace(/\s*<link rel="apple-touch-icon"[^>]*>\n?/, "\n")
-  .replace('src="/pages/page-002.jpg"', 'src=""');
+  .replaceAll('href="/', 'href="')
+  .replaceAll('src="/', 'src="');
+fs.writeFileSync(nativeIndexPath, nativeHtml);
+console.log(`Wrote ${nativeIndexPath}`);
 
-fs.writeFileSync(nativeHtmlPath, nativeHtml);
-console.log(`Wrote ${nativeHtmlPath}`);
-
-fs.rmSync(nativePagesDir, { recursive: true, force: true });
-fs.mkdirSync(nativePagesDir, { recursive: true });
-for (const file of pageFiles) {
-  fs.copyFileSync(path.join(pagesDir, file), path.join(nativePagesDir, file));
-}
-console.log(`Copied ${pageFiles.length} page images to ${nativePagesDir}`);
+const bundleFiles = [];
+const walkBundle = (dir, relativeDir = "") => {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const relativePath = path.posix.join(relativeDir, entry.name);
+    const absolutePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkBundle(absolutePath, relativePath);
+    } else {
+      bundleFiles.push(relativePath);
+    }
+  }
+};
+walkBundle(nativeBundleDir);
 
 const moduleLines = [
-  'const OFFLINE_READER_HTML_MODULE = require("../assets/signo-vino-native.html");',
+  `const OFFLINE_WEB_BUNDLE_VERSION = ${JSON.stringify(bundleVersion)};`,
   "",
-  "const OFFLINE_PAGE_MODULES = {",
-  ...pageFiles.map((file) => {
-    const match = file.match(/(\d+)/);
-    const pageNumber = match ? Number.parseInt(match[1], 10) : 0;
-    return `  ${pageNumber}: require("../assets/offline-pages/${file}"),`;
-  }),
+  "const OFFLINE_WEB_BUNDLE_ASSETS = {",
+  ...bundleFiles.map((relativePath) => `  ${JSON.stringify(relativePath)}: require(${JSON.stringify(`../assets/offline-web/${relativePath}`)}),`),
   "};",
   "",
   "module.exports = {",
-  "  OFFLINE_READER_HTML_MODULE,",
-  "  OFFLINE_PAGE_MODULES,",
+  "  OFFLINE_WEB_BUNDLE_VERSION,",
+  "  OFFLINE_WEB_BUNDLE_ASSETS,",
   "};",
   "",
 ];
 fs.writeFileSync(nativeAssetsModulePath, moduleLines.join("\n"));
 
 const typeLines = [
-  "export const OFFLINE_READER_HTML_MODULE: number;",
-  "export const OFFLINE_PAGE_MODULES: Record<number, number>;",
+  "export const OFFLINE_WEB_BUNDLE_VERSION: string;",
+  "export const OFFLINE_WEB_BUNDLE_ASSETS: Record<string, number>;",
   "",
 ];
 fs.writeFileSync(nativeAssetsTypesPath, typeLines.join("\n"));

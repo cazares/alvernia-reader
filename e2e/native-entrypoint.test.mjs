@@ -25,15 +25,20 @@ test("native app entrypoint registers the root App component", () => {
 test("native shell loads the bundled offline web reader as the source of truth", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
-  const assetsPath = path.join(APP_ROOT, "src", "offlineWebAssets.js");
+  const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
   const assetsSource = fs.readFileSync(assetsPath, "utf8");
 
   assert.match(source, /react-native-webview/);
-  assert.match(source, /OFFLINE_PAGE_MODULES/);
+  assert.match(source, /react-native-blob-util/);
+  assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
+  assert.match(source, /OFFLINE_WEB_BUNDLE_VERSION/);
+  assert.match(source, /signovivo-offline-web/);
+  assert.match(source, /ReactNativeBlobUtil\.fs\.cp/);
+  assert.match(source, /file:\/\/\$\{OFFLINE_BUNDLE_DIR\}\/index\.html/);
   assert.match(source, /injectedJavaScriptBeforeContentLoaded/);
-  assert.match(source, /window\.OFFLINE_PAGES/);
   assert.match(source, /Asset\.fromModule/);
-  assert.match(assetsSource, /signo-vino-native\.html/);
+  assert.match(assetsSource, /offline-web\/index\.html/);
+  assert.match(assetsSource, /pages\/page-001\.jpg/);
   assert.match(source, /<WebView/);
   assert.match(source, /onMessage=\{handleWebMessage\}/);
   assert.match(source, /sendNearbyDirectorPageUpdate/);
@@ -61,6 +66,8 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(webApp, /bindReaderEvents/);
   assert.match(webApp, /postNativeBridge/);
   assert.match(webApp, /applyNativeSyncEvent/);
+  assert.match(webApp, /NATIVE_FILE_MODE/);
+  assert.match(webApp, /resolveAppPath/);
   assert.match(webApp, /sync-start-director/);
   assert.match(webApp, /sync-start-follower/);
 });
