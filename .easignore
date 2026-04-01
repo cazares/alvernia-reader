@@ -1,0 +1,5 @@
+.claude/
+.merge-backup/
+assets-and-web.zip
+web/.offline-tmp/
+web/dist/
