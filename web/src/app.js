@@ -37,7 +37,15 @@ const searchColHeader = document.getElementById("search-col-header");
 const helpButton = document.getElementById("help-button");
 const helpPanel = document.getElementById("help-panel");
 const helpCloseButton = document.getElementById("help-close");
+const helpSettingsLabel = document.getElementById("help-settings-label");
 const hapticToggleButton = document.getElementById("haptic-toggle");
+const directorSyncPanel = document.getElementById("director-sync-panel");
+const directorSyncCodeInput = document.getElementById("director-sync-code");
+const directorSyncStartDirectorButton = document.getElementById("director-sync-start-director");
+const directorSyncStartFollowerButton = document.getElementById("director-sync-start-follower");
+const directorSyncStopButton = document.getElementById("director-sync-stop");
+const directorSyncStatus = document.getElementById("director-sync-status");
+const directorSyncError = document.getElementById("director-sync-error");
 const numpadTipWrap = document.getElementById("numpad-tip-wrap");
 const tipDismissButton = document.getElementById("tip-dismiss");
 const drawerCloseButton = document.getElementById("drawer-close");
@@ -90,6 +98,12 @@ const state = {
   activeTab: "todas",
   prevTab: "todas",     // where to return when exiting search fullscreen
   drawerMode: "numpad", // "numpad" | "browse"
+  nativeSyncUnlocked: false,
+  nativeSyncAvailable: false,
+  nativeSyncRole: "off",
+  nativeSyncStatus: "",
+  nativeSyncError: "",
+  nativeSyncSessionCode: "CORO",
 };
 
 let cachedSongKeys = null;
@@ -123,6 +137,8 @@ const OFFLINE_DB_NAME = "signo-vino-offline";
 const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
 const OFFLINE_PAGES = window.OFFLINE_PAGES || null;
+const NATIVE_BRIDGE_CHANNEL = "signovivo-native";
+const NATIVE_SYNC_SESSION_KEY = "sv-native-sync-session";
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -178,6 +194,38 @@ const normalizeText = (text) => text
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
   .toLowerCase();
+
+const normalizeSyncSessionCode = (value = "") => value
+  .toUpperCase()
+  .replace(/[^A-Z0-9]/g, "")
+  .slice(0, 12);
+
+const loadNativeSyncSessionCode = () => {
+  try {
+    const stored = localStorage.getItem(NATIVE_SYNC_SESSION_KEY) || "";
+    return normalizeSyncSessionCode(stored) || "CORO";
+  } catch {
+    return "CORO";
+  }
+};
+
+state.nativeSyncSessionCode = loadNativeSyncSessionCode();
+
+const hasNativeBridge = () => Boolean(window.ReactNativeWebView?.postMessage);
+
+const postNativeBridge = (payload) => {
+  if (!hasNativeBridge()) return false;
+  try {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      channel: NATIVE_BRIDGE_CHANNEL,
+      ...payload,
+    }));
+    return true;
+  } catch (error) {
+    console.error("No se pudo hablar con la app nativa", error);
+    return false;
+  }
+};
 
 const formatVerifiedAt = (isoString) => {
   if (!isoString) return "";
@@ -593,6 +641,104 @@ const renderDraft = () => {
   displayClearButton.classList.toggle("is-hidden", !state.songDraft);
 };
 
+const persistNativeSyncSessionCode = () => {
+  try {
+    localStorage.setItem(NATIVE_SYNC_SESSION_KEY, state.nativeSyncSessionCode);
+  } catch {}
+};
+
+const describeNativeSyncState = () => {
+  if (!state.nativeSyncAvailable) {
+    return hasNativeBridge()
+      ? "La app todavía está preparando la sincronización offline."
+      : "Disponible solo dentro de la app instalada en iPad.";
+  }
+  if (state.nativeSyncStatus) return state.nativeSyncStatus;
+  if (state.nativeSyncRole === "director") {
+    return `Director listo en ${state.nativeSyncSessionCode}.`;
+  }
+  if (state.nativeSyncRole === "follower") {
+    return `Siguiendo director en ${state.nativeSyncSessionCode}.`;
+  }
+  return "Ingresa un código y elige director o seguidor.";
+};
+
+const renderNativeSyncPanel = () => {
+  if (!directorSyncPanel) return;
+  directorSyncPanel.classList.toggle("is-hidden", !state.nativeSyncUnlocked);
+  directorSyncCodeInput.value = state.nativeSyncSessionCode;
+  directorSyncStatus.textContent = describeNativeSyncState();
+  const showError = Boolean(state.nativeSyncError);
+  directorSyncError.classList.toggle("is-hidden", !showError);
+  directorSyncError.textContent = state.nativeSyncError;
+
+  const disabled = !state.nativeSyncAvailable;
+  directorSyncCodeInput.disabled = disabled;
+  directorSyncStartDirectorButton.disabled = disabled;
+  directorSyncStartFollowerButton.disabled = disabled;
+  directorSyncStopButton.disabled = disabled && state.nativeSyncRole === "off";
+};
+
+const unlockNativeSyncPanel = () => {
+  if (state.nativeSyncUnlocked) return;
+  state.nativeSyncUnlocked = true;
+  renderNativeSyncPanel();
+  haptic(12);
+};
+
+const applyNativeSyncEvent = (payload) => {
+  if (!payload || typeof payload !== "object") return;
+
+  if (payload.type === "bridge-state") {
+    state.nativeSyncAvailable = Boolean(payload.available);
+    if (!state.nativeSyncAvailable && state.nativeSyncRole === "off") {
+      state.nativeSyncStatus = "";
+    }
+    renderNativeSyncPanel();
+    return;
+  }
+
+  if (payload.type !== "sync-event") return;
+
+  const event = payload.event || {};
+
+  if (event.sessionCode) {
+    state.nativeSyncSessionCode = normalizeSyncSessionCode(String(event.sessionCode)) || state.nativeSyncSessionCode;
+    persistNativeSyncSessionCode();
+  }
+
+  if (event.type === "page" && Number.isFinite(event.page)) {
+    state.nativeSyncError = "";
+    state.nativeSyncStatus = `Director cambió a la canción en la página ${event.page}.`;
+    renderNativeSyncPanel();
+    renderPage(event.page, { pushToHistory: false });
+    return;
+  }
+
+  if (event.type === "state") {
+    state.nativeSyncError = "";
+    if (event.status === "idle") {
+      state.nativeSyncRole = "off";
+    } else if (event.role === "director" || event.role === "follower") {
+      state.nativeSyncRole = event.role;
+    }
+    state.nativeSyncStatus = event.message || describeNativeSyncState();
+    renderNativeSyncPanel();
+    return;
+  }
+
+  if (event.type === "error") {
+    state.nativeSyncError = event.message || "La sincronización offline falló.";
+    if (event.role === "off" || event.code === "DIRECTOR_CONFLICT") {
+      state.nativeSyncRole = "off";
+    }
+    if (event.message) state.nativeSyncStatus = event.message;
+    renderNativeSyncPanel();
+  }
+};
+
+window.__signoVivoReceiveNativeEvent = applyNativeSyncEvent;
+
 // ── Image loading ─────────────────────────────────────────────────────────────
 const decodeImage = (src) => new Promise((resolve, reject) => {
   const loader = new Image();
@@ -637,6 +783,11 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     state.currentPage = nextPage;
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
+    postNativeBridge({
+      type: "page-changed",
+      page: nextPage,
+      totalPages: state.totalPages,
+    });
     if (direction !== 0) {
       const animClass = direction > 0 ? "slide-from-right" : "slide-from-left";
       pageImage.classList.remove("slide-from-right", "slide-from-left");
@@ -2056,6 +2207,7 @@ const bindReaderEvents = () => {
   helpButton.addEventListener("click", () => {
     haptic();
     helpPanel.classList.remove("is-hidden");
+    renderNativeSyncPanel();
   });
 
   helpCloseButton.addEventListener("click", () => {
@@ -2080,6 +2232,70 @@ const bindReaderEvents = () => {
     try { localStorage.setItem(HAPTIC_PREF_KEY, hapticEnabled ? "on" : "off"); } catch {}
     syncHapticToggle();
     haptic(12); // Give immediate feedback when turning ON
+  });
+
+  let hiddenSyncPressTimer = 0;
+  const clearHiddenSyncPressTimer = () => {
+    if (!hiddenSyncPressTimer) return;
+    window.clearTimeout(hiddenSyncPressTimer);
+    hiddenSyncPressTimer = 0;
+  };
+  const queueHiddenSyncUnlock = () => {
+    clearHiddenSyncPressTimer();
+    hiddenSyncPressTimer = window.setTimeout(() => {
+      unlockNativeSyncPanel();
+    }, 900);
+  };
+
+  ["mousedown", "touchstart"].forEach((eventName) => {
+    helpSettingsLabel.addEventListener(eventName, queueHiddenSyncUnlock, { passive: true });
+  });
+  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((eventName) => {
+    helpSettingsLabel.addEventListener(eventName, clearHiddenSyncPressTimer, { passive: true });
+  });
+
+  directorSyncCodeInput.addEventListener("input", () => {
+    const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || "CORO";
+    state.nativeSyncSessionCode = normalized;
+    directorSyncCodeInput.value = normalized;
+    persistNativeSyncSessionCode();
+    state.nativeSyncError = "";
+    renderNativeSyncPanel();
+  });
+
+  directorSyncStartDirectorButton.addEventListener("click", () => {
+    haptic(12);
+    state.nativeSyncError = "";
+    state.nativeSyncStatus = `Activando director en ${state.nativeSyncSessionCode}...`;
+    renderNativeSyncPanel();
+    if (!postNativeBridge({ type: "sync-start-director", sessionCode: state.nativeSyncSessionCode })) {
+      state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+      renderNativeSyncPanel();
+    }
+  });
+
+  directorSyncStartFollowerButton.addEventListener("click", () => {
+    haptic(12);
+    state.nativeSyncError = "";
+    state.nativeSyncStatus = `Buscando director en ${state.nativeSyncSessionCode}...`;
+    renderNativeSyncPanel();
+    if (!postNativeBridge({ type: "sync-start-follower", sessionCode: state.nativeSyncSessionCode })) {
+      state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+      renderNativeSyncPanel();
+    }
+  });
+
+  directorSyncStopButton.addEventListener("click", () => {
+    haptic();
+    state.nativeSyncError = "";
+    state.nativeSyncStatus = "Cerrando sincronización offline...";
+    renderNativeSyncPanel();
+    if (!postNativeBridge({ type: "sync-stop" })) {
+      state.nativeSyncRole = "off";
+      state.nativeSyncStatus = "";
+      state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+      renderNativeSyncPanel();
+    }
   });
 
   // Fullscreen
@@ -2230,12 +2446,18 @@ const initReader = async () => {
   state.currentPage = DEFAULT_START_PAGE;
   renderDraft();
   renderStatus();
+  renderNativeSyncPanel();
   updateFullscreenButton();
   hideLoadingIndicator();
   await requireOfflineBundle(state.totalPages);
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   loadSearchIndex();
   renderActiveTab();
+  postNativeBridge({
+    type: "bridge-ready",
+    page: DEFAULT_START_PAGE,
+    totalPages: state.totalPages,
+  });
 };
 
 clearInitialUrl();

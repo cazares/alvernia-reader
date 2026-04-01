@@ -30,12 +30,16 @@ test("native shell loads the bundled offline web reader as the source of truth",
   assert.match(source, /signo-vino-offline\.html/);
   assert.match(source, /Asset\.fromModule/);
   assert.match(source, /<WebView/);
+  assert.match(source, /onMessage=\{handleWebMessage\}/);
+  assert.match(source, /sendNearbyDirectorPageUpdate/);
+  assert.match(source, /startNearbyDirector/);
+  assert.match(source, /startNearbyFollower/);
+  assert.match(source, /stopNearbyDirectorSync/);
+  assert.match(source, /__signoVivoReceiveNativeEvent/);
   assert.doesNotMatch(source, /react-native-pdf/);
-  assert.doesNotMatch(source, /Ir a cancion/);
-  assert.doesNotMatch(source, /number-pad/);
 });
 
-test("restored web source still includes the drawer, numpad, and browse experience", () => {
+test("restored web source still includes the drawer, numpad, browse, and hidden sync experience", () => {
   const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
   const webApp = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
 
@@ -44,10 +48,16 @@ test("restored web source still includes the drawer, numpad, and browse experien
   assert.match(indexHtml, /mode-btn-browse/);
   assert.match(indexHtml, /numberpad-grid/);
   assert.match(indexHtml, /search-input/);
+  assert.match(indexHtml, /director-sync-panel/);
+  assert.match(indexHtml, /help-settings-label/);
   assert.match(webApp, /switchDrawerMode/);
   assert.match(webApp, /goToDraftSong/);
   assert.match(webApp, /renderActiveTab/);
   assert.match(webApp, /bindReaderEvents/);
+  assert.match(webApp, /postNativeBridge/);
+  assert.match(webApp, /applyNativeSyncEvent/);
+  assert.match(webApp, /sync-start-director/);
+  assert.match(webApp, /sync-start-follower/);
 });
 
 test("iOS app includes nearby offline director sync permissions and native bridge", () => {

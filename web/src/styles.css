@@ -1694,6 +1694,101 @@ button:disabled {
   transform: translateX(22px);
 }
 
+.director-sync-panel {
+  margin-top: 0.6rem;
+  padding: 0.95rem;
+  border-radius: 18px;
+  background: rgba(147, 228, 255, 0.08);
+  border: 1px solid rgba(147, 228, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.director-sync-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+}
+
+.director-sync-eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(147, 228, 255, 0.72);
+}
+
+.director-sync-title {
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.director-sync-copy,
+.director-sync-status,
+.director-sync-error {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.director-sync-copy,
+.director-sync-status {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.director-sync-error {
+  color: #ffb4ba;
+}
+
+.director-sync-label {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.director-sync-input {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  padding: 0.82rem 0.95rem;
+  font-size: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.director-sync-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+.director-sync-button {
+  min-height: 48px;
+  border-radius: 14px;
+  padding: 0.8rem 0.95rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.director-sync-button-primary {
+  background: linear-gradient(180deg, rgba(77, 176, 255, 0.34), rgba(34, 96, 180, 0.66));
+  border-color: rgba(147, 228, 255, 0.28);
+}
+
+.director-sync-button-muted {
+  color: rgba(255, 255, 255, 0.78);
+}
+
 /* ── Page slide transition ───────────────────────────────────────────────────── */
 @keyframes slide-from-right {
   from { transform: translateX(8%); opacity: 0.55; }
