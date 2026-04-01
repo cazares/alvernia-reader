@@ -9,11 +9,13 @@ const readJson = (relativePath) => JSON.parse(
   fs.readFileSync(path.join(APP_ROOT, relativePath), "utf8"),
 );
 
-test("package.json only keeps reader and native sync dependencies", () => {
+test("package.json keeps the web-reader host dependencies", () => {
   const packageJson = readJson("package.json");
 
   assert.deepEqual(Object.keys(packageJson.scripts).sort(), [
     "android",
+    "build:web",
+    "build:web:offline",
     "ios",
     "ios:local",
     "start",
@@ -28,9 +30,9 @@ test("package.json only keeps reader and native sync dependencies", () => {
   ]);
 
   const dependencyNames = Object.keys(packageJson.dependencies).sort();
-  assert.equal(dependencyNames.includes("react-native-pdf"), true);
-  assert.equal(dependencyNames.includes("react-native-gesture-handler"), true);
   assert.equal(dependencyNames.includes("expo"), true);
+  assert.equal(dependencyNames.includes("react-native-webview"), true);
+  assert.equal(dependencyNames.includes("tonal"), true);
 
   for (const removedName of [
     "@react-native-community/netinfo",
@@ -45,19 +47,27 @@ test("package.json only keeps reader and native sync dependencies", () => {
     "expo-task-manager",
     "expo-updates",
     "expo-video",
+    "react-native-pdf",
     "react-dom",
     "react-native-web",
-    "react-native-webview",
-    "tonal",
   ]) {
     assert.equal(dependencyNames.includes(removedName), false, `Unexpected dependency left behind: ${removedName}`);
   }
 });
 
-test("repo removes old web, cloud, and upload entrypoints", () => {
+test("repo keeps the restored web source but removes old cloud upload entrypoints", () => {
+  for (const relativePath of [
+    "web",
+    "web/src/index.html",
+    "web/src/app.js",
+    "web/src/styles.css",
+    "web/dist/signo-vino-offline.html",
+  ]) {
+    assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected web path missing: ${relativePath}`);
+  }
+
   for (const relativePath of [
     "cloudflare",
-    "web",
     "CNAME",
     "scripts/upload-server.mjs",
     "scripts/keynote-promote.mjs",
@@ -68,13 +78,10 @@ test("repo removes old web, cloud, and upload entrypoints", () => {
   }
 });
 
-test("repo keeps the local song jump helpers used by the native reader", () => {
+test("repo keeps the song index data used by the web build", () => {
   for (const relativePath of [
-    "src/songNavigation.js",
-    "src/songNavigation.d.ts",
     "src/alverniaManual2SongIndex.js",
     "src/alverniaManual2SongIndex.d.ts",
-    "src/pdfReaderUrl.js",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected helper path missing: ${relativePath}`);
   }

@@ -10,7 +10,8 @@ test("package main points at the native app entrypoint", () => {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
-  assert.equal(packageJson.dependencies["react-native-gesture-handler"], "~2.28.0");
+  assert.equal(packageJson.dependencies["react-native-webview"], "^13.15.0");
+  assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
 
 test("native app entrypoint registers the root App component", () => {
@@ -21,33 +22,32 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("pdf reader restores the old Ir flow while keeping hidden long-press sync", () => {
+test("native shell loads the bundled offline web reader as the source of truth", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
 
-  assert.match(source, /GestureHandlerRootView/);
-  assert.match(source, /accessibilityLabel="Página actual"/);
-  assert.match(source, /style=\{styles\.pageBadge\}/);
-  assert.match(source, /accessibilityLabel="Ir a canción"/);
-  assert.match(source, /Ir a cancion/);
-  assert.match(source, /keyboardType=\{Platform\.OS === "ios" \? "number-pad" : "numeric"\}/);
-  assert.match(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
-  assert.match(source, /findSongEntryOrNext/);
-  assert.doesNotMatch(source, /onTouchStartCapture/);
-  assert.doesNotMatch(source, /onTouchMoveCapture/);
-  assert.doesNotMatch(source, /onTouchEndCapture/);
+  assert.match(source, /react-native-webview/);
+  assert.match(source, /signo-vino-offline\.html/);
+  assert.match(source, /Asset\.fromModule/);
+  assert.match(source, /<WebView/);
+  assert.doesNotMatch(source, /react-native-pdf/);
+  assert.doesNotMatch(source, /Ir a cancion/);
+  assert.doesNotMatch(source, /number-pad/);
 });
 
-test("pdf reader includes a hidden long-press director sync mode", () => {
-  const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
-  const source = fs.readFileSync(appPath, "utf8");
+test("restored web source still includes the drawer, numpad, and browse experience", () => {
+  const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
+  const webApp = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
 
-  assert.match(source, /delayLongPress=\{DIRECTOR_LONG_PRESS_MS\}/);
-  assert.match(source, /onLongPress=\{openSyncModal\}/);
-  assert.match(source, /Entrar como director/);
-  assert.match(source, /Seguir director/);
-  assert.match(source, /sin internet/);
-  assert.doesNotMatch(source, /directorSync/);
+  assert.match(indexHtml, /drawer-handle/);
+  assert.match(indexHtml, /mode-btn-numpad/);
+  assert.match(indexHtml, /mode-btn-browse/);
+  assert.match(indexHtml, /numberpad-grid/);
+  assert.match(indexHtml, /search-input/);
+  assert.match(webApp, /switchDrawerMode/);
+  assert.match(webApp, /goToDraftSong/);
+  assert.match(webApp, /renderActiveTab/);
+  assert.match(webApp, /bindReaderEvents/);
 });
 
 test("iOS app includes nearby offline director sync permissions and native bridge", () => {
@@ -63,16 +63,20 @@ test("iOS app includes nearby offline director sync permissions and native bridg
   assert.match(swiftSource, /MCNearbyServiceBrowser/);
 });
 
-test("offline director mode remains usable even with zero connected iPads", () => {
-  const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
-  const appSource = fs.readFileSync(appPath, "utf8");
+test("offline director native module remains available for later bridge work", () => {
   const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
   const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
 
-  assert.match(appSource, /Director offline listo en/);
   assert.match(swiftSource, /guard !session\.connectedPeers\.isEmpty else \{/);
   assert.match(swiftSource, /emitState\(status: "waiting-followers"\)/);
   assert.match(swiftSource, /resolve\(\["deliveredPeers": 0\]\)/);
+});
+
+test("metro bundles the offline html asset", () => {
+  const metroConfigPath = path.join(APP_ROOT, "metro.config.js");
+  const source = fs.readFileSync(metroConfigPath, "utf8");
+
+  assert.match(source, /assetExts\.push\("html"\)/);
 });
 
 test("native sync module does not shadow the emitState method during reset", () => {

@@ -5,6 +5,7 @@ const { getDefaultConfig } = require('expo/metro-config');
 const config = getDefaultConfig(__dirname);
 config.resolver.useWatchman = false;
 config.resolver.unstable_enableSymlinks = true;
+config.resolver.assetExts.push("html");
 
 const nodeModulesPath = path.join(__dirname, 'node_modules');
 try {
