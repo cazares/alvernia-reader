@@ -45,12 +45,12 @@ module.exports = ({ config }) => {
     ios: {
       ...(config.ios || {}),
       supportsTablet: true,
-      bundleIdentifier: "com.cazares.alverniareader",
+      bundleIdentifier: "com.cazares.alvernia",
       buildNumber: String(buildNumber),
     },
     android: {
       ...(config.android || {}),
-      package: "com.cazares.alverniareader",
+      package: "com.cazares.alvernia",
       versionCode: buildNumber,
     },
     extra: {

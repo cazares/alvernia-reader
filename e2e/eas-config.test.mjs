@@ -45,8 +45,8 @@ test("Static app config keeps standalone reader identity", () => {
   const appConfig = readJson(appConfigPath);
   assert.equal(appConfig?.expo?.name, "SignoVivo");
   assert.equal(appConfig?.expo?.slug, "alvernia-reader");
-  assert.equal(appConfig?.expo?.android?.package, "com.cazares.alverniareader");
-  assert.equal(appConfig?.expo?.ios?.bundleIdentifier, "com.cazares.alverniareader");
+  assert.equal(appConfig?.expo?.android?.package, "com.cazares.alvernia");
+  assert.equal(appConfig?.expo?.ios?.bundleIdentifier, "com.cazares.alvernia");
   assert.equal(appConfig?.expo?.extra?.eas?.projectId, "8973a6b2-a2e5-4268-97ab-4a1b2c4cb555");
 });
 
@@ -73,9 +73,9 @@ test("Resolved Expo config preserves versioning and embedded-only updates", () =
   assert.equal(expoConfig?.runtimeVersion, version.baseVersion);
   assert.equal(expoConfig?.newArchEnabled, false);
   assert.deepEqual(expoConfig?.platforms, ["ios", "android"]);
-  assert.equal(expoConfig?.android?.package, "com.cazares.alverniareader");
+  assert.equal(expoConfig?.android?.package, "com.cazares.alvernia");
   assert.equal(expoConfig?.android?.versionCode, Number(version.buildNumber));
-  assert.equal(expoConfig?.ios?.bundleIdentifier, "com.cazares.alverniareader");
+  assert.equal(expoConfig?.ios?.bundleIdentifier, "com.cazares.alvernia");
   assert.equal(expoConfig?.ios?.buildNumber, String(version.buildNumber));
   assert.equal(expoConfig?.updates?.enabled, false);
   assert.equal(expoConfig?.updates?.checkAutomatically, "NEVER");
