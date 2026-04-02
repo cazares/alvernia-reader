@@ -1,5 +1,9 @@
 .claude/
 .merge-backup/
 assets-and-web.zip
+e2e/
+ios/build/
+node_modules/
+web/
 web/.offline-tmp/
 web/dist/
