@@ -18,11 +18,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cazares.alvernia",
-      "buildNumber": "133"
+      "buildNumber": "134"
     },
     "android": {
       "package": "com.cazares.alvernia",
-      "versionCode": 133
+      "versionCode": 134
     },
     "extra": {
       "eas": {
