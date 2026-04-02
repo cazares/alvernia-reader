@@ -47,6 +47,10 @@ module.exports = ({ config }) => {
       supportsTablet: true,
       bundleIdentifier: "com.cazares.alvernia",
       buildNumber: String(buildNumber),
+      infoPlist: {
+        ...((config.ios || {}).infoPlist || {}),
+        ITSAppUsesNonExemptEncryption: false,
+      },
     },
     android: {
       ...(config.android || {}),

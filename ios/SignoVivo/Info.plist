@@ -35,13 +35,9 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_signovivo._tcp</string>
-	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>SignoVivo usa la red local para sincronizar páginas entre iPads cercanas sin internet.</string>
 	<key>RCTNewArchEnabled</key>
+	<false/>
+	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchStoryboardName</key>
 	<string>SplashScreen</string>

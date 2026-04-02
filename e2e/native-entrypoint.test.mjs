@@ -86,17 +86,13 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(webApp, /sync-start-follower/);
 });
 
-test("iOS app includes nearby offline director sync permissions and native bridge", () => {
+test("iOS app disables non-exempt encryption and removes local-network sync permissions", () => {
   const plistPath = path.join(APP_ROOT, "ios", "SignoVivo", "Info.plist");
   const plistSource = fs.readFileSync(plistPath, "utf8");
-  const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
-  const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
 
-  assert.match(plistSource, /NSLocalNetworkUsageDescription/);
-  assert.match(plistSource, /_signovivo\._tcp/);
-  assert.match(swiftSource, /MultipeerConnectivity/);
-  assert.match(swiftSource, /MCNearbyServiceAdvertiser/);
-  assert.match(swiftSource, /MCNearbyServiceBrowser/);
+  assert.match(plistSource, /ITSAppUsesNonExemptEncryption/);
+  assert.doesNotMatch(plistSource, /NSLocalNetworkUsageDescription/);
+  assert.doesNotMatch(plistSource, /NSBonjourServices/);
 });
 
 test("metro bundles the offline html asset", () => {
@@ -106,11 +102,12 @@ test("metro bundles the offline html asset", () => {
   assert.match(source, /assetExts\.push\("html"\)/);
 });
 
-test("native sync module does not shadow the emitState method during reset", () => {
+test("nearby director sync source is absent from the shipped app", () => {
+  const syncClientPath = path.join(APP_ROOT, "src", "nearbyDirectorSync.js");
   const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
-  const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
+  const bridgePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModuleBridge.m");
 
-  assert.match(swiftSource, /private func resetTransport\(emitState shouldEmitState: Bool\)/);
-  assert.match(swiftSource, /if shouldEmitState \{\s*emitState\(status: "idle"\)/s);
-  assert.doesNotMatch(swiftSource, /private func resetTransport\(emitState: Bool\)/);
+  assert.equal(fs.existsSync(syncClientPath), false);
+  assert.equal(fs.existsSync(swiftModulePath), false);
+  assert.equal(fs.existsSync(bridgePath), false);
 });
