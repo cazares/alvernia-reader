@@ -44,15 +44,12 @@ test("native shell loads the bundled offline web reader as the source of truth",
   assert.match(source, /injectedJavaScriptBeforeContentLoaded/);
   assert.match(source, /Asset\.fromModule/);
   assert.doesNotMatch(source, /Asset\.loadAsync\(bundleEntries\.map/);
+  assert.match(source, /available: false/);
   assert.match(assetsSource, /offline-web\/index\.html/);
   assert.match(assetsSource, /pages\/page-001\.jpg/);
   assert.match(source, /<WebView/);
-  assert.match(source, /onMessage=\{handleWebMessage\}/);
-  assert.match(source, /sendNearbyDirectorPageUpdate/);
-  assert.match(source, /startNearbyDirector/);
-  assert.match(source, /startNearbyFollower/);
-  assert.match(source, /stopNearbyDirectorSync/);
   assert.match(source, /__signoVivoReceiveNativeEvent/);
+  assert.doesNotMatch(source, /nearbyDirectorSync/);
   assert.doesNotMatch(source, /react-native-pdf/);
 });
 
@@ -100,15 +97,6 @@ test("iOS app includes nearby offline director sync permissions and native bridg
   assert.match(swiftSource, /MultipeerConnectivity/);
   assert.match(swiftSource, /MCNearbyServiceAdvertiser/);
   assert.match(swiftSource, /MCNearbyServiceBrowser/);
-});
-
-test("offline director native module remains available for later bridge work", () => {
-  const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
-  const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
-
-  assert.match(swiftSource, /guard !session\.connectedPeers\.isEmpty else \{/);
-  assert.match(swiftSource, /emitState\(status: "waiting-followers"\)/);
-  assert.match(swiftSource, /resolve\(\["deliveredPeers": 0\]\)/);
 });
 
 test("metro bundles the offline html asset", () => {
