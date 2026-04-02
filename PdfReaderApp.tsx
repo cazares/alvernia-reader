@@ -16,6 +16,7 @@ import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/off
 const BRIDGE_CHANNEL = "signovivo-native";
 const OFFLINE_BUNDLE_DIR = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/signovivo-offline-web`;
 const OFFLINE_BUNDLE_VERSION_PATH = `${OFFLINE_BUNDLE_DIR}/.bundle-version`;
+const OFFLINE_BUNDLE_BATCH_SIZE = 12;
 
 type SyncRole = "off" | "director" | "follower";
 
@@ -63,7 +64,6 @@ export default function App() {
 
     const buildOfflineBundle = async () => {
       const bundleEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS);
-      await Asset.loadAsync(bundleEntries.map(([, moduleId]) => moduleId));
 
       const versionExists = await ReactNativeBlobUtil.fs.exists(OFFLINE_BUNDLE_VERSION_PATH);
       const currentVersion = versionExists
@@ -78,16 +78,30 @@ export default function App() {
         }
         await ReactNativeBlobUtil.fs.mkdir(OFFLINE_BUNDLE_DIR);
 
-        for (const [relativePath, moduleId] of bundleEntries) {
-          const asset = Asset.fromModule(moduleId);
-          const sourceUri = asset.localUri || asset.uri;
-          if (!sourceUri) {
-            throw new Error(`No encontramos el recurso offline ${relativePath}.`);
-          }
+        for (let start = 0; start < bundleEntries.length; start += OFFLINE_BUNDLE_BATCH_SIZE) {
+          const chunk = bundleEntries.slice(start, start + OFFLINE_BUNDLE_BATCH_SIZE);
+          const chunkAssets = chunk.map(([, moduleId]) => Asset.fromModule(moduleId));
 
-          const destinationPath = `${OFFLINE_BUNDLE_DIR}/${relativePath}`;
-          await ensureParentDirectory(destinationPath);
-          await ReactNativeBlobUtil.fs.cp(sourceUri.replace(/^file:\/\//, ""), destinationPath);
+          await Promise.all(
+            chunkAssets.map(async (asset) => {
+              if (!asset.localUri && typeof asset.downloadAsync === "function") {
+                await asset.downloadAsync();
+              }
+            }),
+          );
+
+          for (let index = 0; index < chunk.length; index += 1) {
+            const [relativePath] = chunk[index];
+            const asset = chunkAssets[index];
+            const sourceUri = asset.localUri || asset.uri;
+            if (!sourceUri) {
+              throw new Error(`No encontramos el recurso offline ${relativePath}.`);
+            }
+
+            const destinationPath = `${OFFLINE_BUNDLE_DIR}/${relativePath}`;
+            await ensureParentDirectory(destinationPath);
+            await ReactNativeBlobUtil.fs.cp(sourceUri.replace(/^file:\/\//, ""), destinationPath);
+          }
         }
 
         await ReactNativeBlobUtil.fs.writeFile(
