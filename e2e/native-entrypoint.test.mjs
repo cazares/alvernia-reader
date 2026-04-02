@@ -49,6 +49,16 @@ test("native shell loads the bundled offline web reader as the source of truth",
   assert.doesNotMatch(source, /react-native-pdf/);
 });
 
+test("offline web bundle version matches the app build number so updates refresh cached files", () => {
+  const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
+  const assetsSource = fs.readFileSync(assetsPath, "utf8");
+  const versionJson = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "version.json"), "utf8"));
+
+  const match = assetsSource.match(/OFFLINE_WEB_BUNDLE_VERSION = "(\d+)"/);
+  assert.ok(match, "Expected offline bundle version constant");
+  assert.equal(match[1], String(versionJson.buildNumber));
+});
+
 test("restored web source still includes the drawer, numpad, browse, and hidden sync experience", () => {
   const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
   const webApp = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
