@@ -18,13 +18,8 @@ const tmpDir = path.join(rootDir, "web", ".offline-tmp");
 const nativeBundleDir = path.join(rootDir, "assets", "offline-web");
 const nativeAssetsModulePath = path.join(rootDir, "src", "offlineWebBundle.js");
 const nativeAssetsTypesPath = path.join(rootDir, "src", "offlineWebBundle.d.ts");
-const gitSha = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
-  cwd: rootDir,
-  encoding: "utf8",
-});
-const bundleVersion = gitSha.status === 0 && gitSha.stdout.trim()
-  ? gitSha.stdout.trim()
-  : `${Date.now()}`;
+const versionFile = JSON.parse(fs.readFileSync(path.join(rootDir, "version.json"), "utf8"));
+const bundleVersion = String(versionFile.buildNumber || Date.now());
 
 const copyDir = (sourceDir, targetDir) => {
   fs.mkdirSync(targetDir, { recursive: true });
@@ -39,6 +34,10 @@ const copyDir = (sourceDir, targetDir) => {
     }
   }
 };
+const NATIVE_BUNDLE_EXCLUDED_FILES = new Set([
+  "manifest.webmanifest",
+  "sw.js",
+]);
 
 fs.mkdirSync(tmpDir, { recursive: true });
 
@@ -140,12 +139,13 @@ const walkBundle = (dir, relativeDir = "") => {
   }
 };
 walkBundle(nativeBundleDir);
+const nativeBundleFiles = bundleFiles.filter((relativePath) => !NATIVE_BUNDLE_EXCLUDED_FILES.has(relativePath));
 
 const moduleLines = [
   `const OFFLINE_WEB_BUNDLE_VERSION = ${JSON.stringify(bundleVersion)};`,
   "",
   "const OFFLINE_WEB_BUNDLE_ASSETS = {",
-  ...bundleFiles.map((relativePath) => `  ${JSON.stringify(relativePath)}: require(${JSON.stringify(`../assets/offline-web/${relativePath}`)}),`),
+  ...nativeBundleFiles.map((relativePath) => `  ${JSON.stringify(relativePath)}: require(${JSON.stringify(`../assets/offline-web/${relativePath}`)}),`),
   "};",
   "",
   "module.exports = {",
