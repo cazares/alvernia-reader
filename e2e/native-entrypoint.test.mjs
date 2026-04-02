@@ -63,6 +63,20 @@ test("offline web bundle version matches the app build number so updates refresh
   assert.equal(match[1], String(versionJson.buildNumber));
 });
 
+test("native iOS project build number matches version.json", () => {
+  const versionJson = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "version.json"), "utf8"));
+  const projectSource = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo.xcodeproj", "project.pbxproj"),
+    "utf8",
+  );
+
+  const matches = [...projectSource.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]);
+  assert.ok(matches.length >= 2, "Expected native iOS build number entries");
+  for (const buildNumber of matches) {
+    assert.equal(buildNumber, String(versionJson.buildNumber));
+  }
+});
+
 test("restored web source still includes the drawer, numpad, browse, and hidden sync experience", () => {
   const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
   const webApp = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
