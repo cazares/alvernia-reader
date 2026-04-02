@@ -33,10 +33,13 @@ test("native shell loads the bundled offline web reader as the source of truth",
   assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
   assert.match(source, /OFFLINE_WEB_BUNDLE_VERSION/);
   assert.match(source, /OFFLINE_BUNDLE_BATCH_SIZE = 12/);
+  assert.match(source, /PAGE_ASSET_PREFIX = "pages\/"/);
   assert.match(source, /signovivo-offline-web/);
   assert.match(source, /ReactNativeBlobUtil\.fs\.cp/);
   assert.match(source, /asset\.downloadAsync\(\)/);
-  assert.match(source, /bundleEntries\.slice\(start, start \+ OFFLINE_BUNDLE_BATCH_SIZE\)/);
+  assert.match(source, /coreBundleEntries\.slice\(start, start \+ OFFLINE_BUNDLE_BATCH_SIZE\)/);
+  assert.match(source, /window\.OFFLINE_PAGES = /);
+  assert.match(source, /pageBundleEntries\.map/);
   assert.match(source, /file:\/\/\$\{OFFLINE_BUNDLE_DIR\}\/index\.html/);
   assert.match(source, /injectedJavaScriptBeforeContentLoaded/);
   assert.match(source, /Asset\.fromModule/);

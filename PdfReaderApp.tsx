@@ -17,6 +17,7 @@ const BRIDGE_CHANNEL = "signovivo-native";
 const OFFLINE_BUNDLE_DIR = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/signovivo-offline-web`;
 const OFFLINE_BUNDLE_VERSION_PATH = `${OFFLINE_BUNDLE_DIR}/.bundle-version`;
 const OFFLINE_BUNDLE_BATCH_SIZE = 12;
+const PAGE_ASSET_PREFIX = "pages/";
 
 type SyncRole = "off" | "director" | "follower";
 
@@ -32,6 +33,7 @@ export default function App() {
   const [readerUri, setReaderUri] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [offlinePagesScript, setOfflinePagesScript] = useState("window.OFFLINE_PAGES = {}; true;");
   const webViewRef = useRef<WebView>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const currentPageRef = useRef(2);
@@ -64,6 +66,8 @@ export default function App() {
 
     const buildOfflineBundle = async () => {
       const bundleEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS);
+      const pageBundleEntries = bundleEntries.filter(([relativePath]) => relativePath.startsWith(PAGE_ASSET_PREFIX));
+      const coreBundleEntries = bundleEntries.filter(([relativePath]) => !relativePath.startsWith(PAGE_ASSET_PREFIX));
 
       const versionExists = await ReactNativeBlobUtil.fs.exists(OFFLINE_BUNDLE_VERSION_PATH);
       const currentVersion = versionExists
@@ -78,8 +82,8 @@ export default function App() {
         }
         await ReactNativeBlobUtil.fs.mkdir(OFFLINE_BUNDLE_DIR);
 
-        for (let start = 0; start < bundleEntries.length; start += OFFLINE_BUNDLE_BATCH_SIZE) {
-          const chunk = bundleEntries.slice(start, start + OFFLINE_BUNDLE_BATCH_SIZE);
+        for (let start = 0; start < coreBundleEntries.length; start += OFFLINE_BUNDLE_BATCH_SIZE) {
+          const chunk = coreBundleEntries.slice(start, start + OFFLINE_BUNDLE_BATCH_SIZE);
           const chunkAssets = chunk.map(([, moduleId]) => Asset.fromModule(moduleId));
 
           await Promise.all(
@@ -111,19 +115,44 @@ export default function App() {
         );
       }
 
-      return `file://${OFFLINE_BUNDLE_DIR}/index.html`;
+      const offlinePages = Object.fromEntries(
+        pageBundleEntries.map(([relativePath, moduleId]) => {
+          const asset = Asset.fromModule(moduleId);
+          const sourceUri = asset.localUri || asset.uri;
+          if (!sourceUri) {
+            throw new Error(`No encontramos el recurso offline ${relativePath}.`);
+          }
+
+          const pageNumber = Number.parseInt(
+            relativePath.replace(PAGE_ASSET_PREFIX, "").replace(/^page-/, "").replace(/\.jpg$/, ""),
+            10,
+          );
+
+          return [pageNumber, sourceUri];
+        }),
+      );
+
+      return {
+        readerUri: `file://${OFFLINE_BUNDLE_DIR}/index.html`,
+        bootScript: [
+          "window.__SIGNO_VINO_NATIVE_FILE_MODE = true;",
+          `window.OFFLINE_PAGES = ${JSON.stringify(offlinePages)};`,
+          "true;",
+        ].join(" "),
+      };
     };
 
     const loadOfflineReader = async () => {
       try {
         setErrorMessage("");
         setReaderUri(null);
-        const nextUri = await buildOfflineBundle();
+        const { readerUri: nextUri, bootScript } = await buildOfflineBundle();
 
         if (!cancelled) {
           if (!nextUri) {
             throw new Error("No encontramos el archivo del lector offline.");
           }
+          setOfflinePagesScript(bootScript);
           setReaderUri(nextUri);
         }
       } catch (error) {
@@ -242,7 +271,7 @@ export default function App() {
           bounces={false}
           decelerationRate="normal"
           domStorageEnabled
-          injectedJavaScriptBeforeContentLoaded={"window.__SIGNO_VINO_NATIVE_FILE_MODE = true; true;"}
+          injectedJavaScriptBeforeContentLoaded={offlinePagesScript}
           onLoadEnd={sendBridgeState}
           onMessage={handleWebMessage}
           originWhitelist={["*"]}
