@@ -1,21 +1,8 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Image, Modal, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
-import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
+import { getOfflinePageAsset, OFFLINE_PAGE_COUNT } from "./src/offlinePageAssets";
 
-const PAGE_ASSET_PREFIX = "pages/";
-
-const PAGE_ENTRIES = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
-  .filter(([relativePath]) => relativePath.startsWith(PAGE_ASSET_PREFIX))
-  .map(([relativePath, moduleId]) => ({
-    pageNumber: Number.parseInt(
-      relativePath.replace(PAGE_ASSET_PREFIX, "").replace(/^page-/, "").replace(/\.jpg$/, ""),
-      10,
-    ),
-    moduleId,
-  }))
-  .sort((left, right) => left.pageNumber - right.pageNumber);
-
-const TOTAL_PAGES = PAGE_ENTRIES.length;
+const TOTAL_PAGES = OFFLINE_PAGE_COUNT;
 
 const clampPage = (value: number) => Math.max(1, Math.min(TOTAL_PAGES, value));
 
@@ -28,7 +15,7 @@ export default function App() {
   const pageWidth = Math.max(width, 1);
   const pageHeight = Math.max(height - 148, 240);
 
-  const currentEntry = useMemo(() => PAGE_ENTRIES[currentPage - 1] || PAGE_ENTRIES[0], [currentPage]);
+  const currentImageSource = useMemo(() => getOfflinePageAsset(currentPage), [currentPage]);
 
   const goToPage = useCallback((pageNumber: number) => {
     setCurrentPage(clampPage(pageNumber));
@@ -58,7 +45,7 @@ export default function App() {
           fadeDuration={0}
           key={currentPage}
           resizeMode="contain"
-          source={currentEntry.moduleId}
+          source={currentImageSource}
           style={[styles.pageImage, { width: pageWidth, height: pageHeight }]}
         />
       </View>
@@ -72,7 +59,7 @@ export default function App() {
           <Text style={styles.navButtonText}>Anterior</Text>
         </Pressable>
 
-        <Text style={styles.footerLabel}>Página {currentEntry?.pageNumber || currentPage}</Text>
+        <Text style={styles.footerLabel}>Página {currentPage}</Text>
 
         <Pressable
           disabled={currentPage >= TOTAL_PAGES}

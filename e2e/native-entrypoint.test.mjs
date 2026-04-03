@@ -26,20 +26,23 @@ test("native shell boots as a single-page offline image reader", () => {
   const source = fs.readFileSync(appPath, "utf8");
   const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
   const assetsSource = fs.readFileSync(assetsPath, "utf8");
+  const pageAssetsPath = path.join(APP_ROOT, "src", "offlinePageAssets.js");
+  const pageAssetsSource = fs.readFileSync(pageAssetsPath, "utf8");
 
-  assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
-  assert.match(source, /PAGE_ASSET_PREFIX = "pages\/"/);
+  assert.match(source, /getOfflinePageAsset/);
+  assert.match(source, /OFFLINE_PAGE_COUNT/);
   assert.match(source, /Image/);
   assert.match(source, /keyboardType="number-pad"/);
-  assert.match(source, /PAGE_ENTRIES/);
-  assert.match(source, /source=\{currentEntry\.moduleId\}/);
+  assert.match(source, /source=\{currentImageSource\}/);
   assert.match(source, /key=\{currentPage\}/);
   assert.doesNotMatch(source, /FlatList/);
   assert.doesNotMatch(source, /scrollToIndex/);
   assert.doesNotMatch(source, /react-native-webview/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.match(assetsSource, /offline-web\/index\.html/);
-  assert.match(assetsSource, /pages\/page-001\.jpg/);
+  assert.doesNotMatch(assetsSource, /pages\/page-001\.jpg/);
+  assert.match(pageAssetsSource, /switch \(pageNumber\)/);
+  assert.match(pageAssetsSource, /pages\/page-001\.jpg/);
   assert.doesNotMatch(source, /nearbyDirectorSync/);
 });
 
