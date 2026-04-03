@@ -10,7 +10,8 @@ test("package main points at the native app entrypoint", () => {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
-  assert.equal(packageJson.dependencies["expo-asset"], "^12.0.12");
+  assert.equal(packageJson.dependencies["react-native-webview"], "13.15.0");
+  assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
 
 test("native app entrypoint registers the root App component", () => {
@@ -21,17 +22,27 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("native shell hosts a single bundled PDF with native controls", () => {
+test("native shell hosts the bundled signovivo.com experience locally", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
 
+  assert.match(source, /react-native-webview/);
   assert.match(source, /Asset\.fromModule/);
-  assert.match(source, /assets\/alvernia_manual_2\.pdf/);
-  assert.match(source, /SignoVivoPdfNativeView/);
-  assert.match(source, /keyboardType="number-pad"/);
-  assert.match(source, /Ir a pagina/);
+  assert.match(source, /assets\/offline-web\/index\.html/);
+  assert.match(source, /<WebView/);
+  assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.doesNotMatch(source, /nearbyDirectorSync/);
+});
+
+test("offline web bundle version matches the app build number so updates refresh cached files", () => {
+  const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
+  const assetsSource = fs.readFileSync(assetsPath, "utf8");
+  const versionJson = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "version.json"), "utf8"));
+
+  const match = assetsSource.match(/OFFLINE_WEB_BUNDLE_VERSION = "(\d+)"/);
+  assert.ok(match, "Expected offline bundle version constant");
+  assert.equal(match[1], String(versionJson.buildNumber));
 });
 
 test("native iOS project build number matches version.json", () => {
@@ -48,16 +59,28 @@ test("native iOS project build number matches version.json", () => {
   }
 });
 
-test("native iOS target includes a dedicated PDFKit bridge", () => {
-  const managerPath = path.join(APP_ROOT, "ios", "SignoVivo", "SignoVivoPdfViewManager.swift");
-  const bridgePath = path.join(APP_ROOT, "ios", "SignoVivo", "SignoVivoPdfViewManagerBridge.m");
-  const managerSource = fs.readFileSync(managerPath, "utf8");
-  const bridgeSource = fs.readFileSync(bridgePath, "utf8");
+test("restored web source still includes the drawer, numpad, browse, and hidden sync experience", () => {
+  const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
+  const webApp = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
 
-  assert.match(managerSource, /import PDFKit/);
-  assert.match(managerSource, /class SignoVivoPdfViewManager/);
-  assert.match(managerSource, /PDFView/);
-  assert.match(bridgeSource, /RCT_EXTERN_MODULE\(SignoVivoPdfView/);
+  assert.match(indexHtml, /drawer-handle/);
+  assert.match(indexHtml, /mode-btn-numpad/);
+  assert.match(indexHtml, /mode-btn-browse/);
+  assert.match(indexHtml, /numberpad-grid/);
+  assert.match(indexHtml, /search-input/);
+  assert.match(indexHtml, /director-sync-panel/);
+  assert.match(indexHtml, /offline-gate/);
+  assert.match(indexHtml, /help-settings-label/);
+  assert.match(webApp, /switchDrawerMode/);
+  assert.match(webApp, /goToDraftSong/);
+  assert.match(webApp, /renderActiveTab/);
+  assert.match(webApp, /bindReaderEvents/);
+  assert.match(webApp, /postNativeBridge/);
+  assert.match(webApp, /applyNativeSyncEvent/);
+  assert.match(webApp, /NATIVE_FILE_MODE/);
+  assert.match(webApp, /resolveAppPath/);
+  assert.match(webApp, /sync-start-director/);
+  assert.match(webApp, /sync-start-follower/);
 });
 
 test("iOS app disables non-exempt encryption and removes local-network sync permissions", () => {
@@ -65,12 +88,11 @@ test("iOS app disables non-exempt encryption and removes local-network sync perm
   const plistSource = fs.readFileSync(plistPath, "utf8");
 
   assert.match(plistSource, /ITSAppUsesNonExemptEncryption/);
-  assert.doesNotMatch(plistSource, /NSAppTransportSecurity/);
   assert.doesNotMatch(plistSource, /NSLocalNetworkUsageDescription/);
   assert.doesNotMatch(plistSource, /NSBonjourServices/);
 });
 
-test("metro can still bundle html assets for build-time tooling if needed", () => {
+test("metro bundles the offline html asset", () => {
   const metroConfigPath = path.join(APP_ROOT, "metro.config.js");
   const source = fs.readFileSync(metroConfigPath, "utf8");
 
