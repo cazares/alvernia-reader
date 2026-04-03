@@ -1,108 +1,88 @@
-import { useCallback, useMemo, useState } from "react";
-import { Image, Modal, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
-import { getOfflinePageAsset, OFFLINE_PAGE_COUNT } from "./src/offlinePageAssets";
+import { Asset } from "expo-asset";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
+import { WebView } from "react-native-webview";
 
-const TOTAL_PAGES = OFFLINE_PAGE_COUNT;
+const OFFLINE_READER_MODULE = require("./assets/offline-web/index.html");
 
-const clampPage = (value: number) => Math.max(1, Math.min(TOTAL_PAGES, value));
+const getReadableError = (error: unknown) => {
+  if (error instanceof Error && error.message) return error.message;
+  return "No se pudo preparar Signo Vino offline.";
+};
 
 export default function App() {
-  const { width, height } = useWindowDimensions();
-  const [currentPage, setCurrentPage] = useState(1);
-  const [jumpModalVisible, setJumpModalVisible] = useState(false);
-  const [jumpDraft, setJumpDraft] = useState("");
+  const [readerUri, setReaderUri] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const pageWidth = Math.max(width, 1);
-  const pageHeight = Math.max(height - 148, 240);
+  useEffect(() => {
+    let cancelled = false;
 
-  const currentImageSource = useMemo(() => getOfflinePageAsset(currentPage), [currentPage]);
+    const loadReader = async () => {
+      try {
+        setErrorMessage("");
+        setReaderUri(null);
+        const asset = Asset.fromModule(OFFLINE_READER_MODULE);
+        await asset.downloadAsync();
+        const nextUri = asset.localUri || asset.uri;
+        if (!nextUri) {
+          throw new Error("No encontramos el lector web offline.");
+        }
+        if (!cancelled) {
+          setReaderUri(nextUri);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(getReadableError(error));
+        }
+      }
+    };
 
-  const goToPage = useCallback((pageNumber: number) => {
-    setCurrentPage(clampPage(pageNumber));
-  }, []);
+    loadReader();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
 
-  const handleJumpSubmit = useCallback(() => {
-    const parsed = Number.parseInt(jumpDraft, 10);
-    const nextPage = Number.isFinite(parsed) ? clampPage(parsed) : currentPage;
-    setJumpModalVisible(false);
-    setJumpDraft("");
-    goToPage(nextPage);
-  }, [currentPage, goToPage, jumpDraft]);
+  const readAccessUrl = useMemo(() => {
+    if (!readerUri?.startsWith("file://")) return undefined;
+    return readerUri.replace(/[^/]+$/, "");
+  }, [readerUri]);
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <View style={styles.screen}>
       <StatusBar hidden barStyle="light-content" />
-
-      <View style={styles.header}>
-        <Text style={styles.title}>Signo Vino</Text>
-        <Pressable onPress={() => setJumpModalVisible(true)} style={styles.pageBadge}>
-          <Text style={styles.pageBadgeText}>{currentPage} / {TOTAL_PAGES}</Text>
-        </Pressable>
-      </View>
-
-      <View style={[styles.pageShell, { width: pageWidth, height: pageHeight }]}>
-        <Image
-          fadeDuration={0}
-          key={currentPage}
-          resizeMode="contain"
-          source={currentImageSource}
-          style={[styles.pageImage, { width: pageWidth, height: pageHeight }]}
+      {readerUri ? (
+        <WebView
+          allowingReadAccessToURL={readAccessUrl}
+          allowFileAccess
+          allowFileAccessFromFileURLs
+          allowUniversalAccessFromFileURLs
+          allowsBackForwardNavigationGestures={false}
+          allowsInlineMediaPlayback
+          bounces={false}
+          domStorageEnabled
+          injectedJavaScriptBeforeContentLoaded={"window.__SIGNO_VINO_NATIVE_FILE_MODE = true; true;"}
+          originWhitelist={["*"]}
+          setSupportMultipleWindows={false}
+          source={{ uri: readerUri }}
+          style={styles.webview}
         />
-      </View>
-
-      <View style={styles.footer}>
-        <Pressable
-          disabled={currentPage <= 1}
-          onPress={() => goToPage(currentPage - 1)}
-          style={[styles.navButton, currentPage <= 1 && styles.navButtonDisabled]}
-        >
-          <Text style={styles.navButtonText}>Anterior</Text>
-        </Pressable>
-
-        <Text style={styles.footerLabel}>Página {currentPage}</Text>
-
-        <Pressable
-          disabled={currentPage >= TOTAL_PAGES}
-          onPress={() => goToPage(currentPage + 1)}
-          style={[styles.navButton, currentPage >= TOTAL_PAGES && styles.navButtonDisabled]}
-        >
-          <Text style={styles.navButtonText}>Siguiente</Text>
-        </Pressable>
-      </View>
-
-      <Modal
-        animationType="fade"
-        onRequestClose={() => setJumpModalVisible(false)}
-        transparent
-        visible={jumpModalVisible}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Ir a página</Text>
-            <Text style={styles.modalText}>Escribe un número entre 1 y {TOTAL_PAGES}.</Text>
-            <TextInput
-              autoFocus
-              inputMode="numeric"
-              keyboardType="number-pad"
-              onChangeText={(value) => setJumpDraft(value.replace(/[^0-9]/g, "").slice(0, 3))}
-              onSubmitEditing={handleJumpSubmit}
-              placeholder="Número de página"
-              placeholderTextColor="#6f7b94"
-              style={styles.input}
-              value={jumpDraft}
-            />
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => setJumpModalVisible(false)} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Cancelar</Text>
-              </Pressable>
-              <Pressable onPress={handleJumpSubmit} style={styles.primaryButton}>
-                <Text style={styles.primaryButtonText}>Ir</Text>
-              </Pressable>
-            </View>
-          </View>
+      ) : (
+        <View style={styles.loadingShell}>
+          <ActivityIndicator color="#93e4ff" size="large" />
+          <Text style={styles.loadingTitle}>Preparando Signo Vino</Text>
+          <Text style={styles.loadingText}>
+            {errorMessage || "Cargando la misma experiencia de signovivo.com, totalmente offline."}
+          </Text>
+          {errorMessage ? (
+            <Pressable onPress={() => setReloadKey((value) => value + 1)} style={styles.retryButton}>
+              <Text style={styles.retryText}>Reintentar</Text>
+            </Pressable>
+          ) : null}
         </View>
-      </Modal>
-    </SafeAreaView>
+      )}
+    </View>
   );
 }
 
@@ -111,133 +91,41 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#030508",
   },
-  header: {
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  title: {
-    color: "#ffffff",
-    fontSize: 20,
-    fontWeight: "700",
-  },
-  pageBadge: {
-    backgroundColor: "#173463",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  pageBadgeText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  reader: {
+  webview: {
     flex: 1,
-  },
-  pageShell: {
-    alignItems: "center",
-    justifyContent: "center",
     backgroundColor: "#000000",
   },
-  pageImage: {
-    backgroundColor: "#000000",
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  footerLabel: {
-    color: "#dbe4f7",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  navButton: {
-    minWidth: 112,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 14,
-    backgroundColor: "#173463",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  navButtonDisabled: {
-    opacity: 0.35,
-  },
-  navButtonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  modalBackdrop: {
+  loadingShell: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.72)",
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
-  },
-  modalCard: {
-    width: "100%",
-    maxWidth: 360,
-    borderRadius: 22,
-    backgroundColor: "#111827",
-    padding: 20,
+    paddingHorizontal: 28,
+    backgroundColor: "#060910",
     gap: 14,
   },
-  modalTitle: {
-    color: "#ffffff",
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  modalText: {
-    color: "#dbe4f7",
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  input: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#243552",
-    backgroundColor: "#0a1120",
+  loadingTitle: {
     color: "#ffffff",
     fontSize: 24,
     fontWeight: "700",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    textAlign: "center",
   },
-  modalActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 10,
+  loadingText: {
+    color: "#dbe4f7",
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: "center",
+    maxWidth: 420,
   },
-  secondaryButton: {
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#1c2433",
-  },
-  secondaryButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  primaryButton: {
-    borderRadius: 12,
+  retryButton: {
+    marginTop: 8,
+    borderRadius: 999,
     paddingHorizontal: 18,
     paddingVertical: 12,
-    backgroundColor: "#1d4ed8",
+    backgroundColor: "#173463",
   },
-  primaryButtonText: {
+  retryText: {
     color: "#ffffff",
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "700",
   },
 });

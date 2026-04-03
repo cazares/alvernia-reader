@@ -9,7 +9,7 @@ const readJson = (relativePath) => JSON.parse(
   fs.readFileSync(path.join(APP_ROOT, relativePath), "utf8"),
 );
 
-test("package.json keeps the native offline reader dependency footprint lean", () => {
+test("package.json keeps the offline web-host dependency footprint lean", () => {
   const packageJson = readJson("package.json");
 
   assert.deepEqual(Object.keys(packageJson.scripts).sort(), [
@@ -34,6 +34,7 @@ test("package.json keeps the native offline reader dependency footprint lean", (
   assert.equal(dependencyNames.includes("tonal"), true);
   assert.equal(dependencyNames.includes("expo-asset"), true);
   assert.equal(dependencyNames.includes("expo-haptics"), true);
+  assert.equal(dependencyNames.includes("react-native-webview"), true);
 
   for (const removedName of [
     "@react-native-community/netinfo",
@@ -49,7 +50,6 @@ test("package.json keeps the native offline reader dependency footprint lean", (
     "expo-updates",
     "expo-video",
     "react-native-pdf",
-    "react-native-webview",
     "react-dom",
     "react-native-web",
   ]) {
@@ -68,8 +68,6 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "assets/offline-web/pages/page-001.jpg",
     "src/offlineWebBundle.js",
     "src/offlineWebBundle.d.ts",
-    "src/offlinePageAssets.js",
-    "src/offlinePageAssets.d.ts",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected web path missing: ${relativePath}`);
   }
@@ -84,6 +82,8 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "assets/signo-vino-native.html",
     "src/offlineWebAssets.js",
     "src/offlineWebAssets.d.ts",
+    "src/offlinePageAssets.js",
+    "src/offlinePageAssets.d.ts",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), false, `Unexpected leftover path: ${relativePath}`);
   }

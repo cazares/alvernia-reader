@@ -10,6 +10,7 @@ test("package main points at the native app entrypoint", () => {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
+  assert.equal(packageJson.dependencies["react-native-webview"], "13.15.0");
   assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
 
@@ -21,28 +22,16 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("native shell boots as a single-page offline image reader", () => {
+test("native shell hosts the bundled signovivo.com experience locally", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
-  const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
-  const assetsSource = fs.readFileSync(assetsPath, "utf8");
-  const pageAssetsPath = path.join(APP_ROOT, "src", "offlinePageAssets.js");
-  const pageAssetsSource = fs.readFileSync(pageAssetsPath, "utf8");
 
-  assert.match(source, /getOfflinePageAsset/);
-  assert.match(source, /OFFLINE_PAGE_COUNT/);
-  assert.match(source, /Image/);
-  assert.match(source, /keyboardType="number-pad"/);
-  assert.match(source, /source=\{currentImageSource\}/);
-  assert.match(source, /key=\{currentPage\}/);
-  assert.doesNotMatch(source, /FlatList/);
-  assert.doesNotMatch(source, /scrollToIndex/);
-  assert.doesNotMatch(source, /react-native-webview/);
+  assert.match(source, /react-native-webview/);
+  assert.match(source, /Asset\.fromModule/);
+  assert.match(source, /assets\/offline-web\/index\.html/);
+  assert.match(source, /<WebView/);
+  assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
   assert.doesNotMatch(source, /react-native-blob-util/);
-  assert.match(assetsSource, /offline-web\/index\.html/);
-  assert.doesNotMatch(assetsSource, /pages\/page-001\.jpg/);
-  assert.match(pageAssetsSource, /switch \(pageNumber\)/);
-  assert.match(pageAssetsSource, /pages\/page-001\.jpg/);
   assert.doesNotMatch(source, /nearbyDirectorSync/);
 });
 
@@ -80,6 +69,7 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(indexHtml, /numberpad-grid/);
   assert.match(indexHtml, /search-input/);
   assert.match(indexHtml, /director-sync-panel/);
+  assert.match(indexHtml, /offline-gate/);
   assert.match(indexHtml, /help-settings-label/);
   assert.match(webApp, /switchDrawerMode/);
   assert.match(webApp, /goToDraftSong/);

@@ -18,8 +18,6 @@ const tmpDir = path.join(rootDir, "web", ".offline-tmp");
 const nativeBundleDir = path.join(rootDir, "assets", "offline-web");
 const nativeAssetsModulePath = path.join(rootDir, "src", "offlineWebBundle.js");
 const nativeAssetsTypesPath = path.join(rootDir, "src", "offlineWebBundle.d.ts");
-const nativePageAssetsModulePath = path.join(rootDir, "src", "offlinePageAssets.js");
-const nativePageAssetsTypesPath = path.join(rootDir, "src", "offlinePageAssets.d.ts");
 const versionFile = JSON.parse(fs.readFileSync(path.join(rootDir, "version.json"), "utf8"));
 const bundleVersion = String(versionFile.buildNumber || Date.now());
 
@@ -142,14 +140,12 @@ const walkBundle = (dir, relativeDir = "") => {
 };
 walkBundle(nativeBundleDir);
 const nativeBundleFiles = bundleFiles.filter((relativePath) => !NATIVE_BUNDLE_EXCLUDED_FILES.has(relativePath));
-const pageBundleFiles = nativeBundleFiles.filter((relativePath) => /^pages\/page-\d+\.jpg$/.test(relativePath));
-const coreBundleFiles = nativeBundleFiles.filter((relativePath) => !/^pages\/page-\d+\.jpg$/.test(relativePath));
 
 const moduleLines = [
   `const OFFLINE_WEB_BUNDLE_VERSION = ${JSON.stringify(bundleVersion)};`,
   "",
   "const OFFLINE_WEB_BUNDLE_ASSETS = {",
-  ...coreBundleFiles.map((relativePath) => `  ${JSON.stringify(relativePath)}: require(${JSON.stringify(`../assets/offline-web/${relativePath}`)}),`),
+  ...nativeBundleFiles.map((relativePath) => `  ${JSON.stringify(relativePath)}: require(${JSON.stringify(`../assets/offline-web/${relativePath}`)}),`),
   "};",
   "",
   "module.exports = {",
@@ -167,36 +163,3 @@ const typeLines = [
 ];
 fs.writeFileSync(nativeAssetsTypesPath, typeLines.join("\n"));
 console.log(`Wrote ${nativeAssetsModulePath}`);
-
-const fallbackPageNumber = pageBundleFiles.length > 0
-  ? Number.parseInt(pageBundleFiles[0].match(/page-(\d+)\.jpg$/)?.[1] || "1", 10)
-  : 1;
-
-const pageAssetModuleLines = [
-  `const OFFLINE_PAGE_COUNT = ${pageBundleFiles.length};`,
-  "",
-  "function getOfflinePageAsset(pageNumber) {",
-  "  switch (pageNumber) {",
-  ...pageBundleFiles.map((relativePath) => {
-    const pageNumber = Number.parseInt(relativePath.match(/page-(\d+)\.jpg$/)?.[1] || "0", 10);
-    return `    case ${pageNumber}: return require(${JSON.stringify(`../assets/offline-web/${relativePath}`)});`;
-  }),
-  `    default: return require(${JSON.stringify(`../assets/offline-web/pages/page-${String(fallbackPageNumber).padStart(3, "0")}.jpg`)});`,
-  "  }",
-  "}",
-  "",
-  "module.exports = {",
-  "  OFFLINE_PAGE_COUNT,",
-  "  getOfflinePageAsset,",
-  "};",
-  "",
-];
-fs.writeFileSync(nativePageAssetsModulePath, pageAssetModuleLines.join("\n"));
-
-const pageTypeLines = [
-  "export const OFFLINE_PAGE_COUNT: number;",
-  "export function getOfflinePageAsset(pageNumber: number): number;",
-  "",
-];
-fs.writeFileSync(nativePageAssetsTypesPath, pageTypeLines.join("\n"));
-console.log(`Wrote ${nativePageAssetsModulePath}`);
