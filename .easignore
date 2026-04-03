@@ -1,8 +1,11 @@
 .claude/
 .merge-backup/
 assets-and-web.zip
+.DS_Store
 e2e/
 ios/build/
+ios/Pods/
+ios/build/generated/
 node_modules/
 web/
 web/.offline-tmp/
