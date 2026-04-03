@@ -9,7 +9,7 @@ const readJson = (relativePath) => JSON.parse(
   fs.readFileSync(path.join(APP_ROOT, relativePath), "utf8"),
 );
 
-test("package.json keeps the offline web-host dependency footprint lean", () => {
+test("package.json keeps the offline PDF-reader dependency footprint lean", () => {
   const packageJson = readJson("package.json");
 
   assert.deepEqual(Object.keys(packageJson.scripts).sort(), [
@@ -31,17 +31,16 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
 
   const dependencyNames = Object.keys(packageJson.dependencies).sort();
   assert.equal(dependencyNames.includes("expo"), true);
-  assert.equal(dependencyNames.includes("tonal"), true);
   assert.equal(dependencyNames.includes("expo-asset"), true);
-  assert.equal(dependencyNames.includes("expo-haptics"), true);
-  assert.equal(dependencyNames.includes("react-native-webview"), true);
 
   for (const removedName of [
     "@react-native-community/netinfo",
+    "@react-native-async-storage/async-storage",
     "busboy",
     "expo-application",
     "expo-constants",
     "expo-file-system",
+    "expo-haptics",
     "expo-media-library",
     "expo-notifications",
     "expo-secure-store",
@@ -50,6 +49,7 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
     "expo-updates",
     "expo-video",
     "react-native-pdf",
+    "react-native-webview",
     "react-dom",
     "react-native-web",
   ]) {
@@ -57,22 +57,19 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
   }
 });
 
-test("repo keeps the restored web source but removes old cloud upload entrypoints", () => {
+test("repo keeps build-time web source but removes shipped offline web assets", () => {
   for (const relativePath of [
     "web",
     "web/src/index.html",
     "web/src/app.js",
     "web/src/styles.css",
-    "web/dist/signo-vino-offline.html",
-    "assets/offline-web/index.html",
-    "assets/offline-web/pages/page-001.jpg",
-    "src/offlineWebBundle.js",
-    "src/offlineWebBundle.d.ts",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected web path missing: ${relativePath}`);
   }
 
   for (const relativePath of [
+    "web/dist/signo-vino-offline.html",
+    "assets/offline-web",
     "cloudflare",
     "CNAME",
     "scripts/upload-server.mjs",
@@ -82,6 +79,8 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "assets/signo-vino-native.html",
     "src/offlineWebAssets.js",
     "src/offlineWebAssets.d.ts",
+    "src/offlineWebBundle.js",
+    "src/offlineWebBundle.d.ts",
     "src/offlinePageAssets.js",
     "src/offlinePageAssets.d.ts",
   ]) {
