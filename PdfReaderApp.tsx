@@ -1,233 +1,311 @@
-import { Asset } from "expo-asset";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
-import ReactNativeBlobUtil from "react-native-blob-util";
-import { WebView } from "react-native-webview";
-import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
+import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
 
-const OFFLINE_BUNDLE_DIR = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/signovivo-offline-web`;
-const OFFLINE_BUNDLE_VERSION_PATH = `${OFFLINE_BUNDLE_DIR}/.bundle-version`;
-const OFFLINE_BUNDLE_BATCH_SIZE = 12;
 const PAGE_ASSET_PREFIX = "pages/";
 
-const getReadableError = (error: unknown) => {
-  if (error instanceof Error && error.message) return error.message;
-  return "No se pudo preparar el lector offline.";
-};
+const PAGE_ENTRIES = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
+  .filter(([relativePath]) => relativePath.startsWith(PAGE_ASSET_PREFIX))
+  .map(([relativePath, moduleId]) => ({
+    pageNumber: Number.parseInt(
+      relativePath.replace(PAGE_ASSET_PREFIX, "").replace(/^page-/, "").replace(/\.jpg$/, ""),
+      10,
+    ),
+    moduleId,
+  }))
+  .sort((left, right) => left.pageNumber - right.pageNumber);
 
-const OFFLINE_BRIDGE_DISABLED_SCRIPT = [
-  "window.__SIGNO_VINO_NATIVE_FILE_MODE = true;",
-  "window.OFFLINE_PAGES = {};",
-  "window.__signoVivoReceiveNativeEvent && window.__signoVivoReceiveNativeEvent({ type: 'bridge-state', available: false, role: 'off' });",
-  "true;",
-].join(" ");
+const TOTAL_PAGES = PAGE_ENTRIES.length;
+
+const clampPage = (value: number) => Math.max(1, Math.min(TOTAL_PAGES, value));
 
 export default function App() {
-  const [readerUri, setReaderUri] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [reloadKey, setReloadKey] = useState(0);
-  const [offlinePagesScript, setOfflinePagesScript] = useState(OFFLINE_BRIDGE_DISABLED_SCRIPT);
-  const webViewRef = useRef<WebView>(null);
+  const { width, height } = useWindowDimensions();
+  const listRef = useRef<FlatList<(typeof PAGE_ENTRIES)[number]>>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [jumpModalVisible, setJumpModalVisible] = useState(false);
+  const [jumpDraft, setJumpDraft] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
+  const pageWidth = Math.max(width, 1);
+  const pageHeight = Math.max(height - 148, 240);
 
-    const ensureParentDirectory = async (filePath: string) => {
-      const parentPath = filePath.slice(0, filePath.lastIndexOf("/"));
-      if (!parentPath) return;
-      const exists = await ReactNativeBlobUtil.fs.exists(parentPath);
-      if (!exists) {
-        await ReactNativeBlobUtil.fs.mkdir(parentPath);
-      }
-    };
+  const currentEntry = useMemo(() => PAGE_ENTRIES[currentPage - 1] || PAGE_ENTRIES[0], [currentPage]);
 
-    const buildOfflineBundle = async () => {
-      const bundleEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS);
-      const pageBundleEntries = bundleEntries.filter(([relativePath]) => relativePath.startsWith(PAGE_ASSET_PREFIX));
-      const coreBundleEntries = bundleEntries.filter(([relativePath]) => !relativePath.startsWith(PAGE_ASSET_PREFIX));
+  const goToPage = useCallback(
+    (pageNumber: number, animated = true) => {
+      const nextPage = clampPage(pageNumber);
+      setCurrentPage(nextPage);
+      listRef.current?.scrollToIndex({
+        index: nextPage - 1,
+        animated,
+      });
+    },
+    [],
+  );
 
-      const versionExists = await ReactNativeBlobUtil.fs.exists(OFFLINE_BUNDLE_VERSION_PATH);
-      const currentVersion = versionExists
-        ? await ReactNativeBlobUtil.fs.readFile(OFFLINE_BUNDLE_VERSION_PATH, "utf8")
-        : "";
-      const needsRefresh = currentVersion.trim() !== OFFLINE_WEB_BUNDLE_VERSION;
+  const handleMomentumEnd = useCallback(
+    (event: { nativeEvent: { contentOffset: { x: number } } }) => {
+      const nextIndex = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+      setCurrentPage(clampPage(nextIndex + 1));
+    },
+    [pageWidth],
+  );
 
-      if (needsRefresh) {
-        const bundleDirExists = await ReactNativeBlobUtil.fs.exists(OFFLINE_BUNDLE_DIR);
-        if (bundleDirExists) {
-          await ReactNativeBlobUtil.fs.unlink(OFFLINE_BUNDLE_DIR);
-        }
-        await ReactNativeBlobUtil.fs.mkdir(OFFLINE_BUNDLE_DIR);
+  const handleJumpSubmit = useCallback(() => {
+    const parsed = Number.parseInt(jumpDraft, 10);
+    const nextPage = Number.isFinite(parsed) ? clampPage(parsed) : currentPage;
+    setJumpModalVisible(false);
+    setJumpDraft("");
+    requestAnimationFrame(() => goToPage(nextPage));
+  }, [currentPage, goToPage, jumpDraft]);
 
-        for (let start = 0; start < coreBundleEntries.length; start += OFFLINE_BUNDLE_BATCH_SIZE) {
-          const chunk = coreBundleEntries.slice(start, start + OFFLINE_BUNDLE_BATCH_SIZE);
-          const chunkAssets = chunk.map(([, moduleId]) => Asset.fromModule(moduleId));
-
-          await Promise.all(
-            chunkAssets.map(async (asset) => {
-              if (!asset.localUri && typeof asset.downloadAsync === "function") {
-                await asset.downloadAsync();
-              }
-            }),
-          );
-
-          for (let index = 0; index < chunk.length; index += 1) {
-            const [relativePath] = chunk[index];
-            const asset = chunkAssets[index];
-            const sourceUri = asset.localUri || asset.uri;
-            if (!sourceUri) {
-              throw new Error(`No encontramos el recurso offline ${relativePath}.`);
-            }
-
-            const destinationPath = `${OFFLINE_BUNDLE_DIR}/${relativePath}`;
-            await ensureParentDirectory(destinationPath);
-            await ReactNativeBlobUtil.fs.cp(sourceUri.replace(/^file:\/\//, ""), destinationPath);
-          }
-        }
-
-        await ReactNativeBlobUtil.fs.writeFile(
-          OFFLINE_BUNDLE_VERSION_PATH,
-          OFFLINE_WEB_BUNDLE_VERSION,
-          "utf8",
-        );
-      }
-
-      const offlinePages = Object.fromEntries(
-        pageBundleEntries.map(([relativePath, moduleId]) => {
-          const asset = Asset.fromModule(moduleId);
-          const sourceUri = asset.localUri || asset.uri;
-          if (!sourceUri) {
-            throw new Error(`No encontramos el recurso offline ${relativePath}.`);
-          }
-
-          const pageNumber = Number.parseInt(
-            relativePath.replace(PAGE_ASSET_PREFIX, "").replace(/^page-/, "").replace(/\.jpg$/, ""),
-            10,
-          );
-
-          return [pageNumber, sourceUri];
-        }),
-      );
-
-      return {
-        readerUri: `file://${OFFLINE_BUNDLE_DIR}/index.html`,
-        bootScript: [
-          "window.__SIGNO_VINO_NATIVE_FILE_MODE = true;",
-          `window.OFFLINE_PAGES = ${JSON.stringify(offlinePages)};`,
-          "window.__signoVivoReceiveNativeEvent && window.__signoVivoReceiveNativeEvent({ type: 'bridge-state', available: false, role: 'off' });",
-          "true;",
-        ].join(" "),
-      };
-    };
-
-    const loadOfflineReader = async () => {
-      try {
-        setErrorMessage("");
-        setReaderUri(null);
-        const { readerUri: nextUri, bootScript } = await buildOfflineBundle();
-
-        if (!cancelled) {
-          if (!nextUri) {
-            throw new Error("No encontramos el archivo del lector offline.");
-          }
-          setOfflinePagesScript(bootScript);
-          setReaderUri(nextUri);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setErrorMessage(getReadableError(error));
-        }
-      }
-    };
-
-    loadOfflineReader();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
-
-  const readAccessUrl = useMemo(() => {
-    if (!readerUri?.startsWith("file://")) return undefined;
-    return readerUri.replace(/[^/]+$/, "");
-  }, [readerUri]);
+  const renderPage = useCallback(
+    ({ item }: { item: (typeof PAGE_ENTRIES)[number] }) => (
+      <View style={[styles.pageShell, { width: pageWidth, height: pageHeight }]}>
+        <Image
+          fadeDuration={0}
+          resizeMode="contain"
+          source={item.moduleId}
+          style={[styles.pageImage, { width: pageWidth, height: pageHeight }]}
+        />
+      </View>
+    ),
+    [pageHeight, pageWidth],
+  );
 
   return (
-    <View style={styles.screen}>
+    <SafeAreaView style={styles.screen}>
       <StatusBar hidden barStyle="light-content" />
-      {readerUri ? (
-        <WebView
-          ref={webViewRef}
-          allowingReadAccessToURL={readAccessUrl}
-          allowsBackForwardNavigationGestures={false}
-          allowsInlineMediaPlayback
-          bounces={false}
-          decelerationRate="normal"
-          domStorageEnabled
-          injectedJavaScriptBeforeContentLoaded={offlinePagesScript}
-          originWhitelist={["*"]}
-          scrollEnabled
-          source={{ uri: readerUri }}
-          style={styles.webview}
-        />
-      ) : (
-        <View style={styles.loadingShell}>
-          <ActivityIndicator color="#93e4ff" size="large" />
-          <Text style={styles.loadingTitle}>Preparando Signo Vino</Text>
-          <Text style={styles.loadingText}>
-            {errorMessage || "Cargando la misma experiencia del lector web, totalmente offline."}
-          </Text>
-          {errorMessage ? (
-            <Pressable onPress={() => setReloadKey((value) => value + 1)} style={styles.retryButton}>
-              <Text style={styles.retryText}>Reintentar</Text>
-            </Pressable>
-          ) : null}
+
+      <View style={styles.header}>
+        <Text style={styles.title}>Signo Vino</Text>
+        <Pressable onPress={() => setJumpModalVisible(true)} style={styles.pageBadge}>
+          <Text style={styles.pageBadgeText}>{currentPage} / {TOTAL_PAGES}</Text>
+        </Pressable>
+      </View>
+
+      <FlatList
+        ref={listRef}
+        data={PAGE_ENTRIES}
+        getItemLayout={(_, index) => ({
+          index,
+          length: pageWidth,
+          offset: pageWidth * index,
+        })}
+        horizontal
+        initialNumToRender={1}
+        initialScrollIndex={0}
+        keyExtractor={(item) => String(item.pageNumber)}
+        maxToRenderPerBatch={2}
+        onMomentumScrollEnd={handleMomentumEnd}
+        pagingEnabled
+        removeClippedSubviews
+        renderItem={renderPage}
+        showsHorizontalScrollIndicator={false}
+        style={styles.reader}
+        windowSize={3}
+      />
+
+      <View style={styles.footer}>
+        <Pressable
+          disabled={currentPage <= 1}
+          onPress={() => goToPage(currentPage - 1)}
+          style={[styles.navButton, currentPage <= 1 && styles.navButtonDisabled]}
+        >
+          <Text style={styles.navButtonText}>Anterior</Text>
+        </Pressable>
+
+        <Text style={styles.footerLabel}>Página {currentEntry?.pageNumber || currentPage}</Text>
+
+        <Pressable
+          disabled={currentPage >= TOTAL_PAGES}
+          onPress={() => goToPage(currentPage + 1)}
+          style={[styles.navButton, currentPage >= TOTAL_PAGES && styles.navButtonDisabled]}
+        >
+          <Text style={styles.navButtonText}>Siguiente</Text>
+        </Pressable>
+      </View>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setJumpModalVisible(false)}
+        transparent
+        visible={jumpModalVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Ir a página</Text>
+            <Text style={styles.modalText}>Escribe un número entre 1 y {TOTAL_PAGES}.</Text>
+            <TextInput
+              autoFocus
+              inputMode="numeric"
+              keyboardType="number-pad"
+              onChangeText={(value) => setJumpDraft(value.replace(/[^0-9]/g, "").slice(0, 3))}
+              onSubmitEditing={handleJumpSubmit}
+              placeholder="Número de página"
+              placeholderTextColor="#6f7b94"
+              style={styles.input}
+              value={jumpDraft}
+            />
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setJumpModalVisible(false)} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Cancelar</Text>
+              </Pressable>
+              <Pressable onPress={handleJumpSubmit} style={styles.primaryButton}>
+                <Text style={styles.primaryButtonText}>Ir</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
-      )}
-    </View>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: "#030508",
   },
-  webview: {
-    flex: 1,
-    backgroundColor: "#000",
+  header: {
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-  loadingShell: {
+  title: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  pageBadge: {
+    backgroundColor: "#173463",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  pageBadgeText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  reader: {
     flex: 1,
+  },
+  pageShell: {
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 28,
-    backgroundColor: "#060910",
+    backgroundColor: "#000000",
+  },
+  pageImage: {
+    backgroundColor: "#000000",
+  },
+  footer: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  footerLabel: {
+    color: "#dbe4f7",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  navButton: {
+    minWidth: 112,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "#173463",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  navButtonDisabled: {
+    opacity: 0.35,
+  },
+  navButtonText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 22,
+    backgroundColor: "#111827",
+    padding: 20,
     gap: 14,
   },
-  loadingTitle: {
+  modalTitle: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "700",
+  },
+  modalText: {
+    color: "#dbe4f7",
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  input: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#243552",
+    backgroundColor: "#0a1120",
     color: "#ffffff",
     fontSize: 24,
     fontWeight: "700",
-    textAlign: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  loadingText: {
-    color: "#d8dff0",
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: "center",
-    maxWidth: 420,
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
   },
-  retryButton: {
-    marginTop: 8,
-    borderRadius: 999,
-    paddingHorizontal: 20,
+  secondaryButton: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#173463",
+    backgroundColor: "#1c2433",
   },
-  retryText: {
+  secondaryButtonText: {
     color: "#ffffff",
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  primaryButton: {
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    backgroundColor: "#1d4ed8",
+  },
+  primaryButtonText: {
+    color: "#ffffff",
+    fontSize: 15,
     fontWeight: "700",
   },
 });

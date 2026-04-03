@@ -10,7 +10,6 @@ test("package main points at the native app entrypoint", () => {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
-  assert.equal(packageJson.dependencies["react-native-webview"], "^13.15.0");
   assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
 
@@ -22,35 +21,26 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("native shell loads the bundled offline web reader as the source of truth", () => {
+test("native shell boots as a simple offline image reader", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
   const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
   const assetsSource = fs.readFileSync(assetsPath, "utf8");
 
-  assert.match(source, /react-native-webview/);
-  assert.match(source, /react-native-blob-util/);
   assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
-  assert.match(source, /OFFLINE_WEB_BUNDLE_VERSION/);
-  assert.match(source, /OFFLINE_BUNDLE_BATCH_SIZE = 12/);
   assert.match(source, /PAGE_ASSET_PREFIX = "pages\/"/);
-  assert.match(source, /signovivo-offline-web/);
-  assert.match(source, /ReactNativeBlobUtil\.fs\.cp/);
-  assert.match(source, /asset\.downloadAsync\(\)/);
-  assert.match(source, /coreBundleEntries\.slice\(start, start \+ OFFLINE_BUNDLE_BATCH_SIZE\)/);
-  assert.match(source, /window\.OFFLINE_PAGES = /);
-  assert.match(source, /pageBundleEntries\.map/);
-  assert.match(source, /file:\/\/\$\{OFFLINE_BUNDLE_DIR\}\/index\.html/);
-  assert.match(source, /injectedJavaScriptBeforeContentLoaded/);
-  assert.match(source, /Asset\.fromModule/);
-  assert.doesNotMatch(source, /Asset\.loadAsync\(bundleEntries\.map/);
-  assert.match(source, /available: false/);
+  assert.match(source, /FlatList/);
+  assert.match(source, /Image/);
+  assert.match(source, /keyboardType="number-pad"/);
+  assert.match(source, /PAGE_ENTRIES/);
+  assert.match(source, /renderItem=\{renderPage\}/);
+  assert.match(source, /source=\{item\.moduleId\}/);
+  assert.match(source, /scrollToIndex/);
+  assert.doesNotMatch(source, /react-native-webview/);
+  assert.doesNotMatch(source, /react-native-blob-util/);
   assert.match(assetsSource, /offline-web\/index\.html/);
   assert.match(assetsSource, /pages\/page-001\.jpg/);
-  assert.match(source, /<WebView/);
-  assert.match(source, /__signoVivoReceiveNativeEvent/);
   assert.doesNotMatch(source, /nearbyDirectorSync/);
-  assert.doesNotMatch(source, /react-native-pdf/);
 });
 
 test("offline web bundle version matches the app build number so updates refresh cached files", () => {
