@@ -1,17 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import {
-  FlatList,
-  Image,
-  Modal,
-  Pressable,
-  SafeAreaView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { Image, Modal, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
 
 const PAGE_ASSET_PREFIX = "pages/";
@@ -33,7 +21,6 @@ const clampPage = (value: number) => Math.max(1, Math.min(TOTAL_PAGES, value));
 
 export default function App() {
   const { width, height } = useWindowDimensions();
-  const listRef = useRef<FlatList<(typeof PAGE_ENTRIES)[number]>>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [jumpModalVisible, setJumpModalVisible] = useState(false);
   const [jumpDraft, setJumpDraft] = useState("");
@@ -43,47 +30,17 @@ export default function App() {
 
   const currentEntry = useMemo(() => PAGE_ENTRIES[currentPage - 1] || PAGE_ENTRIES[0], [currentPage]);
 
-  const goToPage = useCallback(
-    (pageNumber: number, animated = true) => {
-      const nextPage = clampPage(pageNumber);
-      setCurrentPage(nextPage);
-      listRef.current?.scrollToIndex({
-        index: nextPage - 1,
-        animated,
-      });
-    },
-    [],
-  );
-
-  const handleMomentumEnd = useCallback(
-    (event: { nativeEvent: { contentOffset: { x: number } } }) => {
-      const nextIndex = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
-      setCurrentPage(clampPage(nextIndex + 1));
-    },
-    [pageWidth],
-  );
+  const goToPage = useCallback((pageNumber: number) => {
+    setCurrentPage(clampPage(pageNumber));
+  }, []);
 
   const handleJumpSubmit = useCallback(() => {
     const parsed = Number.parseInt(jumpDraft, 10);
     const nextPage = Number.isFinite(parsed) ? clampPage(parsed) : currentPage;
     setJumpModalVisible(false);
     setJumpDraft("");
-    requestAnimationFrame(() => goToPage(nextPage));
+    goToPage(nextPage);
   }, [currentPage, goToPage, jumpDraft]);
-
-  const renderPage = useCallback(
-    ({ item }: { item: (typeof PAGE_ENTRIES)[number] }) => (
-      <View style={[styles.pageShell, { width: pageWidth, height: pageHeight }]}>
-        <Image
-          fadeDuration={0}
-          resizeMode="contain"
-          source={item.moduleId}
-          style={[styles.pageImage, { width: pageWidth, height: pageHeight }]}
-        />
-      </View>
-    ),
-    [pageHeight, pageWidth],
-  );
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -96,27 +53,15 @@ export default function App() {
         </Pressable>
       </View>
 
-      <FlatList
-        ref={listRef}
-        data={PAGE_ENTRIES}
-        getItemLayout={(_, index) => ({
-          index,
-          length: pageWidth,
-          offset: pageWidth * index,
-        })}
-        horizontal
-        initialNumToRender={1}
-        initialScrollIndex={0}
-        keyExtractor={(item) => String(item.pageNumber)}
-        maxToRenderPerBatch={2}
-        onMomentumScrollEnd={handleMomentumEnd}
-        pagingEnabled
-        removeClippedSubviews
-        renderItem={renderPage}
-        showsHorizontalScrollIndicator={false}
-        style={styles.reader}
-        windowSize={3}
-      />
+      <View style={[styles.pageShell, { width: pageWidth, height: pageHeight }]}>
+        <Image
+          fadeDuration={0}
+          key={currentPage}
+          resizeMode="contain"
+          source={currentEntry.moduleId}
+          style={[styles.pageImage, { width: pageWidth, height: pageHeight }]}
+        />
+      </View>
 
       <View style={styles.footer}>
         <Pressable

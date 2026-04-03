@@ -21,7 +21,7 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("native shell boots as a simple offline image reader", () => {
+test("native shell boots as a single-page offline image reader", () => {
   const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
   const source = fs.readFileSync(appPath, "utf8");
   const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
@@ -29,13 +29,13 @@ test("native shell boots as a simple offline image reader", () => {
 
   assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
   assert.match(source, /PAGE_ASSET_PREFIX = "pages\/"/);
-  assert.match(source, /FlatList/);
   assert.match(source, /Image/);
   assert.match(source, /keyboardType="number-pad"/);
   assert.match(source, /PAGE_ENTRIES/);
-  assert.match(source, /renderItem=\{renderPage\}/);
-  assert.match(source, /source=\{item\.moduleId\}/);
-  assert.match(source, /scrollToIndex/);
+  assert.match(source, /source=\{currentEntry\.moduleId\}/);
+  assert.match(source, /key=\{currentPage\}/);
+  assert.doesNotMatch(source, /FlatList/);
+  assert.doesNotMatch(source, /scrollToIndex/);
   assert.doesNotMatch(source, /react-native-webview/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.match(assetsSource, /offline-web\/index\.html/);

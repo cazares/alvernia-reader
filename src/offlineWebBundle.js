@@ -1,4 +1,4 @@
-const OFFLINE_WEB_BUNDLE_VERSION = "138";
+const OFFLINE_WEB_BUNDLE_VERSION = "139";
 
 const OFFLINE_WEB_BUNDLE_ASSETS = {
   "app.js": require("../assets/offline-web/app.js"),
