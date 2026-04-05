@@ -1,13 +1,74 @@
 import { Asset } from "expo-asset";
+import {
+  cacheDirectory,
+  copyAsync,
+  deleteAsync,
+  documentDirectory,
+  getInfoAsync,
+  makeDirectoryAsync,
+} from "expo-file-system/legacy";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 
-const OFFLINE_READER_MODULE = require("./assets/offline-web/index.html");
+import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
+
+const OFFLINE_READER_ENTRY = "index.html";
+const OFFLINE_BUNDLE_PARENT = "signovivo-offline";
 
 const getReadableError = (error: unknown) => {
   if (error instanceof Error && error.message) return error.message;
   return "No se pudo preparar Signo Vino offline.";
+};
+
+const ensureParentDirectory = async (fileUri: string) => {
+  const directoryUri = fileUri.replace(/[^/]+$/, "");
+  await makeDirectoryAsync(directoryUri, { intermediates: true });
+};
+
+const getBundleRootUri = () => {
+  const baseDirectory = documentDirectory || cacheDirectory;
+  if (!baseDirectory) {
+    throw new Error("No encontramos almacenamiento local para el modo offline.");
+  }
+
+  return `${baseDirectory}${OFFLINE_BUNDLE_PARENT}/${OFFLINE_WEB_BUNDLE_VERSION}/`;
+};
+
+const stageOfflineBundle = async () => {
+  const bundleRootUri = getBundleRootUri();
+  const entryUri = `${bundleRootUri}${OFFLINE_READER_ENTRY}`;
+  const existingEntry = await getInfoAsync(entryUri);
+  if (existingEntry.exists) return entryUri;
+
+  await deleteAsync(bundleRootUri, { idempotent: true }).catch(() => {});
+  await makeDirectoryAsync(bundleRootUri, { intermediates: true });
+
+  const entries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS);
+  const batchSize = 12;
+
+  for (let index = 0; index < entries.length; index += batchSize) {
+    const batch = entries.slice(index, index + batchSize);
+    await Promise.all(
+      batch.map(async ([relativePath, moduleId]) => {
+        const asset = Asset.fromModule(moduleId);
+        await asset.downloadAsync();
+        const sourceUri = asset.localUri || asset.uri;
+        if (!sourceUri) {
+          throw new Error(`No pudimos preparar el archivo offline: ${relativePath}`);
+        }
+
+        const destinationUri = `${bundleRootUri}${relativePath}`;
+        await ensureParentDirectory(destinationUri);
+        await copyAsync({
+          from: sourceUri,
+          to: destinationUri,
+        });
+      }),
+    );
+  }
+
+  return entryUri;
 };
 
 export default function App() {
@@ -22,9 +83,7 @@ export default function App() {
       try {
         setErrorMessage("");
         setReaderUri(null);
-        const asset = Asset.fromModule(OFFLINE_READER_MODULE);
-        await asset.downloadAsync();
-        const nextUri = asset.localUri || asset.uri;
+        const nextUri = await stageOfflineBundle();
         if (!nextUri) {
           throw new Error("No encontramos el lector web offline.");
         }
@@ -73,7 +132,7 @@ export default function App() {
           <ActivityIndicator color="#93e4ff" size="large" />
           <Text style={styles.loadingTitle}>Preparando Signo Vino</Text>
           <Text style={styles.loadingText}>
-            {errorMessage || "Cargando la misma experiencia de signovivo.com, totalmente offline."}
+            {errorMessage || "Copiando la experiencia completa de signovivo.com para que funcione 100% offline."}
           </Text>
           {errorMessage ? (
             <Pressable onPress={() => setReloadKey((value) => value + 1)} style={styles.retryButton}>

@@ -33,6 +33,7 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
   assert.equal(dependencyNames.includes("expo"), true);
   assert.equal(dependencyNames.includes("tonal"), true);
   assert.equal(dependencyNames.includes("expo-asset"), true);
+  assert.equal(dependencyNames.includes("expo-file-system"), true);
   assert.equal(dependencyNames.includes("expo-haptics"), true);
   assert.equal(dependencyNames.includes("react-native-webview"), true);
 
@@ -41,7 +42,6 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
     "busboy",
     "expo-application",
     "expo-constants",
-    "expo-file-system",
     "expo-media-library",
     "expo-notifications",
     "expo-secure-store",

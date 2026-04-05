@@ -11,6 +11,7 @@ test("package main points at the native app entrypoint", () => {
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
   assert.equal(packageJson.dependencies["react-native-webview"], "13.15.0");
+  assert.match(packageJson.dependencies["expo-file-system"], /^~?\^?\d/);
   assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
 
@@ -27,8 +28,10 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /react-native-webview/);
-  assert.match(source, /Asset\.fromModule/);
-  assert.match(source, /assets\/offline-web\/index\.html/);
+  assert.match(source, /expo-file-system/);
+  assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
+  assert.match(source, /stageOfflineBundle/);
+  assert.match(source, /copyAsync/);
   assert.match(source, /<WebView/);
   assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
   assert.doesNotMatch(source, /react-native-blob-util/);
