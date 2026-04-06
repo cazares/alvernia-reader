@@ -35,9 +35,13 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.match(source, /window\.OFFLINE_PAGES/);
   assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
   assert.match(source, /source=\{\{ uri: readerUri/);
+  assert.match(source, /onMessage=\{handleWebMessage\}/);
+  assert.match(source, /onLoadEnd=\{sendBridgeState\}/);
+  assert.match(source, /nearbyDirectorSync/);
+  assert.match(source, /sync-start-director/);
+  assert.match(source, /sync-start-follower/);
   assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
   assert.doesNotMatch(source, /react-native-blob-util/);
-  assert.doesNotMatch(source, /nearbyDirectorSync/);
   assert.doesNotMatch(source, /copyAsync/);
   assert.doesNotMatch(source, /documentDirectory/);
 });
@@ -104,13 +108,13 @@ test("reader renders exactly one visible page surface at a time", () => {
   assert.match(styles, /#page-image \{[\s\S]*object-fit: contain;/);
 });
 
-test("iOS app disables non-exempt encryption and removes local-network sync permissions", () => {
+test("iOS app keeps exempt-encryption declaration and nearby sync permissions", () => {
   const plistPath = path.join(APP_ROOT, "ios", "SignoVivo", "Info.plist");
   const plistSource = fs.readFileSync(plistPath, "utf8");
 
   assert.match(plistSource, /ITSAppUsesNonExemptEncryption/);
-  assert.doesNotMatch(plistSource, /NSLocalNetworkUsageDescription/);
-  assert.doesNotMatch(plistSource, /NSBonjourServices/);
+  assert.match(plistSource, /NSLocalNetworkUsageDescription/);
+  assert.match(plistSource, /NSBonjourServices/);
 });
 
 test("metro bundles the offline html and bundle assets", () => {
@@ -121,12 +125,12 @@ test("metro bundles the offline html and bundle assets", () => {
   assert.match(source, /assetExts\.push\("bundle"\)/);
 });
 
-test("nearby director sync source is absent from the shipped app", () => {
+test("nearby director sync source is present in the shipped app", () => {
   const syncClientPath = path.join(APP_ROOT, "src", "nearbyDirectorSync.js");
   const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
   const bridgePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModuleBridge.m");
 
-  assert.equal(fs.existsSync(syncClientPath), false);
-  assert.equal(fs.existsSync(swiftModulePath), false);
-  assert.equal(fs.existsSync(bridgePath), false);
+  assert.equal(fs.existsSync(syncClientPath), true);
+  assert.equal(fs.existsSync(swiftModulePath), true);
+  assert.equal(fs.existsSync(bridgePath), true);
 });

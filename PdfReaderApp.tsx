@@ -1,15 +1,26 @@
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
-import { WebView } from "react-native-webview";
+import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
+import {
+  addNearbyDirectorSyncListener,
+  isNearbyDirectorSyncAvailable,
+  sendNearbyDirectorPageUpdate,
+  startNearbyDirector,
+  startNearbyFollower,
+  stopNearbyDirectorSync,
+} from "./src/nearbyDirectorSync";
 import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
 
+const BRIDGE_CHANNEL = "signovivo-native";
 const OFFLINE_READER_ENTRY = "index.html";
 const OFFLINE_READER_SCRIPT = "app.bundle";
 const OFFLINE_PAGE_ASSET_PATTERN = /^pages\/page-(\d+)\.jpg$/;
 const OFFLINE_READER_HTML_CACHE = `${FileSystem.cacheDirectory}signovivo-offline-reader.html`;
+
+type SyncRole = "off" | "director" | "follower";
 
 const getReadableError = (error: unknown) => {
   if (error instanceof Error && error.message) return error.message;
@@ -95,6 +106,25 @@ export default function App() {
   const [readerUri, setReaderUri] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const webViewRef = useRef<WebView>(null);
+  const syncRoleRef = useRef<SyncRole>("off");
+  const currentPageRef = useRef(2);
+  const totalPagesRef = useRef(0);
+  const syncAvailable = isNearbyDirectorSyncAvailable();
+
+  const injectNativeEvent = useCallback((payload: Record<string, unknown>) => {
+    webViewRef.current?.injectJavaScript(
+      `window.__signoVivoReceiveNativeEvent && window.__signoVivoReceiveNativeEvent(${JSON.stringify(payload)}); true;`,
+    );
+  }, []);
+
+  const sendBridgeState = useCallback(() => {
+    injectNativeEvent({
+      type: "bridge-state",
+      available: syncAvailable,
+      role: syncRoleRef.current,
+    });
+  }, [injectNativeEvent, syncAvailable]);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,16 +153,110 @@ export default function App() {
     };
   }, [reloadKey]);
 
+  useEffect(() => {
+    if (!syncAvailable) return undefined;
+
+    const subscription = addNearbyDirectorSyncListener((event) => {
+      if (event.type === "state") {
+        if (event.status === "idle") {
+          syncRoleRef.current = "off";
+        } else if (event.role === "director" || event.role === "follower") {
+          syncRoleRef.current = event.role;
+        }
+      } else if (event.type === "error" && event.code === "DIRECTOR_CONFLICT") {
+        syncRoleRef.current = "off";
+      }
+
+      injectNativeEvent({
+        type: "sync-event",
+        event,
+      });
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [injectNativeEvent, syncAvailable]);
+
+  useEffect(() => () => {
+    if (!syncAvailable) return;
+    stopNearbyDirectorSync().catch(() => {});
+  }, [syncAvailable]);
+
+  const readAccessUrl = useMemo(() => {
+    if (!readerUri?.startsWith("file://")) return undefined;
+    return readerUri.replace(/[^/]+$/, "");
+  }, [readerUri]);
+
+  const handleWebMessage = useCallback(async (event: WebViewMessageEvent) => {
+    let payload: Record<string, unknown> | null = null;
+    try {
+      payload = JSON.parse(event.nativeEvent.data);
+    } catch {
+      return;
+    }
+
+    if (!payload || payload.channel !== BRIDGE_CHANNEL) return;
+
+    try {
+      switch (payload.type) {
+        case "bridge-ready":
+          if (typeof payload.page === "number") currentPageRef.current = payload.page;
+          if (typeof payload.totalPages === "number") totalPagesRef.current = payload.totalPages;
+          sendBridgeState();
+          break;
+        case "page-changed":
+          if (typeof payload.page === "number") currentPageRef.current = payload.page;
+          if (typeof payload.totalPages === "number") totalPagesRef.current = payload.totalPages;
+          if (syncRoleRef.current === "director") {
+            await sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current);
+          }
+          break;
+        case "sync-start-director":
+          await startNearbyDirector(String(payload.sessionCode || ""));
+          syncRoleRef.current = "director";
+          sendBridgeState();
+          break;
+        case "sync-start-follower":
+          await startNearbyFollower(String(payload.sessionCode || ""));
+          syncRoleRef.current = "follower";
+          sendBridgeState();
+          break;
+        case "sync-stop":
+          await stopNearbyDirectorSync();
+          syncRoleRef.current = "off";
+          sendBridgeState();
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      injectNativeEvent({
+        type: "sync-event",
+        event: {
+          type: "error",
+          code: "WEBVIEW_BRIDGE_FAILED",
+          message: getReadableError(error),
+          role: syncRoleRef.current,
+        },
+      });
+    }
+  }, [injectNativeEvent, sendBridgeState]);
+
   return (
     <View style={styles.screen}>
       <StatusBar hidden barStyle="light-content" />
       {readerUri ? (
         <WebView
+          ref={webViewRef}
+          allowingReadAccessToURL={readAccessUrl}
           allowsBackForwardNavigationGestures={false}
           allowsInlineMediaPlayback
           bounces={false}
           domStorageEnabled
           injectedJavaScriptBeforeContentLoaded={"window.__SIGNO_VINO_NATIVE_FILE_MODE = true; true;"}
+          onLoadEnd={sendBridgeState}
+          onMessage={handleWebMessage}
           originWhitelist={["*"]}
           setSupportMultipleWindows={false}
           source={{ uri: readerUri }}
