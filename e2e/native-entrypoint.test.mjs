@@ -34,7 +34,7 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.match(source, /<WebView/);
   assert.match(source, /window\.OFFLINE_PAGES/);
   assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
-  assert.match(source, /source=\{\{ html: readerHtml/);
+  assert.match(source, /source=\{\{ uri: readerUri/);
   assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.doesNotMatch(source, /nearbyDirectorSync/);
@@ -113,11 +113,12 @@ test("iOS app disables non-exempt encryption and removes local-network sync perm
   assert.doesNotMatch(plistSource, /NSBonjourServices/);
 });
 
-test("metro bundles the offline html asset", () => {
+test("metro bundles the offline html and bundle assets", () => {
   const metroConfigPath = path.join(APP_ROOT, "metro.config.js");
   const source = fs.readFileSync(metroConfigPath, "utf8");
 
   assert.match(source, /assetExts\.push\("html"\)/);
+  assert.match(source, /assetExts\.push\("bundle"\)/);
 });
 
 test("nearby director sync source is absent from the shipped app", () => {

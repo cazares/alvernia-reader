@@ -119,11 +119,19 @@ fs.rmSync(nativeBundleDir, { recursive: true, force: true });
 copyDir(distDir, nativeBundleDir);
 
 const nativeIndexPath = path.join(nativeBundleDir, "index.html");
+const nativeCssPath = path.join(nativeBundleDir, "styles.css");
 let nativeHtml = fs.readFileSync(nativeIndexPath, "utf8");
+const nativeCss = fs.readFileSync(nativeCssPath, "utf8");
 nativeHtml = nativeHtml
   .replaceAll('href="/', 'href="')
-  .replaceAll('src="/', 'src="');
+  .replaceAll('src="/', 'src="')
+  .replace('<link rel="stylesheet" href="styles.css" />', `<style>\n${nativeCss}\n</style>`);
 fs.writeFileSync(nativeIndexPath, nativeHtml);
+fs.unlinkSync(nativeCssPath);
+
+// Rename app.js → app.bundle so Metro treats it as a binary asset, not a JS module.
+// If Metro evaluates app.js as a module it crashes immediately (document is undefined in RN).
+fs.renameSync(path.join(nativeBundleDir, "app.js"), path.join(nativeBundleDir, "app.bundle"));
 console.log(`Wrote ${nativeIndexPath}`);
 
 const bundleFiles = [];

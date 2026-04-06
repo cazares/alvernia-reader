@@ -7,9 +7,9 @@ import { WebView } from "react-native-webview";
 import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
 
 const OFFLINE_READER_ENTRY = "index.html";
-const OFFLINE_READER_STYLES = "styles.css";
-const OFFLINE_READER_SCRIPT = "app.js";
+const OFFLINE_READER_SCRIPT = "app.bundle";
 const OFFLINE_PAGE_ASSET_PATTERN = /^pages\/page-(\d+)\.jpg$/;
+const OFFLINE_READER_HTML_CACHE = `${FileSystem.cacheDirectory}signovivo-offline-reader.html`;
 
 const getReadableError = (error: unknown) => {
   if (error instanceof Error && error.message) return error.message;
@@ -37,31 +37,31 @@ const readBundledTextAsset = async (relativePath: string) => {
   return FileSystem.readAsStringAsync(assetUri);
 };
 
-const buildOfflinePageMap = () => {
+const buildOfflinePageMap = async () => {
   const offlinePages: Record<number, string> = {};
 
-  for (const [relativePath, moduleId] of Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)) {
-    const match = relativePath.match(OFFLINE_PAGE_ASSET_PATTERN);
-    if (!match) continue;
-    const pageNumber = Number.parseInt(match[1], 10);
-    const asset = Asset.fromModule(moduleId);
-    const assetUri = asset.localUri || asset.uri;
-    if (assetUri) {
-      offlinePages[pageNumber] = assetUri;
-    }
-  }
+  const downloads = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
+    .filter(([relativePath]) => OFFLINE_PAGE_ASSET_PATTERN.test(relativePath))
+    .map(async ([relativePath, moduleId]) => {
+      const pageNumber = Number.parseInt(relativePath.match(OFFLINE_PAGE_ASSET_PATTERN)![1], 10);
+      const asset = Asset.fromModule(moduleId);
+      await asset.downloadAsync();
+      if (asset.localUri) {
+        offlinePages[pageNumber] = asset.localUri;
+      }
+    });
 
+  await Promise.all(downloads);
   return offlinePages;
 };
 
 const buildOfflineReaderHtml = async () => {
-  const [indexHtml, stylesCss, appJs] = await Promise.all([
+  const [indexHtml, appJs, offlinePages] = await Promise.all([
     readBundledTextAsset(OFFLINE_READER_ENTRY),
-    readBundledTextAsset(OFFLINE_READER_STYLES),
     readBundledTextAsset(OFFLINE_READER_SCRIPT),
+    buildOfflinePageMap(),
   ]);
 
-  const offlinePages = buildOfflinePageMap();
   const nativeBootstrap = [
     `window.__SIGNO_VINO_NATIVE_FILE_MODE = true;`,
     `window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION = ${JSON.stringify(OFFLINE_WEB_BUNDLE_VERSION)};`,
@@ -73,16 +73,12 @@ const buildOfflineReaderHtml = async () => {
     .replace(/\s*<link rel="icon"[^>]*>\n?/, "\n")
     .replace(/\s*<link rel="apple-touch-icon"[^>]*>\n?/, "\n")
     .replace(
-      '<link rel="stylesheet" href="styles.css" />',
-      `<style>\n${stylesCss}\n</style>`,
-    )
-    .replace(
       '<script defer src="app.js"></script>',
       `<script>\n${nativeBootstrap}\n</script>\n    <script>\n${appJs}\n</script>`,
     );
 };
 
-const resolveOfflineReaderHtml = async () => {
+const resolveOfflineReaderUri = async () => {
   const entryModule = OFFLINE_WEB_BUNDLE_ASSETS[OFFLINE_READER_ENTRY];
   if (!entryModule) {
     throw new Error("No encontramos el lector web offline.");
@@ -90,11 +86,13 @@ const resolveOfflineReaderHtml = async () => {
 
   const asset = Asset.fromModule(entryModule);
   await asset.downloadAsync();
-  return buildOfflineReaderHtml();
+  const html = await buildOfflineReaderHtml();
+  await FileSystem.writeAsStringAsync(OFFLINE_READER_HTML_CACHE, html);
+  return OFFLINE_READER_HTML_CACHE;
 };
 
 export default function App() {
-  const [readerHtml, setReaderHtml] = useState<string | null>(null);
+  const [readerUri, setReaderUri] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -104,13 +102,13 @@ export default function App() {
     const loadReader = async () => {
       try {
         setErrorMessage("");
-        setReaderHtml(null);
-        const nextHtml = await resolveOfflineReaderHtml();
-        if (!nextHtml) {
+        setReaderUri(null);
+        const nextUri = await resolveOfflineReaderUri();
+        if (!nextUri) {
           throw new Error("No encontramos el lector web offline.");
         }
         if (!cancelled) {
-          setReaderHtml(nextHtml);
+          setReaderUri(nextUri);
         }
       } catch (error) {
         if (!cancelled) {
@@ -128,7 +126,7 @@ export default function App() {
   return (
     <View style={styles.screen}>
       <StatusBar hidden barStyle="light-content" />
-      {readerHtml ? (
+      {readerUri ? (
         <WebView
           allowsBackForwardNavigationGestures={false}
           allowsInlineMediaPlayback
@@ -137,7 +135,7 @@ export default function App() {
           injectedJavaScriptBeforeContentLoaded={"window.__SIGNO_VINO_NATIVE_FILE_MODE = true; true;"}
           originWhitelist={["*"]}
           setSupportMultipleWindows={false}
-          source={{ html: readerHtml, baseUrl: "https://signovivo.local/" }}
+          source={{ uri: readerUri }}
           style={styles.webview}
         />
       ) : (
