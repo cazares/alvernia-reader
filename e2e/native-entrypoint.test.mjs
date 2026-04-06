@@ -11,7 +11,6 @@ test("package main points at the native app entrypoint", () => {
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
   assert.equal(packageJson.dependencies["react-native-webview"], "13.15.0");
-  assert.match(packageJson.dependencies["expo-file-system"], /^~?\^?\d/);
   assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
 
@@ -28,10 +27,8 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /react-native-webview/);
-  assert.match(source, /expo-file-system/);
-  assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
-  assert.match(source, /stageOfflineBundle/);
-  assert.match(source, /copyAsync/);
+  assert.match(source, /signo-vino-offline\.html/);
+  assert.match(source, /resolveOfflineReaderUri/);
   assert.match(source, /<WebView/);
   assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
   assert.doesNotMatch(source, /react-native-blob-util/);
@@ -84,6 +81,17 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(webApp, /resolveAppPath/);
   assert.match(webApp, /sync-start-director/);
   assert.match(webApp, /sync-start-follower/);
+});
+
+test("reader renders exactly one visible page surface at a time", () => {
+  const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
+  const styles = fs.readFileSync(path.join(APP_ROOT, "web", "src", "styles.css"), "utf8");
+
+  const pageImageMatches = indexHtml.match(/id="page-image"/g) || [];
+  assert.equal(pageImageMatches.length, 1, "Expected a single page image element");
+  assert.match(styles, /\.viewer-shell \{[\s\S]*overflow: hidden;/);
+  assert.match(styles, /\.viewer-shell \{[\s\S]*contain: layout paint style;/);
+  assert.match(styles, /#page-image \{[\s\S]*object-fit: contain;/);
 });
 
 test("iOS app disables non-exempt encryption and removes local-network sync permissions", () => {

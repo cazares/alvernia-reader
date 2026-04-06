@@ -90,6 +90,8 @@ button:disabled {
   place-items: center;
   user-select: none;
   overflow: hidden;
+  contain: layout paint style;
+  isolation: isolate;
 }
 
 #page-image {
@@ -102,6 +104,7 @@ button:disabled {
   object-position: center center;
   background: #000;
   transition: opacity 160ms ease;
+  overflow: clip;
 }
 
 #page-image.is-loading {
