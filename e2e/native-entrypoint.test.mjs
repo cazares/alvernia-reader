@@ -10,6 +10,7 @@ test("package main points at the native app entrypoint", () => {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
+  assert.equal(packageJson.dependencies["expo-file-system"], "~19.0.21");
   assert.equal(packageJson.dependencies["react-native-webview"], "13.15.0");
   assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
@@ -27,12 +28,18 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /react-native-webview/);
-  assert.match(source, /signo-vino-offline\.html/);
-  assert.match(source, /resolveOfflineReaderUri/);
+  assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
+  assert.match(source, /buildOfflineReaderHtml/);
+  assert.match(source, /readAsStringAsync/);
   assert.match(source, /<WebView/);
+  assert.match(source, /window\.OFFLINE_PAGES/);
   assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
+  assert.match(source, /source=\{\{ html: readerHtml/);
+  assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.doesNotMatch(source, /nearbyDirectorSync/);
+  assert.doesNotMatch(source, /copyAsync/);
+  assert.doesNotMatch(source, /documentDirectory/);
 });
 
 test("offline web bundle version matches the app build number so updates refresh cached files", () => {
@@ -79,6 +86,9 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(webApp, /applyNativeSyncEvent/);
   assert.match(webApp, /NATIVE_FILE_MODE/);
   assert.match(webApp, /resolveAppPath/);
+  assert.match(webApp, /prefetchSongPage/);
+  assert.match(webApp, /img\.src = resolvePageSrc\(pageNumber\)/);
+  assert.match(webApp, /nextPageUrl = resolvePageSrc\(nextPage\)/);
   assert.match(webApp, /sync-start-director/);
   assert.match(webApp, /sync-start-follower/);
 });

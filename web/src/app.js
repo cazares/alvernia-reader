@@ -603,7 +603,7 @@ const prefetchSongPage = (pageNumber) => {
       state.prefetchingPages.delete(pageNumber);
     };
     img.onerror = () => { state.prefetchingPages.delete(pageNumber); };
-    img.src = pageFileName(pageNumber);
+    img.src = resolvePageSrc(pageNumber);
   });
 };
 
@@ -769,7 +769,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
   try {
     let nextPageUrl = "";
     if (pageImageMatches(nextPage) && pageImage.complete && pageImage.naturalWidth > 0) {
-      nextPageUrl = pageFileName(nextPage);
+      nextPageUrl = resolvePageSrc(nextPage);
     } else {
       try {
         nextPageUrl = await loadPageImage(nextPage);
