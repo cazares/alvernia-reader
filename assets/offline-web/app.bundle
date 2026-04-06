@@ -129,7 +129,7 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "be3e6fe";
+const CACHE_VERSION = "134cb71";
 const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
@@ -603,7 +603,7 @@ const prefetchSongPage = (pageNumber) => {
       state.prefetchingPages.delete(pageNumber);
     };
     img.onerror = () => { state.prefetchingPages.delete(pageNumber); };
-    img.src = pageFileName(pageNumber);
+    img.src = resolvePageSrc(pageNumber);
   });
 };
 
@@ -769,7 +769,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
   try {
     let nextPageUrl = "";
     if (pageImageMatches(nextPage) && pageImage.complete && pageImage.naturalWidth > 0) {
-      nextPageUrl = pageFileName(nextPage);
+      nextPageUrl = resolvePageSrc(nextPage);
     } else {
       try {
         nextPageUrl = await loadPageImage(nextPage);

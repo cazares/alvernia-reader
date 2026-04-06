@@ -41,7 +41,6 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
     "busboy",
     "expo-application",
     "expo-constants",
-    "expo-file-system",
     "expo-media-library",
     "expo-notifications",
     "expo-secure-store",

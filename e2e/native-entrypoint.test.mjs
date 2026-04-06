@@ -10,6 +10,7 @@ test("package main points at the native app entrypoint", () => {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
+  assert.equal(packageJson.dependencies["expo-file-system"], "~19.0.21");
   assert.equal(packageJson.dependencies["react-native-webview"], "13.15.0");
   assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
@@ -27,12 +28,18 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   const source = fs.readFileSync(appPath, "utf8");
 
   assert.match(source, /react-native-webview/);
-  assert.match(source, /Asset\.fromModule/);
-  assert.match(source, /assets\/offline-web\/index\.html/);
+  assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
+  assert.match(source, /buildOfflineReaderHtml/);
+  assert.match(source, /readAsStringAsync/);
   assert.match(source, /<WebView/);
+  assert.match(source, /window\.OFFLINE_PAGES/);
   assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
+  assert.match(source, /source=\{\{ uri: readerUri/);
+  assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.doesNotMatch(source, /nearbyDirectorSync/);
+  assert.doesNotMatch(source, /copyAsync/);
+  assert.doesNotMatch(source, /documentDirectory/);
 });
 
 test("offline web bundle version matches the app build number so updates refresh cached files", () => {
@@ -79,8 +86,22 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(webApp, /applyNativeSyncEvent/);
   assert.match(webApp, /NATIVE_FILE_MODE/);
   assert.match(webApp, /resolveAppPath/);
+  assert.match(webApp, /prefetchSongPage/);
+  assert.match(webApp, /img\.src = resolvePageSrc\(pageNumber\)/);
+  assert.match(webApp, /nextPageUrl = resolvePageSrc\(nextPage\)/);
   assert.match(webApp, /sync-start-director/);
   assert.match(webApp, /sync-start-follower/);
+});
+
+test("reader renders exactly one visible page surface at a time", () => {
+  const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
+  const styles = fs.readFileSync(path.join(APP_ROOT, "web", "src", "styles.css"), "utf8");
+
+  const pageImageMatches = indexHtml.match(/id="page-image"/g) || [];
+  assert.equal(pageImageMatches.length, 1, "Expected a single page image element");
+  assert.match(styles, /\.viewer-shell \{[\s\S]*overflow: hidden;/);
+  assert.match(styles, /\.viewer-shell \{[\s\S]*contain: layout paint style;/);
+  assert.match(styles, /#page-image \{[\s\S]*object-fit: contain;/);
 });
 
 test("iOS app disables non-exempt encryption and removes local-network sync permissions", () => {
@@ -92,11 +113,12 @@ test("iOS app disables non-exempt encryption and removes local-network sync perm
   assert.doesNotMatch(plistSource, /NSBonjourServices/);
 });
 
-test("metro bundles the offline html asset", () => {
+test("metro bundles the offline html and bundle assets", () => {
   const metroConfigPath = path.join(APP_ROOT, "metro.config.js");
   const source = fs.readFileSync(metroConfigPath, "utf8");
 
   assert.match(source, /assetExts\.push\("html"\)/);
+  assert.match(source, /assetExts\.push\("bundle"\)/);
 });
 
 test("nearby director sync source is absent from the shipped app", () => {

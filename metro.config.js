@@ -6,6 +6,7 @@ const config = getDefaultConfig(__dirname);
 config.resolver.useWatchman = false;
 config.resolver.unstable_enableSymlinks = true;
 config.resolver.assetExts.push("html");
+config.resolver.assetExts.push("bundle");
 
 const nodeModulesPath = path.join(__dirname, 'node_modules');
 try {
