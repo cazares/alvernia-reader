@@ -72,6 +72,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.currentRole = "follower"
       self.currentSessionCode = normalizedSessionCode
       self.configureTransport()
+      self.startAdvertising()
       self.startBrowsing()
       self.emitState(status: "searching")
       resolve([
@@ -147,12 +148,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private func startAdvertising() {
-    guard currentRole == "director", let peerID = localPeerID else { return }
-    let discoveryInfo = [
+    guard (currentRole == "director" || currentRole == "follower"), let peerID = localPeerID else { return }
+    var discoveryInfo: [String: String] = [
       "session": currentSessionCode,
-      "role": "director",
-      "token": currentDirectorToken,
+      "role": currentRole,
     ]
+    if currentRole == "director" {
+      discoveryInfo["token"] = currentDirectorToken
+    }
     let advertiser = MCNearbyServiceAdvertiser(peer: peerID, discoveryInfo: discoveryInfo, serviceType: Self.serviceType)
     advertiser.delegate = self
     advertiser.startAdvertisingPeer()
@@ -286,7 +289,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     invitationHandler: @escaping (Bool, MCSession?) -> Void
   ) {
     DispatchQueue.main.async {
-      guard self.currentRole == "director", let session = self.mcSession else {
+      guard (self.currentRole == "director" || self.currentRole == "follower"),
+            let session = self.mcSession else {
         invitationHandler(false, nil)
         return
       }
@@ -312,14 +316,22 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   ) {
     DispatchQueue.main.async {
       guard let sessionCode = info?["session"], sessionCode == self.currentSessionCode else { return }
-      guard info?["role"] == "director" else { return }
-      let token = info?["token"] ?? peerID.displayName
-      self.discoveredDirectors[peerID] = token
+      let role = info?["role"] ?? ""
 
-      if self.currentRole == "director" {
-        self.handleDirectorConflict(with: token)
-      } else {
-        self.reconsiderFollowerTarget()
+      if role == "director" {
+        let token = info?["token"] ?? peerID.displayName
+        self.discoveredDirectors[peerID] = token
+        if self.currentRole == "director" {
+          self.handleDirectorConflict(with: token)
+        } else if self.currentRole == "follower" {
+          self.reconsiderFollowerTarget()
+        }
+      } else if role == "follower", self.currentRole == "director" {
+        // Director found a follower advertising — invite them directly so
+        // connection works even if the follower's browser can't find us.
+        guard let session = self.mcSession,
+              !session.connectedPeers.contains(peerID) else { return }
+        self.browser?.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
       }
     }
   }
