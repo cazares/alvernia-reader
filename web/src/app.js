@@ -2414,6 +2414,11 @@ const bindReaderEvents = () => {
       state.touchStart = null;
       return;
     }
+    // When the viewport is zoomed in, let native pan/zoom handle the touch
+    if ((window.visualViewport?.scale ?? 1) > 1.05) {
+      state.touchStart = null;
+      return;
+    }
     const touch = event.touches[0];
     state.touchStart = { x: touch.clientX, y: touch.clientY, time: Date.now() };
   }, { passive: true });

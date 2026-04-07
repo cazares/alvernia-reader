@@ -125,6 +125,8 @@ test("iOS app keeps exempt-encryption declaration and nearby sync permissions", 
   assert.match(plistSource, /ITSAppUsesNonExemptEncryption/);
   assert.match(plistSource, /NSLocalNetworkUsageDescription/);
   assert.match(plistSource, /NSBonjourServices/);
+  assert.match(plistSource, /_signovivo\._tcp/);
+  assert.match(plistSource, /_signovivo\._udp/);
 });
 
 test("metro bundles the offline html and bundle assets", () => {
@@ -139,8 +141,11 @@ test("nearby director sync source is present in the shipped app", () => {
   const syncClientPath = path.join(APP_ROOT, "src", "nearbyDirectorSync.js");
   const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
   const bridgePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModuleBridge.m");
+  const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
 
   assert.equal(fs.existsSync(syncClientPath), true);
   assert.equal(fs.existsSync(swiftModulePath), true);
   assert.equal(fs.existsSync(bridgePath), true);
+  assert.match(swiftSource, /encryptionPreference: \.none/);
+  assert.match(swiftSource, /didReceiveCertificate/);
 });
