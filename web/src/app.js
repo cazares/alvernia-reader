@@ -104,6 +104,8 @@ const state = {
   nativeSyncStatus: "",
   nativeSyncError: "",
   nativeSyncSessionCode: "CORO",
+  nativeSyncAutoStartRequested: false,
+  nativeSyncAutoStartSuppressed: false,
 };
 
 let cachedSongKeys = null;
@@ -692,11 +694,25 @@ const unlockNativeSyncPanel = () => {
   haptic(12);
 };
 
+const requestAutoFollowerMode = () => {
+  if (!state.nativeSyncAvailable || state.nativeSyncRole !== "off") return;
+  if (state.nativeSyncAutoStartRequested || state.nativeSyncAutoStartSuppressed) return;
+  if (!postNativeBridge({ type: "sync-start-follower", sessionCode: state.nativeSyncSessionCode })) return;
+
+  state.nativeSyncAutoStartRequested = true;
+  state.nativeSyncError = "";
+  state.nativeSyncStatus = `Buscando director en ${state.nativeSyncSessionCode}...`;
+  renderNativeSyncPanel();
+};
+
 const applyNativeSyncEvent = (payload) => {
   if (!payload || typeof payload !== "object") return;
 
   if (payload.type === "bridge-state") {
     state.nativeSyncAvailable = Boolean(payload.available);
+    if (state.nativeSyncAvailable) {
+      requestAutoFollowerMode();
+    }
     if (!state.nativeSyncAvailable && state.nativeSyncRole === "off") {
       state.nativeSyncStatus = "";
     }
@@ -725,8 +741,10 @@ const applyNativeSyncEvent = (payload) => {
     state.nativeSyncError = "";
     if (event.status === "idle") {
       state.nativeSyncRole = "off";
+      state.nativeSyncAutoStartRequested = false;
     } else if (event.role === "director" || event.role === "follower") {
       state.nativeSyncRole = event.role;
+      state.nativeSyncAutoStartRequested = false;
     }
     state.nativeSyncStatus = event.message || describeNativeSyncState();
     renderNativeSyncPanel();
@@ -737,6 +755,7 @@ const applyNativeSyncEvent = (payload) => {
     state.nativeSyncError = event.message || "La sincronización offline falló.";
     if (event.role === "off" || event.code === "DIRECTOR_CONFLICT") {
       state.nativeSyncRole = "off";
+      state.nativeSyncAutoStartRequested = false;
     }
     if (event.message) state.nativeSyncStatus = event.message;
     renderNativeSyncPanel();
@@ -2272,6 +2291,8 @@ const bindReaderEvents = () => {
 
   directorSyncStartDirectorButton.addEventListener("click", () => {
     haptic(12);
+    state.nativeSyncAutoStartSuppressed = false;
+    state.nativeSyncAutoStartRequested = false;
     state.nativeSyncError = "";
     state.nativeSyncStatus = `Activando director en ${state.nativeSyncSessionCode}...`;
     renderNativeSyncPanel();
@@ -2283,10 +2304,13 @@ const bindReaderEvents = () => {
 
   directorSyncStartFollowerButton.addEventListener("click", () => {
     haptic(12);
+    state.nativeSyncAutoStartSuppressed = false;
+    state.nativeSyncAutoStartRequested = true;
     state.nativeSyncError = "";
     state.nativeSyncStatus = `Buscando director en ${state.nativeSyncSessionCode}...`;
     renderNativeSyncPanel();
     if (!postNativeBridge({ type: "sync-start-follower", sessionCode: state.nativeSyncSessionCode })) {
+      state.nativeSyncAutoStartRequested = false;
       state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
       renderNativeSyncPanel();
     }
@@ -2294,6 +2318,8 @@ const bindReaderEvents = () => {
 
   directorSyncStopButton.addEventListener("click", () => {
     haptic();
+    state.nativeSyncAutoStartSuppressed = true;
+    state.nativeSyncAutoStartRequested = false;
     state.nativeSyncError = "";
     state.nativeSyncStatus = "Cerrando sincronización offline...";
     renderNativeSyncPanel();
