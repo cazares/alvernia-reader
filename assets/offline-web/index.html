@@ -2143,41 +2143,41 @@ button:disabled {
                 </span>
               </button>
             </div>
-            <div class="director-sync-panel is-hidden" id="director-sync-panel">
-              <div class="director-sync-header">
-                <p class="director-sync-eyebrow">Modo oculto</p>
-                <strong class="director-sync-title">Director offline</strong>
-                <p class="director-sync-copy">
-                  Usa el mismo código en los iPads cercanos. El director cambia la página y las seguidoras lo siguen sin internet.
+            <div class=”director-sync-panel is-hidden” id=”director-sync-panel”>
+              <div class=”director-sync-header”>
+                <p class=”director-sync-eyebrow”>Modo oculto</p>
+                <strong class=”director-sync-title”>Director offline</strong>
+                <p class=”director-sync-copy”>
+                  Escribe <strong>2046</strong> en el teclado y toca ↵ para entrar como director. Los demás dispositivos siguen automáticamente.
                 </p>
               </div>
-              <label class="director-sync-label" for="director-sync-code">Código</label>
+              <label class=”director-sync-label is-hidden” for=”director-sync-code”>Código</label>
               <input
-                class="director-sync-input"
-                id="director-sync-code"
-                type="text"
-                inputmode="text"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="characters"
-                spellcheck="false"
-                maxlength="12"
-                placeholder="CORO"
-                aria-label="Código de sincronización"
+                class=”director-sync-input is-hidden”
+                id=”director-sync-code”
+                type=”text”
+                inputmode=”text”
+                autocomplete=”off”
+                autocorrect=”off”
+                autocapitalize=”characters”
+                spellcheck=”false”
+                maxlength=”12”
+                placeholder=”2046”
+                aria-label=”Código de sincronización”
               />
-              <div class="director-sync-actions">
-                <button class="director-sync-button director-sync-button-primary" id="director-sync-start-director" type="button">
+              <div class=”director-sync-actions”>
+                <button class=”director-sync-button director-sync-button-primary” id=”director-sync-start-director” type=”button”>
                   Entrar como director
                 </button>
-                <button class="director-sync-button" id="director-sync-start-follower" type="button">
+                <button class=”director-sync-button is-hidden” id=”director-sync-start-follower” type=”button”>
                   Seguir director
                 </button>
-                <button class="director-sync-button director-sync-button-muted" id="director-sync-stop" type="button">
+                <button class=”director-sync-button director-sync-button-muted is-hidden” id=”director-sync-stop” type=”button”>
                   Salir de sync
                 </button>
               </div>
-              <p class="director-sync-status" id="director-sync-status">Mantén presionado “Ajustes” para abrir este modo.</p>
-              <p class="director-sync-error is-hidden" id="director-sync-error"></p>
+              <p class=”director-sync-status” id=”director-sync-status”></p>
+              <p class=”director-sync-error is-hidden” id=”director-sync-error”></p>
             </div>
           </div><!-- /help-panel -->
 

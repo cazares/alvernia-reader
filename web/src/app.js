@@ -664,17 +664,13 @@ const persistNativeSyncSessionCode = () => {
 const describeNativeSyncState = () => {
   if (!state.nativeSyncAvailable) {
     return hasNativeBridge()
-      ? "La app todavía está preparando la sincronización offline."
-      : "Disponible solo dentro de la app instalada en iPad.";
+      ? "Preparando sincronización…"
+      : "Solo disponible dentro de la app instalada.";
   }
   if (state.nativeSyncStatus) return state.nativeSyncStatus;
-  if (state.nativeSyncRole === "director") {
-    return `Director listo en ${state.nativeSyncSessionCode}.`;
-  }
-  if (state.nativeSyncRole === "follower") {
-    return `Siguiendo director en ${state.nativeSyncSessionCode}.`;
-  }
-  return `Los demás siguen automáticamente en ${state.nativeSyncSessionCode}.`;
+  if (state.nativeSyncRole === "director") return "Modo director activo.";
+  if (state.nativeSyncRole === "follower") return "Sincronizado con el director.";
+  return "Escribe 2046 y toca ↵ para entrar como director.";
 };
 
 const renderDirectorModeBadge = () => {
@@ -694,10 +690,20 @@ const renderNativeSyncPanel = () => {
   directorSyncError.textContent = state.nativeSyncError;
 
   const disabled = !state.nativeSyncAvailable;
-  directorSyncCodeInput.disabled = disabled;
-  directorSyncStartDirectorButton.disabled = disabled;
-  directorSyncStartFollowerButton.disabled = disabled;
-  directorSyncStopButton.disabled = disabled && state.nativeSyncRole === "off";
+  const isActive = state.nativeSyncRole !== "off";
+  directorSyncCodeInput.classList.toggle("is-hidden", true);
+  if (directorSyncCodeInput.labels) {
+    for (const label of directorSyncCodeInput.labels) {
+      label.classList.toggle("is-hidden", true);
+    }
+  }
+  directorSyncStartDirectorButton.disabled = disabled || state.nativeSyncRole === "director";
+  directorSyncStartDirectorButton.textContent = state.nativeSyncRole === "director"
+    ? "Director activo"
+    : "Entrar como director";
+  directorSyncStartFollowerButton.classList.add("is-hidden");
+  directorSyncStopButton.classList.toggle("is-hidden", !isActive);
+  directorSyncStopButton.disabled = false;
   renderDirectorModeBadge();
 };
 
@@ -715,17 +721,22 @@ const requestAutoFollowerMode = () => {
 
   state.nativeSyncAutoStartRequested = true;
   state.nativeSyncError = "";
-  state.nativeSyncStatus = `Buscando director en ${state.nativeSyncSessionCode}...`;
+  state.nativeSyncStatus = "";
   renderNativeSyncPanel();
 };
 
 const activateDirectorShortcut = () => {
+  // If another device is already directing, ask before overriding
+  if (state.nativeSyncRole === "follower") {
+    const ok = window.confirm("Ya hay un director activo cerca.\n¿Quieres tomar el control como director en este dispositivo?");
+    if (!ok) { clearDraft(); return false; }
+  }
   state.nativeSyncSessionCode = DEFAULT_NATIVE_SYNC_SESSION;
   persistNativeSyncSessionCode();
   state.nativeSyncAutoStartSuppressed = false;
   state.nativeSyncAutoStartRequested = false;
   state.nativeSyncError = "";
-  state.nativeSyncStatus = `Activando director en ${state.nativeSyncSessionCode}...`;
+  state.nativeSyncStatus = "Activando modo director...";
   unlockNativeSyncPanel();
   renderNativeSyncPanel();
   if (!postNativeBridge({ type: "sync-start-director", sessionCode: state.nativeSyncSessionCode })) {
@@ -765,7 +776,7 @@ const applyNativeSyncEvent = (payload) => {
 
   if (event.type === "page" && Number.isFinite(event.page)) {
     state.nativeSyncError = "";
-    state.nativeSyncStatus = `Director cambió a la canción en la página ${event.page}.`;
+    state.nativeSyncStatus = "";
     renderNativeSyncPanel();
     renderPage(event.page, { pushToHistory: false });
     return;
@@ -776,13 +787,12 @@ const applyNativeSyncEvent = (payload) => {
     if (event.status === "idle") {
       state.nativeSyncRole = "off";
       state.nativeSyncAutoStartRequested = false;
+      state.nativeSyncStatus = "";
     } else if (event.role === "director" || event.role === "follower") {
       state.nativeSyncRole = event.role;
       state.nativeSyncAutoStartRequested = false;
-    }
-    state.nativeSyncStatus = event.message || describeNativeSyncState();
-    if (event.status === "resolving-conflict") {
-      unlockNativeSyncPanel();
+      // Only keep native message if it's meaningful; otherwise let describeNativeSyncState handle it
+      state.nativeSyncStatus = (event.status === "connected" || event.status === "waiting-followers" || event.status === "searching") ? "" : (event.message || "");
     }
     renderNativeSyncPanel();
     return;
@@ -910,6 +920,10 @@ const backspaceDraft = () => {
 };
 
 const goToDraftSong = () => {
+  if (state.songDraft === SECRET_DIRECTOR_DRAFT) {
+    activateDirectorShortcut();
+    return;
+  }
   const songNumber = Number.parseInt(state.songDraft, 10);
   if (!Number.isFinite(songNumber)) return;
   renderPage(findSongPage(songNumber));
@@ -2055,35 +2069,7 @@ const bindReaderEvents = () => {
 
   backspaceButton.addEventListener("click", () => { haptic(); backspaceDraft(); });
   displayClearButton.addEventListener("click", () => { haptic(); clearDraft(); });
-  let directorShortcutTimer = 0;
-  let directorShortcutTriggered = false;
-  const clearDirectorShortcutTimer = () => {
-    if (!directorShortcutTimer) return;
-    window.clearTimeout(directorShortcutTimer);
-    directorShortcutTimer = 0;
-  };
-  const queueDirectorShortcut = () => {
-    directorShortcutTriggered = false;
-    clearDirectorShortcutTimer();
-    if (state.songDraft !== SECRET_DIRECTOR_DRAFT) return;
-    directorShortcutTimer = window.setTimeout(() => {
-      directorShortcutTimer = 0;
-      directorShortcutTriggered = activateDirectorShortcut();
-    }, 700);
-  };
-
-  ["mousedown", "touchstart"].forEach((eventName) => {
-    goButton.addEventListener(eventName, queueDirectorShortcut, { passive: true });
-  });
-  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((eventName) => {
-    goButton.addEventListener(eventName, clearDirectorShortcutTimer, { passive: true });
-  });
-
   goButton.addEventListener("click", () => {
-    if (directorShortcutTriggered) {
-      directorShortcutTriggered = false;
-      return;
-    }
     haptic(12);
     goToDraftSong();
   });
@@ -2360,29 +2346,14 @@ const bindReaderEvents = () => {
 
   directorSyncStartDirectorButton.addEventListener("click", () => {
     haptic(12);
-    state.nativeSyncAutoStartSuppressed = false;
-    state.nativeSyncAutoStartRequested = false;
-    state.nativeSyncError = "";
-    state.nativeSyncStatus = `Activando director en ${state.nativeSyncSessionCode}...`;
-    renderNativeSyncPanel();
-    if (!postNativeBridge({ type: "sync-start-director", sessionCode: state.nativeSyncSessionCode })) {
-      state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
-      renderNativeSyncPanel();
-    }
+    activateDirectorShortcut();
   });
 
   directorSyncStartFollowerButton.addEventListener("click", () => {
+    // Follower mode is automatic — button is hidden but kept for compat
     haptic(12);
     state.nativeSyncAutoStartSuppressed = false;
-    state.nativeSyncAutoStartRequested = true;
-    state.nativeSyncError = "";
-    state.nativeSyncStatus = `Buscando director en ${state.nativeSyncSessionCode}...`;
-    renderNativeSyncPanel();
-    if (!postNativeBridge({ type: "sync-start-follower", sessionCode: state.nativeSyncSessionCode })) {
-      state.nativeSyncAutoStartRequested = false;
-      state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
-      renderNativeSyncPanel();
-    }
+    requestAutoFollowerMode();
   });
 
   directorSyncStopButton.addEventListener("click", () => {
@@ -2390,7 +2361,7 @@ const bindReaderEvents = () => {
     state.nativeSyncAutoStartSuppressed = true;
     state.nativeSyncAutoStartRequested = false;
     state.nativeSyncError = "";
-    state.nativeSyncStatus = "Cerrando sincronización offline...";
+    state.nativeSyncStatus = "";
     renderNativeSyncPanel();
     if (!postNativeBridge({ type: "sync-stop" })) {
       state.nativeSyncRole = "off";
