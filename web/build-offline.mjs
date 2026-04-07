@@ -46,7 +46,7 @@ const pageFiles = fs
   .filter((f) => /^page-\d+\.jpg$/.test(f))
   .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-console.log(`Re-compressing ${pageFiles.length} pages at quality=55...`);
+console.log(`Re-compressing ${pageFiles.length} pages at quality=40...`);
 
 const pagesData = {};
 for (let i = 0; i < pageFiles.length; i++) {
@@ -57,7 +57,7 @@ for (let i = 0; i < pageFiles.length; i++) {
 
   const result = spawnSync(
     "sips",
-    ["-s", "format", "jpeg", "-s", "formatOptions", "55", src, "--out", tmp],
+    ["-s", "format", "jpeg", "-s", "formatOptions", "40", src, "--out", tmp],
     { stdio: "pipe" },
   );
   const recompressedExists = fs.existsSync(tmp);

@@ -103,8 +103,8 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(webApp, /nextPageUrl = resolvePageSrc\(nextPage\)/);
   assert.match(webApp, /sync-start-director/);
   assert.match(webApp, /sync-start-follower/);
-  assert.match(webApp, /Los demás siguen automáticamente en/);
-  assert.match(webApp, /Buscando director en/);
+  assert.match(webApp, /requestAutoFollowerMode/);
+  assert.match(webApp, /activateDirectorShortcut/);
 });
 
 test("reader renders exactly one visible page surface at a time", () => {
