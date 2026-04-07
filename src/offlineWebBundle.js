@@ -1,7 +1,7 @@
-const OFFLINE_WEB_BUNDLE_VERSION = "142";
+const OFFLINE_WEB_BUNDLE_VERSION = "152";
 
 const OFFLINE_WEB_BUNDLE_ASSETS = {
-  "app.js": require("../assets/offline-web/app.js"),
+  "app.bundle": require("../assets/offline-web/app.bundle"),
   "icon-192.png": require("../assets/offline-web/icon-192.png"),
   "icon-512.png": require("../assets/offline-web/icon-512.png"),
   "icon.png": require("../assets/offline-web/icon.png"),
@@ -376,7 +376,6 @@ const OFFLINE_WEB_BUNDLE_ASSETS = {
   "pages/page-368.jpg": require("../assets/offline-web/pages/page-368.jpg"),
   "pages.json": require("../assets/offline-web/pages.json"),
   "search-index.json": require("../assets/offline-web/search-index.json"),
-  "styles.css": require("../assets/offline-web/styles.css"),
 };
 
 module.exports = {

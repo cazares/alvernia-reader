@@ -70,7 +70,7 @@ const pageFiles = fs
 
 const songIndexSource = fs.readFileSync(path.join(rootDir, "src", "alverniaManual2SongIndex.js"), "utf8");
 const songIndex = [];
-for (const match of songIndexSource.matchAll(/song:\s*(\d+),\s*page:\s*(\d+)/g)) {
+for (const match of songIndexSource.matchAll(/\[(\d+),\s*(\d+)\]/g)) {
   songIndex.push({ song: Number(match[1]), page: Number(match[2]) });
 }
 

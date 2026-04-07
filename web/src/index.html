@@ -21,6 +21,11 @@
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" src="/pages/page-002.jpg" alt="Pagina actual del manual" />
+        <div class="director-mode-badge is-hidden" id="director-mode-badge" aria-live="polite">
+          <span class="director-mode-badge-eyebrow">Modo activo</span>
+          <strong class="director-mode-badge-title">DIRECTOR</strong>
+          <span class="director-mode-badge-code" id="director-mode-badge-code">Código 2046</span>
+        </div>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
           <div class="offline-gate-card">
@@ -138,7 +143,7 @@
             </div>
 
             <div class="numpad-tip-wrap" id="numpad-tip-wrap">
-              <p class="numpad-tip">🎉 <strong>¡Buenas noticias!</strong> Ya no tienes que pasar páginas. Escribe el número y toca <strong>↵ Ir</strong> — vas directo, <strong>sin scroll</strong>.</p>
+              <p class="numpad-tip">🎉 <strong>¡Buenas noticias!</strong> Ya no tienes que pasar páginas. Escribe el número y toca <strong>↵ Ir</strong> — vas directo, <strong>sin scroll</strong>. Para entrar como director, escribe <strong>2046</strong> y mantén presionado <strong>↵ Ir</strong>.</p>
               <button class="numpad-tip-dismiss" id="tip-dismiss" type="button" aria-label="Cerrar aviso">✕</button>
             </div>
 
@@ -274,7 +279,7 @@
                 <p class="director-sync-eyebrow">Modo oculto</p>
                 <strong class="director-sync-title">Director offline</strong>
                 <p class="director-sync-copy">
-                  Usa el mismo código en los iPads cercanos. El director cambia la página y las seguidoras lo siguen sin internet.
+                  Los dispositivos normales siguen automáticamente. Para entrar como director rápido, escribe 2046 y mantén presionado ↵ Ir.
                 </p>
               </div>
               <label class="director-sync-label" for="director-sync-code">Código</label>
@@ -302,7 +307,7 @@
                   Salir de sync
                 </button>
               </div>
-              <p class="director-sync-status" id="director-sync-status">Mantén presionado “Ajustes” para abrir este modo.</p>
+              <p class="director-sync-status" id="director-sync-status">Mantén presionado “Ajustes” para abrir este modo. Si no hay director cercano, las demás seguirán esperando en 2046.</p>
               <p class="director-sync-error is-hidden" id="director-sync-error"></p>
             </div>
           </div><!-- /help-panel -->

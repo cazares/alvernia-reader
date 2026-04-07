@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4AA18D770A0B4B4B82A0C001 /* DirectorSyncModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */; };
+		4AA18D790A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		7ECBF155D8DED1D95472C67D /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A2D06BCA20833798453115A /* ExpoModulesProvider.swift */; };
@@ -17,6 +19,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectorSyncModule.swift; path = SignoVivo/DirectorSyncModule.swift; sourceTree = "<group>"; };
+		4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DirectorSyncModuleBridge.m; path = SignoVivo/DirectorSyncModuleBridge.m; sourceTree = "<group>"; };
 		05AEA00A1B64EF04F512A5F2 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = SignoVivo/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* SignoVivo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SignoVivo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = SignoVivo/Images.xcassets; sourceTree = "<group>"; };
@@ -48,6 +52,8 @@
 			isa = PBXGroup;
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
+				4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */,
+				4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */,
 				F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -323,6 +329,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4AA18D770A0B4B4B82A0C001 /* DirectorSyncModule.swift in Sources */,
+				4AA18D790A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m in Sources */,
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
 				7ECBF155D8DED1D95472C67D /* ExpoModulesProvider.swift in Sources */,
 			);
@@ -337,7 +345,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CURRENT_PROJECT_VERSION = 142;
+				CURRENT_PROJECT_VERSION = 152;
 				DEVELOPMENT_TEAM = 7QRW68DD5X;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -373,7 +381,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CURRENT_PROJECT_VERSION = 142;
+				CURRENT_PROJECT_VERSION = 152;
 				DEVELOPMENT_TEAM = 7QRW68DD5X;
 				INFOPLIST_FILE = SignoVivo/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
