@@ -136,7 +136,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private func configureTransport() {
     let peerName = UIDevice.current.name.isEmpty ? UUID().uuidString : UIDevice.current.name
     let peerID = MCPeerID(displayName: "\(peerName)-\(UUID().uuidString.prefix(6))")
-    let session = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .required)
+    let session = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .none)
     session.delegate = self
 
     localPeerID = peerID
@@ -410,4 +410,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     at localURL: URL?,
     withError error: Error?
   ) {}
+
+  func session(
+    _ session: MCSession,
+    didReceiveCertificate certificate: [Any]?,
+    fromPeer peerID: MCPeerID,
+    certificateHandler: @escaping (Bool) -> Void
+  ) {
+    certificateHandler(true)
+  }
 }

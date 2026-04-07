@@ -40,6 +40,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_signovivo._tcp</string>
+		<string>_signovivo._udp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>SignoVivo usa la red local para sincronizar páginas entre iPads cercanas sin internet.</string>
