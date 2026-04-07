@@ -40,6 +40,8 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.match(source, /nearbyDirectorSync/);
   assert.match(source, /sync-start-director/);
   assert.match(source, /sync-start-follower/);
+  assert.match(source, /Director listo\. Esperando seguidoras cercanas\./);
+  assert.match(source, /Buscando director cercano\.\.\./);
   assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.doesNotMatch(source, /copyAsync/);

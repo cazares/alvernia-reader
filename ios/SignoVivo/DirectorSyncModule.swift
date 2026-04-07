@@ -128,7 +128,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.emitState(status: "connected")
         resolve(["deliveredPeers": session.connectedPeers.count])
       } catch {
-        reject("DIRECTOR_SEND_FAILED", "No se pudo enviar la página a los iPads conectados.", error)
+        reject("DIRECTOR_SEND_FAILED", "No se pudo enviar la página a los dispositivos conectados.", error)
       }
     }
   }
@@ -261,8 +261,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     guard currentRole == "director" else { return }
     guard !otherToken.isEmpty, !currentDirectorToken.isEmpty else { return }
 
+    // Only one director may survive for a given session code.
+    // The lexicographically smaller token wins so every nearby device
+    // reaches the same answer without needing internet or a server.
     if otherToken < currentDirectorToken {
-      emitError(code: "DIRECTOR_CONFLICT", message: "Otro director cercano ya usa este código. Esta iPad salió del modo director.")
+      emitError(code: "DIRECTOR_CONFLICT", message: "Otro director cercano ya usa este código. Este dispositivo salió del modo director.")
       resetTransport(emitState: true)
     }
   }
@@ -297,7 +300,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     didNotStartAdvertisingPeer error: Error
   ) {
     DispatchQueue.main.async {
-      self.emitError(code: "DIRECTOR_ADVERTISE_FAILED", message: "No se pudo anunciar esta iPad al resto del coro.")
+      self.emitError(code: "DIRECTOR_ADVERTISE_FAILED", message: "No se pudo anunciar este dispositivo al resto del coro.")
       self.resetTransport(emitState: true)
     }
   }
@@ -337,7 +340,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
     DispatchQueue.main.async {
-      self.emitError(code: "DIRECTOR_BROWSE_FAILED", message: "No se pudieron buscar iPads cercanas.")
+      self.emitError(code: "DIRECTOR_BROWSE_FAILED", message: "No se pudieron buscar dispositivos cercanos.")
       self.resetTransport(emitState: true)
     }
   }
@@ -375,7 +378,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         type == "page",
         let page = payload["page"] as? Int
       else {
-        self.emitError(code: "DIRECTOR_PAYLOAD_INVALID", message: "Llegó un mensaje inválido desde otra iPad.")
+        self.emitError(code: "DIRECTOR_PAYLOAD_INVALID", message: "Llegó un mensaje inválido desde otro dispositivo.")
         return
       }
 

@@ -747,11 +747,15 @@ const applyNativeSyncEvent = (payload) => {
       state.nativeSyncAutoStartRequested = false;
     }
     state.nativeSyncStatus = event.message || describeNativeSyncState();
+    if (event.status === "resolving-conflict") {
+      unlockNativeSyncPanel();
+    }
     renderNativeSyncPanel();
     return;
   }
 
   if (event.type === "error") {
+    unlockNativeSyncPanel();
     state.nativeSyncError = event.message || "La sincronización offline falló.";
     if (event.role === "off" || event.code === "DIRECTOR_CONFLICT") {
       state.nativeSyncRole = "off";

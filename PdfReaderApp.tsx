@@ -215,16 +215,46 @@ export default function App() {
         case "sync-start-director":
           await startNearbyDirector(String(payload.sessionCode || ""));
           syncRoleRef.current = "director";
+          injectNativeEvent({
+            type: "sync-event",
+            event: {
+              type: "state",
+              role: "director",
+              sessionCode: String(payload.sessionCode || ""),
+              status: "waiting-followers",
+              message: "Director listo. Esperando seguidoras cercanas.",
+            },
+          });
           sendBridgeState();
           break;
         case "sync-start-follower":
           await startNearbyFollower(String(payload.sessionCode || ""));
           syncRoleRef.current = "follower";
+          injectNativeEvent({
+            type: "sync-event",
+            event: {
+              type: "state",
+              role: "follower",
+              sessionCode: String(payload.sessionCode || ""),
+              status: "searching",
+              message: "Buscando director cercano...",
+            },
+          });
           sendBridgeState();
           break;
         case "sync-stop":
           await stopNearbyDirectorSync();
           syncRoleRef.current = "off";
+          injectNativeEvent({
+            type: "sync-event",
+            event: {
+              type: "state",
+              role: "off",
+              sessionCode: "",
+              status: "idle",
+              message: "",
+            },
+          });
           sendBridgeState();
           break;
         default:
