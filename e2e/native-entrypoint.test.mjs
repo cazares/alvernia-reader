@@ -82,15 +82,19 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(indexHtml, /numberpad-grid/);
   assert.match(indexHtml, /search-input/);
   assert.match(indexHtml, /director-sync-panel/);
+  assert.match(indexHtml, /director-mode-badge/);
   assert.match(indexHtml, /offline-gate/);
   assert.match(indexHtml, /help-settings-label/);
   assert.match(webApp, /switchDrawerMode/);
   assert.match(webApp, /goToDraftSong/);
+  assert.match(webApp, /activateDirectorShortcut/);
   assert.match(webApp, /renderActiveTab/);
   assert.match(webApp, /bindReaderEvents/);
   assert.match(webApp, /postNativeBridge/);
   assert.match(webApp, /applyNativeSyncEvent/);
   assert.match(webApp, /requestAutoFollowerMode/);
+  assert.match(webApp, /DEFAULT_NATIVE_SYNC_SESSION = "2046"/);
+  assert.match(webApp, /SECRET_DIRECTOR_DRAFT = "2046"/);
   assert.match(webApp, /nativeSyncAutoStartRequested/);
   assert.match(webApp, /NATIVE_FILE_MODE/);
   assert.match(webApp, /resolveAppPath/);
@@ -99,6 +103,7 @@ test("restored web source still includes the drawer, numpad, browse, and hidden 
   assert.match(webApp, /nextPageUrl = resolvePageSrc\(nextPage\)/);
   assert.match(webApp, /sync-start-director/);
   assert.match(webApp, /sync-start-follower/);
+  assert.match(webApp, /Los demás siguen automáticamente en/);
   assert.match(webApp, /Buscando director en/);
 });
 

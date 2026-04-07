@@ -25,6 +25,8 @@ const displayClearButton = document.getElementById("display-clear");
 const numberpadGrid = document.getElementById("numberpad-grid");
 const backspaceButton = document.getElementById("backspace-button");
 const goButton = document.getElementById("go-button");
+const directorModeBadge = document.getElementById("director-mode-badge");
+const directorModeBadgeCode = document.getElementById("director-mode-badge-code");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
@@ -103,7 +105,7 @@ const state = {
   nativeSyncRole: "off",
   nativeSyncStatus: "",
   nativeSyncError: "",
-  nativeSyncSessionCode: "CORO",
+  nativeSyncSessionCode: "2046",
   nativeSyncAutoStartRequested: false,
   nativeSyncAutoStartSuppressed: false,
 };
@@ -142,6 +144,8 @@ const OFFLINE_PAGES = window.OFFLINE_PAGES || null;
 const NATIVE_FILE_MODE = Boolean(window.__SIGNO_VINO_NATIVE_FILE_MODE || window.location.protocol === "file:");
 const NATIVE_BRIDGE_CHANNEL = "signovivo-native";
 const NATIVE_SYNC_SESSION_KEY = "sv-native-sync-session";
+const DEFAULT_NATIVE_SYNC_SESSION = "2046";
+const SECRET_DIRECTOR_DRAFT = "2046";
 const resolveAppPath = (pathname) => {
   if (!NATIVE_FILE_MODE) return pathname;
   if (pathname === "/") return "./";
@@ -211,9 +215,11 @@ const normalizeSyncSessionCode = (value = "") => value
 const loadNativeSyncSessionCode = () => {
   try {
     const stored = localStorage.getItem(NATIVE_SYNC_SESSION_KEY) || "";
-    return normalizeSyncSessionCode(stored) || "CORO";
+    const normalized = normalizeSyncSessionCode(stored);
+    if (!normalized || normalized === "CORO") return DEFAULT_NATIVE_SYNC_SESSION;
+    return normalized;
   } catch {
-    return "CORO";
+    return DEFAULT_NATIVE_SYNC_SESSION;
   }
 };
 
@@ -668,7 +674,14 @@ const describeNativeSyncState = () => {
   if (state.nativeSyncRole === "follower") {
     return `Siguiendo director en ${state.nativeSyncSessionCode}.`;
   }
-  return "Ingresa un código y elige director o seguidor.";
+  return `Los demás siguen automáticamente en ${state.nativeSyncSessionCode}.`;
+};
+
+const renderDirectorModeBadge = () => {
+  if (!directorModeBadge || !directorModeBadgeCode) return;
+  const isDirector = state.nativeSyncRole === "director";
+  directorModeBadge.classList.toggle("is-hidden", !isDirector);
+  directorModeBadgeCode.textContent = `Código ${state.nativeSyncSessionCode}`;
 };
 
 const renderNativeSyncPanel = () => {
@@ -685,6 +698,7 @@ const renderNativeSyncPanel = () => {
   directorSyncStartDirectorButton.disabled = disabled;
   directorSyncStartFollowerButton.disabled = disabled;
   directorSyncStopButton.disabled = disabled && state.nativeSyncRole === "off";
+  renderDirectorModeBadge();
 };
 
 const unlockNativeSyncPanel = () => {
@@ -703,6 +717,26 @@ const requestAutoFollowerMode = () => {
   state.nativeSyncError = "";
   state.nativeSyncStatus = `Buscando director en ${state.nativeSyncSessionCode}...`;
   renderNativeSyncPanel();
+};
+
+const activateDirectorShortcut = () => {
+  state.nativeSyncSessionCode = DEFAULT_NATIVE_SYNC_SESSION;
+  persistNativeSyncSessionCode();
+  state.nativeSyncAutoStartSuppressed = false;
+  state.nativeSyncAutoStartRequested = false;
+  state.nativeSyncError = "";
+  state.nativeSyncStatus = `Activando director en ${state.nativeSyncSessionCode}...`;
+  unlockNativeSyncPanel();
+  renderNativeSyncPanel();
+  if (!postNativeBridge({ type: "sync-start-director", sessionCode: state.nativeSyncSessionCode })) {
+    state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+    renderNativeSyncPanel();
+    return false;
+  }
+  clearDraft();
+  closeDrawer();
+  haptic(20);
+  return true;
 };
 
 const applyNativeSyncEvent = (payload) => {
@@ -2021,7 +2055,38 @@ const bindReaderEvents = () => {
 
   backspaceButton.addEventListener("click", () => { haptic(); backspaceDraft(); });
   displayClearButton.addEventListener("click", () => { haptic(); clearDraft(); });
-  goButton.addEventListener("click", () => { haptic(12); goToDraftSong(); });
+  let directorShortcutTimer = 0;
+  let directorShortcutTriggered = false;
+  const clearDirectorShortcutTimer = () => {
+    if (!directorShortcutTimer) return;
+    window.clearTimeout(directorShortcutTimer);
+    directorShortcutTimer = 0;
+  };
+  const queueDirectorShortcut = () => {
+    directorShortcutTriggered = false;
+    clearDirectorShortcutTimer();
+    if (state.songDraft !== SECRET_DIRECTOR_DRAFT) return;
+    directorShortcutTimer = window.setTimeout(() => {
+      directorShortcutTimer = 0;
+      directorShortcutTriggered = activateDirectorShortcut();
+    }, 700);
+  };
+
+  ["mousedown", "touchstart"].forEach((eventName) => {
+    goButton.addEventListener(eventName, queueDirectorShortcut, { passive: true });
+  });
+  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((eventName) => {
+    goButton.addEventListener(eventName, clearDirectorShortcutTimer, { passive: true });
+  });
+
+  goButton.addEventListener("click", () => {
+    if (directorShortcutTriggered) {
+      directorShortcutTriggered = false;
+      return;
+    }
+    haptic(12);
+    goToDraftSong();
+  });
 
   // Drawer nav prev/next (stay in drawer so keepOverlay=true)
   prevPageButton.addEventListener("click", () => {
@@ -2285,7 +2350,7 @@ const bindReaderEvents = () => {
   });
 
   directorSyncCodeInput.addEventListener("input", () => {
-    const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || "CORO";
+    const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
     state.nativeSyncSessionCode = normalized;
     directorSyncCodeInput.value = normalized;
     persistNativeSyncSessionCode();
