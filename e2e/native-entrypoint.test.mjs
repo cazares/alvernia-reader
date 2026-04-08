@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const APP_ROOT = path.resolve(import.meta.dirname, "..");
+const APP_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
 test("package main points at the native app entrypoint", () => {
   const packageJsonPath = path.join(APP_ROOT, "package.json");
@@ -44,7 +44,7 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.match(source, /Buscando director cercano\.\.\./);
   assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
   assert.doesNotMatch(source, /react-native-blob-util/);
-  assert.doesNotMatch(source, /copyAsync/);
+  assert.match(source, /FileSystem\.copyAsync/);
   assert.doesNotMatch(source, /documentDirectory/);
 });
 
