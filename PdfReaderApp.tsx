@@ -19,6 +19,8 @@ const OFFLINE_READER_ENTRY = "index.html";
 const OFFLINE_READER_SCRIPT = "app.bundle";
 const OFFLINE_PAGE_ASSET_PATTERN = /^pages\/page-(\d+)\.jpg$/;
 const OFFLINE_READER_HTML_CACHE = `${FileSystem.cacheDirectory}signovivo-offline-reader.html`;
+// Pages are staged into cacheDirectory so WKWebView's allowingReadAccessToURL covers them.
+const OFFLINE_PAGES_STAGE_DIR = `${FileSystem.cacheDirectory}signovivo-pages/${OFFLINE_WEB_BUNDLE_VERSION}/`;
 
 type SyncRole = "off" | "director" | "follower";
 
@@ -48,29 +50,56 @@ const readBundledTextAsset = async (relativePath: string) => {
   return FileSystem.readAsStringAsync(assetUri);
 };
 
-const buildOfflinePageMap = async () => {
-  const offlinePages: Record<number, string> = {};
+const stageOfflinePages = async (): Promise<string> => {
+  // Return early if already staged for this bundle version
+  const readyMarker = `${OFFLINE_PAGES_STAGE_DIR}.ready`;
+  const existing = await FileSystem.getInfoAsync(readyMarker);
+  if (existing.exists) return OFFLINE_PAGES_STAGE_DIR;
 
-  const downloads = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
-    .filter(([relativePath]) => OFFLINE_PAGE_ASSET_PATTERN.test(relativePath))
-    .map(async ([relativePath, moduleId]) => {
-      const pageNumber = Number.parseInt(relativePath.match(OFFLINE_PAGE_ASSET_PATTERN)![1], 10);
+  // Clear any stale staged pages from previous bundle versions
+  const stageParent = `${FileSystem.cacheDirectory}signovivo-pages/`;
+  await FileSystem.deleteAsync(stageParent, { idempotent: true });
+  await FileSystem.makeDirectoryAsync(OFFLINE_PAGES_STAGE_DIR, { intermediates: true });
+
+  // Copy every page asset into cacheDirectory so allowingReadAccessToURL covers them.
+  // Run in small batches to avoid exhausting file descriptors.
+  const pageEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
+    .filter(([relativePath]) => OFFLINE_PAGE_ASSET_PATTERN.test(relativePath));
+
+  const BATCH = 20;
+  for (let i = 0; i < pageEntries.length; i += BATCH) {
+    const batch = pageEntries.slice(i, i + BATCH);
+    await Promise.all(batch.map(async ([relativePath, moduleId]) => {
       const asset = Asset.fromModule(moduleId);
       await asset.downloadAsync();
-      if (asset.localUri) {
-        offlinePages[pageNumber] = asset.localUri;
-      }
-    });
+      const src = asset.localUri || asset.uri;
+      if (!src) return;
+      const pageNum = relativePath.match(OFFLINE_PAGE_ASSET_PATTERN)![1];
+      const dest = `${OFFLINE_PAGES_STAGE_DIR}page-${pageNum}.jpg`;
+      await FileSystem.copyAsync({ from: src, to: dest });
+    }));
+  }
 
-  await Promise.all(downloads);
+  await FileSystem.writeAsStringAsync(readyMarker, "ready");
+  return OFFLINE_PAGES_STAGE_DIR;
+};
+
+const buildOfflinePageMap = async (pagesDir: string) => {
+  const offlinePages: Record<number, string> = {};
+  for (const [relativePath] of Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)) {
+    const match = relativePath.match(OFFLINE_PAGE_ASSET_PATTERN);
+    if (!match) continue;
+    const pageNumber = Number.parseInt(match[1], 10);
+    offlinePages[pageNumber] = `${pagesDir}page-${match[1]}.jpg`;
+  }
   return offlinePages;
 };
 
-const buildOfflineReaderHtml = async () => {
+const buildOfflineReaderHtml = async (pagesDir: string) => {
   const [indexHtml, appJs, offlinePages] = await Promise.all([
     readBundledTextAsset(OFFLINE_READER_ENTRY),
     readBundledTextAsset(OFFLINE_READER_SCRIPT),
-    buildOfflinePageMap(),
+    buildOfflinePageMap(pagesDir),
   ]);
 
   const nativeBootstrap = [
@@ -95,9 +124,12 @@ const resolveOfflineReaderUri = async () => {
     throw new Error("No encontramos el lector web offline.");
   }
 
+  // Stage pages into cacheDirectory first so WKWebView can access them.
+  const pagesDir = await stageOfflinePages();
+
   const asset = Asset.fromModule(entryModule);
   await asset.downloadAsync();
-  const html = await buildOfflineReaderHtml();
+  const html = await buildOfflineReaderHtml(pagesDir);
   await FileSystem.writeAsStringAsync(OFFLINE_READER_HTML_CACHE, html);
   return OFFLINE_READER_HTML_CACHE;
 };
