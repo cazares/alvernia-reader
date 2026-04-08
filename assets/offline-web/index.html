@@ -112,6 +112,46 @@ button:disabled {
   isolation: isolate;
 }
 
+.director-mode-badge {
+  position: absolute;
+  top: calc(var(--safe-top) + 14px);
+  right: calc(var(--safe-right) + 14px);
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  padding: 0.58rem 0.82rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 235, 194, 0.34);
+  background:
+    linear-gradient(180deg, rgba(84, 34, 20, 0.90), rgba(44, 18, 16, 0.94)),
+    rgba(30, 16, 16, 0.94);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26);
+  text-align: right;
+}
+
+.director-mode-badge-eyebrow {
+  color: rgba(255, 231, 182, 0.72);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.director-mode-badge-title {
+  color: #fff6d7;
+  font-size: 0.96rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.director-mode-badge-code {
+  color: rgba(255, 231, 182, 0.82);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 #page-image {
   display: block;
   width: 100%;
@@ -286,9 +326,9 @@ button:disabled {
   border: none;
   border-radius: 0 12px 12px 0;
   background: rgba(20, 28, 60, 0.92);
-  border-right: 1px solid rgba(147, 228, 255, 0.40);
-  border-top: 1px solid rgba(147, 228, 255, 0.25);
-  border-bottom: 1px solid rgba(147, 228, 255, 0.25);
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
   box-shadow: none;
   pointer-events: auto;
   touch-action: manipulation;
@@ -346,7 +386,7 @@ button:disabled {
   width: var(--drawer-width);
   padding-top: calc(var(--safe-top) + 4px);
   background: #07091a;
-  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  border-right: 0;
   display: flex;
   flex-direction: column;
   /* Two-pane handles its own scroll; drawer clips overflow */
@@ -1895,6 +1935,11 @@ button:disabled {
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" src="pages/page-002.jpg" alt="Pagina actual del manual" />
+        <div class="director-mode-badge is-hidden" id="director-mode-badge" aria-live="polite">
+          <span class="director-mode-badge-eyebrow">Modo activo</span>
+          <strong class="director-mode-badge-title">DIRECTOR</strong>
+          <span class="director-mode-badge-code" id="director-mode-badge-code">Código 2046</span>
+        </div>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
           <div class="offline-gate-card">

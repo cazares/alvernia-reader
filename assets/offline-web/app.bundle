@@ -25,6 +25,8 @@ const displayClearButton = document.getElementById("display-clear");
 const numberpadGrid = document.getElementById("numberpad-grid");
 const backspaceButton = document.getElementById("backspace-button");
 const goButton = document.getElementById("go-button");
+const directorModeBadge = document.getElementById("director-mode-badge");
+const directorModeBadgeCode = document.getElementById("director-mode-badge-code");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
@@ -39,8 +41,6 @@ const helpPanel = document.getElementById("help-panel");
 const helpCloseButton = document.getElementById("help-close");
 const helpSettingsLabel = document.getElementById("help-settings-label");
 const hapticToggleButton = document.getElementById("haptic-toggle");
-const directorModeBadge = document.getElementById("director-mode-badge");
-const directorModeBadgeCode = document.getElementById("director-mode-badge-code");
 const directorSyncPanel = document.getElementById("director-sync-panel");
 const directorSyncCodeInput = document.getElementById("director-sync-code");
 const directorSyncStartDirectorButton = document.getElementById("director-sync-start-director");
@@ -133,7 +133,7 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "134cb71";
+const CACHE_VERSION = "a3874d1";
 const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
@@ -215,9 +215,11 @@ const normalizeSyncSessionCode = (value = "") => value
 const loadNativeSyncSessionCode = () => {
   try {
     const stored = localStorage.getItem(NATIVE_SYNC_SESSION_KEY) || "";
-    return normalizeSyncSessionCode(stored) || "CORO";
+    const normalized = normalizeSyncSessionCode(stored);
+    if (!normalized || normalized === "CORO") return DEFAULT_NATIVE_SYNC_SESSION;
+    return normalized;
   } catch {
-    return "CORO";
+    return DEFAULT_NATIVE_SYNC_SESSION;
   }
 };
 
@@ -716,6 +718,7 @@ const requestAutoFollowerMode = () => {
   if (!state.nativeSyncAvailable || state.nativeSyncRole !== "off") return;
   if (state.nativeSyncAutoStartRequested || state.nativeSyncAutoStartSuppressed) return;
   if (!postNativeBridge({ type: "sync-start-follower", sessionCode: state.nativeSyncSessionCode })) return;
+
   state.nativeSyncAutoStartRequested = true;
   state.nativeSyncError = "";
   state.nativeSyncStatus = "";
@@ -723,11 +726,13 @@ const requestAutoFollowerMode = () => {
 };
 
 const activateDirectorShortcut = () => {
+  // If another device is already directing, ask before overriding
   if (state.nativeSyncRole === "follower") {
     const ok = window.confirm("Ya hay un director activo cerca.\n¿Quieres tomar el control como director en este dispositivo?");
     if (!ok) { clearDraft(); return false; }
   }
   state.nativeSyncSessionCode = DEFAULT_NATIVE_SYNC_SESSION;
+  persistNativeSyncSessionCode();
   state.nativeSyncAutoStartSuppressed = false;
   state.nativeSyncAutoStartRequested = false;
   state.nativeSyncError = "";
@@ -786,6 +791,7 @@ const applyNativeSyncEvent = (payload) => {
     } else if (event.role === "director" || event.role === "follower") {
       state.nativeSyncRole = event.role;
       state.nativeSyncAutoStartRequested = false;
+      // Only keep native message if it's meaningful; otherwise let describeNativeSyncState handle it
       state.nativeSyncStatus = (event.status === "connected" || event.status === "waiting-followers" || event.status === "searching") ? "" : (event.message || "");
     }
     renderNativeSyncPanel();
@@ -2063,7 +2069,10 @@ const bindReaderEvents = () => {
 
   backspaceButton.addEventListener("click", () => { haptic(); backspaceDraft(); });
   displayClearButton.addEventListener("click", () => { haptic(); clearDraft(); });
-  goButton.addEventListener("click", () => { haptic(12); goToDraftSong(); });
+  goButton.addEventListener("click", () => {
+    haptic(12);
+    goToDraftSong();
+  });
 
   // Drawer nav prev/next (stay in drawer so keepOverlay=true)
   prevPageButton.addEventListener("click", () => {
@@ -2327,7 +2336,7 @@ const bindReaderEvents = () => {
   });
 
   directorSyncCodeInput.addEventListener("input", () => {
-    const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || "CORO";
+    const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
     state.nativeSyncSessionCode = normalized;
     directorSyncCodeInput.value = normalized;
     persistNativeSyncSessionCode();
@@ -2341,7 +2350,7 @@ const bindReaderEvents = () => {
   });
 
   directorSyncStartFollowerButton.addEventListener("click", () => {
-    // Follower mode is automatic — this button is hidden but kept for compat
+    // Follower mode is automatic — button is hidden but kept for compat
     haptic(12);
     state.nativeSyncAutoStartSuppressed = false;
     requestAutoFollowerMode();

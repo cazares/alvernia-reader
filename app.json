@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cazares.alvernia",
-    "buildNumber": "156",
+    "buildNumber": "157",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
