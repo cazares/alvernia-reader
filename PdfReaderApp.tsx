@@ -18,9 +18,10 @@ const BRIDGE_CHANNEL = "signovivo-native";
 const OFFLINE_READER_ENTRY = "index.html";
 const OFFLINE_READER_SCRIPT = "app.bundle";
 const OFFLINE_PAGE_ASSET_PATTERN = /^pages\/page-(\d+)\.jpg$/;
-const OFFLINE_READER_HTML_CACHE = `${FileSystem.cacheDirectory}signovivo-offline-reader.html`;
-// Pages are staged into cacheDirectory so WKWebView's allowingReadAccessToURL covers them.
-const OFFLINE_PAGES_STAGE_DIR = `${FileSystem.cacheDirectory}signovivo-pages/${OFFLINE_WEB_BUNDLE_VERSION}/`;
+// Versioned staged directory: HTML + pages/ live together so relative paths work
+// and allowingReadAccessToURL needs only to cover one root.
+const OFFLINE_STAGE_ROOT = `${FileSystem.cacheDirectory}signovivo-reader/${OFFLINE_WEB_BUNDLE_VERSION}/`;
+const OFFLINE_STAGE_HTML = `${OFFLINE_STAGE_ROOT}index.html`;
 
 type SyncRole = "off" | "director" | "follower";
 
@@ -50,62 +51,17 @@ const readBundledTextAsset = async (relativePath: string) => {
   return FileSystem.readAsStringAsync(assetUri);
 };
 
-const stageOfflinePages = async (): Promise<string> => {
-  // Return early if already staged for this bundle version
-  const readyMarker = `${OFFLINE_PAGES_STAGE_DIR}.ready`;
-  const existing = await FileSystem.getInfoAsync(readyMarker);
-  if (existing.exists) return OFFLINE_PAGES_STAGE_DIR;
-
-  // Clear any stale staged pages from previous bundle versions
-  const stageParent = `${FileSystem.cacheDirectory}signovivo-pages/`;
-  await FileSystem.deleteAsync(stageParent, { idempotent: true });
-  await FileSystem.makeDirectoryAsync(OFFLINE_PAGES_STAGE_DIR, { intermediates: true });
-
-  // Copy every page asset into cacheDirectory so allowingReadAccessToURL covers them.
-  // Run in small batches to avoid exhausting file descriptors.
-  const pageEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
-    .filter(([relativePath]) => OFFLINE_PAGE_ASSET_PATTERN.test(relativePath));
-
-  const BATCH = 20;
-  for (let i = 0; i < pageEntries.length; i += BATCH) {
-    const batch = pageEntries.slice(i, i + BATCH);
-    await Promise.all(batch.map(async ([relativePath, moduleId]) => {
-      const asset = Asset.fromModule(moduleId);
-      await asset.downloadAsync();
-      const src = asset.localUri || asset.uri;
-      if (!src) return;
-      const pageNum = relativePath.match(OFFLINE_PAGE_ASSET_PATTERN)![1];
-      const dest = `${OFFLINE_PAGES_STAGE_DIR}page-${pageNum}.jpg`;
-      await FileSystem.copyAsync({ from: src, to: dest });
-    }));
-  }
-
-  await FileSystem.writeAsStringAsync(readyMarker, "ready");
-  return OFFLINE_PAGES_STAGE_DIR;
-};
-
-const buildOfflinePageMap = async (pagesDir: string) => {
-  const offlinePages: Record<number, string> = {};
-  for (const [relativePath] of Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)) {
-    const match = relativePath.match(OFFLINE_PAGE_ASSET_PATTERN);
-    if (!match) continue;
-    const pageNumber = Number.parseInt(match[1], 10);
-    offlinePages[pageNumber] = `${pagesDir}page-${match[1]}.jpg`;
-  }
-  return offlinePages;
-};
-
-const buildOfflineReaderHtml = async (pagesDir: string) => {
-  const [indexHtml, appJs, offlinePages] = await Promise.all([
+const buildOfflineReaderHtml = async () => {
+  const [indexHtml, appJs] = await Promise.all([
     readBundledTextAsset(OFFLINE_READER_ENTRY),
     readBundledTextAsset(OFFLINE_READER_SCRIPT),
-    buildOfflinePageMap(pagesDir),
   ]);
 
+  // No OFFLINE_PAGES: pages live at pages/page-NNN.jpg relative to the staged HTML,
+  // so NATIVE_FILE_MODE's relative-path fallback resolves them via allowingReadAccessToURL.
   const nativeBootstrap = [
     `window.__SIGNO_VINO_NATIVE_FILE_MODE = true;`,
     `window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION = ${JSON.stringify(OFFLINE_WEB_BUNDLE_VERSION)};`,
-    `window.OFFLINE_PAGES = ${JSON.stringify(offlinePages)};`,
   ].join("\n");
 
   return indexHtml
@@ -119,19 +75,36 @@ const buildOfflineReaderHtml = async (pagesDir: string) => {
 };
 
 const resolveOfflineReaderUri = async () => {
-  const entryModule = OFFLINE_WEB_BUNDLE_ASSETS[OFFLINE_READER_ENTRY];
-  if (!entryModule) {
-    throw new Error("No encontramos el lector web offline.");
+  // Return cached staged bundle if this version is already staged.
+  const existing = await FileSystem.getInfoAsync(OFFLINE_STAGE_HTML);
+  if (existing.exists) return OFFLINE_STAGE_HTML;
+
+  // Clear stale staged bundles from previous versions.
+  const stageParent = `${FileSystem.cacheDirectory}signovivo-reader/`;
+  await FileSystem.deleteAsync(stageParent, { idempotent: true });
+  await FileSystem.makeDirectoryAsync(`${OFFLINE_STAGE_ROOT}pages/`, { intermediates: true });
+
+  // Copy every page into pages/ alongside the HTML so relative paths resolve.
+  const pageEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
+    .filter(([p]) => OFFLINE_PAGE_ASSET_PATTERN.test(p));
+
+  const BATCH = 20;
+  for (let i = 0; i < pageEntries.length; i += BATCH) {
+    const batch = pageEntries.slice(i, i + BATCH);
+    await Promise.all(batch.map(async ([relativePath, moduleId]) => {
+      const asset = Asset.fromModule(moduleId);
+      await asset.downloadAsync();
+      const src = asset.localUri || asset.uri;
+      if (!src) return;
+      const fileName = relativePath.replace(/^pages\//, "");
+      await FileSystem.copyAsync({ from: src, to: `${OFFLINE_STAGE_ROOT}pages/${fileName}` });
+    }));
   }
 
-  // Stage pages into cacheDirectory first so WKWebView can access them.
-  const pagesDir = await stageOfflinePages();
-
-  const asset = Asset.fromModule(entryModule);
-  await asset.downloadAsync();
-  const html = await buildOfflineReaderHtml(pagesDir);
-  await FileSystem.writeAsStringAsync(OFFLINE_READER_HTML_CACHE, html);
-  return OFFLINE_READER_HTML_CACHE;
+  // Build and write the HTML last; its existence is the "ready" signal.
+  const html = await buildOfflineReaderHtml();
+  await FileSystem.writeAsStringAsync(OFFLINE_STAGE_HTML, html);
+  return OFFLINE_STAGE_HTML;
 };
 
 export default function App() {
