@@ -77,6 +77,7 @@ const state = {
   currentPage: 1,
   songDraft: "",
   songIndex: [],
+  songPageLookup: new Map(),
   themeIndex: [],
   pageHistory: [],
   searchIndexPages: [],
@@ -574,11 +575,23 @@ const findSongIndexAtOrBeforePage = (pageNumber) => {
   return index;
 };
 
+const normalizeSongDraftNumber = (draft) => {
+  const trimmed = String(draft ?? "").trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
 const findSongPage = (songNumber) => {
-  if (songNumber <= 0) return 1;
-  const exact = state.songIndex.find((entry) => entry.song === songNumber);
-  if (exact) return exact.page;
-  const next = state.songIndex.find((entry) => entry.song >= songNumber);
+  const normalized = normalizeSongDraftNumber(songNumber);
+  if (normalized === null) return 1;
+
+  const exact = state.songPageLookup.get(normalized);
+  if (Number.isFinite(exact)) return exact;
+
+  const next = state.songIndex.find((entry) => entry.song >= normalized);
   return next ? next.page : state.totalPages;
 };
 
@@ -924,8 +937,8 @@ const goToDraftSong = () => {
     activateDirectorShortcut();
     return;
   }
-  const songNumber = Number.parseInt(state.songDraft, 10);
-  if (!Number.isFinite(songNumber)) return;
+  const songNumber = normalizeSongDraftNumber(state.songDraft);
+  if (songNumber === null) return;
   renderPage(findSongPage(songNumber));
   addToRecientes(songNumber);
   clearDraft();
@@ -2528,6 +2541,7 @@ const initReader = async () => {
   updateFullscreenButton();
   hideLoadingIndicator();
   await requireOfflineBundle(state.totalPages);
+  state.songPageLookup = new Map(state.songIndex.map((entry) => [entry.song, entry.page]));
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   loadSearchIndex();
   renderActiveTab();
