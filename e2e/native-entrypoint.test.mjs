@@ -56,6 +56,7 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.match(source, /FileSystem\.copyAsync/);
   assert.doesNotMatch(source, /window\.OFFLINE_PAGES/);
   assert.doesNotMatch(source, /documentDirectory/);
+  assert.match(source, /const OFFLINE_STAGE_ROOT = `\$\{FileSystem\.cacheDirectory\}signovivo-reader\/\$\{OFFLINE_WEB_BUNDLE_VERSION\}\/`;/);
 });
 
 test("native offline template keeps the initial page relative and the script entrypoint stable", () => {
@@ -75,9 +76,11 @@ test("shared reader resolver parses numeric input strictly and uses exact lookup
   assert.match(appSource, /const exact = state\.songPageLookup\.get\(normalized\);/);
   assert.match(appSource, /const next = state\.songIndex\.find\(\(entry\) => entry\.song >= normalized\);/);
   assert.match(appSource, /const PAGE_IMAGE_LOAD_TIMEOUT_MS = 3000;/);
-  assert.match(appSource, /const waitForImageDisplay = \(image, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS\) => new Promise/);
+  assert.match(appSource, /const preloadImage = \(src, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS\) => new Promise/);
   assert.match(appSource, /const loadPageImage = async \(pageNumber, retryToken = ""\) =>/);
-  assert.match(appSource, /const loadState = await waitForImageDisplay\(pageImage\);/);
+  assert.match(appSource, /const loadState = await preloadImage\(url\);/);
+  assert.match(appSource, /return currentSrc\.endsWith\(pageFileName\(pageNumber\)\);/);
+  assert.match(appSource, /loader\.src = src;/);
 });
 
 test("song 55 still resolves to page 55 through the manual index and exact-match lookup", () => {

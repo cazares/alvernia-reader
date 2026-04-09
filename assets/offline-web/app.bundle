@@ -134,7 +134,7 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "251f1cf";
+const CACHE_VERSION = "128bce0";
 const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
@@ -179,7 +179,7 @@ const pageImageMatches = (pageNumber) => {
   if (OFFLINE_PAGES?.[pageNumber]) {
     return currentSrc === OFFLINE_PAGES[pageNumber];
   }
-  return currentSrc.startsWith(pageFileName(pageNumber));
+  return currentSrc.endsWith(pageFileName(pageNumber));
 };
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
@@ -831,19 +831,17 @@ const applyNativeSyncEvent = (payload) => {
 window.__signoVivoReceiveNativeEvent = applyNativeSyncEvent;
 
 // ── Image loading ─────────────────────────────────────────────────────────────
-const waitForImageDisplay = (image, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS) => new Promise((resolve, reject) => {
-  if (image.complete && image.naturalWidth > 0) {
-    resolve("ready");
-    return;
-  }
+const preloadImage = (src, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS) => new Promise((resolve, reject) => {
+  const loader = new Image();
+  loader.decoding = "async";
 
   let settled = false;
   const finish = (handler, value) => {
     if (settled) return;
     settled = true;
     window.clearTimeout(timer);
-    image.removeEventListener("load", onLoad);
-    image.removeEventListener("error", onError);
+    loader.removeEventListener("load", onLoad);
+    loader.removeEventListener("error", onError);
     handler(value);
   };
 
@@ -851,14 +849,15 @@ const waitForImageDisplay = (image, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS) => n
   const onError = () => finish(reject, new Error("No se pudo decodificar la imagen"));
   const timer = window.setTimeout(() => finish(resolve, "timeout"), timeoutMs);
 
-  image.addEventListener("load", onLoad, { once: true });
-  image.addEventListener("error", onError, { once: true });
+  loader.addEventListener("load", onLoad, { once: true });
+  loader.addEventListener("error", onError, { once: true });
+  loader.src = src;
 });
 
 const loadPageImage = async (pageNumber, retryToken = "") => {
   const url = resolvePageSrc(pageNumber, retryToken);
+  const loadState = await preloadImage(url);
   pageImage.src = url;
-  const loadState = await waitForImageDisplay(pageImage);
   return { url, loadState };
 };
 
