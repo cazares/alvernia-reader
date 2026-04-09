@@ -32,7 +32,6 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.match(source, /buildOfflineReaderHtml/);
   assert.match(source, /readAsStringAsync/);
   assert.match(source, /<WebView/);
-  assert.match(source, /window\.OFFLINE_PAGES/);
   assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
   assert.match(source, /source=\{\{ uri: readerUri/);
   assert.match(source, /onMessage=\{handleWebMessage\}/);
@@ -45,6 +44,7 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
   assert.doesNotMatch(source, /react-native-blob-util/);
   assert.match(source, /FileSystem\.copyAsync/);
+  assert.doesNotMatch(source, /window\.OFFLINE_PAGES/);
   assert.doesNotMatch(source, /documentDirectory/);
 });
 

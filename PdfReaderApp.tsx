@@ -1,6 +1,6 @@
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
@@ -18,8 +18,8 @@ const BRIDGE_CHANNEL = "signovivo-native";
 const OFFLINE_READER_ENTRY = "index.html";
 const OFFLINE_READER_SCRIPT = "app.bundle";
 const OFFLINE_PAGE_ASSET_PATTERN = /^pages\/page-(\d+)\.jpg$/;
-// Versioned staged directory for the HTML file; page assets are copied alongside it
-// and are referenced via window.OFFLINE_PAGES absolute file:// URIs.
+// Versioned staged directory: HTML + pages/ live together so relative paths work
+// and allowingReadAccessToURL only needs to cover one root.
 const OFFLINE_STAGE_ROOT = `${FileSystem.cacheDirectory}signovivo-reader/${OFFLINE_WEB_BUNDLE_VERSION}/`;
 const OFFLINE_STAGE_HTML = `${OFFLINE_STAGE_ROOT}index.html`;
 
@@ -51,35 +51,29 @@ const readBundledTextAsset = async (relativePath: string) => {
   return FileSystem.readAsStringAsync(assetUri);
 };
 
-const buildOfflinePageMap = async (): Promise<Record<number, string>> => {
+const stageOfflinePages = async () => {
   const pageEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
     .filter(([p]) => OFFLINE_PAGE_ASSET_PATTERN.test(p));
 
-  // Stage pages into cacheDirectory so allowingReadAccessToURL (= cacheDirectory) covers them.
-  // The bundled asset URI is a local file URI, so copyAsync is the safe local-file path here.
   const pagesDir = `${OFFLINE_STAGE_ROOT}pages/`;
   await FileSystem.makeDirectoryAsync(pagesDir, { intermediates: true });
 
   const BATCH = 20;
-  const map: Record<number, string> = {};
 
   for (let i = 0; i < pageEntries.length; i += BATCH) {
     const batch = pageEntries.slice(i, i + BATCH);
     await Promise.all(batch.map(async ([relativePath, moduleId]) => {
       const match = OFFLINE_PAGE_ASSET_PATTERN.exec(relativePath);
       if (!match) return;
-      const pageNumber = parseInt(match[1], 10);
       const srcUri = await getBundledAssetUri(moduleId as number, { download: true });
-      const destPath = `${pagesDir}${pageNumber}.jpg`;
+      const fileName = relativePath.replace(/^pages\//, "");
+      const destPath = `${pagesDir}${fileName}`;
       await FileSystem.copyAsync({ from: srcUri, to: destPath });
-      map[pageNumber] = destPath;
     }));
   }
-
-  return map;
 };
 
-const buildOfflineReaderHtml = async (pageMap: Record<number, string>) => {
+const buildOfflineReaderHtml = async () => {
   const [indexHtml, appJs] = await Promise.all([
     readBundledTextAsset(OFFLINE_READER_ENTRY),
     readBundledTextAsset(OFFLINE_READER_SCRIPT),
@@ -88,7 +82,6 @@ const buildOfflineReaderHtml = async (pageMap: Record<number, string>) => {
   const nativeBootstrap = [
     `window.__SIGNO_VINO_NATIVE_FILE_MODE = true;`,
     `window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION = ${JSON.stringify(OFFLINE_WEB_BUNDLE_VERSION)};`,
-    `window.OFFLINE_PAGES = ${JSON.stringify(pageMap)};`,
   ].join("\n");
 
   return indexHtml
@@ -110,12 +103,12 @@ const resolveOfflineReaderUri = async () => {
   const stageParent = `${FileSystem.cacheDirectory}signovivo-reader/`;
   await FileSystem.deleteAsync(stageParent, { idempotent: true });
 
-  // buildOfflinePageMap creates OFFLINE_STAGE_ROOT/pages/ with intermediates:true,
+  // stageOfflinePages creates OFFLINE_STAGE_ROOT/pages/ with intermediates:true,
   // which also creates OFFLINE_STAGE_ROOT itself — no separate makeDirectoryAsync needed.
-  const pageMap = await buildOfflinePageMap();
+  await stageOfflinePages();
 
   // Build and write the HTML last; its existence is the "ready" signal.
-  const html = await buildOfflineReaderHtml(pageMap);
+  const html = await buildOfflineReaderHtml();
   await FileSystem.writeAsStringAsync(OFFLINE_STAGE_HTML, html);
   return OFFLINE_STAGE_HTML;
 };
@@ -201,11 +194,10 @@ export default function App() {
     stopNearbyDirectorSync().catch(() => {});
   }, [syncAvailable]);
 
-  // Grant access to the whole cacheDirectory so both the staged HTML and the
-  // Expo-cached page assets (from downloadAsync) are readable by the WebView.
-  const readAccessUrl = readerUri?.startsWith("file://")
-    ? (FileSystem.cacheDirectory ?? undefined)
-    : undefined;
+  const readAccessUrl = useMemo(() => {
+    if (!readerUri?.startsWith("file://")) return undefined;
+    return readerUri.replace(/[^/]+$/, "");
+  }, [readerUri]);
 
   const handleWebMessage = useCallback(async (event: WebViewMessageEvent) => {
     let payload: Record<string, unknown> | null = null;
