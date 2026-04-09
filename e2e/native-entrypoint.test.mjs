@@ -55,6 +55,15 @@ test("native offline template keeps the initial page relative and the script ent
   assert.match(indexHtml, /<script defer src="app\.js"><\/script>/);
 });
 
+test("song 55 still resolves to page 55 through the manual index and exact-match lookup", () => {
+  const songIndexSource = fs.readFileSync(path.join(APP_ROOT, "src", "alverniaManual2SongIndex.js"), "utf8");
+  const appSource = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
+
+  assert.match(songIndexSource, /\[55,\s*55\]/);
+  assert.match(appSource, /const exact = state\.songIndex\.find\(\(entry\) => entry\.song === songNumber\);/);
+  assert.match(appSource, /const next = state\.songIndex\.find\(\(entry\) => entry\.song >= songNumber\);/);
+});
+
 test("offline web bundle version matches the app build number so updates refresh cached files", () => {
   const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
   const assetsSource = fs.readFileSync(assetsPath, "utf8");
