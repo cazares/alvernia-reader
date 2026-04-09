@@ -494,7 +494,7 @@ const isOfflineBundleReady = async (totalPages) => {
 };
 
 const requireOfflineBundle = async (totalPages) => {
-  if (OFFLINE_PAGES) {
+  if (OFFLINE_PAGES || NATIVE_FILE_MODE) {
     setOfflineGateState({ visible: false });
     return;
   }

@@ -134,7 +134,7 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "794ad13";
+const CACHE_VERSION = "251f1cf";
 const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
@@ -494,7 +494,7 @@ const isOfflineBundleReady = async (totalPages) => {
 };
 
 const requireOfflineBundle = async (totalPages) => {
-  if (OFFLINE_PAGES) {
+  if (OFFLINE_PAGES || NATIVE_FILE_MODE) {
     setOfflineGateState({ visible: false });
     return;
   }

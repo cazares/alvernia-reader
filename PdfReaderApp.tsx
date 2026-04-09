@@ -18,6 +18,8 @@ const BRIDGE_CHANNEL = "signovivo-native";
 const OFFLINE_READER_ENTRY = "index.html";
 const OFFLINE_READER_SCRIPT = "app.bundle";
 const OFFLINE_PAGE_ASSET_PATTERN = /^pages\/page-(\d+)\.jpg$/;
+const OFFLINE_BOOT_TIMEOUT_MS = 90000;
+const OFFLINE_STAGE_BATCH_TIMEOUT_MS = 15000;
 // Versioned staged directory: HTML + pages/ live together so relative paths work
 // and allowingReadAccessToURL only needs to cover one root.
 const OFFLINE_STAGE_ROOT = `${FileSystem.cacheDirectory}signovivo-reader/${OFFLINE_WEB_BUNDLE_VERSION}/`;
@@ -28,6 +30,20 @@ type SyncRole = "off" | "director" | "follower";
 const getReadableError = (error: unknown) => {
   if (error instanceof Error && error.message) return error.message;
   return "No se pudo preparar Signo Vino offline.";
+};
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string) => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 };
 
 const getBundledAssetUri = async (moduleId: number, { download = false } = {}) => {
@@ -51,7 +67,7 @@ const readBundledTextAsset = async (relativePath: string) => {
   return FileSystem.readAsStringAsync(assetUri);
 };
 
-const stageOfflinePages = async () => {
+const stageOfflinePages = async (onProgress?: (stage: number, total: number) => void) => {
   const pageEntries = Object.entries(OFFLINE_WEB_BUNDLE_ASSETS)
     .filter(([p]) => OFFLINE_PAGE_ASSET_PATTERN.test(p));
 
@@ -59,17 +75,21 @@ const stageOfflinePages = async () => {
   await FileSystem.makeDirectoryAsync(pagesDir, { intermediates: true });
 
   const BATCH = 20;
+  let completed = 0;
+  onProgress?.(completed, pageEntries.length);
 
   for (let i = 0; i < pageEntries.length; i += BATCH) {
     const batch = pageEntries.slice(i, i + BATCH);
-    await Promise.all(batch.map(async ([relativePath, moduleId]) => {
+    await withTimeout(Promise.all(batch.map(async ([relativePath, moduleId]) => {
       const match = OFFLINE_PAGE_ASSET_PATTERN.exec(relativePath);
       if (!match) return;
       const srcUri = await getBundledAssetUri(moduleId as number, { download: true });
       const fileName = relativePath.replace(/^pages\//, "");
       const destPath = `${pagesDir}${fileName}`;
       await FileSystem.copyAsync({ from: srcUri, to: destPath });
-    }));
+    })), OFFLINE_STAGE_BATCH_TIMEOUT_MS, "La copia de las páginas offline tardó demasiado.");
+    completed += batch.length;
+    onProgress?.(completed, pageEntries.length);
   }
 };
 
@@ -101,18 +121,14 @@ const buildOfflineReaderHtml = async () => {
     );
 };
 
-const resolveOfflineReaderUri = async () => {
+const resolveOfflineReaderUri = async (onProgress?: (stage: number, total: number) => void) => {
   // Return cached staged HTML if this version is already prepared.
   const existing = await FileSystem.getInfoAsync(OFFLINE_STAGE_HTML);
   if (existing.exists) return OFFLINE_STAGE_HTML;
 
-  // Clear stale staged bundles from previous versions.
-  const stageParent = `${FileSystem.cacheDirectory}signovivo-reader/`;
-  await FileSystem.deleteAsync(stageParent, { idempotent: true });
-
   // stageOfflinePages creates OFFLINE_STAGE_ROOT/pages/ with intermediates:true,
   // which also creates OFFLINE_STAGE_ROOT itself — no separate makeDirectoryAsync needed.
-  await stageOfflinePages();
+  await stageOfflinePages(onProgress);
 
   // Build and write the HTML last; its existence is the "ready" signal.
   const html = await buildOfflineReaderHtml();
@@ -123,8 +139,11 @@ const resolveOfflineReaderUri = async () => {
 export default function App() {
   const [readerUri, setReaderUri] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [bootMessage, setBootMessage] = useState("Preparando Signo Vino");
+  const [bootDetail, setBootDetail] = useState("Abriendo la experiencia offline.");
   const [reloadKey, setReloadKey] = useState(0);
   const webViewRef = useRef<WebView>(null);
+  const bootRequestRef = useRef(0);
   const syncRoleRef = useRef<SyncRole>("off");
   const currentPageRef = useRef(2);
   const totalPagesRef = useRef(0);
@@ -146,21 +165,35 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const requestId = bootRequestRef.current + 1;
+    bootRequestRef.current = requestId;
 
     const loadReader = async () => {
       try {
         setErrorMessage("");
+        setBootMessage("Preparando Signo Vino");
+        setBootDetail("Abriendo la experiencia offline.");
         setReaderUri(null);
-        const nextUri = await resolveOfflineReaderUri();
+        const nextUri = await withTimeout(
+          resolveOfflineReaderUri((stage, total) => {
+            if (cancelled || bootRequestRef.current !== requestId) return;
+            setBootMessage("Preparando páginas offline");
+            setBootDetail(`${stage} / ${total} páginas listas`);
+          }),
+          OFFLINE_BOOT_TIMEOUT_MS,
+          "La preparación inicial tardó demasiado.",
+        );
         if (!nextUri) {
           throw new Error("No encontramos el lector web offline.");
         }
-        if (!cancelled) {
+        if (!cancelled && bootRequestRef.current === requestId) {
           setReaderUri(nextUri);
         }
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && bootRequestRef.current === requestId) {
           setErrorMessage(getReadableError(error));
+          setBootMessage("No se pudo preparar Signo Vino");
+          setBootDetail("Toca Reintentar para volver a empezar.");
         }
       }
     };
@@ -313,9 +346,9 @@ export default function App() {
       ) : (
         <View style={styles.loadingShell}>
           <ActivityIndicator color="#93e4ff" size="large" />
-          <Text style={styles.loadingTitle}>Preparando Signo Vino</Text>
+          <Text style={styles.loadingTitle}>{bootMessage}</Text>
           <Text style={styles.loadingText}>
-            {errorMessage || "Abriendo la experiencia completa de signovivo.com para que funcione 100% offline."}
+            {errorMessage || bootDetail}
           </Text>
           {errorMessage ? (
             <Pressable onPress={() => setReloadKey((value) => value + 1)} style={styles.retryButton}>
