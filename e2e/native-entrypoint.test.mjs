@@ -48,6 +48,13 @@ test("native shell hosts the bundled signovivo.com experience locally", () => {
   assert.doesNotMatch(source, /documentDirectory/);
 });
 
+test("native offline template keeps the initial page relative and the script entrypoint stable", () => {
+  const indexHtml = fs.readFileSync(path.join(APP_ROOT, "assets", "offline-web", "index.html"), "utf8");
+
+  assert.match(indexHtml, /src="pages\/page-002\.jpg"/);
+  assert.match(indexHtml, /<script defer src="app\.js"><\/script>/);
+});
+
 test("offline web bundle version matches the app build number so updates refresh cached files", () => {
   const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
   const assetsSource = fs.readFileSync(assetsPath, "utf8");

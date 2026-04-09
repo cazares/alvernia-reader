@@ -79,6 +79,13 @@ const buildOfflineReaderHtml = async () => {
     readBundledTextAsset(OFFLINE_READER_SCRIPT),
   ]);
 
+  if (!indexHtml.includes('src="pages/page-002.jpg"')) {
+    throw new Error("El lector offline debe iniciar con una ruta relativa para la pagina 2.");
+  }
+  if (!indexHtml.includes('<script defer src="app.js"></script>')) {
+    throw new Error("El lector offline debe conservar el entrypoint web esperado.");
+  }
+
   const nativeBootstrap = [
     `window.__SIGNO_VINO_NATIVE_FILE_MODE = true;`,
     `window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION = ${JSON.stringify(OFFLINE_WEB_BUNDLE_VERSION)};`,
