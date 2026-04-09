@@ -58,10 +58,16 @@ test("native offline template keeps the initial page relative and the script ent
 test("shared reader resolver parses numeric input strictly and uses exact lookups first", () => {
   const appSource = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
 
+  assert.match(appSource, /const buildSongPageLookup = \(songIndex\) => new Map\(songIndex\.map/);
   assert.match(appSource, /const normalizeSongDraftNumber = \(draft\) =>/);
-  assert.match(appSource, /state\.songPageLookup = new Map\(state\.songIndex\.map/);
+  assert.match(appSource, /state\.songPageLookup = buildSongPageLookup\(state\.songIndex\);/);
+  assert.match(appSource, /const resolveSongPage = \(songNumber\) =>/);
   assert.match(appSource, /const exact = state\.songPageLookup\.get\(normalized\);/);
   assert.match(appSource, /const next = state\.songIndex\.find\(\(entry\) => entry\.song >= normalized\);/);
+  assert.match(appSource, /const PAGE_IMAGE_LOAD_TIMEOUT_MS = 3000;/);
+  assert.match(appSource, /const waitForImageDisplay = \(image, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS\) => new Promise/);
+  assert.match(appSource, /const loadPageImage = async \(pageNumber, retryToken = ""\) =>/);
+  assert.match(appSource, /const loadState = await waitForImageDisplay\(pageImage\);/);
 });
 
 test("song 55 still resolves to page 55 through the manual index and exact-match lookup", () => {
@@ -69,8 +75,10 @@ test("song 55 still resolves to page 55 through the manual index and exact-match
   const appSource = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
 
   assert.match(songIndexSource, /\[55,\s*55\]/);
+  assert.match(appSource, /const buildSongPageLookup = \(songIndex\) => new Map\(songIndex\.map/);
   assert.match(appSource, /const normalizeSongDraftNumber = \(draft\) =>/);
-  assert.match(appSource, /state\.songPageLookup = new Map\(state\.songIndex\.map/);
+  assert.match(appSource, /state\.songPageLookup = buildSongPageLookup\(state\.songIndex\);/);
+  assert.match(appSource, /const resolveSongPage = \(songNumber\) =>/);
   assert.match(appSource, /const exact = state\.songPageLookup\.get\(normalized\);/);
   assert.match(appSource, /const next = state\.songIndex\.find\(\(entry\) => entry\.song >= normalized\);/);
 });

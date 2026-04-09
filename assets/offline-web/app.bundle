@@ -134,7 +134,7 @@ const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "388eb06";
+const CACHE_VERSION = "794ad13";
 const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
@@ -188,6 +188,7 @@ const isFullscreen = () => Boolean(getFullscreenElement());
 const scheduleIdleWork = window.requestIdleCallback
   ? window.requestIdleCallback.bind(window)
   : (callback) => window.setTimeout(callback, 140);
+const PAGE_IMAGE_LOAD_TIMEOUT_MS = 3000;
 const setViewportCssVars = () => {
   const viewport = window.visualViewport;
   const width = Math.max(1, Math.round((viewport?.width || window.innerWidth) * 100) / 100);
@@ -566,6 +567,8 @@ const clearInitialUrl = () => {
   window.history.replaceState({}, "", initialUrl.pathname || "/");
 };
 
+const buildSongPageLookup = (songIndex) => new Map(songIndex.map((entry) => [entry.song, entry.page]));
+
 const findSongIndexAtOrBeforePage = (pageNumber) => {
   let index = -1;
   for (let i = 0; i < state.songIndex.length; i += 1) {
@@ -584,7 +587,7 @@ const normalizeSongDraftNumber = (draft) => {
   return parsed;
 };
 
-const findSongPage = (songNumber) => {
+const resolveSongPage = (songNumber) => {
   const normalized = normalizeSongDraftNumber(songNumber);
   if (normalized === null) return 1;
 
@@ -594,6 +597,8 @@ const findSongPage = (songNumber) => {
   const next = state.songIndex.find((entry) => entry.song >= normalized);
   return next ? next.page : state.totalPages;
 };
+
+const findSongPage = (songNumber) => resolveSongPage(songNumber);
 
 const getCurrentSongNumber = () => {
   const index = findSongIndexAtOrBeforePage(state.currentPage);
@@ -826,18 +831,35 @@ const applyNativeSyncEvent = (payload) => {
 window.__signoVivoReceiveNativeEvent = applyNativeSyncEvent;
 
 // ── Image loading ─────────────────────────────────────────────────────────────
-const decodeImage = (src) => new Promise((resolve, reject) => {
-  const loader = new Image();
-  loader.decoding = "async";
-  loader.onload = () => resolve(true);
-  loader.onerror = () => reject(new Error("No se pudo decodificar la imagen"));
-  loader.src = src;
+const waitForImageDisplay = (image, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS) => new Promise((resolve, reject) => {
+  if (image.complete && image.naturalWidth > 0) {
+    resolve("ready");
+    return;
+  }
+
+  let settled = false;
+  const finish = (handler, value) => {
+    if (settled) return;
+    settled = true;
+    window.clearTimeout(timer);
+    image.removeEventListener("load", onLoad);
+    image.removeEventListener("error", onError);
+    handler(value);
+  };
+
+  const onLoad = () => finish(resolve, "ready");
+  const onError = () => finish(reject, new Error("No se pudo decodificar la imagen"));
+  const timer = window.setTimeout(() => finish(resolve, "timeout"), timeoutMs);
+
+  image.addEventListener("load", onLoad, { once: true });
+  image.addEventListener("error", onError, { once: true });
 });
 
 const loadPageImage = async (pageNumber, retryToken = "") => {
   const url = resolvePageSrc(pageNumber, retryToken);
-  await decodeImage(url);
-  return url;
+  pageImage.src = url;
+  const loadState = await waitForImageDisplay(pageImage);
+  return { url, loadState };
 };
 
 const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = {}) => {
@@ -848,14 +870,15 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
 
   try {
     let nextPageUrl = "";
+    let loadState = "ready";
     if (pageImageMatches(nextPage) && pageImage.complete && pageImage.naturalWidth > 0) {
       nextPageUrl = resolvePageSrc(nextPage);
     } else {
       try {
-        nextPageUrl = await loadPageImage(nextPage);
+        ({ url: nextPageUrl, loadState } = await loadPageImage(nextPage));
       } catch (firstError) {
         console.warn("Primer intento falló al cargar la página", nextPage, firstError);
-        nextPageUrl = await loadPageImage(nextPage, Date.now());
+        ({ url: nextPageUrl, loadState } = await loadPageImage(nextPage, Date.now()));
       }
     }
 
@@ -869,6 +892,9 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     state.currentPage = nextPage;
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
+    if (loadState === "timeout") {
+      console.warn("La carga de la página tardó demasiado", nextPage);
+    }
     postNativeBridge({
       type: "page-changed",
       page: nextPage,
@@ -2541,7 +2567,7 @@ const initReader = async () => {
   updateFullscreenButton();
   hideLoadingIndicator();
   await requireOfflineBundle(state.totalPages);
-  state.songPageLookup = new Map(state.songIndex.map((entry) => [entry.song, entry.page]));
+  state.songPageLookup = buildSongPageLookup(state.songIndex);
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   loadSearchIndex();
   renderActiveTab();
