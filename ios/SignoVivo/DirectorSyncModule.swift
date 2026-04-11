@@ -264,12 +264,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     guard currentRole == "director" else { return }
     guard !otherToken.isEmpty, !currentDirectorToken.isEmpty else { return }
 
-    // Only one director may survive for a given session code.
-    // The lexicographically smaller token wins so every nearby device
-    // reaches the same answer without needing internet or a server.
-    if otherToken < currentDirectorToken {
-      emitError(code: "DIRECTOR_CONFLICT", message: "Otro director cercano ya usa este código. Este dispositivo salió del modo director.")
-      resetTransport(emitState: true)
+    // The device that became director most recently (largest timestamp token) wins.
+    // This means a device that enters the code after an existing director always
+    // takes over — the old director is demoted to follower automatically.
+    if otherToken > currentDirectorToken {
+      emitError(code: "DIRECTOR_CONFLICT", message: "Un nuevo director tomó el control. Este dispositivo cambió a modo seguidor.")
+      resetTransport(emitState: false) // JS will restart as follower; skip idle event
     }
   }
 
@@ -279,7 +279,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private static func randomToken() -> String {
-    UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    // Zero-padded microsecond timestamp so newer directors always have a
+    // lexicographically larger token — the newest director always wins.
+    let microseconds = Int64(Date().timeIntervalSince1970 * 1_000_000)
+    return String(format: "%020lld", microseconds)
   }
 
   func advertiser(

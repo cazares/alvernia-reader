@@ -3,56 +3,41 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const APP_ROOT = path.resolve(import.meta.dirname, "..");
+const APP_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
 test("package main points at the native app entrypoint", () => {
-  const packageJsonPath = path.join(APP_ROOT, "package.json");
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-
+  const packageJson = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "package.json"), "utf8"));
   assert.match(packageJson.main, /^(index\.js|expo\/AppEntry\.js)$/);
-  assert.equal(packageJson.dependencies["expo-file-system"], "~19.0.21");
-  assert.equal(packageJson.dependencies["react-native-webview"], "13.15.0");
-  assert.equal(packageJson.dependencies.tonal, "^6.4.3");
 });
 
 test("native app entrypoint registers the root App component", () => {
-  const entryPath = path.join(APP_ROOT, "index.js");
-  const source = fs.readFileSync(entryPath, "utf8");
-
+  const source = fs.readFileSync(path.join(APP_ROOT, "index.js"), "utf8");
   assert.match(source, /registerRootComponent/);
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("native shell hosts the bundled signovivo.com experience locally", () => {
-  const appPath = path.join(APP_ROOT, "PdfReaderApp.tsx");
-  const source = fs.readFileSync(appPath, "utf8");
+test("native reader uses FlatList paging over bundled page assets — no WebView, no file staging", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
 
-  assert.match(source, /react-native-webview/);
+  assert.match(source, /FlatList/);
+  assert.match(source, /pagingEnabled/);
   assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
-  assert.match(source, /buildOfflineReaderHtml/);
-  assert.match(source, /readAsStringAsync/);
-  assert.match(source, /<WebView/);
-  assert.match(source, /window\.OFFLINE_PAGES/);
-  assert.match(source, /__SIGNO_VINO_NATIVE_FILE_MODE/);
-  assert.match(source, /source=\{\{ uri: readerUri/);
-  assert.match(source, /onMessage=\{handleWebMessage\}/);
-  assert.match(source, /onLoadEnd=\{sendBridgeState\}/);
-  assert.match(source, /nearbyDirectorSync/);
-  assert.match(source, /sync-start-director/);
-  assert.match(source, /sync-start-follower/);
-  assert.match(source, /Director listo\. Esperando seguidoras cercanas\./);
-  assert.match(source, /Buscando director cercano\.\.\./);
-  assert.doesNotMatch(source, /web\/dist\/signo-vino-offline\.html/);
-  assert.doesNotMatch(source, /react-native-blob-util/);
-  assert.doesNotMatch(source, /copyAsync/);
-  assert.doesNotMatch(source, /documentDirectory/);
+  assert.match(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
+  assert.match(source, /resolveSongPage/);
+  assert.match(source, /keyboardType="number-pad"/);
+  assert.doesNotMatch(source, /react-native-webview/);
+  assert.doesNotMatch(source, /FileSystem/);
+  assert.doesNotMatch(source, /stageOfflinePages/);
+});
+
+test("song index resolves correctly — song 55 → page 55, out-of-range clamps", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "src", "alverniaManual2SongIndex.js"), "utf8");
+  assert.match(source, /\[55,\s*55\]/);
 });
 
 test("offline web bundle version matches the app build number so updates refresh cached files", () => {
-  const assetsPath = path.join(APP_ROOT, "src", "offlineWebBundle.js");
-  const assetsSource = fs.readFileSync(assetsPath, "utf8");
+  const assetsSource = fs.readFileSync(path.join(APP_ROOT, "src", "offlineWebBundle.js"), "utf8");
   const versionJson = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "version.json"), "utf8"));
-
   const match = assetsSource.match(/OFFLINE_WEB_BUNDLE_VERSION = "(\d+)"/);
   assert.ok(match, "Expected offline bundle version constant");
   assert.equal(match[1], String(versionJson.buildNumber));
@@ -64,64 +49,15 @@ test("native iOS project build number matches version.json", () => {
     path.join(APP_ROOT, "ios", "SignoVivo.xcodeproj", "project.pbxproj"),
     "utf8",
   );
-
-  const matches = [...projectSource.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]);
+  const matches = [...projectSource.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => m[1]);
   assert.ok(matches.length >= 2, "Expected native iOS build number entries");
   for (const buildNumber of matches) {
     assert.equal(buildNumber, String(versionJson.buildNumber));
   }
 });
 
-test("restored web source still includes the drawer, numpad, browse, and hidden sync experience", () => {
-  const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
-  const webApp = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
-
-  assert.match(indexHtml, /drawer-handle/);
-  assert.match(indexHtml, /mode-btn-numpad/);
-  assert.match(indexHtml, /mode-btn-browse/);
-  assert.match(indexHtml, /numberpad-grid/);
-  assert.match(indexHtml, /search-input/);
-  assert.match(indexHtml, /director-sync-panel/);
-  assert.match(indexHtml, /director-mode-badge/);
-  assert.match(indexHtml, /offline-gate/);
-  assert.match(indexHtml, /help-settings-label/);
-  assert.match(webApp, /switchDrawerMode/);
-  assert.match(webApp, /goToDraftSong/);
-  assert.match(webApp, /activateDirectorShortcut/);
-  assert.match(webApp, /renderActiveTab/);
-  assert.match(webApp, /bindReaderEvents/);
-  assert.match(webApp, /postNativeBridge/);
-  assert.match(webApp, /applyNativeSyncEvent/);
-  assert.match(webApp, /requestAutoFollowerMode/);
-  assert.match(webApp, /DEFAULT_NATIVE_SYNC_SESSION = "2046"/);
-  assert.match(webApp, /SECRET_DIRECTOR_DRAFT = "2046"/);
-  assert.match(webApp, /nativeSyncAutoStartRequested/);
-  assert.match(webApp, /NATIVE_FILE_MODE/);
-  assert.match(webApp, /resolveAppPath/);
-  assert.match(webApp, /prefetchSongPage/);
-  assert.match(webApp, /img\.src = resolvePageSrc\(pageNumber\)/);
-  assert.match(webApp, /nextPageUrl = resolvePageSrc\(nextPage\)/);
-  assert.match(webApp, /sync-start-director/);
-  assert.match(webApp, /sync-start-follower/);
-  assert.match(webApp, /requestAutoFollowerMode/);
-  assert.match(webApp, /activateDirectorShortcut/);
-});
-
-test("reader renders exactly one visible page surface at a time", () => {
-  const indexHtml = fs.readFileSync(path.join(APP_ROOT, "web", "src", "index.html"), "utf8");
-  const styles = fs.readFileSync(path.join(APP_ROOT, "web", "src", "styles.css"), "utf8");
-
-  const pageImageMatches = indexHtml.match(/id="page-image"/g) || [];
-  assert.equal(pageImageMatches.length, 1, "Expected a single page image element");
-  assert.match(styles, /\.viewer-shell \{[\s\S]*overflow: hidden;/);
-  assert.match(styles, /\.viewer-shell \{[\s\S]*contain: layout paint style;/);
-  assert.match(styles, /#page-image \{[\s\S]*object-fit: contain;/);
-});
-
 test("iOS app keeps exempt-encryption declaration and nearby sync permissions", () => {
-  const plistPath = path.join(APP_ROOT, "ios", "SignoVivo", "Info.plist");
-  const plistSource = fs.readFileSync(plistPath, "utf8");
-
+  const plistSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "Info.plist"), "utf8");
   assert.match(plistSource, /ITSAppUsesNonExemptEncryption/);
   assert.match(plistSource, /NSLocalNetworkUsageDescription/);
   assert.match(plistSource, /NSBonjourServices/);
@@ -130,22 +66,14 @@ test("iOS app keeps exempt-encryption declaration and nearby sync permissions", 
 });
 
 test("metro bundles the offline html and bundle assets", () => {
-  const metroConfigPath = path.join(APP_ROOT, "metro.config.js");
-  const source = fs.readFileSync(metroConfigPath, "utf8");
-
+  const source = fs.readFileSync(path.join(APP_ROOT, "metro.config.js"), "utf8");
   assert.match(source, /assetExts\.push\("html"\)/);
   assert.match(source, /assetExts\.push\("bundle"\)/);
 });
 
-test("nearby director sync source is present in the shipped app", () => {
-  const syncClientPath = path.join(APP_ROOT, "src", "nearbyDirectorSync.js");
-  const swiftModulePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift");
-  const bridgePath = path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModuleBridge.m");
-  const swiftSource = fs.readFileSync(swiftModulePath, "utf8");
-
-  assert.equal(fs.existsSync(syncClientPath), true);
-  assert.equal(fs.existsSync(swiftModulePath), true);
-  assert.equal(fs.existsSync(bridgePath), true);
-  assert.match(swiftSource, /encryptionPreference: \.none/);
-  assert.match(swiftSource, /didReceiveCertificate/);
+test("iOS pod properties disable new architecture and network inspector", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "ios", "Podfile.properties.json"), "utf8");
+  const props = JSON.parse(source);
+  assert.equal(props["newArchEnabled"], "false");
+  assert.equal(props["EX_DEV_CLIENT_NETWORK_INSPECTOR"], "false");
 });

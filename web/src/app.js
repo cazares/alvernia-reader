@@ -77,6 +77,7 @@ const state = {
   currentPage: 1,
   songDraft: "",
   songIndex: [],
+  songPageLookup: new Map(),
   themeIndex: [],
   pageHistory: [],
   searchIndexPages: [],
@@ -178,7 +179,7 @@ const pageImageMatches = (pageNumber) => {
   if (OFFLINE_PAGES?.[pageNumber]) {
     return currentSrc === OFFLINE_PAGES[pageNumber];
   }
-  return currentSrc.startsWith(pageFileName(pageNumber));
+  return currentSrc.endsWith(pageFileName(pageNumber));
 };
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
@@ -187,6 +188,7 @@ const isFullscreen = () => Boolean(getFullscreenElement());
 const scheduleIdleWork = window.requestIdleCallback
   ? window.requestIdleCallback.bind(window)
   : (callback) => window.setTimeout(callback, 140);
+const PAGE_IMAGE_LOAD_TIMEOUT_MS = 3000;
 const setViewportCssVars = () => {
   const viewport = window.visualViewport;
   const width = Math.max(1, Math.round((viewport?.width || window.innerWidth) * 100) / 100);
@@ -492,7 +494,7 @@ const isOfflineBundleReady = async (totalPages) => {
 };
 
 const requireOfflineBundle = async (totalPages) => {
-  if (OFFLINE_PAGES) {
+  if (OFFLINE_PAGES || NATIVE_FILE_MODE) {
     setOfflineGateState({ visible: false });
     return;
   }
@@ -565,6 +567,8 @@ const clearInitialUrl = () => {
   window.history.replaceState({}, "", initialUrl.pathname || "/");
 };
 
+const buildSongPageLookup = (songIndex) => new Map(songIndex.map((entry) => [entry.song, entry.page]));
+
 const findSongIndexAtOrBeforePage = (pageNumber) => {
   let index = -1;
   for (let i = 0; i < state.songIndex.length; i += 1) {
@@ -574,13 +578,27 @@ const findSongIndexAtOrBeforePage = (pageNumber) => {
   return index;
 };
 
-const findSongPage = (songNumber) => {
-  if (songNumber <= 0) return 1;
-  const exact = state.songIndex.find((entry) => entry.song === songNumber);
-  if (exact) return exact.page;
-  const next = state.songIndex.find((entry) => entry.song >= songNumber);
+const normalizeSongDraftNumber = (draft) => {
+  const trimmed = String(draft ?? "").trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const resolveSongPage = (songNumber) => {
+  const normalized = normalizeSongDraftNumber(songNumber);
+  if (normalized === null) return 1;
+
+  const exact = state.songPageLookup.get(normalized);
+  if (Number.isFinite(exact)) return exact;
+
+  const next = state.songIndex.find((entry) => entry.song >= normalized);
   return next ? next.page : state.totalPages;
 };
+
+const findSongPage = (songNumber) => resolveSongPage(songNumber);
 
 const getCurrentSongNumber = () => {
   const index = findSongIndexAtOrBeforePage(state.currentPage);
@@ -813,18 +831,34 @@ const applyNativeSyncEvent = (payload) => {
 window.__signoVivoReceiveNativeEvent = applyNativeSyncEvent;
 
 // ── Image loading ─────────────────────────────────────────────────────────────
-const decodeImage = (src) => new Promise((resolve, reject) => {
+const preloadImage = (src, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS) => new Promise((resolve, reject) => {
   const loader = new Image();
   loader.decoding = "async";
-  loader.onload = () => resolve(true);
-  loader.onerror = () => reject(new Error("No se pudo decodificar la imagen"));
+
+  let settled = false;
+  const finish = (handler, value) => {
+    if (settled) return;
+    settled = true;
+    window.clearTimeout(timer);
+    loader.removeEventListener("load", onLoad);
+    loader.removeEventListener("error", onError);
+    handler(value);
+  };
+
+  const onLoad = () => finish(resolve, "ready");
+  const onError = () => finish(reject, new Error("No se pudo decodificar la imagen"));
+  const timer = window.setTimeout(() => finish(resolve, "timeout"), timeoutMs);
+
+  loader.addEventListener("load", onLoad, { once: true });
+  loader.addEventListener("error", onError, { once: true });
   loader.src = src;
 });
 
 const loadPageImage = async (pageNumber, retryToken = "") => {
   const url = resolvePageSrc(pageNumber, retryToken);
-  await decodeImage(url);
-  return url;
+  const loadState = await preloadImage(url);
+  pageImage.src = url;
+  return { url, loadState };
 };
 
 const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = {}) => {
@@ -835,14 +869,15 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
 
   try {
     let nextPageUrl = "";
+    let loadState = "ready";
     if (pageImageMatches(nextPage) && pageImage.complete && pageImage.naturalWidth > 0) {
       nextPageUrl = resolvePageSrc(nextPage);
     } else {
       try {
-        nextPageUrl = await loadPageImage(nextPage);
+        ({ url: nextPageUrl, loadState } = await loadPageImage(nextPage));
       } catch (firstError) {
         console.warn("Primer intento falló al cargar la página", nextPage, firstError);
-        nextPageUrl = await loadPageImage(nextPage, Date.now());
+        ({ url: nextPageUrl, loadState } = await loadPageImage(nextPage, Date.now()));
       }
     }
 
@@ -856,6 +891,9 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     state.currentPage = nextPage;
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
+    if (loadState === "timeout") {
+      console.warn("La carga de la página tardó demasiado", nextPage);
+    }
     postNativeBridge({
       type: "page-changed",
       page: nextPage,
@@ -924,8 +962,8 @@ const goToDraftSong = () => {
     activateDirectorShortcut();
     return;
   }
-  const songNumber = Number.parseInt(state.songDraft, 10);
-  if (!Number.isFinite(songNumber)) return;
+  const songNumber = normalizeSongDraftNumber(state.songDraft);
+  if (songNumber === null) return;
   renderPage(findSongPage(songNumber));
   addToRecientes(songNumber);
   clearDraft();
@@ -2528,6 +2566,7 @@ const initReader = async () => {
   updateFullscreenButton();
   hideLoadingIndicator();
   await requireOfflineBundle(state.totalPages);
+  state.songPageLookup = buildSongPageLookup(state.songIndex);
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   loadSearchIndex();
   renderActiveTab();

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const APP_ROOT = path.resolve(import.meta.dirname, "..");
+const APP_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
 const readJson = (relativePath) => JSON.parse(
   fs.readFileSync(path.join(APP_ROOT, relativePath), "utf8"),
@@ -18,6 +18,7 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
     "build:web:offline",
     "ios",
     "ios:local",
+    "postinstall",
     "start",
     "test:e2e",
     "typecheck",
