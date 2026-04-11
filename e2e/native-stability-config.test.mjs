@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const APP_ROOT = path.resolve(import.meta.dirname, "..");
+const APP_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
 test("iOS pod properties disable new architecture and network inspector", () => {
   const source = fs.readFileSync(path.join(APP_ROOT, "ios", "Podfile.properties.json"), "utf8");
