@@ -159,6 +159,9 @@ export default function App() {
   const [browseVisible, setBrowseVisible] = useState(false);
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [followerNotice, setFollowerNotice] = useState(false);
+  const followerBannerAnim = useRef(new Animated.Value(-120)).current;
+  const lastFollowerNoticeRef = useRef(0);
+  const followerDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
@@ -204,9 +207,12 @@ export default function App() {
         setSyncRole("follower");
         startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
       } else if (event.type === "state" && event.status === "connected" && syncRoleRef.current === "follower") {
-        // Follower just connected to director — show notification
-        setFollowerNotice(true);
-        setTimeout(() => setFollowerNotice(false), 5000);
+        // Follower just connected to director — show banner (30s cooldown)
+        const now = Date.now();
+        if (now - lastFollowerNoticeRef.current > 30_000) {
+          lastFollowerNoticeRef.current = now;
+          showFollowerBanner();
+        }
       }
     });
     return () => sub.remove();
@@ -298,6 +304,38 @@ export default function App() {
     }
   }, [closeSyncModal]);
 
+  // Follower banner
+  const hideFollowerBanner = useCallback(() => {
+    if (followerDismissTimer.current) { clearTimeout(followerDismissTimer.current); followerDismissTimer.current = null; }
+    Animated.spring(followerBannerAnim, { toValue: -120, useNativeDriver: true, bounciness: 0, speed: 18 }).start(() => {
+      setFollowerNotice(false);
+    });
+  }, [followerBannerAnim]);
+
+  const showFollowerBanner = useCallback(() => {
+    setFollowerNotice(true);
+    followerBannerAnim.setValue(-120);
+    Animated.spring(followerBannerAnim, { toValue: 0, useNativeDriver: true, bounciness: 6, speed: 14 }).start();
+    followerDismissTimer.current = setTimeout(() => hideFollowerBanner(), 4500);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followerBannerAnim, hideFollowerBanner]);
+
+  const followerBannerPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 6,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy < 0) followerBannerAnim.setValue(gs.dy);
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy < -30 || gs.vy < -0.5) {
+          hideFollowerBanner();
+        } else {
+          Animated.spring(followerBannerAnim, { toValue: 0, useNativeDriver: true, bounciness: 4, speed: 16 }).start();
+        }
+      },
+    }),
+  ).current;
+
   // Spotlight-style search
   const openSearch = useCallback(() => {
     setSearchText("");
@@ -375,6 +413,7 @@ export default function App() {
   );
 
   const { width, height } = dims;
+  const isSmallScreen = Math.min(width, height) < 600;
 
   const renderItem = useCallback(({ item }: ListRenderItemInfo<typeof PAGE_ASSETS[0]>) => (
     <View style={{ width, height, backgroundColor: "#000" }}>
@@ -420,7 +459,8 @@ export default function App() {
         const cellW = (width - GAP * (gridCols + 1)) / gridCols;
         const imgH = Math.round(cellW * 1.33);
         const labelH = 28;
-        const cellH = imgH + labelH + GAP;
+        // rowH = cell content height + top/bottom margins (GAP/2 each = GAP total)
+        const rowH = imgH + labelH + GAP;
 
         return (
           <View style={styles.gridOverlay}>
@@ -433,20 +473,25 @@ export default function App() {
               maxToRenderPerBatch={gridCols * 2}
               initialNumToRender={gridCols * 5}
               contentContainerStyle={{ padding: GAP / 2 }}
+              getItemLayout={(_, index) => ({
+                length: rowH,
+                offset: GAP / 2 + rowH * Math.floor(index / gridCols),
+                index,
+              })}
               renderItem={({ item }) => {
                 const thumb = THUMB_ASSETS[item.page - 1];
                 return (
                   <TouchableOpacity
-                    style={{ width: cellW, margin: GAP / 2, backgroundColor: "#000", borderRadius: 6, overflow: "hidden" }}
+                    style={{ width: cellW, margin: GAP / 2, backgroundColor: "#111", borderRadius: 6, overflow: "hidden" }}
                     onPress={() => handleGridSongTap(item.song)}
                     activeOpacity={0.7}
                   >
                     {thumb?.source ? (
                       <Image source={thumb.source} style={{ width: cellW, height: imgH }} resizeMode="cover" />
                     ) : (
-                      <View style={{ width: cellW, height: imgH, backgroundColor: "#333" }} />
+                      <View style={{ width: cellW, height: imgH, backgroundColor: "#222" }} />
                     )}
-                    <View style={{ height: labelH, backgroundColor: "#000", justifyContent: "center", alignItems: "center" }}>
+                    <View style={{ height: labelH, backgroundColor: "#111", justifyContent: "center", alignItems: "center" }}>
                       <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{item.song}</Text>
                     </View>
                   </TouchableOpacity>
@@ -559,16 +604,16 @@ export default function App() {
 
       {/* Director buttons — top-right row: [Browse] [Grid] [Search] */}
       {syncRole === "director" && (
-        <View style={styles.directorBar}>
-          <TouchableOpacity style={styles.dirBtn} onPress={openBrowse} activeOpacity={0.75}>
-            <Text style={styles.dirBtnIcon}>☰</Text>
+        <View style={[styles.directorBar, isSmallScreen && styles.directorBarSmall]}>
+          <TouchableOpacity style={[styles.dirBtn, isSmallScreen && styles.dirBtnSmall]} onPress={openBrowse} activeOpacity={0.75}>
+            <Text style={[styles.dirBtnIcon, isSmallScreen && styles.dirBtnIconSmall]}>☰</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.dirBtn} onPress={handleGridButtonPress} activeOpacity={0.75}>
-            <Text style={styles.dirBtnIcon}>⊞</Text>
-            {gridVisible && <Text style={styles.gridDensityBadge}>{gridCols}</Text>}
+          <TouchableOpacity style={[styles.dirBtn, isSmallScreen && styles.dirBtnSmall]} onPress={handleGridButtonPress} activeOpacity={0.75}>
+            <Text style={[styles.dirBtnIcon, isSmallScreen && styles.dirBtnIconSmall]}>⊞</Text>
+            {gridVisible && <Text style={[styles.gridDensityBadge, isSmallScreen && styles.gridDensityBadgeSmall]}>{gridCols}</Text>}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.dirBtn} onPress={openSearch} activeOpacity={0.75}>
-            <Text style={styles.dirBtnIcon}>⌕</Text>
+          <TouchableOpacity style={[styles.dirBtn, isSmallScreen && styles.dirBtnSmall]} onPress={openSearch} activeOpacity={0.75}>
+            <Text style={[styles.dirBtnIcon, isSmallScreen && styles.dirBtnIconSmall]}>⌕</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -670,19 +715,23 @@ export default function App() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* ── Follower connection notification ── */}
-      <Modal visible={followerNotice} transparent animationType="fade" statusBarTranslucent>
-        <TouchableWithoutFeedback onPress={() => setFollowerNotice(false)}>
-          <View style={styles.noticeBackdrop}>
-            <View style={styles.noticeCard}>
-              <Text style={styles.noticeEmoji}>📡</Text>
-              <Text style={styles.noticeTitle}>Conectado al director</Text>
-              <Text style={styles.noticeBody}>Tu iPad seguirá automáticamente los cambios de página del director. No necesitas hacer nada.</Text>
-              <Text style={styles.noticeDismiss}>Toca para cerrar</Text>
+      {/* ── Follower connection banner (slide-down, swipe-up to dismiss) ── */}
+      {followerNotice && (
+        <Animated.View
+          style={[styles.noticeBanner, { transform: [{ translateY: followerBannerAnim }] }]}
+          {...followerBannerPan.panHandlers}
+        >
+          <TouchableWithoutFeedback onPress={hideFollowerBanner}>
+            <View style={styles.noticeBannerInner}>
+              <Text style={styles.noticeBannerEmoji}>📡</Text>
+              <View style={styles.noticeBannerText}>
+                <Text style={styles.noticeBannerTitle}>Conectado al director</Text>
+                <Text style={styles.noticeBannerBody}>Tu iPad seguirá automáticamente los cambios de página.</Text>
+              </View>
             </View>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+          </TouchableWithoutFeedback>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -891,22 +940,37 @@ const styles = StyleSheet.create({
   browsePage: { fontSize: 14, color: "rgba(255,255,255,0.4)" },
   browseEmpty: { color: "rgba(255,255,255,0.3)", fontSize: 16, textAlign: "center", marginTop: 60 },
 
-  // Follower notification
-  noticeBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center" },
-  noticeCard: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 28,
-    marginHorizontal: 40,
-    alignItems: "center",
+  // Follower notification banner
+  noticeBanner: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 999,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 20,
   },
-  noticeEmoji: { fontSize: 48, marginBottom: 12 },
-  noticeTitle: { fontSize: 20, fontWeight: "700", color: "#1a1a2e", marginBottom: 8 },
-  noticeBody: { fontSize: 15, color: "#555", textAlign: "center", lineHeight: 22, marginBottom: 16 },
-  noticeDismiss: { fontSize: 13, color: "#999" },
+  noticeBannerInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(20,30,60,0.97)",
+    margin: 10,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    gap: 14,
+  },
+  noticeBannerEmoji: { fontSize: 28 },
+  noticeBannerText: { flex: 1 },
+  noticeBannerTitle: { fontSize: 15, fontWeight: "700", color: "#fff", marginBottom: 2 },
+  noticeBannerBody: { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 18 },
+
+  // Small-screen (iPhone) director bar overrides
+  directorBarSmall: { gap: 4 },
+  dirBtnSmall: { paddingHorizontal: 9, paddingVertical: 7 },
+  dirBtnIconSmall: { fontSize: 20, lineHeight: 24 },
+  gridDensityBadgeSmall: { fontSize: 12, lineHeight: 24 },
 });
