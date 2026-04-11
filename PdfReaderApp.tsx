@@ -33,6 +33,8 @@ import {
 import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
 // @ts-ignore — Metro resolves JSON fine
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
+// @ts-ignore
+import SONG_SEARCH_INDEX from "./assets/offline-web/song-search-index.json";
 
 const TOTAL_PAGES = 368;
 const START_PAGE = 2;
@@ -43,10 +45,11 @@ const SONG_TO_PAGE = new Map<number, number>(
 );
 const SORTED_SONGS = [...ALVERNIA_MANUAL_2_SONG_INDEX].sort((a, b) => a.song - b.song);
 
-// Searchable song entries: song number + OCR-extracted title (normalized for accent-insensitive matching)
+// Searchable song entries: title for display + full OCR text (title + lyrics) for matching
 const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
   const title = (SONG_TITLES as Record<string, string>)[String(s.song)] ?? "";
-  const normalized = title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const fullText = (SONG_SEARCH_INDEX as Record<string, string>)[String(s.song)] ?? title;
+  const normalized = fullText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   return { ...s, title, normalized };
 });
 
