@@ -31,6 +31,8 @@ import {
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
 import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
+// @ts-ignore — Metro resolves JSON fine
+import SONG_TITLES from "./assets/offline-web/song-titles.json";
 
 const TOTAL_PAGES = 368;
 const START_PAGE = 2;
@@ -40,6 +42,13 @@ const SONG_TO_PAGE = new Map<number, number>(
   ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]),
 );
 const SORTED_SONGS = [...ALVERNIA_MANUAL_2_SONG_INDEX].sort((a, b) => a.song - b.song);
+
+// Searchable song entries: song number + OCR-extracted title (normalized for accent-insensitive matching)
+const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
+  const title = (SONG_TITLES as Record<string, string>)[String(s.song)] ?? "";
+  const normalized = title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return { ...s, title, normalized };
+});
 
 const resolveSongPage = (input: string): number => {
   const n = parseInt(input, 10);
@@ -336,7 +345,7 @@ export default function App() {
     }),
   ).current;
 
-  // Spotlight-style search
+  // Spotlight-style keyword search
   const openSearch = useCallback(() => {
     setSearchText("");
     setSearchVisible(true);
@@ -349,15 +358,47 @@ export default function App() {
     setSearchVisible(false);
     setSearchText("");
   }, []);
-  const handleSearchSubmit = useCallback(() => {
-    const trimmed = searchText.trim();
-    closeSearch();
-    if (trimmed !== "") {
-      const n = parseInt(trimmed, 10);
-      if (n > 0) recentSongsRef.current = [n, ...recentSongsRef.current.filter(s => s !== n)].slice(0, 20);
-      goToPage(resolveSongPage(trimmed));
+
+  // Compute search results on every keystroke
+  const searchResults = useMemo(() => {
+    const q = searchText.trim();
+    if (!q) return [];
+    // If purely numeric → direct song number lookup
+    if (/^\d+$/.test(q)) {
+      const n = parseInt(q, 10);
+      const exact = SEARCHABLE_SONGS.find((s) => s.song === n);
+      if (exact) return [exact];
+      // Prefix match: show songs starting with those digits
+      return SEARCHABLE_SONGS.filter((s) => String(s.song).startsWith(q)).slice(0, 15);
     }
-  }, [searchText, goToPage, closeSearch]);
+    // Keyword search: accent-insensitive, match all words (AND logic)
+    const normalizedQ = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const words = normalizedQ.split(/\s+/).filter(Boolean);
+    return SEARCHABLE_SONGS.filter((s) => {
+      if (!s.normalized) return false;
+      return words.every((w) => s.normalized.includes(w));
+    }).slice(0, 20);
+  }, [searchText]);
+
+  const handleSearchResultTap = useCallback((song: number) => {
+    const page = resolveSongPage(String(song));
+    goToPage(page);
+    recentSongsRef.current = [song, ...recentSongsRef.current.filter((s) => s !== song)].slice(0, 20);
+    closeSearch();
+  }, [goToPage, closeSearch]);
+
+  const handleSearchSubmit = useCallback(() => {
+    // If there's exactly one result or a numeric input, go directly
+    if (searchResults.length > 0) {
+      handleSearchResultTap(searchResults[0].song);
+    } else {
+      const trimmed = searchText.trim();
+      if (trimmed && /^\d+$/.test(trimmed)) {
+        goToPage(resolveSongPage(trimmed));
+        closeSearch();
+      }
+    }
+  }, [searchResults, searchText, goToPage, closeSearch, handleSearchResultTap]);
 
   // Browse categories
   const openBrowse = useCallback(() => {
@@ -564,23 +605,51 @@ export default function App() {
         <TouchableWithoutFeedback onPress={closeSearch}>
           <View style={styles.searchOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.searchBar}>
-                <TextInput
-                  ref={searchInputRef}
-                  style={styles.searchInput}
-                  value={searchText}
-                  onChangeText={(t) => setSearchText(t.replace(/[^0-9]/g, ""))}
-                  onSubmitEditing={handleSearchSubmit}
-                  placeholder="Buscar canción..."
-                  placeholderTextColor="rgba(255,255,255,0.4)"
-                  keyboardType="number-pad"
-                  returnKeyType="go"
-                  maxLength={4}
-                  selectTextOnFocus
-                />
-                <TouchableOpacity style={styles.searchGoBtn} onPress={handleSearchSubmit} activeOpacity={0.7}>
-                  <Text style={styles.searchGoBtnText}>Ir</Text>
-                </TouchableOpacity>
+              <View style={styles.searchContainer}>
+                <View style={styles.searchBar}>
+                  <TextInput
+                    ref={searchInputRef}
+                    style={styles.searchInput}
+                    value={searchText}
+                    onChangeText={setSearchText}
+                    onSubmitEditing={handleSearchSubmit}
+                    placeholder="Buscar canción o palabra..."
+                    placeholderTextColor="rgba(255,255,255,0.4)"
+                    keyboardType="default"
+                    returnKeyType="go"
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    maxLength={40}
+                    selectTextOnFocus
+                  />
+                  <TouchableOpacity style={styles.searchGoBtn} onPress={handleSearchSubmit} activeOpacity={0.7}>
+                    <Text style={styles.searchGoBtnText}>Ir</Text>
+                  </TouchableOpacity>
+                </View>
+                {searchResults.length > 0 && (
+                  <FlatList
+                    data={searchResults}
+                    keyExtractor={(item) => `sr-${item.song}`}
+                    keyboardShouldPersistTaps="handled"
+                    style={styles.searchResults}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={styles.searchResultRow}
+                        onPress={() => handleSearchResultTap(item.song)}
+                        activeOpacity={0.6}
+                      >
+                        <Text style={styles.searchResultNum}>{item.song}</Text>
+                        <Text style={styles.searchResultTitle} numberOfLines={1}>{item.title || `Canción ${item.song}`}</Text>
+                        <Text style={styles.searchResultPage}>p.{item.page}</Text>
+                      </TouchableOpacity>
+                    )}
+                  />
+                )}
+                {searchText.trim().length > 0 && searchResults.length === 0 && (
+                  <View style={styles.searchEmpty}>
+                    <Text style={styles.searchEmptyText}>Sin resultados</Text>
+                  </View>
+                )}
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -602,20 +671,16 @@ export default function App() {
         {syncRole === "follower" && <View style={[styles.syncDot, { backgroundColor: "#4cff91" }]} />}
       </TouchableOpacity>
 
-      {/* Director buttons — top-right row: [Browse] [Grid] [Search] */}
+      {/* Director search button — top-right, same size as nav trigger */}
       {syncRole === "director" && (
-        <View style={[styles.directorBar, isSmallScreen && styles.directorBarSmall]}>
-          <TouchableOpacity style={[styles.dirBtn, isSmallScreen && styles.dirBtnSmall]} onPress={openBrowse} activeOpacity={0.75}>
-            <Text style={[styles.dirBtnIcon, isSmallScreen && styles.dirBtnIconSmall]}>☰</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.dirBtn, isSmallScreen && styles.dirBtnSmall]} onPress={handleGridButtonPress} activeOpacity={0.75}>
-            <Text style={[styles.dirBtnIcon, isSmallScreen && styles.dirBtnIconSmall]}>⊞</Text>
-            {gridVisible && <Text style={[styles.gridDensityBadge, isSmallScreen && styles.gridDensityBadgeSmall]}>{gridCols}</Text>}
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.dirBtn, isSmallScreen && styles.dirBtnSmall]} onPress={openSearch} activeOpacity={0.75}>
-            <Text style={[styles.dirBtnIcon, isSmallScreen && styles.dirBtnIconSmall]}>⌕</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={[styles.cornerButton, styles.searchTrigger, isSmallScreen && styles.searchTriggerSmall]}
+          onPress={openSearch}
+          activeOpacity={0.75}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Text style={styles.searchTriggerIcon}>⌕</Text>
+        </TouchableOpacity>
       )}
 
       {/* Version label */}
@@ -759,6 +824,9 @@ const styles = StyleSheet.create({
   navTrigger: { left: 1.25 },
   navTriggerIcon: { fontSize: 32, color: "#fff", lineHeight: 38 },
   navTriggerArrow: { fontSize: 36, color: "#7ec8f7", lineHeight: 38, fontWeight: "700" },
+  searchTrigger: { right: 1.25 },
+  searchTriggerSmall: { paddingHorizontal: 14, paddingVertical: 10 },
+  searchTriggerIcon: { fontSize: 32, color: "#7ec8f7", lineHeight: 38 },
 
   // Director top-right button row
   directorBar: {
@@ -902,6 +970,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
+  searchContainer: {
+    maxHeight: "70%",
+  },
   searchGoBtn: {
     backgroundColor: "#3b82f6",
     borderRadius: 10,
@@ -909,6 +980,48 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   searchGoBtnText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  searchResults: {
+    backgroundColor: "rgba(20,20,40,0.97)",
+    borderRadius: 12,
+    marginTop: 6,
+    maxHeight: 380,
+  },
+  searchResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+    gap: 12,
+  },
+  searchResultNum: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#3b82f6",
+    width: 48,
+    fontVariant: ["tabular-nums"] as any,
+  },
+  searchResultTitle: {
+    flex: 1,
+    fontSize: 16,
+    color: "#fff",
+  },
+  searchResultPage: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.35)",
+  },
+  searchEmpty: {
+    backgroundColor: "rgba(20,20,40,0.97)",
+    borderRadius: 12,
+    marginTop: 6,
+    paddingVertical: 24,
+    alignItems: "center",
+  },
+  searchEmptyText: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 15,
+  },
 
   // Browse overlay
   browseTabBar: {
