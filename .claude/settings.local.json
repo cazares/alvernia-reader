@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git log:*)",
+      "Bash(node web/build.mjs)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh repo:*)",
+      "Bash(git remote:*)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}

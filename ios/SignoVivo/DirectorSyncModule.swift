@@ -19,7 +19,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var discoveredFollowers: Set<MCPeerID> = []
   private var pendingInvitePeer: MCPeerID?
   private var connectedDirectorPeer: MCPeerID?
-  private var reinviteTimer: Timer?
 
   override static func requiresMainQueueSetup() -> Bool {
     false
@@ -49,7 +48,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.configureTransport()
       self.startAdvertising()
       self.startBrowsing()
-      self.startReinviteTimer()
       self.emitState(status: "advertising")
       resolve([
         "role": "director",
@@ -150,27 +148,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     connectedDirectorPeer = nil
   }
 
-  /// Director: periodically re-invite any discovered followers that haven't connected yet.
-  /// This fixes flaky discovery where the 3rd+ device is found but the initial invite times out.
-  private func startReinviteTimer() {
-    reinviteTimer?.invalidate()
-    reinviteTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-      DispatchQueue.main.async {
-        self?.reinviteDisconnectedFollowers()
-      }
-    }
-  }
-
-  private func reinviteDisconnectedFollowers() {
-    guard currentRole == "director", let session = mcSession else { return }
-    let connected = Set(session.connectedPeers)
-    for follower in discoveredFollowers {
-      if !connected.contains(follower) {
-        browser?.invitePeer(follower, to: session, withContext: nil, timeout: 10)
-      }
-    }
-  }
-
   private func startAdvertising() {
     guard (currentRole == "director" || currentRole == "follower"), let peerID = localPeerID else { return }
     var discoveryInfo: [String: String] = [
@@ -195,9 +172,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private func resetTransport(emitState shouldEmitState: Bool) {
-    reinviteTimer?.invalidate()
-    reinviteTimer = nil
-
     advertiser?.stopAdvertisingPeer()
     advertiser?.delegate = nil
     advertiser = nil

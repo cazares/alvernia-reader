@@ -58,6 +58,7 @@ const searchRow        = document.getElementById("search-row");
 const searchBackButton = document.getElementById("search-back");
 const modeBtnNumpad    = document.getElementById("mode-btn-numpad");
 const modeBtnBrowse    = document.getElementById("mode-btn-browse");
+const appVersionLabel  = document.getElementById("app-version-label");
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const PREFS_KEY = "nc-sort-prefs";
@@ -166,7 +167,12 @@ const CORE_ASSETS = [
 ].map(resolveAppPath);
 
 // ── Utilities ────────────────────────────────────────────────────────────────
-const pageFileName = (pageNumber) => resolveAppPath(`/pages/page-${String(pageNumber).padStart(3, "0")}.jpg`);
+const pageFileName = (pageNumber) => {
+  const padded = String(pageNumber).padStart(3, "0");
+  // In native file mode pages are staged flat (no pages/ subdir) so WKWebView
+  // can reach them via loadRequest:'s parent-directory sandbox.
+  return NATIVE_FILE_MODE ? `page-${padded}.jpg` : `/pages/page-${padded}.jpg`;
+};
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
   : pageFileName(pageNumber);
@@ -2576,6 +2582,10 @@ const initReader = async () => {
     totalPages: state.totalPages,
   });
 };
+
+if (appVersionLabel && window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION) {
+  appVersionLabel.textContent = `Versión ${window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION}`;
+}
 
 clearInitialUrl();
 registerServiceWorker();
