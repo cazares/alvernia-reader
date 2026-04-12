@@ -45,11 +45,20 @@ const SONG_TO_PAGE = new Map<number, number>(
 );
 const SORTED_SONGS = [...ALVERNIA_MANUAL_2_SONG_INDEX].sort((a, b) => a.song - b.song);
 
+// Safe accent-insensitive normalizer (normalize may not exist on all Hermes builds)
+const normalizeText = (s: string): string => {
+  try {
+    return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  } catch {
+    return s.toLowerCase();
+  }
+};
+
 // Searchable song entries: title for display + full OCR text (title + lyrics) for matching
 const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
   const title = (SONG_TITLES as Record<string, string>)[String(s.song)] ?? "";
   const fullText = (SONG_SEARCH_INDEX as Record<string, string>)[String(s.song)] ?? title;
-  const normalized = fullText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const normalized = normalizeText(fullText);
   return { ...s, title, normalized };
 });
 
@@ -375,7 +384,7 @@ export default function App() {
       return SEARCHABLE_SONGS.filter((s) => String(s.song).startsWith(q)).slice(0, 15);
     }
     // Keyword search: accent-insensitive, match all words (AND logic)
-    const normalizedQ = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const normalizedQ = normalizeText(q);
     const words = normalizedQ.split(/\s+/).filter(Boolean);
     return SEARCHABLE_SONGS.filter((s) => {
       if (!s.normalized) return false;
