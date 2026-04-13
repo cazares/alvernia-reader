@@ -1908,3 +1908,12 @@ button:disabled {
     );
   }
 }
+
+.app-version-label {
+  margin-top: 20px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+  text-align: center;
+  letter-spacing: 0.03em;
+}

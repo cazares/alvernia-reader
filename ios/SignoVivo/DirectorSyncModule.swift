@@ -7,6 +7,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let serviceType = "signovivo"
   private static let eventName = "DirectorSyncEvent"
   private static let maxSessionCodeLength = 12
+  /// How often to restart browser+advertiser to keep discovery fresh (especially offline/Bluetooth)
+  private static let discoveryRefreshInterval: TimeInterval = 25
+  /// Invitation timeout — long enough for Bluetooth negotiation
+  private static let inviteTimeout: TimeInterval = 30
+  /// Delay before follower retries after disconnect
+  private static let followerRetryDelay: TimeInterval = 2
 
   private var localPeerID: MCPeerID?
   private var mcSession: MCSession?
@@ -16,8 +22,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var currentSessionCode = ""
   private var currentDirectorToken = ""
   private var discoveredDirectors: [MCPeerID: String] = [:]
+  private var discoveredFollowers: Set<MCPeerID> = []
   private var pendingInvitePeer: MCPeerID?
   private var connectedDirectorPeer: MCPeerID?
+  /// Periodic timer that restarts browser+advertiser to keep discovery alive offline
+  private var discoveryRefreshTimer: Timer?
 
   override static func requiresMainQueueSetup() -> Bool {
     false
@@ -47,6 +56,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.configureTransport()
       self.startAdvertising()
       self.startBrowsing()
+      self.startDiscoveryRefreshTimer()
       self.emitState(status: "advertising")
       resolve([
         "role": "director",
@@ -74,6 +84,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.configureTransport()
       self.startAdvertising()
       self.startBrowsing()
+      self.startDiscoveryRefreshTimer()
       self.emitState(status: "searching")
       resolve([
         "role": "follower",
@@ -129,20 +140,28 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.emitState(status: "connected")
         resolve(["deliveredPeers": session.connectedPeers.count])
       } catch {
-        reject("DIRECTOR_SEND_FAILED", "No se pudo enviar la página a los dispositivos conectados.", error)
+        // Reliable send failed — try unreliable as fallback (better than nothing)
+        if let data = try? JSONSerialization.data(withJSONObject: payload) {
+          try? session.send(data, toPeers: session.connectedPeers, with: .unreliable)
+        }
+        resolve(["deliveredPeers": 0])
       }
     }
   }
 
+  // MARK: - Transport setup
+
   private func configureTransport() {
     let peerName = UIDevice.current.name.isEmpty ? UUID().uuidString : UIDevice.current.name
     let peerID = MCPeerID(displayName: "\(peerName)-\(UUID().uuidString.prefix(6))")
+    // encryptionPreference: .none ensures both WiFi AND Bluetooth are used simultaneously
     let session = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .none)
     session.delegate = self
 
     localPeerID = peerID
     mcSession = session
     discoveredDirectors = [:]
+    discoveredFollowers = []
     pendingInvitePeer = nil
     connectedDirectorPeer = nil
   }
@@ -170,7 +189,39 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     self.browser = browser
   }
 
+  /// Periodically restart browser + advertiser to keep discovery alive.
+  /// MultipeerConnectivity's Bonjour layer can go stale after ~30s in offline
+  /// (no-internet) environments, especially over Bluetooth. Restarting forces
+  /// a fresh mDNS/BLE announcement cycle without dropping existing MCSession connections.
+  private func startDiscoveryRefreshTimer() {
+    discoveryRefreshTimer?.invalidate()
+    discoveryRefreshTimer = Timer.scheduledTimer(withTimeInterval: Self.discoveryRefreshInterval, repeats: true) { [weak self] _ in
+      DispatchQueue.main.async {
+        self?.refreshDiscovery()
+      }
+    }
+  }
+
+  private func refreshDiscovery() {
+    guard currentRole != "off" else { return }
+    // Stop and restart browser+advertiser — keeps mDNS/BLE announcements fresh
+    // The MCSession stays alive so existing connections are NOT dropped.
+    advertiser?.stopAdvertisingPeer()
+    advertiser?.delegate = nil
+    advertiser = nil
+
+    browser?.stopBrowsingForPeers()
+    browser?.delegate = nil
+    browser = nil
+
+    startAdvertising()
+    startBrowsing()
+  }
+
   private func resetTransport(emitState shouldEmitState: Bool) {
+    discoveryRefreshTimer?.invalidate()
+    discoveryRefreshTimer = nil
+
     advertiser?.stopAdvertisingPeer()
     advertiser?.delegate = nil
     advertiser = nil
@@ -185,6 +236,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
     localPeerID = nil
     discoveredDirectors = [:]
+    discoveredFollowers = []
     pendingInvitePeer = nil
     connectedDirectorPeer = nil
     currentRole = "off"
@@ -195,6 +247,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       emitState(status: "idle")
     }
   }
+
+  // MARK: - Event emission
 
   private func emitState(status: String, message: String? = nil) {
     let payload: [String: Any] = [
@@ -230,6 +284,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     sendEvent(withName: Self.eventName, body: payload)
   }
 
+  // MARK: - Connection logic
+
   private func reconsiderFollowerTarget() {
     guard currentRole == "follower", let session = mcSession else { return }
     guard session.connectedPeers.isEmpty else {
@@ -254,9 +310,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       emitState(status: "resolving-conflict", message: "Hay varios directores cercanos. Eligiendo uno automáticamente.")
     }
 
-    guard pendingInvitePeer != target else { return }
+    // Always allow re-invite (clear stale pending state)
     pendingInvitePeer = target
-    browser?.invitePeer(target, to: session, withContext: nil, timeout: 10)
+    browser?.invitePeer(target, to: session, withContext: nil, timeout: Self.inviteTimeout)
     emitState(status: "connecting")
   }
 
@@ -264,12 +320,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     guard currentRole == "director" else { return }
     guard !otherToken.isEmpty, !currentDirectorToken.isEmpty else { return }
 
-    // The device that became director most recently (largest timestamp token) wins.
-    // This means a device that enters the code after an existing director always
-    // takes over — the old director is demoted to follower automatically.
     if otherToken > currentDirectorToken {
       emitError(code: "DIRECTOR_CONFLICT", message: "Un nuevo director tomó el control. Este dispositivo cambió a modo seguidor.")
-      resetTransport(emitState: false) // JS will restart as follower; skip idle event
+      resetTransport(emitState: false)
     }
   }
 
@@ -279,11 +332,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private static func randomToken() -> String {
-    // Zero-padded microsecond timestamp so newer directors always have a
-    // lexicographically larger token — the newest director always wins.
     let microseconds = Int64(Date().timeIntervalSince1970 * 1_000_000)
     return String(format: "%020lld", microseconds)
   }
+
+  // MARK: - MCNearbyServiceAdvertiserDelegate
 
   func advertiser(
     _ advertiser: MCNearbyServiceAdvertiser,
@@ -298,7 +351,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         return
       }
       invitationHandler(true, session)
-      self.emitState(status: "connecting")
     }
   }
 
@@ -307,10 +359,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     didNotStartAdvertisingPeer error: Error
   ) {
     DispatchQueue.main.async {
-      self.emitError(code: "DIRECTOR_ADVERTISE_FAILED", message: "No se pudo anunciar este dispositivo al resto del coro.")
-      self.resetTransport(emitState: true)
+      // Don't reset everything — just try to re-advertise after a short delay
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+        guard let self = self, self.currentRole != "off" else { return }
+        self.advertiser?.stopAdvertisingPeer()
+        self.advertiser?.delegate = nil
+        self.advertiser = nil
+        self.startAdvertising()
+      }
     }
   }
+
+  // MARK: - MCNearbyServiceBrowserDelegate
 
   func browser(
     _ browser: MCNearbyServiceBrowser,
@@ -330,11 +390,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.reconsiderFollowerTarget()
         }
       } else if role == "follower", self.currentRole == "director" {
-        // Director found a follower advertising — invite them directly so
-        // connection works even if the follower's browser can't find us.
+        self.discoveredFollowers.insert(peerID)
         guard let session = self.mcSession,
               !session.connectedPeers.contains(peerID) else { return }
-        self.browser?.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
+        self.browser?.invitePeer(peerID, to: session, withContext: nil, timeout: Self.inviteTimeout)
       }
     }
   }
@@ -342,6 +401,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
     DispatchQueue.main.async {
       self.discoveredDirectors.removeValue(forKey: peerID)
+      self.discoveredFollowers.remove(peerID)
       if self.currentRole == "follower" {
         if self.connectedDirectorPeer == peerID {
           self.connectedDirectorPeer = nil
@@ -355,10 +415,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
     DispatchQueue.main.async {
-      self.emitError(code: "DIRECTOR_BROWSE_FAILED", message: "No se pudieron buscar dispositivos cercanos.")
-      self.resetTransport(emitState: true)
+      // Don't reset — just retry after a short delay
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+        guard let self = self, self.currentRole != "off" else { return }
+        self.browser?.stopBrowsingForPeers()
+        self.browser?.delegate = nil
+        self.browser = nil
+        self.startBrowsing()
+      }
     }
   }
+
+  // MARK: - MCSessionDelegate
 
   func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
     DispatchQueue.main.async {
@@ -370,17 +438,21 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         }
         self.emitState(status: "connected")
       case .connecting:
-        self.emitState(status: "connecting")
+        break // don't emit — avoids spamming JS during negotiation
       case .notConnected:
         if self.currentRole == "follower", self.connectedDirectorPeer == peerID {
           self.connectedDirectorPeer = nil
-          self.emitState(status: "searching", message: "El director se desconectó. Buscando otra vez.")
-          self.reconsiderFollowerTarget()
+          self.pendingInvitePeer = nil
+          self.emitState(status: "searching", message: "El director se desconectó. Reconectando...")
+          // Retry after short delay — gives Bluetooth/WiFi time to stabilize
+          DispatchQueue.main.asyncAfter(deadline: .now() + Self.followerRetryDelay) { [weak self] in
+            self?.reconsiderFollowerTarget()
+          }
         } else if self.currentRole == "director" {
           self.emitState(status: session.connectedPeers.isEmpty ? "waiting-followers" : "connected")
         }
       @unknown default:
-        self.emitError(code: "DIRECTOR_SESSION_UNKNOWN", message: "La sesión cambió a un estado desconocido.")
+        break
       }
     }
   }
@@ -393,8 +465,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         type == "page",
         let page = payload["page"] as? Int
       else {
-        self.emitError(code: "DIRECTOR_PAYLOAD_INVALID", message: "Llegó un mensaje inválido desde otro dispositivo.")
-        return
+        return // silently ignore malformed data — don't spam error events
       }
 
       let totalPages = payload["totalPages"] as? Int ?? 0

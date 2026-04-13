@@ -59,5 +59,39 @@ target 'SignoVivo' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+
+    # Workaround: fmt 11.0.2 consteval error on Xcode 17 / Apple Clang 17
+    # Downgrade C++ standard for fmt to avoid consteval issues
+    installer.pods_project.targets.each do |target|
+      if target.name == 'fmt'
+        target.build_configurations.each do |config|
+          config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+        end
+      end
+    end
+
+    # Fix react-native-webview bug: for file:// URLs, request.URL.host is @"" (empty
+    # NSString — non-nil, so truthy in ObjC), which makes `if (request.URL.host)` branch
+    # to loadRequest: instead of loadFileURL:allowingReadAccessToURL:, rendering the
+    # allowingReadAccessToURL prop completely inert. Replace with a length guard.
+    rnwebview_src = File.join(
+      File.dirname(`node --print "require.resolve('react-native-webview/package.json')"`.strip),
+      'apple', 'RNCWebViewImpl.m'
+    )
+    if File.exist?(rnwebview_src)
+      content = File.read(rnwebview_src)
+      patched = content.gsub(
+        'if (request.URL.host) {',
+        'if ([request.URL.host length] > 0) {'
+      )
+      if patched != content
+        File.write(rnwebview_src, patched)
+        puts "✔ Patched RNCWebViewImpl.m: file:// URL host-length fix applied"
+      else
+        puts "✔ RNCWebViewImpl.m: file:// URL patch already applied or pattern not found"
+      end
+    else
+      puts "⚠ RNCWebViewImpl.m not found at #{rnwebview_src}"
+    end
   end
 end

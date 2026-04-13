@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-reader",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-p", "4000", "web/dist"],
+      "port": 4000
+    }
+  ]
+}
