@@ -731,9 +731,9 @@ export default function App() {
       {/* ── Search overlay (Spotlight-style) — director only ── */}
       {searchVisible && syncRole === "director" && (
         <TouchableWithoutFeedback onPress={closeSearch}>
-          <View style={styles.searchOverlay}>
+          <View style={[styles.searchOverlay, { bottom: keyboardHeight }]}>
             <TouchableWithoutFeedback>
-              <View style={[styles.searchContainer, { maxHeight: availableHeight - 40 }]}>
+              <View style={styles.searchContainer}>
                 <View style={styles.searchBar}>
                   <TextInput
                     ref={searchInputRef}
@@ -760,6 +760,7 @@ export default function App() {
                     keyExtractor={(item, i) => `sr-${item.song}-${i}`}
                     keyboardShouldPersistTaps="handled"
                     style={styles.searchResults}
+                    contentContainerStyle={{ paddingBottom: 16 }}
                     stickySectionHeadersEnabled={false}
                     renderSectionHeader={({ section }) => (
                       <View style={styles.searchSectionHeader}>
@@ -1105,6 +1106,7 @@ const styles = StyleSheet.create({
   gridToolbarText: { color: "#fff", fontSize: 16, fontWeight: "600" },
 
   // Search overlay (Spotlight-style)
+  // bottom is overridden inline with keyboardHeight so results never go under keyboard
   searchOverlay: {
     position: "absolute",
     top: 0, left: 0, right: 0, bottom: 0,
@@ -1112,6 +1114,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     paddingTop: 60,
     paddingHorizontal: 24,
+    paddingBottom: 12,
   },
   searchBar: {
     flexDirection: "row",
@@ -1136,6 +1139,8 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     flex: 1,
+    // Ensures SectionList inside can grow to fill available space above keyboard
+    overflow: "hidden",
   },
   searchGoBtn: {
     backgroundColor: "#3b82f6",
