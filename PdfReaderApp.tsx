@@ -78,7 +78,7 @@ const extractLyricSnippet = (raw: string): string => {
     if (chordLine.test(t)) continue;
     if (skipLine.test(t)) continue;
     if (!/[a-záéíóúüñ]{2,}/i.test(t)) continue;
-    return t.length > 120 ? t.slice(0, 118) + "…" : t;
+    return t;
   }
   return "";
 };
