@@ -36,6 +36,8 @@ import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/off
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
 // @ts-ignore
 import SONG_SEARCH_INDEX from "./assets/offline-web/song-search-index.json";
+// @ts-ignore
+import PAGES_JSON from "./assets/offline-web/pages.json";
 
 const TOTAL_PAGES = 368;
 const START_PAGE = 2;
@@ -55,43 +57,64 @@ const normalizeText = (s: string): string => {
   }
 };
 
-// Searchable song entries: title for display + full OCR text (title + lyrics) for matching
+// Build song→themes lookup from pages.json (all 312 songs are tagged)
+const SONG_THEMES: Record<number, string[]> = {};
+for (const entry of (PAGES_JSON as any).songIndex ?? []) {
+  if (entry.themes?.length) SONG_THEMES[entry.song as number] = entry.themes;
+}
+
+// Searchable song entries: title + full OCR text + theme tags
 const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
   const title = (SONG_TITLES as Record<string, string>)[String(s.song)] ?? "";
   const fullText = (SONG_SEARCH_INDEX as Record<string, string>)[String(s.song)] ?? title;
   const normalized = normalizeText(fullText);
-  return { ...s, title, normalized };
+  const themes: string[] = SONG_THEMES[s.song] ?? [];
+  return { ...s, title, normalized, themes };
 });
 
-// Mass parts — keywords that map to a mass part label
-const MASS_PARTS: { label: string; keywords: string[] }[] = [
-  { label: "Entrada", keywords: ["entrada", "inicio"] },
-  { label: "Gloria", keywords: ["gloria"] },
-  { label: "Aleluya", keywords: ["aleluya", "alleluia", "aleluia"] },
-  { label: "Ofertorio", keywords: ["ofertorio", "ofrenda", "ofrendas"] },
-  { label: "Santo / Sanctus", keywords: ["santo", "sanctus", "hosanna"] },
-  { label: "Cordero de Dios", keywords: ["cordero"] },
-  { label: "Comunión", keywords: ["comunion", "eucaristia"] },
-  { label: "Piedad / Kyrie", keywords: ["piedad", "kyrie"] },
-  { label: "Padre Nuestro", keywords: ["padre nuestro"] },
-  { label: "Paz", keywords: ["paz"] },
-  { label: "Despedida", keywords: ["despedida", "envio", "final"] },
-];
+// Theme ID → display label mapping
+const THEME_LABELS: Record<string, string> = {
+  misa: "Parte de Misa",
+  entrada: "Entrada",
+  envio: "Despedida / Envío",
+  eucaristia: "Eucaristía / Comunión",
+  alabanza: "Alabanza",
+  maria: "Virgen María",
+  espiritu_santo: "Espíritu Santo",
+  cuaresma: "Cuaresma / Semana Santa",
+  resurreccion: "Pascua / Resurrección",
+  navidad: "Navidad",
+  adviento: "Adviento",
+  comunidad: "Comunidad",
+  fe: "Fe / Esperanza",
+  sanacion: "Sanación / Perdón",
+  paz: "Paz",
+  mision: "Misión",
+  ninos: "Niños",
+  bodas: "Bodas",
+  funerales: "Funerales",
+  bautismo: "Bautismo",
+  confirmacion: "Confirmación",
+  primera_comunion: "Primera Comunión",
+  procesion: "Procesión",
+  santos: "Santos",
+};
 
-// Liturgical themes — keyword search against titles/lyrics
-const THEMES: { label: string; keywords: string[] }[] = [
-  { label: "Adviento", keywords: ["adviento"] },
-  { label: "Navidad", keywords: ["navidad", "noche buena", "nochebuena", "pesebre", "belen"] },
-  { label: "Cuaresma", keywords: ["cuaresma", "ceniza"] },
-  { label: "Semana Santa", keywords: ["semana santa", "pretorio", "crucifixion", "calvario", "via crucis"] },
-  { label: "Pascua / Resurrección", keywords: ["pascua", "resurreccion", "resucito"] },
-  { label: "Pentecostés / Espíritu Santo", keywords: ["pentecostes", "espiritu santo", "espiritu de dios"] },
-  { label: "María", keywords: ["maria", "virgen", "ave maria", "guadalupe", "magnificat"] },
-  { label: "Alabanza", keywords: ["alabanza", "adoracion", "alabarte", "alabar"] },
-  { label: "Sanación / Perdón", keywords: ["sanacion", "perdon", "misericordia"] },
-  { label: "Bautismo", keywords: ["bautismo", "bautizar"] },
-  { label: "Misión", keywords: ["mision", "vocacion", "enviados"] },
-];
+// Which theme IDs to surface as "Parte de Misa" subgroups when searched
+const MISA_KEYWORDS: Record<string, string> = {
+  gloria: "Gloria",
+  santo: "Santo / Sanctus",
+  sanctus: "Santo / Sanctus",
+  aleluya: "Aleluya",
+  alleluia: "Aleluya",
+  cordero: "Cordero de Dios",
+  piedad: "Piedad / Kyrie",
+  kyrie: "Piedad / Kyrie",
+  ofertorio: "Ofertorio",
+  ofrenda: "Ofertorio",
+  comunion: "Comunión",
+  padre_nuestro: "Padre Nuestro",
+};
 
 type SearchResultItem =
   | { type: "header"; title: string; key: string }
@@ -413,74 +436,73 @@ export default function App() {
     const normalizedQ = normalizeText(q);
     const words = normalizedQ.split(/\s+/).filter(Boolean);
     const isNumeric = /^\d+$/.test(q);
-    const sections: { title: string; data: { song: number; page: number; title: string; matchContext?: string }[] }[] = [];
+    const sections: { title: string; data: { song: number; page: number; title: string }[] }[] = [];
     const seenSongs = new Set<number>();
 
-    // Helper: add songs to a section, deduplicating
-    const addSection = (title: string, songs: { song: number; page: number; title: string; matchContext?: string }[]) => {
+    const addSection = (title: string, songs: typeof SEARCHABLE_SONGS) => {
       const unique = songs.filter((s) => !seenSongs.has(s.song));
       if (unique.length === 0) return;
       unique.forEach((s) => seenSongs.add(s.song));
       sections.push({ title, data: unique });
     };
 
-    // 1) Numeric → exact song number match at absolute top
+    // 1) Numeric → exact + prefix match at top
     if (isNumeric) {
       const n = parseInt(q, 10);
       const exact = SEARCHABLE_SONGS.find((s) => s.song === n);
       if (exact) addSection("Canción", [exact]);
-      const prefix = SEARCHABLE_SONGS.filter((s) => s.song !== n && String(s.song).startsWith(q)).slice(0, 10);
+      const prefix = SEARCHABLE_SONGS.filter((s) => s.song !== n && String(s.song).startsWith(q)).slice(0, 12);
       if (prefix.length > 0) addSection("Canciones", prefix);
       return sections;
     }
 
-    // 2) Recents matching query
+    const titleNorm = (s: typeof SEARCHABLE_SONGS[0]) => normalizeText(s.title);
+    const matchesWords = (text: string) => words.every((w) => text.includes(w));
+
+    // 2) Recents matching query (title or lyrics)
     const recentMatches = recentSongsRef.current
       .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
-      .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s && words.every((w) => s.normalized.includes(w) || normalizeText(s.title).includes(w)))
+      .filter((s): s is typeof SEARCHABLE_SONGS[0] =>
+        !!s && (matchesWords(titleNorm(s)) || matchesWords(s.normalized)))
       .slice(0, 5);
     addSection("Recientes", recentMatches);
 
-    // 3) Songs by title match
-    const titleNorm = (s: typeof SEARCHABLE_SONGS[0]) => normalizeText(s.title);
-    const titleMatches = SEARCHABLE_SONGS.filter((s) => {
-      const t = titleNorm(s);
-      return words.every((w) => t.includes(w));
-    }).slice(0, 15);
+    // 3) Title matches
+    const titleMatches = SEARCHABLE_SONGS.filter((s) => matchesWords(titleNorm(s))).slice(0, 15);
     addSection("Canciones", titleMatches);
 
-    // 4) Songs by lyrics (matched in full text but NOT in title)
-    const lyricMatches = SEARCHABLE_SONGS.filter((s) => {
-      if (!s.normalized) return false;
-      const t = titleNorm(s);
-      const inTitle = words.every((w) => t.includes(w));
-      if (inTitle) return false; // already shown in title section
-      return words.every((w) => s.normalized.includes(w));
-    }).slice(0, 10);
+    // 4) Lyric-only matches (not already in title section)
+    const lyricMatches = SEARCHABLE_SONGS.filter((s) =>
+      !seenSongs.has(s.song) && s.normalized && matchesWords(s.normalized)
+    ).slice(0, 10);
     addSection("Letras", lyricMatches);
 
-    // 5) Mass parts — if query matches a mass part keyword
-    for (const part of MASS_PARTS) {
-      if (part.keywords.some((kw) => normalizedQ.includes(kw) || kw.includes(normalizedQ))) {
-        const partSongs = SEARCHABLE_SONGS.filter((s) => {
-          const t = titleNorm(s);
-          return part.keywords.some((kw) => t.includes(kw) || s.normalized.includes(kw));
-        }).slice(0, 8);
-        addSection(`Parte de Misa: ${part.label}`, partSongs);
-        break; // only match one mass part per query
-      }
+    // 5) Misa subgroup — match specific mass-part keywords in query
+    const misaMatch = Object.entries(MISA_KEYWORDS).find(([kw]) =>
+      normalizedQ.includes(kw) || kw.includes(normalizedQ)
+    );
+    if (misaMatch) {
+      const [kw, label] = misaMatch;
+      const misaSongs = SEARCHABLE_SONGS.filter((s) =>
+        !seenSongs.has(s.song) &&
+        (s.themes.includes("misa") || s.themes.includes("eucaristia") || s.themes.includes("entrada")) &&
+        (titleNorm(s).includes(kw) || s.normalized.includes(kw))
+      ).slice(0, 10);
+      addSection(`Misa · ${label}`, misaSongs);
     }
 
-    // 6) Themes — if query matches a theme keyword
-    for (const theme of THEMES) {
-      if (theme.keywords.some((kw) => normalizedQ.includes(kw) || kw.includes(normalizedQ))) {
-        const themeSongs = SEARCHABLE_SONGS.filter((s) => {
-          const t = titleNorm(s);
-          return theme.keywords.some((kw) => t.includes(kw) || s.normalized.includes(kw));
-        }).slice(0, 8);
-        addSection(`Tema: ${theme.label}`, themeSongs);
-        break;
-      }
+    // 6) Theme tag match — if query matches a theme label or ID, surface tagged songs
+    const themeEntry = Object.entries(THEME_LABELS).find(([id, label]) => {
+      const normLabel = normalizeText(label);
+      return normalizedQ.includes(id) || id.includes(normalizedQ) ||
+             normLabel.includes(normalizedQ) || normalizedQ.includes(normLabel);
+    });
+    if (themeEntry) {
+      const [themeId, themeLabel] = themeEntry;
+      const themeSongs = SEARCHABLE_SONGS.filter((s) =>
+        !seenSongs.has(s.song) && s.themes.includes(themeId)
+      ).slice(0, 12);
+      addSection(themeLabel, themeSongs);
     }
 
     return sections;
