@@ -63,13 +63,33 @@ for (const entry of (PAGES_JSON as any).songIndex ?? []) {
   if (entry.themes?.length) SONG_THEMES[entry.song as number] = entry.themes;
 }
 
-// Searchable song entries: title + full OCR text + theme tags
+// Extract first clean lyric line from raw OCR text.
+// Skips: chord lines, stage directions, metadata, empty lines.
+const extractLyricSnippet = (raw: string): string => {
+  const lines = raw.split("\n");
+  const chordLine = /^[\s()*HMThT]*([A-G][#b]?(m|maj|sus|dim|aug|7|9|11|13|add)?[0-9]?\/?[A-G]?[#b]?[\s]+){1,}[\s()*HMThT]*$/i;
+  const skipLine = /^(intro|coro|estrofa|puente|fin|bridge|verso|rev\s|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|[0-9]+\.|[A-G][#b]?[m]?\s)/i;
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.length < 10) continue;
+    if (chordLine.test(t)) continue;
+    if (skipLine.test(t)) continue;
+    // Must have at least 2 lowercase letters in a row (actual words, not all chord/caps noise)
+    if (!/[a-záéíóúüñ]{2,}/i.test(t)) continue;
+    // Trim to ~70 chars
+    return t.length > 70 ? t.slice(0, 68) + "…" : t;
+  }
+  return "";
+};
+
+// Searchable song entries: title + full OCR text + theme tags + lyric snippet
 const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
   const title = (SONG_TITLES as Record<string, string>)[String(s.song)] ?? "";
   const fullText = (SONG_SEARCH_INDEX as Record<string, string>)[String(s.song)] ?? title;
   const normalized = normalizeText(fullText);
   const themes: string[] = SONG_THEMES[s.song] ?? [];
-  return { ...s, title, normalized, themes };
+  const snippet = extractLyricSnippet(fullText);
+  return { ...s, title, normalized, themes, snippet };
 });
 
 // Theme ID → display label mapping
@@ -792,6 +812,7 @@ export default function App() {
                         if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
                       }
                       const hasParts = titleParts.length > 0;
+                      const snippet = SEARCHABLE_SONGS.find((s) => s.song === item.song)?.snippet ?? "";
                       return (
                         <TouchableOpacity
                           style={styles.searchResultRow}
@@ -799,11 +820,16 @@ export default function App() {
                           activeOpacity={0.6}
                         >
                           <Text style={styles.searchResultNum}>{item.song}</Text>
-                          <Text style={styles.searchResultTitle} numberOfLines={1}>
-                            {hasParts ? titleParts.map((p, i) => (
-                              <Text key={i} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
-                            )) : displayTitle}
-                          </Text>
+                          <View style={styles.searchResultBody}>
+                            <Text style={styles.searchResultTitle} numberOfLines={1}>
+                              {hasParts ? titleParts.map((p, i) => (
+                                <Text key={i} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
+                              )) : displayTitle}
+                            </Text>
+                            {!!snippet && (
+                              <Text style={styles.searchResultSnippet} numberOfLines={1}>{snippet}</Text>
+                            )}
+                          </View>
                           <Text style={styles.searchResultPage}>p.{item.page}</Text>
                         </TouchableOpacity>
                       );
@@ -1188,10 +1214,18 @@ const styles = StyleSheet.create({
     width: 48,
     fontVariant: ["tabular-nums"] as any,
   },
-  searchResultTitle: {
+  searchResultBody: {
     flex: 1,
+    gap: 2,
+  },
+  searchResultTitle: {
     fontSize: 16,
     color: "#fff",
+  },
+  searchResultSnippet: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.45)",
+    fontStyle: "italic",
   },
   searchResultPage: {
     fontSize: 13,
