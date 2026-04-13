@@ -8,6 +8,7 @@ import {
   Keyboard,
   Modal,
   PanResponder,
+  SectionList,
   StatusBar,
   StyleSheet,
   Text,
@@ -61,6 +62,40 @@ const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
   const normalized = normalizeText(fullText);
   return { ...s, title, normalized };
 });
+
+// Mass parts — keywords that map to a mass part label
+const MASS_PARTS: { label: string; keywords: string[] }[] = [
+  { label: "Entrada", keywords: ["entrada", "inicio"] },
+  { label: "Gloria", keywords: ["gloria"] },
+  { label: "Aleluya", keywords: ["aleluya", "alleluia", "aleluia"] },
+  { label: "Ofertorio", keywords: ["ofertorio", "ofrenda", "ofrendas"] },
+  { label: "Santo / Sanctus", keywords: ["santo", "sanctus", "hosanna"] },
+  { label: "Cordero de Dios", keywords: ["cordero"] },
+  { label: "Comunión", keywords: ["comunion", "eucaristia"] },
+  { label: "Piedad / Kyrie", keywords: ["piedad", "kyrie"] },
+  { label: "Padre Nuestro", keywords: ["padre nuestro"] },
+  { label: "Paz", keywords: ["paz"] },
+  { label: "Despedida", keywords: ["despedida", "envio", "final"] },
+];
+
+// Liturgical themes — keyword search against titles/lyrics
+const THEMES: { label: string; keywords: string[] }[] = [
+  { label: "Adviento", keywords: ["adviento"] },
+  { label: "Navidad", keywords: ["navidad", "noche buena", "nochebuena", "pesebre", "belen"] },
+  { label: "Cuaresma", keywords: ["cuaresma", "ceniza"] },
+  { label: "Semana Santa", keywords: ["semana santa", "pretorio", "crucifixion", "calvario", "via crucis"] },
+  { label: "Pascua / Resurrección", keywords: ["pascua", "resurreccion", "resucito"] },
+  { label: "Pentecostés / Espíritu Santo", keywords: ["pentecostes", "espiritu santo", "espiritu de dios"] },
+  { label: "María", keywords: ["maria", "virgen", "ave maria", "guadalupe", "magnificat"] },
+  { label: "Alabanza", keywords: ["alabanza", "adoracion", "alabarte", "alabar"] },
+  { label: "Sanación / Perdón", keywords: ["sanacion", "perdon", "misericordia"] },
+  { label: "Bautismo", keywords: ["bautismo", "bautizar"] },
+  { label: "Misión", keywords: ["mision", "vocacion", "enviados"] },
+];
+
+type SearchResultItem =
+  | { type: "header"; title: string; key: string }
+  | { type: "song"; song: number; page: number; title: string; matchContext?: string; key: string };
 
 const resolveSongPage = (input: string): number => {
   const n = parseInt(input, 10);
@@ -371,25 +406,84 @@ export default function App() {
     setSearchText("");
   }, []);
 
-  // Compute search results on every keystroke
-  const searchResults = useMemo(() => {
+  // Compute grouped search results on every keystroke
+  const searchSections = useMemo(() => {
     const q = searchText.trim();
     if (!q) return [];
-    // If purely numeric → direct song number lookup
-    if (/^\d+$/.test(q)) {
-      const n = parseInt(q, 10);
-      const exact = SEARCHABLE_SONGS.find((s) => s.song === n);
-      if (exact) return [exact];
-      // Prefix match: show songs starting with those digits
-      return SEARCHABLE_SONGS.filter((s) => String(s.song).startsWith(q)).slice(0, 15);
-    }
-    // Keyword search: accent-insensitive, match all words (AND logic)
     const normalizedQ = normalizeText(q);
     const words = normalizedQ.split(/\s+/).filter(Boolean);
-    return SEARCHABLE_SONGS.filter((s) => {
+    const isNumeric = /^\d+$/.test(q);
+    const sections: { title: string; data: { song: number; page: number; title: string; matchContext?: string }[] }[] = [];
+    const seenSongs = new Set<number>();
+
+    // Helper: add songs to a section, deduplicating
+    const addSection = (title: string, songs: { song: number; page: number; title: string; matchContext?: string }[]) => {
+      const unique = songs.filter((s) => !seenSongs.has(s.song));
+      if (unique.length === 0) return;
+      unique.forEach((s) => seenSongs.add(s.song));
+      sections.push({ title, data: unique });
+    };
+
+    // 1) Numeric → exact song number match at absolute top
+    if (isNumeric) {
+      const n = parseInt(q, 10);
+      const exact = SEARCHABLE_SONGS.find((s) => s.song === n);
+      if (exact) addSection("Canción", [exact]);
+      const prefix = SEARCHABLE_SONGS.filter((s) => s.song !== n && String(s.song).startsWith(q)).slice(0, 10);
+      if (prefix.length > 0) addSection("Canciones", prefix);
+      return sections;
+    }
+
+    // 2) Recents matching query
+    const recentMatches = recentSongsRef.current
+      .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
+      .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s && words.every((w) => s.normalized.includes(w) || normalizeText(s.title).includes(w)))
+      .slice(0, 5);
+    addSection("Recientes", recentMatches);
+
+    // 3) Songs by title match
+    const titleNorm = (s: typeof SEARCHABLE_SONGS[0]) => normalizeText(s.title);
+    const titleMatches = SEARCHABLE_SONGS.filter((s) => {
+      const t = titleNorm(s);
+      return words.every((w) => t.includes(w));
+    }).slice(0, 15);
+    addSection("Canciones", titleMatches);
+
+    // 4) Songs by lyrics (matched in full text but NOT in title)
+    const lyricMatches = SEARCHABLE_SONGS.filter((s) => {
       if (!s.normalized) return false;
+      const t = titleNorm(s);
+      const inTitle = words.every((w) => t.includes(w));
+      if (inTitle) return false; // already shown in title section
       return words.every((w) => s.normalized.includes(w));
-    }).slice(0, 20);
+    }).slice(0, 10);
+    addSection("Letras", lyricMatches);
+
+    // 5) Mass parts — if query matches a mass part keyword
+    for (const part of MASS_PARTS) {
+      if (part.keywords.some((kw) => normalizedQ.includes(kw) || kw.includes(normalizedQ))) {
+        const partSongs = SEARCHABLE_SONGS.filter((s) => {
+          const t = titleNorm(s);
+          return part.keywords.some((kw) => t.includes(kw) || s.normalized.includes(kw));
+        }).slice(0, 8);
+        addSection(`Parte de Misa: ${part.label}`, partSongs);
+        break; // only match one mass part per query
+      }
+    }
+
+    // 6) Themes — if query matches a theme keyword
+    for (const theme of THEMES) {
+      if (theme.keywords.some((kw) => normalizedQ.includes(kw) || kw.includes(normalizedQ))) {
+        const themeSongs = SEARCHABLE_SONGS.filter((s) => {
+          const t = titleNorm(s);
+          return theme.keywords.some((kw) => t.includes(kw) || s.normalized.includes(kw));
+        }).slice(0, 8);
+        addSection(`Tema: ${theme.label}`, themeSongs);
+        break;
+      }
+    }
+
+    return sections;
   }, [searchText]);
 
   const handleSearchResultTap = useCallback((song: number) => {
@@ -400,9 +494,9 @@ export default function App() {
   }, [goToPage, closeSearch]);
 
   const handleSearchSubmit = useCallback(() => {
-    // If there's exactly one result or a numeric input, go directly
-    if (searchResults.length > 0) {
-      handleSearchResultTap(searchResults[0].song);
+    const firstSection = searchSections[0];
+    if (firstSection && firstSection.data.length > 0) {
+      handleSearchResultTap(firstSection.data[0].song);
     } else {
       const trimmed = searchText.trim();
       if (trimmed && /^\d+$/.test(trimmed)) {
@@ -410,7 +504,7 @@ export default function App() {
         closeSearch();
       }
     }
-  }, [searchResults, searchText, goToPage, closeSearch, handleSearchResultTap]);
+  }, [searchSections, searchText, goToPage, closeSearch, handleSearchResultTap]);
 
   // Browse categories
   const openBrowse = useCallback(() => {
@@ -617,7 +711,7 @@ export default function App() {
         <TouchableWithoutFeedback onPress={closeSearch}>
           <View style={styles.searchOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.searchContainer}>
+              <View style={[styles.searchContainer, { maxHeight: availableHeight - 40 }]}>
                 <View style={styles.searchBar}>
                   <TextInput
                     ref={searchInputRef}
@@ -625,7 +719,7 @@ export default function App() {
                     value={searchText}
                     onChangeText={setSearchText}
                     onSubmitEditing={handleSearchSubmit}
-                    placeholder="Buscar canción o palabra..."
+                    placeholder="Buscar canción, palabra, parte de misa..."
                     placeholderTextColor="rgba(255,255,255,0.4)"
                     keyboardType="default"
                     returnKeyType="go"
@@ -638,26 +732,62 @@ export default function App() {
                     <Text style={styles.searchGoBtnText}>Ir</Text>
                   </TouchableOpacity>
                 </View>
-                {searchResults.length > 0 && (
-                  <FlatList
-                    data={searchResults}
-                    keyExtractor={(item) => `sr-${item.song}`}
+                {searchSections.length > 0 && (
+                  <SectionList
+                    sections={searchSections}
+                    keyExtractor={(item, i) => `sr-${item.song}-${i}`}
                     keyboardShouldPersistTaps="handled"
                     style={styles.searchResults}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={styles.searchResultRow}
-                        onPress={() => handleSearchResultTap(item.song)}
-                        activeOpacity={0.6}
-                      >
-                        <Text style={styles.searchResultNum}>{item.song}</Text>
-                        <Text style={styles.searchResultTitle} numberOfLines={1}>{item.title || `Canción ${item.song}`}</Text>
-                        <Text style={styles.searchResultPage}>p.{item.page}</Text>
-                      </TouchableOpacity>
+                    stickySectionHeadersEnabled={false}
+                    renderSectionHeader={({ section }) => (
+                      <View style={styles.searchSectionHeader}>
+                        <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
+                      </View>
                     )}
+                    renderItem={({ item }) => {
+                      const displayTitle = item.title || `Canción ${item.song}`;
+                      const normalizedQ = normalizeText(searchText.trim());
+                      const qWords = normalizedQ.split(/\s+/).filter(Boolean);
+                      // Highlight matching words in title
+                      const titleParts: { text: string; bold: boolean }[] = [];
+                      if (qWords.length > 0 && !/^\d+$/.test(searchText.trim())) {
+                        const normTitle = normalizeText(displayTitle);
+                        let lastIdx = 0;
+                        // Find first matching word position for highlight
+                        const matchPositions: { start: number; end: number }[] = [];
+                        for (const w of qWords) {
+                          const idx = normTitle.indexOf(w);
+                          if (idx !== -1) matchPositions.push({ start: idx, end: idx + w.length });
+                        }
+                        matchPositions.sort((a, b) => a.start - b.start);
+                        for (const mp of matchPositions) {
+                          if (mp.start < lastIdx) continue;
+                          if (mp.start > lastIdx) titleParts.push({ text: displayTitle.slice(lastIdx, mp.start), bold: false });
+                          titleParts.push({ text: displayTitle.slice(mp.start, mp.end), bold: true });
+                          lastIdx = mp.end;
+                        }
+                        if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
+                      }
+                      const hasParts = titleParts.length > 0;
+                      return (
+                        <TouchableOpacity
+                          style={styles.searchResultRow}
+                          onPress={() => handleSearchResultTap(item.song)}
+                          activeOpacity={0.6}
+                        >
+                          <Text style={styles.searchResultNum}>{item.song}</Text>
+                          <Text style={styles.searchResultTitle} numberOfLines={1}>
+                            {hasParts ? titleParts.map((p, i) => (
+                              <Text key={i} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
+                            )) : displayTitle}
+                          </Text>
+                          <Text style={styles.searchResultPage}>p.{item.page}</Text>
+                        </TouchableOpacity>
+                      );
+                    }}
                   />
                 )}
-                {searchText.trim().length > 0 && searchResults.length === 0 && (
+                {searchText.trim().length > 0 && searchSections.length === 0 && (
                   <View style={styles.searchEmpty}>
                     <Text style={styles.searchEmptyText}>Sin resultados</Text>
                   </View>
@@ -983,7 +1113,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   searchContainer: {
-    maxHeight: "70%",
+    flex: 1,
   },
   searchGoBtn: {
     backgroundColor: "#3b82f6",
@@ -996,16 +1126,33 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(20,20,40,0.97)",
     borderRadius: 12,
     marginTop: 6,
-    maxHeight: 380,
+    flex: 1,
+  },
+  searchSectionHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  searchSectionHeaderText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.45)",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   searchResultRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 13,
+    minHeight: 48,
+    paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.08)",
     gap: 12,
+  },
+  searchHighlight: {
+    color: "#7ec8f7",
+    fontWeight: "700",
   },
   searchResultNum: {
     fontSize: 18,
