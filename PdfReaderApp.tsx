@@ -78,7 +78,7 @@ const extractLyricSnippet = (raw: string): string => {
     if (chordLine.test(t)) continue;
     if (skipLine.test(t)) continue;
     if (!/[a-záéíóúüñ]{2,}/i.test(t)) continue;
-    return t.length > 70 ? t.slice(0, 68) + "…" : t;
+    return t.length > 120 ? t.slice(0, 118) + "…" : t;
   }
   return "";
 };
@@ -828,7 +828,7 @@ export default function App() {
                               )) : displayTitle}
                             </Text>
                             {!!snippet && (
-                              <Text style={styles.searchResultSnippet} numberOfLines={1}>{snippet}</Text>
+                              <Text style={styles.searchResultSnippet} numberOfLines={2}>{snippet}</Text>
                             )}
                           </View>
                           <Text style={styles.searchResultPage}>p.{item.page}</Text>
