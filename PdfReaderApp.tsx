@@ -63,10 +63,13 @@ for (const entry of (PAGES_JSON as any).songIndex ?? []) {
   if (entry.themes?.length) SONG_THEMES[entry.song as number] = entry.themes;
 }
 
-// Extract first clean lyric line from raw OCR text.
-// Skips: chord lines, stage directions, metadata, empty lines.
+// Extract a lyric snippet from raw OCR text.
+// Starts scanning from 30% into the text to skip title/metadata/chord intro.
+// Skips chord lines, stage directions, and OCR noise.
 const extractLyricSnippet = (raw: string): string => {
-  const lines = raw.split("\n");
+  const start = Math.floor(raw.length * 0.30);
+  const slice = raw.slice(start);
+  const lines = slice.split("\n");
   const chordLine = /^[\s()*HMThT]*([A-G][#b]?(m|maj|sus|dim|aug|7|9|11|13|add)?[0-9]?\/?[A-G]?[#b]?[\s]+){1,}[\s()*HMThT]*$/i;
   const skipLine = /^(intro|coro|estrofa|puente|fin|bridge|verso|rev\s|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|[0-9]+\.|[A-G][#b]?[m]?\s)/i;
   for (const line of lines) {
@@ -74,9 +77,7 @@ const extractLyricSnippet = (raw: string): string => {
     if (t.length < 10) continue;
     if (chordLine.test(t)) continue;
     if (skipLine.test(t)) continue;
-    // Must have at least 2 lowercase letters in a row (actual words, not all chord/caps noise)
     if (!/[a-záéíóúüñ]{2,}/i.test(t)) continue;
-    // Trim to ~70 chars
     return t.length > 70 ? t.slice(0, 68) + "…" : t;
   }
   return "";
