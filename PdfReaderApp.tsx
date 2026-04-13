@@ -64,21 +64,38 @@ for (const entry of (PAGES_JSON as any).songIndex ?? []) {
 }
 
 // Extract a lyric snippet from raw OCR text.
-// Starts scanning from 30% into the text to skip title/metadata/chord intro.
-// Skips chord lines, stage directions, and OCR noise.
+// Starts at 30% to skip title/metadata. Strips chord tokens and stage directions,
+// leaving only sung text words.
 const extractLyricSnippet = (raw: string): string => {
   const start = Math.floor(raw.length * 0.30);
   const slice = raw.slice(start);
   const lines = slice.split("\n");
-  const chordLine = /^[\s()*HMThT]*([A-G][#b]?(m|maj|sus|dim|aug|7|9|11|13|add)?[0-9]?\/?[A-G]?[#b]?[\s]+){1,}[\s()*HMThT]*$/i;
-  const skipLine = /^(intro|coro|estrofa|puente|fin|bridge|verso|rev\s|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|[0-9]+\.|[A-G][#b]?[m]?\s)/i;
+
+  // A "chord token" is an isolated music chord: A-G optionally followed by
+  // accidental, quality, extension, slash bass — surrounded by whitespace/punctuation.
+  // e.g. "D", "Em", "A7", "G#m", "C/E", "Bm7", "A#", "D7", "G7"
+  const chordToken = /\b[A-G][#b]?(m|maj|sus|dim|aug|add)?[0-9]{0,2}(\/[A-G][#b]?)?\b/g;
+
+  // Skip entire lines that are stage directions or pure metadata
+  const skipLine = /^\s*(intro|coro|estrofa|puente|fin\s*$|bridge|verso|rev[\s\d]|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|2\s*veces|dos\s*veces|[0-9]+\.)/i;
+
   for (const line of lines) {
     const t = line.trim();
-    if (t.length < 10) continue;
-    if (chordLine.test(t)) continue;
+    if (t.length < 6) continue;
     if (skipLine.test(t)) continue;
-    if (!/[a-záéíóúüñ]{2,}/i.test(t)) continue;
-    return t;
+
+    // Strip chord tokens from the line, then clean up leftover punctuation/spaces
+    const stripped = t
+      .replace(chordToken, " ")
+      .replace(/[_\-#:\\/*()[\]{}<>|^~`]/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    // Must have at least 3 real words after stripping
+    const wordCount = stripped.split(/\s+/).filter((w) => /[a-záéíóúüñ]{2,}/i.test(w)).length;
+    if (wordCount < 3) continue;
+
+    return stripped;
   }
   return "";
 };
