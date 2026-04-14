@@ -170,6 +170,49 @@ const MISA_PARTS_ORDERED = [
   { label: "Despedida / Envío", keywords: ["despedida", "envio"] },
 ];
 
+// Pill colors — each Misa part gets a distinct hue cycling through this palette
+const MISA_PILL_COLORS = [
+  "#1a6b3a", // 1 Entrada       — forest green
+  "#7b3f00", // 2 Gloria         — deep amber
+  "#b5860a", // 3 Aleluya        — gold
+  "#5c3317", // 4 Ofertorio      — dark brown
+  "#1a3a6b", // 5 Santo          — navy
+  "#6b1a1a", // 6 Cordero        — deep red
+  "#1a5f6b", // 7 Padre Nuestro  — teal
+  "#3a1a6b", // 8 Comunión       — deep violet
+  "#2e6b1a", // 9 Paz            — mid green
+  "#4a4a4a", // 10 Despedida     — charcoal
+];
+
+// Per-theme pill colors
+const TEMA_PILL_COLORS: Record<string, string> = {
+  alabanza:         "#7b4f00", // amber-brown
+  fe:               "#1a4a7b", // steel blue
+  eucaristia:       "#6b1a5f", // magenta-purple
+  maria:            "#7b1a4a", // rose
+  sanacion:         "#1a6b5a", // teal-green
+  comunidad:        "#4a6b1a", // olive
+  paz:              "#1a5f3a", // emerald
+  mision:           "#6b4a1a", // sienna
+  ninos:            "#1a6b6b", // cyan-teal
+  bodas:            "#5f1a6b", // violet
+  funerales:        "#3a3a3a", // dark grey
+  bautismo:         "#1a3f6b", // cobalt
+  confirmacion:     "#6b3a1a", // copper
+  primera_comunion: "#5a1a6b", // deep purple
+  procesion:        "#1a6b30", // jade
+  santos:           "#6b5a1a", // ochre
+};
+
+// Per-temporada pill colors
+const TEMPO_PILL_COLORS: Record<string, string> = {
+  adviento:      "#4a1a6b", // deep purple
+  navidad:       "#6b1a1a", // crimson
+  cuaresma:      "#5a3a00", // dark bronze
+  resurreccion:  "#1a6b2a", // bright green
+  espiritu_santo:"#6b3a00", // burnt orange
+};
+
 const TIEMPO_GROUPS = [
   { id: "adviento",      label: "Adviento" },
   { id: "navidad",       label: "Navidad" },
@@ -923,18 +966,24 @@ export default function App() {
               onPress={() => handleSearchResultTap(item.song)}
               activeOpacity={0.6}
             >
-              {/* Left: keyword tags */}
+              {/* Left: keyword pills */}
               <View style={styles.songRowKeywords}>
                 {misaPart && (
-                  <Text style={styles.keywordMisa} numberOfLines={1}>
-                    {`${misaPart.label} (${misaPart.idx + 1}/${MISA_PARTS_ORDERED.length})`}
-                  </Text>
+                  <View style={[styles.pill, { backgroundColor: MISA_PILL_COLORS[misaPart.idx % MISA_PILL_COLORS.length] }]}>
+                    <Text style={styles.pillText} numberOfLines={1}>
+                      {`${misaPart.label} ${misaPart.idx + 1}/${MISA_PARTS_ORDERED.length}`}
+                    </Text>
+                  </View>
                 )}
                 {temaTag && (
-                  <Text style={styles.keywordTema} numberOfLines={1}>{THEME_LABELS[temaTag]}</Text>
+                  <View style={[styles.pill, { backgroundColor: TEMA_PILL_COLORS[temaTag] ?? "#555" }]}>
+                    <Text style={styles.pillText} numberOfLines={1}>{THEME_LABELS[temaTag]}</Text>
+                  </View>
                 )}
                 {tempoTag && (
-                  <Text style={styles.keywordTemporada} numberOfLines={1}>{THEME_LABELS[tempoTag] ?? tempoTag}</Text>
+                  <View style={[styles.pill, { backgroundColor: TEMPO_PILL_COLORS[tempoTag] ?? "#5c4f7c" }]}>
+                    <Text style={styles.pillText} numberOfLines={1}>{THEME_LABELS[tempoTag] ?? tempoTag}</Text>
+                  </View>
                 )}
               </View>
               {/* Center: song number + title + snippet */}
@@ -1552,26 +1601,23 @@ const styles = StyleSheet.create({
   browsePage: { fontSize: 14, color: "rgba(255,255,255,0.4)" },
   browseEmpty: { color: "rgba(255,255,255,0.3)", fontSize: 16, textAlign: "center", marginTop: 60 },
 
-  // Song row keyword tags (director row redesign)
+  // Song row keyword pills (director row redesign)
   songRowKeywords: {
     width: 120,
-    gap: 2,
+    gap: 3,
     justifyContent: "center",
   },
-  keywordMisa: {
-    fontSize: 10,
-    color: "#7ec8f7",
-    fontWeight: "600",
+  pill: {
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    alignSelf: "flex-start",
   },
-  keywordTema: {
+  pillText: {
     fontSize: 10,
-    color: "#f5b942",
-    fontWeight: "600",
-  },
-  keywordTemporada: {
-    fontSize: 10,
-    color: "#b39ddb",
-    fontWeight: "600",
+    color: "#fff",
+    fontWeight: "700",
+    opacity: 0.92,
   },
 
   // Follower notification banner (kept for reference, no longer rendered)
