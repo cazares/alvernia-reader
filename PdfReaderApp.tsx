@@ -427,7 +427,7 @@ export default function App() {
   useEffect(() => {
     if (!syncAvailable) return;
     NativeModules.DirectorSyncModule?.getDeviceName?.().then((name: string) => {
-      if (name === "Brau MASTER" || name === "mPad") {
+      if (name === "Brau MASTER") {
         startNearbyDirector(DIRECTOR_SESSION)
           .then(() => setSyncRole("director"))
           .catch(() => {
