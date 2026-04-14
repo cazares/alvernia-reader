@@ -1077,7 +1077,7 @@ export default function App() {
             style={[styles.cornerButton, isSmallScreen && styles.searchTriggerSmall]}
             onPress={searchVisible ? closeSearch : openSearch}
             activeOpacity={0.75}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 3 }}
           >
             <Text style={styles.searchTriggerIcon}>⌕</Text>
           </TouchableOpacity>
@@ -1089,7 +1089,7 @@ export default function App() {
           onLongPress={syncAvailable ? openSyncModal : undefined}
           delayLongPress={500}
           activeOpacity={0.75}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          hitSlop={{ top: 16, bottom: 16, left: 3, right: 16 }}
         >
           <Text style={styles.navTriggerIcon}>♪</Text>
           <Text style={styles.navTriggerArrow}>›</Text>
