@@ -1219,7 +1219,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(26,26,46,0.38)",
     borderRadius: 14,
     width: 96,
-    height: 72,
+    height: 96,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.4,
