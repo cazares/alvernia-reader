@@ -113,6 +113,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  @objc(getDeviceName:rejecter:)
+  func getDeviceName(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(UIDevice.current.name)
+  }
+
   @objc(sendPageUpdate:totalPages:resolver:rejecter:)
   func sendPageUpdate(
     _ page: NSNumber,

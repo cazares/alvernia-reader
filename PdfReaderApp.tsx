@@ -7,6 +7,7 @@ import {
   Image,
   Keyboard,
   Modal,
+  NativeModules,
   PanResponder,
   SectionList,
   StatusBar,
@@ -179,23 +180,52 @@ const TIEMPO_GROUPS = [
 
 const TEMAS_EXCLUDED = new Set(["misa","entrada","envio","eucaristia","adviento","navidad","cuaresma","resurreccion","espiritu_santo"]);
 
-// Precomputed tab sections (static — SEARCHABLE_SONGS never changes at runtime)
-const MISA_TAB_SECTIONS = MISA_PARTS_ORDERED.map((part, i) => ({
+// Static song sets per category (unordered — will be sorted inside component via sortSongs)
+const MISA_TAB_SONGS_BY_PART = MISA_PARTS_ORDERED.map((part, i) => ({
   title: `Parte de Misa (${i + 1} de ${MISA_PARTS_ORDERED.length}): ${part.label}`,
-  data: SEARCHABLE_SONGS.filter((s) => part.keywords.some((kw) => s.normalized.includes(kw))).slice(0, 20),
-})).filter((s) => s.data.length > 0);
+  songs: SEARCHABLE_SONGS.filter((s) => part.keywords.some((kw) => s.normalized.includes(kw))).slice(0, 20),
+})).filter((s) => s.songs.length > 0);
 
-const TIEMPO_TAB_SECTIONS = TIEMPO_GROUPS.map((g) => ({
+const TIEMPO_TAB_SONGS_BY_GROUP = TIEMPO_GROUPS.map((g) => ({
   title: g.label,
-  data: SEARCHABLE_SONGS.filter((s) => s.themes.includes(g.id)).slice(0, 20),
-})).filter((s) => s.data.length > 0);
+  id: g.id,
+  songs: SEARCHABLE_SONGS.filter((s) => s.themes.includes(g.id)).slice(0, 20),
+})).filter((s) => s.songs.length > 0);
 
-const TEMAS_TAB_SECTIONS = Object.entries(THEME_LABELS)
+const TEMAS_TAB_SONGS_BY_GROUP = Object.entries(THEME_LABELS)
   .filter(([id]) => !TEMAS_EXCLUDED.has(id))
   .map(([id, label]) => ({
     title: label,
-    data: SEARCHABLE_SONGS.filter((s) => s.themes.includes(id)).slice(0, 20),
-  })).filter((s) => s.data.length > 0);
+    id,
+    songs: SEARCHABLE_SONGS.filter((s) => s.themes.includes(id)).slice(0, 20),
+  })).filter((s) => s.songs.length > 0);
+
+// Helper: sort a song array by sortMode
+function sortSongs(
+  arr: typeof SEARCHABLE_SONGS,
+  mode: "number" | "numberDesc" | "az" | "za",
+): typeof SEARCHABLE_SONGS {
+  const copy = [...arr];
+  if (mode === "numberDesc") copy.sort((a, b) => b.song - a.song);
+  else if (mode === "az") copy.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+  else if (mode === "za") copy.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
+  // "number" — ascending by default
+  return copy;
+}
+
+// Helper: find the Misa part label + index for a song
+function getMisaPart(song: typeof SEARCHABLE_SONGS[0]): { label: string; idx: number } | null {
+  for (let i = 0; i < MISA_PARTS_ORDERED.length; i++) {
+    const part = MISA_PARTS_ORDERED[i];
+    if (part.keywords.some((kw) => song.normalized.includes(kw))) {
+      return { label: part.label, idx: i };
+    }
+  }
+  return null;
+}
+
+const TIEMPO_IDS = new Set(TIEMPO_GROUPS.map((g) => g.id));
+const MISA_CATEGORY_IDS = new Set(["misa", "entrada", "envio", "eucaristia"]);
 
 // Which theme IDs to surface in keyword search results (misa subgroups)
 const MISA_SEARCH_KEYWORDS: Record<string, string> = {
@@ -320,14 +350,12 @@ export default function App() {
   const [gridDensityIdx, setGridDensityIdx] = useState(0);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState("");
-  const [searchTab, setSearchTab] = useState<"todas" | "misa" | "tiempo" | "temas">("todas");
+  const [searchTab, setSearchTab] = useState<"todas" | "misa" | "tiempo" | "temas" | "recientes">("todas");
   const [sortMode, setSortMode] = useState<"number" | "numberDesc" | "az" | "za">("number");
   const [browseVisible, setBrowseVisible] = useState(false);
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
-  const [followerNotice, setFollowerNotice] = useState(false);
-  const followerBannerAnim = useRef(new Animated.Value(-120)).current;
+  const [showSatellite, setShowSatellite] = useState(false);
   const lastFollowerNoticeRef = useRef(0);
-  const followerDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
@@ -373,11 +401,12 @@ export default function App() {
         setSyncRole("follower");
         startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
       } else if (event.type === "state" && event.status === "connected" && syncRoleRef.current === "follower") {
-        // Follower just connected to director — show banner (30s cooldown)
+        // Follower just connected to director — show satellite emoji briefly (30s cooldown)
         const now = Date.now();
         if (now - lastFollowerNoticeRef.current > 30_000) {
           lastFollowerNoticeRef.current = now;
-          showFollowerBanner();
+          setShowSatellite(true);
+          setTimeout(() => setShowSatellite(false), 3000);
         }
       }
     });
@@ -390,6 +419,17 @@ export default function App() {
     if (!syncAvailable) return;
     startNearbyFollower(DIRECTOR_SESSION).then(() => setSyncRole("follower")).catch(() => {});
     return () => { stopNearbyDirectorSync().catch(() => {}); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-join as director if this is the master device
+  useEffect(() => {
+    if (!syncAvailable) return;
+    NativeModules.DirectorSyncModule?.getDeviceName?.().then((name: string) => {
+      if (name === "Brau MASTER") {
+        startNearbyDirector(DIRECTOR_SESSION).then(() => setSyncRole("director")).catch(() => {});
+      }
+    }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -470,41 +510,8 @@ export default function App() {
     }
   }, [closeSyncModal]);
 
-  // Follower banner
-  const hideFollowerBanner = useCallback(() => {
-    if (followerDismissTimer.current) { clearTimeout(followerDismissTimer.current); followerDismissTimer.current = null; }
-    Animated.spring(followerBannerAnim, { toValue: -120, useNativeDriver: true, bounciness: 0, speed: 18 }).start(() => {
-      setFollowerNotice(false);
-    });
-  }, [followerBannerAnim]);
-
-  const showFollowerBanner = useCallback(() => {
-    setFollowerNotice(true);
-    followerBannerAnim.setValue(-120);
-    Animated.spring(followerBannerAnim, { toValue: 0, useNativeDriver: true, bounciness: 6, speed: 14 }).start();
-    followerDismissTimer.current = setTimeout(() => hideFollowerBanner(), 4500);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followerBannerAnim, hideFollowerBanner]);
-
-  const followerBannerPan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 6,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy < 0) followerBannerAnim.setValue(gs.dy);
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy < -30 || gs.vy < -0.5) {
-          hideFollowerBanner();
-        } else {
-          Animated.spring(followerBannerAnim, { toValue: 0, useNativeDriver: true, bounciness: 4, speed: 16 }).start();
-        }
-      },
-    }),
-  ).current;
-
   // Spotlight-style keyword search
   const openSearch = useCallback(() => {
-    setSearchText("");
     setSearchVisible(true);
     setBrowseVisible(false);
     setGridVisible(false);
@@ -513,7 +520,6 @@ export default function App() {
   const closeSearch = useCallback(() => {
     Keyboard.dismiss();
     setSearchVisible(false);
-    setSearchText("");
   }, []);
 
   // Compute grouped search results on every keystroke
@@ -606,6 +612,43 @@ export default function App() {
     else if (sortMode === "za") arr.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
     // "number" keeps natural order (already sorted ascending by song number)
     return arr;
+  }, [sortMode]);
+
+  // Sorted tab sections (re-sorted whenever sortMode changes)
+  const sortedMisaSections = useMemo(() => {
+    const seenMisa = new Set<number>();
+    const sections = MISA_TAB_SONGS_BY_PART.map((part) => {
+      const data = sortSongs(part.songs, sortMode);
+      data.forEach((s) => seenMisa.add(s.song));
+      return { title: part.title, data };
+    });
+    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenMisa.has(s.song)), sortMode);
+    if (otros.length > 0) sections.push({ title: "Otros", data: otros });
+    return sections;
+  }, [sortMode]);
+
+  const sortedTiempoSections = useMemo(() => {
+    const seenTiempo = new Set<number>();
+    const sections = TIEMPO_TAB_SONGS_BY_GROUP.map((g) => {
+      const data = sortSongs(g.songs, sortMode);
+      data.forEach((s) => seenTiempo.add(s.song));
+      return { title: g.title, data };
+    });
+    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenTiempo.has(s.song)), sortMode);
+    if (otros.length > 0) sections.push({ title: "Otros", data: otros });
+    return sections;
+  }, [sortMode]);
+
+  const sortedTemasSections = useMemo(() => {
+    const seenTemas = new Set<number>();
+    const sections = TEMAS_TAB_SONGS_BY_GROUP.map((g) => {
+      const data = sortSongs(g.songs, sortMode);
+      data.forEach((s) => seenTemas.add(s.song));
+      return { title: g.title, data };
+    });
+    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenTemas.has(s.song)), sortMode);
+    if (otros.length > 0) sections.push({ title: "Otros", data: otros });
+    return sections;
   }, [sortMode]);
 
   const sortLabel = sortMode === "number" ? "#↑" : sortMode === "numberDesc" ? "#↓" : sortMode === "az" ? "A→Z" : "Z→A";
@@ -860,6 +903,12 @@ export default function App() {
             if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
           }
           const hasParts = titleParts.length > 0;
+
+          // Compute keyword tags
+          const misaPart = getMisaPart(item);
+          const tempoTag = item.themes.find((t) => TIEMPO_IDS.has(t));
+          const temaTag = item.themes.find((t) => !TIEMPO_IDS.has(t) && !MISA_CATEGORY_IDS.has(t) && THEME_LABELS[t]);
+
           return (
             <TouchableOpacity
               key={`row-${item.song}`}
@@ -867,9 +916,24 @@ export default function App() {
               onPress={() => handleSearchResultTap(item.song)}
               activeOpacity={0.6}
             >
-              <Text style={styles.searchResultNum}>{item.song}</Text>
+              {/* Left: keyword tags */}
+              <View style={styles.songRowKeywords}>
+                {misaPart && (
+                  <Text style={styles.keywordMisa} numberOfLines={1}>
+                    {`${misaPart.label} (${misaPart.idx + 1}/${MISA_PARTS_ORDERED.length})`}
+                  </Text>
+                )}
+                {temaTag && (
+                  <Text style={styles.keywordTema} numberOfLines={1}>{THEME_LABELS[temaTag]}</Text>
+                )}
+                {tempoTag && (
+                  <Text style={styles.keywordTemporada} numberOfLines={1}>{THEME_LABELS[tempoTag] ?? tempoTag}</Text>
+                )}
+              </View>
+              {/* Center: song number + title + snippet */}
               <View style={styles.searchResultBody}>
                 <Text style={styles.searchResultTitle} numberOfLines={1}>
+                  <Text style={{ color: "#3b82f6", fontWeight: "800" }}>{item.song}. </Text>
                   {hasParts ? titleParts.map((p, pi) => (
                     <Text key={pi} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
                   )) : displayTitle}
@@ -884,11 +948,15 @@ export default function App() {
         };
 
         // Tab content for when there's no query
+        const recentSongEntries = recentSongsRef.current
+          .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
+          .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s);
         const tabSections = !hasQuery ? (
           searchTab === "todas" ? [{title: "", data: sortedTodas}] :
-          searchTab === "misa" ? MISA_TAB_SECTIONS :
-          searchTab === "tiempo" ? TIEMPO_TAB_SECTIONS :
-          TEMAS_TAB_SECTIONS
+          searchTab === "misa" ? sortedMisaSections :
+          searchTab === "tiempo" ? sortedTiempoSections :
+          searchTab === "temas" ? sortedTemasSections :
+          /* recientes */ [{title: "Recientes", data: recentSongEntries}]
         ) : null;
 
         return (
@@ -930,7 +998,7 @@ export default function App() {
                   {/* Tabs — only when no query */}
                   {!hasQuery && (
                     <View style={styles.searchTabBar}>
-                      {(["todas","misa","tiempo","temas"] as const).map((tab) => (
+                      {(["recientes","todas","misa","tiempo","temas"] as const).map((tab) => (
                         <TouchableOpacity
                           key={tab}
                           style={[styles.searchTabBtn, searchTab === tab && styles.searchTabBtnActive]}
@@ -938,7 +1006,7 @@ export default function App() {
                           activeOpacity={0.7}
                         >
                           <Text style={[styles.searchTabBtnText, searchTab === tab && styles.searchTabBtnTextActive]}>
-                            {tab === "todas" ? "Todas" : tab === "misa" ? "Misa" : tab === "tiempo" ? "Temporada" : "Temas"}
+                            {tab === "recientes" ? "Recientes" : tab === "todas" ? "Todas" : tab === "misa" ? "Misa" : tab === "tiempo" ? "Temporada" : "Temas"}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -970,22 +1038,28 @@ export default function App() {
 
                   {/* Tab content — shown when no query */}
                   {!hasQuery && tabSections && (
-                    <SectionList
-                      sections={tabSections}
-                      keyExtractor={(item, i) => `tab-${item.song}-${i}`}
-                      keyboardShouldPersistTaps="handled"
-                      style={styles.searchResults}
-                      contentContainerStyle={{ paddingBottom: 16 }}
-                      stickySectionHeadersEnabled={false}
-                      renderSectionHeader={({ section }) =>
-                        section.title ? (
-                          <View style={styles.searchSectionHeader}>
-                            <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
-                          </View>
-                        ) : null
-                      }
-                      renderItem={({ item }) => renderSongRow(item as typeof SEARCHABLE_SONGS[0], false)}
-                    />
+                    tabSections[0]?.data.length === 0 && searchTab === "recientes" ? (
+                      <View style={styles.searchEmpty}>
+                        <Text style={styles.searchEmptyText}>Sin canciones recientes</Text>
+                      </View>
+                    ) : (
+                      <SectionList
+                        sections={tabSections}
+                        keyExtractor={(item, i) => `tab-${item.song}-${i}`}
+                        keyboardShouldPersistTaps="handled"
+                        style={styles.searchResults}
+                        contentContainerStyle={{ paddingBottom: 16 }}
+                        stickySectionHeadersEnabled={false}
+                        renderSectionHeader={({ section }) =>
+                          section.title ? (
+                            <View style={styles.searchSectionHeader}>
+                              <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
+                            </View>
+                          ) : null
+                        }
+                        renderItem={({ item }) => renderSongRow(item as typeof SEARCHABLE_SONGS[0], false)}
+                      />
+                    )
                   )}
 
                 </View>
@@ -995,32 +1069,35 @@ export default function App() {
         );
       })()}
 
-      {/* Nav trigger — tap: song modal, long press: sync modal */}
-      <TouchableOpacity
-        style={[styles.cornerButton, styles.navTrigger]}
-        onPress={openSongModal}
-        onLongPress={syncAvailable ? openSyncModal : undefined}
-        delayLongPress={500}
-        activeOpacity={0.75}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-      >
-        <Text style={styles.navTriggerIcon}>♪</Text>
-        <Text style={styles.navTriggerArrow}>›</Text>
-        {syncRole === "director" && <PulsingDot color="#4a90e2" />}
-        {syncRole === "follower" && <View style={[styles.syncDot, { backgroundColor: "#4cff91" }]} />}
-      </TouchableOpacity>
-
-      {/* Director search button — top-right, same size as nav trigger */}
-      {syncRole === "director" && (
+      {/* Top-right button cluster */}
+      <View style={styles.navCluster}>
+        {/* Search button — director only, to the left of ♪ */}
+        {syncRole === "director" && (
+          <TouchableOpacity
+            style={[styles.cornerButton, isSmallScreen && styles.searchTriggerSmall]}
+            onPress={searchVisible ? closeSearch : openSearch}
+            activeOpacity={0.75}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Text style={styles.searchTriggerIcon}>⌕</Text>
+          </TouchableOpacity>
+        )}
+        {/* Nav trigger — tap: song modal, long press: sync modal */}
         <TouchableOpacity
-          style={[styles.cornerButton, styles.searchTrigger, isSmallScreen && styles.searchTriggerSmall]}
-          onPress={openSearch}
+          style={styles.cornerButton}
+          onPress={openSongModal}
+          onLongPress={syncAvailable ? openSyncModal : undefined}
+          delayLongPress={500}
           activeOpacity={0.75}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Text style={styles.searchTriggerIcon}>⌕</Text>
+          <Text style={styles.navTriggerIcon}>♪</Text>
+          <Text style={styles.navTriggerArrow}>›</Text>
+          {syncRole === "director" && <PulsingDot color="#4a90e2" />}
+          {syncRole === "follower" && <PulsingDot color="#4cff91" />}
+          {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
         </TouchableOpacity>
-      )}
+      </View>
 
       {/* Version label */}
       <Text style={styles.versionLabel} pointerEvents="none">1.0.{OFFLINE_WEB_BUNDLE_VERSION}</Text>
@@ -1119,23 +1196,6 @@ export default function App() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* ── Follower connection banner (slide-down, swipe-up to dismiss) ── */}
-      {followerNotice && (
-        <Animated.View
-          style={[styles.noticeBanner, { transform: [{ translateY: followerBannerAnim }] }]}
-          {...followerBannerPan.panHandlers}
-        >
-          <TouchableWithoutFeedback onPress={hideFollowerBanner}>
-            <View style={styles.noticeBannerInner}>
-              <Text style={styles.noticeBannerEmoji}>📡</Text>
-              <View style={styles.noticeBannerText}>
-                <Text style={styles.noticeBannerTitle}>Conectado al director</Text>
-                <Text style={styles.noticeBannerBody}>Tu iPad seguirá automáticamente los cambios de página.</Text>
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </Animated.View>
-      )}
     </View>
   );
 }
@@ -1160,12 +1220,24 @@ const styles = StyleSheet.create({
     elevation: 7,
     gap: 4,
   },
-  navTrigger: { left: 1.25 },
+  navCluster: {
+    position: "absolute",
+    top: 1.25,
+    right: 1.25,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   navTriggerIcon: { fontSize: 32, color: "#fff", lineHeight: 38 },
   navTriggerArrow: { fontSize: 36, color: "#7ec8f7", lineHeight: 38, fontWeight: "700" },
-  searchTrigger: { right: 1.25 },
   searchTriggerSmall: { paddingHorizontal: 16, paddingVertical: 12 },
   searchTriggerIcon: { fontSize: 40, color: "#7ec8f7", lineHeight: 46 },
+  satelliteEmoji: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    fontSize: 16,
+  },
 
   // Director top-right button row
   directorBar: {
@@ -1319,7 +1391,7 @@ const styles = StyleSheet.create({
   searchGoBtn: {
     backgroundColor: "#3b82f6",
     borderRadius: 10,
-    width: 48,
+    width: 72,
     height: 48,
     alignItems: "center",
     justifyContent: "center",
@@ -1459,7 +1531,29 @@ const styles = StyleSheet.create({
   browsePage: { fontSize: 14, color: "rgba(255,255,255,0.4)" },
   browseEmpty: { color: "rgba(255,255,255,0.3)", fontSize: 16, textAlign: "center", marginTop: 60 },
 
-  // Follower notification banner
+  // Song row keyword tags (director row redesign)
+  songRowKeywords: {
+    width: 120,
+    gap: 2,
+    justifyContent: "center",
+  },
+  keywordMisa: {
+    fontSize: 10,
+    color: "#7ec8f7",
+    fontWeight: "600",
+  },
+  keywordTema: {
+    fontSize: 10,
+    color: "#f5b942",
+    fontWeight: "600",
+  },
+  keywordTemporada: {
+    fontSize: 10,
+    color: "#b39ddb",
+    fontWeight: "600",
+  },
+
+  // Follower notification banner (kept for reference, no longer rendered)
   noticeBanner: {
     position: "absolute",
     top: 0,
