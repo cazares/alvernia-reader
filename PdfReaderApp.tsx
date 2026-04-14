@@ -1080,7 +1080,7 @@ export default function App() {
       <View style={styles.navCluster}>
         {/* Nav trigger — tap: song modal, long press: sync modal */}
         <TouchableOpacity
-          style={styles.cornerButton}
+          style={styles.clusterBtn}
           onPress={openSongModal}
           onLongPress={syncAvailable ? openSyncModal : undefined}
           delayLongPress={500}
@@ -1093,10 +1093,10 @@ export default function App() {
           {syncRole === "follower" && <PulsingDot color="#4cff91" />}
           {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
         </TouchableOpacity>
-        {/* Search button — director only, far-right */}
+        {/* Search button — director only, far-right — SAME explicit width as nav button */}
         {syncRole === "director" && (
           <TouchableOpacity
-            style={styles.cornerButton}
+            style={styles.clusterBtn}
             onPress={searchVisible ? closeSearch : openSearch}
             activeOpacity={0.75}
             hitSlop={{ top: 16, bottom: 16, left: 3, right: 16 }}
@@ -1211,6 +1211,22 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000" },
   missingText: { color: "rgba(255,255,255,0.15)", fontSize: 48 },
 
+  // clusterBtn: both nav and search buttons in navCluster — locked to same width
+  clusterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(26,26,46,0.38)",
+    borderRadius: 14,
+    width: 96,
+    paddingVertical: 13,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 7,
+    gap: 4,
+  },
   cornerButton: {
     flexDirection: "row",
     alignItems: "center",
