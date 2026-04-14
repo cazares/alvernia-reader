@@ -118,7 +118,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    resolve(UIDevice.current.name)
+    // UIDevice.current.name returns generic "iPad" on iOS 16+ (privacy).
+    // ProcessInfo hostName returns user-set name like "mPad.local" — strip suffix.
+    let host = ProcessInfo.processInfo.hostName
+    let name = host.hasSuffix(".local") ? String(host.dropLast(6)) : host
+    resolve(name)
   }
 
   @objc(sendPageUpdate:totalPages:resolver:rejecter:)

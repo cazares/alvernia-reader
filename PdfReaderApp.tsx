@@ -422,16 +422,23 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-join as director if this is the master device
+  // Auto-join as director if this is a known master device.
+  // Runs whenever syncAvailable flips true so it retries after init.
   useEffect(() => {
     if (!syncAvailable) return;
     NativeModules.DirectorSyncModule?.getDeviceName?.().then((name: string) => {
       if (name === "Brau MASTER" || name === "mPad") {
-        startNearbyDirector(DIRECTOR_SESSION).then(() => setSyncRole("director")).catch(() => {});
+        startNearbyDirector(DIRECTOR_SESSION)
+          .then(() => setSyncRole("director"))
+          .catch(() => {
+            // Mirror exactly what the modal does on failure
+            startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+            setSyncRole("follower");
+          });
       }
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [syncAvailable]);
 
   const goToPage = useCallback((page: number) => {
     const clamped = Math.max(1, Math.min(page, TOTAL_PAGES));
