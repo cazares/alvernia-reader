@@ -426,7 +426,7 @@ export default function App() {
   useEffect(() => {
     if (!syncAvailable) return;
     NativeModules.DirectorSyncModule?.getDeviceName?.().then((name: string) => {
-      if (name === "Brau MASTER") {
+      if (name === "Brau MASTER" || name === "mPad") {
         startNearbyDirector(DIRECTOR_SESSION).then(() => setSyncRole("director")).catch(() => {});
       }
     }).catch(() => {});
@@ -1071,17 +1071,6 @@ export default function App() {
 
       {/* Top-right button cluster */}
       <View style={styles.navCluster}>
-        {/* Search button — director only, to the left of ♪ */}
-        {syncRole === "director" && (
-          <TouchableOpacity
-            style={[styles.cornerButton, isSmallScreen && styles.searchTriggerSmall]}
-            onPress={searchVisible ? closeSearch : openSearch}
-            activeOpacity={0.75}
-            hitSlop={{ top: 16, bottom: 16, left: 16, right: 3 }}
-          >
-            <Text style={styles.searchTriggerIcon}>⌕</Text>
-          </TouchableOpacity>
-        )}
         {/* Nav trigger — tap: song modal, long press: sync modal */}
         <TouchableOpacity
           style={styles.cornerButton}
@@ -1089,7 +1078,7 @@ export default function App() {
           onLongPress={syncAvailable ? openSyncModal : undefined}
           delayLongPress={500}
           activeOpacity={0.75}
-          hitSlop={{ top: 16, bottom: 16, left: 3, right: 16 }}
+          hitSlop={{ top: 16, bottom: 16, left: 16, right: 3 }}
         >
           <Text style={styles.navTriggerIcon}>♪</Text>
           <Text style={styles.navTriggerArrow}>›</Text>
@@ -1097,6 +1086,17 @@ export default function App() {
           {syncRole === "follower" && <PulsingDot color="#4cff91" />}
           {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
         </TouchableOpacity>
+        {/* Search button — director only, far-right */}
+        {syncRole === "director" && (
+          <TouchableOpacity
+            style={styles.cornerButton}
+            onPress={searchVisible ? closeSearch : openSearch}
+            activeOpacity={0.75}
+            hitSlop={{ top: 16, bottom: 16, left: 3, right: 16 }}
+          >
+            <Text style={styles.searchTriggerIcon}>⌕</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Version label */}
