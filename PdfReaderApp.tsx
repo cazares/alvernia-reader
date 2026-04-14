@@ -7,6 +7,7 @@ import {
   Image,
   Keyboard,
   Modal,
+  NativeModules,
   PanResponder,
   SectionList,
   StatusBar,
@@ -63,13 +64,68 @@ for (const entry of (PAGES_JSON as any).songIndex ?? []) {
   if (entry.themes?.length) SONG_THEMES[entry.song as number] = entry.themes;
 }
 
-// Searchable song entries: title + full OCR text + theme tags
+// Spanish text normalizer — removes tokens that are clearly not Spanish words
+// (no vowels, contain digits, too short without being common words).
+const SPANISH_KEEP_SHORT = new Set(["y","a","o","e","u","de","la","el","en","es","al","lo","le","su","no","si","mi","tu","se","me","te","yo","ya","he","oh","di","fe","ha","vi","os","un","ay"]);
+const cleanSpanishText = (text: string): string => {
+  const tokens = text.split(/\s+/).filter((tok) => {
+    const bare = tok.replace(/[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/g, "");
+    if (!bare) return false;
+    if (/^\d+[.,]?$/.test(tok)) return false; // purely numeric token (verse numbers, page refs)
+    if (!/[aeiouáéíóúü]/i.test(bare)) return false; // no vowels — chord/noise
+    if (bare.length <= 2 && !SPANISH_KEEP_SHORT.has(bare.toLowerCase())) return false;
+    return true;
+  });
+  const result = tokens.join(" ").trim();
+  if (!result) return "";
+  return result.charAt(0).toUpperCase() + result.slice(1);
+};
+
+// Extract a lyric snippet from raw OCR text.
+// Starts at 30% to skip title/metadata. Strips chord tokens, stage directions,
+// and any line that is essentially just the song title repeated.
+const extractLyricSnippet = (raw: string, title: string): string => {
+  const normTitle = normalizeText(title).replace(/[^a-z0-9 ]/g, "").trim();
+  const start = Math.floor(raw.length * 0.30);
+  const slice = raw.slice(start);
+  const lines = slice.split("\n");
+
+  const chordToken = /\b[A-G][#b]?(m|maj|sus|dim|aug|add)?[0-9]{0,2}(\/[A-G][#b]?)?\b/g;
+  const skipLine = /^\s*(intro|coro|estrofa|puente|fin\s*$|bridge|verso|rev[\s\d]|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|2\s*veces|dos\s*veces)/i;
+
+  const cleanLine = (t: string): string =>
+    t.replace(chordToken, " ")
+     .replace(/[_\-#:\\/*()[\]{}<>|^~`]/g, " ")
+     .replace(/\s{2,}/g, " ")
+     .trim();
+
+  const realWords = (s: string) => s.split(/\s+/).filter((w) => /[a-záéíóúüñ]{2,}/i.test(w));
+
+  // Collect ALL cleaned lyric lines — iOS numberOfLines={2} will truncate naturally
+  const collected: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.length < 6) continue;
+    if (skipLine.test(t)) continue;
+    const stripped = cleanLine(t);
+    if (realWords(stripped).length < 2) continue;
+    // Skip lines that are just the title repeated
+    const normStripped = normalizeText(stripped).replace(/[^a-z0-9 ]/g, "").trim();
+    if (normTitle.length > 4 && normStripped.includes(normTitle)) continue;
+    collected.push(stripped);
+  }
+  // Apply Spanish normalizer to remove OCR junk tokens
+  return cleanSpanishText(collected.join(" · "));
+};
+
+// Searchable song entries: title + full OCR text + theme tags + lyric snippet
 const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
   const title = (SONG_TITLES as Record<string, string>)[String(s.song)] ?? "";
   const fullText = (SONG_SEARCH_INDEX as Record<string, string>)[String(s.song)] ?? title;
   const normalized = normalizeText(fullText);
   const themes: string[] = SONG_THEMES[s.song] ?? [];
-  return { ...s, title, normalized, themes };
+  const snippet = extractLyricSnippet(fullText, title);
+  return { ...s, title, normalized, themes, snippet };
 });
 
 // Theme ID → display label mapping
@@ -100,25 +156,127 @@ const THEME_LABELS: Record<string, string> = {
   santos: "Santos",
 };
 
-// Which theme IDs to surface as "Parte de Misa" subgroups when searched
-const MISA_KEYWORDS: Record<string, string> = {
-  gloria: "Gloria",
-  santo: "Santo / Sanctus",
-  sanctus: "Santo / Sanctus",
-  aleluya: "Aleluya",
-  alleluia: "Aleluya",
-  cordero: "Cordero de Dios",
-  piedad: "Piedad / Kyrie",
-  kyrie: "Piedad / Kyrie",
-  ofertorio: "Ofertorio",
-  ofrenda: "Ofertorio",
-  comunion: "Comunión",
-  padre_nuestro: "Padre Nuestro",
+// Ordered parts of the Mass for the Misa tab
+const MISA_PARTS_ORDERED = [
+  { label: "Entrada", keywords: ["entrada", "entrare", "venimos", "llegamos"] },
+  { label: "Gloria", keywords: ["gloria"] },
+  { label: "Aleluya", keywords: ["aleluya", "alleluia", "aleluia"] },
+  { label: "Ofertorio", keywords: ["ofertorio", "ofrenda"] },
+  { label: "Santo / Sanctus", keywords: ["santo", "sanctus", "hosanna"] },
+  { label: "Cordero de Dios", keywords: ["cordero"] },
+  { label: "Padre Nuestro", keywords: ["padre nuestro"] },
+  { label: "Comunión", keywords: ["comunion"] },
+  { label: "Paz", keywords: ["paz"] },
+  { label: "Despedida / Envío", keywords: ["despedida", "envio"] },
+];
+
+// Pill colors — each Misa part gets a distinct hue cycling through this palette
+const MISA_PILL_COLORS = [
+  "#1a6b3a", // 1 Entrada       — forest green
+  "#7b3f00", // 2 Gloria         — deep amber
+  "#b5860a", // 3 Aleluya        — gold
+  "#5c3317", // 4 Ofertorio      — dark brown
+  "#1a3a6b", // 5 Santo          — navy
+  "#6b1a1a", // 6 Cordero        — deep red
+  "#1a5f6b", // 7 Padre Nuestro  — teal
+  "#3a1a6b", // 8 Comunión       — deep violet
+  "#2e6b1a", // 9 Paz            — mid green
+  "#4a4a4a", // 10 Despedida     — charcoal
+];
+
+// Per-theme pill colors
+const TEMA_PILL_COLORS: Record<string, string> = {
+  alabanza:         "#7b4f00", // amber-brown
+  fe:               "#1a4a7b", // steel blue
+  eucaristia:       "#6b1a5f", // magenta-purple
+  maria:            "#7b1a4a", // rose
+  sanacion:         "#1a6b5a", // teal-green
+  comunidad:        "#4a6b1a", // olive
+  paz:              "#1a5f3a", // emerald
+  mision:           "#6b4a1a", // sienna
+  ninos:            "#1a6b6b", // cyan-teal
+  bodas:            "#5f1a6b", // violet
+  funerales:        "#3a3a3a", // dark grey
+  bautismo:         "#1a3f6b", // cobalt
+  confirmacion:     "#6b3a1a", // copper
+  primera_comunion: "#5a1a6b", // deep purple
+  procesion:        "#1a6b30", // jade
+  santos:           "#6b5a1a", // ochre
 };
 
-type SearchResultItem =
-  | { type: "header"; title: string; key: string }
-  | { type: "song"; song: number; page: number; title: string; matchContext?: string; key: string };
+// Per-temporada pill colors
+const TEMPO_PILL_COLORS: Record<string, string> = {
+  adviento:      "#4a1a6b", // deep purple
+  navidad:       "#6b1a1a", // crimson
+  cuaresma:      "#5a3a00", // dark bronze
+  resurreccion:  "#1a6b2a", // bright green
+  espiritu_santo:"#6b3a00", // burnt orange
+};
+
+const TIEMPO_GROUPS = [
+  { id: "adviento",      label: "Adviento" },
+  { id: "navidad",       label: "Navidad" },
+  { id: "cuaresma",      label: "Cuaresma / Semana Santa" },
+  { id: "resurreccion",  label: "Pascua / Resurrección" },
+  { id: "espiritu_santo",label: "Pentecostés / Espíritu Santo" },
+];
+
+const TEMAS_EXCLUDED = new Set(["misa","entrada","envio","eucaristia","adviento","navidad","cuaresma","resurreccion","espiritu_santo"]);
+
+// Static song sets per category (unordered — will be sorted inside component via sortSongs)
+const MISA_TAB_SONGS_BY_PART = MISA_PARTS_ORDERED.map((part, i) => ({
+  title: `Parte de Misa (${i + 1} de ${MISA_PARTS_ORDERED.length}): ${part.label}`,
+  songs: SEARCHABLE_SONGS.filter((s) => part.keywords.some((kw) => s.normalized.includes(kw))).slice(0, 20),
+})).filter((s) => s.songs.length > 0);
+
+const TIEMPO_TAB_SONGS_BY_GROUP = TIEMPO_GROUPS.map((g) => ({
+  title: g.label,
+  id: g.id,
+  songs: SEARCHABLE_SONGS.filter((s) => s.themes.includes(g.id)).slice(0, 20),
+})).filter((s) => s.songs.length > 0);
+
+const TEMAS_TAB_SONGS_BY_GROUP = Object.entries(THEME_LABELS)
+  .filter(([id]) => !TEMAS_EXCLUDED.has(id))
+  .map(([id, label]) => ({
+    title: label,
+    id,
+    songs: SEARCHABLE_SONGS.filter((s) => s.themes.includes(id)).slice(0, 20),
+  })).filter((s) => s.songs.length > 0);
+
+// Helper: sort a song array by sortMode
+function sortSongs(
+  arr: typeof SEARCHABLE_SONGS,
+  mode: "number" | "numberDesc" | "az" | "za",
+): typeof SEARCHABLE_SONGS {
+  const copy = [...arr];
+  if (mode === "numberDesc") copy.sort((a, b) => b.song - a.song);
+  else if (mode === "az") copy.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+  else if (mode === "za") copy.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
+  // "number" — ascending by default
+  return copy;
+}
+
+// Helper: find the Misa part label + index for a song
+function getMisaPart(song: typeof SEARCHABLE_SONGS[0]): { label: string; idx: number } | null {
+  for (let i = 0; i < MISA_PARTS_ORDERED.length; i++) {
+    const part = MISA_PARTS_ORDERED[i];
+    if (part.keywords.some((kw) => song.normalized.includes(kw))) {
+      return { label: part.label, idx: i };
+    }
+  }
+  return null;
+}
+
+const TIEMPO_IDS = new Set(TIEMPO_GROUPS.map((g) => g.id));
+const MISA_CATEGORY_IDS = new Set(["misa", "entrada", "envio", "eucaristia"]);
+
+// Which theme IDs to surface in keyword search results (misa subgroups)
+const MISA_SEARCH_KEYWORDS: Record<string, string> = {
+  gloria: "Gloria", santo: "Santo / Sanctus", sanctus: "Santo / Sanctus",
+  aleluya: "Aleluya", alleluia: "Aleluya", cordero: "Cordero de Dios",
+  piedad: "Piedad / Kyrie", kyrie: "Piedad / Kyrie",
+  ofertorio: "Ofertorio", ofrenda: "Ofertorio", comunion: "Comunión",
+};
 
 const resolveSongPage = (input: string): number => {
   const n = parseInt(input, 10);
@@ -235,12 +393,12 @@ export default function App() {
   const [gridDensityIdx, setGridDensityIdx] = useState(0);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [searchTab, setSearchTab] = useState<"todas" | "misa" | "tiempo" | "temas" | "recientes">("todas");
+  const [sortMode, setSortMode] = useState<"number" | "numberDesc" | "az" | "za">("number");
   const [browseVisible, setBrowseVisible] = useState(false);
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
-  const [followerNotice, setFollowerNotice] = useState(false);
-  const followerBannerAnim = useRef(new Animated.Value(-120)).current;
+  const [showSatellite, setShowSatellite] = useState(false);
   const lastFollowerNoticeRef = useRef(0);
-  const followerDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
@@ -286,11 +444,12 @@ export default function App() {
         setSyncRole("follower");
         startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
       } else if (event.type === "state" && event.status === "connected" && syncRoleRef.current === "follower") {
-        // Follower just connected to director — show banner (30s cooldown)
+        // Follower just connected to director — show satellite emoji briefly (30s cooldown)
         const now = Date.now();
         if (now - lastFollowerNoticeRef.current > 30_000) {
           lastFollowerNoticeRef.current = now;
-          showFollowerBanner();
+          setShowSatellite(true);
+          setTimeout(() => setShowSatellite(false), 3000);
         }
       }
     });
@@ -305,6 +464,24 @@ export default function App() {
     return () => { stopNearbyDirectorSync().catch(() => {}); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-join as director if this is a known master device.
+  // Runs whenever syncAvailable flips true so it retries after init.
+  useEffect(() => {
+    if (!syncAvailable) return;
+    NativeModules.DirectorSyncModule?.getDeviceName?.().then((name: string) => {
+      if (name === "Brau MASTER") {
+        startNearbyDirector(DIRECTOR_SESSION)
+          .then(() => setSyncRole("director"))
+          .catch(() => {
+            // Mirror exactly what the modal does on failure
+            startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+            setSyncRole("follower");
+          });
+      }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncAvailable]);
 
   const goToPage = useCallback((page: number) => {
     const clamped = Math.max(1, Math.min(page, TOTAL_PAGES));
@@ -383,41 +560,8 @@ export default function App() {
     }
   }, [closeSyncModal]);
 
-  // Follower banner
-  const hideFollowerBanner = useCallback(() => {
-    if (followerDismissTimer.current) { clearTimeout(followerDismissTimer.current); followerDismissTimer.current = null; }
-    Animated.spring(followerBannerAnim, { toValue: -120, useNativeDriver: true, bounciness: 0, speed: 18 }).start(() => {
-      setFollowerNotice(false);
-    });
-  }, [followerBannerAnim]);
-
-  const showFollowerBanner = useCallback(() => {
-    setFollowerNotice(true);
-    followerBannerAnim.setValue(-120);
-    Animated.spring(followerBannerAnim, { toValue: 0, useNativeDriver: true, bounciness: 6, speed: 14 }).start();
-    followerDismissTimer.current = setTimeout(() => hideFollowerBanner(), 4500);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followerBannerAnim, hideFollowerBanner]);
-
-  const followerBannerPan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dy) > 6,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy < 0) followerBannerAnim.setValue(gs.dy);
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy < -30 || gs.vy < -0.5) {
-          hideFollowerBanner();
-        } else {
-          Animated.spring(followerBannerAnim, { toValue: 0, useNativeDriver: true, bounciness: 4, speed: 16 }).start();
-        }
-      },
-    }),
-  ).current;
-
   // Spotlight-style keyword search
   const openSearch = useCallback(() => {
-    setSearchText("");
     setSearchVisible(true);
     setBrowseVisible(false);
     setGridVisible(false);
@@ -426,7 +570,6 @@ export default function App() {
   const closeSearch = useCallback(() => {
     Keyboard.dismiss();
     setSearchVisible(false);
-    setSearchText("");
   }, []);
 
   // Compute grouped search results on every keystroke
@@ -478,17 +621,20 @@ export default function App() {
     addSection("Letras", lyricMatches);
 
     // 5) Misa subgroup — match specific mass-part keywords in query
-    const misaMatch = Object.entries(MISA_KEYWORDS).find(([kw]) =>
+    const misaMatch = Object.entries(MISA_SEARCH_KEYWORDS).find(([kw]) =>
       normalizedQ.includes(kw) || kw.includes(normalizedQ)
     );
     if (misaMatch) {
       const [kw, label] = misaMatch;
+      const partIdx = MISA_PARTS_ORDERED.findIndex((p) => p.label === label || p.keywords.includes(kw));
+      const header = partIdx >= 0
+        ? `Parte de Misa (${partIdx + 1} de ${MISA_PARTS_ORDERED.length}): ${label}`
+        : `Parte de Misa: ${label}`;
       const misaSongs = SEARCHABLE_SONGS.filter((s) =>
         !seenSongs.has(s.song) &&
-        (s.themes.includes("misa") || s.themes.includes("eucaristia") || s.themes.includes("entrada")) &&
         (titleNorm(s).includes(kw) || s.normalized.includes(kw))
       ).slice(0, 10);
-      addSection(`Misa · ${label}`, misaSongs);
+      addSection(header, misaSongs);
     }
 
     // 6) Theme tag match — if query matches a theme label or ID, surface tagged songs
@@ -507,6 +653,58 @@ export default function App() {
 
     return sections;
   }, [searchText]);
+
+  // Sorted song list for the "Todas" tab
+  const sortedTodas = useMemo(() => {
+    const arr = [...SEARCHABLE_SONGS];
+    if (sortMode === "numberDesc") arr.sort((a, b) => b.song - a.song);
+    else if (sortMode === "az") arr.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+    else if (sortMode === "za") arr.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
+    // "number" keeps natural order (already sorted ascending by song number)
+    return arr;
+  }, [sortMode]);
+
+  // Sorted tab sections (re-sorted whenever sortMode changes)
+  const sortedMisaSections = useMemo(() => {
+    const seenMisa = new Set<number>();
+    const sections = MISA_TAB_SONGS_BY_PART.map((part) => {
+      const data = sortSongs(part.songs, sortMode);
+      data.forEach((s) => seenMisa.add(s.song));
+      return { title: part.title, data };
+    });
+    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenMisa.has(s.song)), sortMode);
+    if (otros.length > 0) sections.push({ title: "Otros", data: otros });
+    return sections;
+  }, [sortMode]);
+
+  const sortedTiempoSections = useMemo(() => {
+    const seenTiempo = new Set<number>();
+    const sections = TIEMPO_TAB_SONGS_BY_GROUP.map((g) => {
+      const data = sortSongs(g.songs, sortMode);
+      data.forEach((s) => seenTiempo.add(s.song));
+      return { title: g.title, data };
+    });
+    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenTiempo.has(s.song)), sortMode);
+    if (otros.length > 0) sections.push({ title: "Otros", data: otros });
+    return sections;
+  }, [sortMode]);
+
+  const sortedTemasSections = useMemo(() => {
+    const seenTemas = new Set<number>();
+    const sections = TEMAS_TAB_SONGS_BY_GROUP.map((g) => {
+      const data = sortSongs(g.songs, sortMode);
+      data.forEach((s) => seenTemas.add(s.song));
+      return { title: g.title, data };
+    });
+    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenTemas.has(s.song)), sortMode);
+    if (otros.length > 0) sections.push({ title: "Otros", data: otros });
+    return sections;
+  }, [sortMode]);
+
+  const sortLabel = sortMode === "number" ? "#↑" : sortMode === "numberDesc" ? "#↓" : sortMode === "az" ? "A→Z" : "Z→A";
+  const cycleSortMode = useCallback(() => {
+    setSortMode((m) => m === "number" ? "numberDesc" : m === "numberDesc" ? "az" : m === "az" ? "za" : "number");
+  }, []);
 
   const handleSearchResultTap = useCallback((song: number) => {
     const page = resolveSongPage(String(song));
@@ -728,124 +926,234 @@ export default function App() {
         </View>
       )}
 
-      {/* ── Search overlay (Spotlight-style) — director only ── */}
-      {searchVisible && syncRole === "director" && (
-        <TouchableWithoutFeedback onPress={closeSearch}>
-          <View style={styles.searchOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.searchContainer, { maxHeight: availableHeight - 40 }]}>
-                <View style={styles.searchBar}>
-                  <TextInput
-                    ref={searchInputRef}
-                    style={styles.searchInput}
-                    value={searchText}
-                    onChangeText={setSearchText}
-                    onSubmitEditing={handleSearchSubmit}
-                    placeholder="Buscar canción, palabra, parte de misa..."
-                    placeholderTextColor="rgba(255,255,255,0.4)"
-                    keyboardType="default"
-                    returnKeyType="go"
-                    autoCorrect={false}
-                    autoCapitalize="none"
-                    maxLength={40}
-                    selectTextOnFocus
-                  />
-                  <TouchableOpacity style={styles.searchGoBtn} onPress={handleSearchSubmit} activeOpacity={0.7}>
-                    <Text style={styles.searchGoBtnText}>Ir</Text>
-                  </TouchableOpacity>
-                </View>
-                {searchSections.length > 0 && (
-                  <SectionList
-                    sections={searchSections}
-                    keyExtractor={(item, i) => `sr-${item.song}-${i}`}
-                    keyboardShouldPersistTaps="handled"
-                    style={styles.searchResults}
-                    stickySectionHeadersEnabled={false}
-                    renderSectionHeader={({ section }) => (
-                      <View style={styles.searchSectionHeader}>
-                        <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
-                      </View>
-                    )}
-                    renderItem={({ item }) => {
-                      const displayTitle = item.title || `Canción ${item.song}`;
-                      const normalizedQ = normalizeText(searchText.trim());
-                      const qWords = normalizedQ.split(/\s+/).filter(Boolean);
-                      // Highlight matching words in title
-                      const titleParts: { text: string; bold: boolean }[] = [];
-                      if (qWords.length > 0 && !/^\d+$/.test(searchText.trim())) {
-                        const normTitle = normalizeText(displayTitle);
-                        let lastIdx = 0;
-                        // Find first matching word position for highlight
-                        const matchPositions: { start: number; end: number }[] = [];
-                        for (const w of qWords) {
-                          const idx = normTitle.indexOf(w);
-                          if (idx !== -1) matchPositions.push({ start: idx, end: idx + w.length });
-                        }
-                        matchPositions.sort((a, b) => a.start - b.start);
-                        for (const mp of matchPositions) {
-                          if (mp.start < lastIdx) continue;
-                          if (mp.start > lastIdx) titleParts.push({ text: displayTitle.slice(lastIdx, mp.start), bold: false });
-                          titleParts.push({ text: displayTitle.slice(mp.start, mp.end), bold: true });
-                          lastIdx = mp.end;
-                        }
-                        if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
-                      }
-                      const hasParts = titleParts.length > 0;
-                      return (
-                        <TouchableOpacity
-                          style={styles.searchResultRow}
-                          onPress={() => handleSearchResultTap(item.song)}
-                          activeOpacity={0.6}
-                        >
-                          <Text style={styles.searchResultNum}>{item.song}</Text>
-                          <Text style={styles.searchResultTitle} numberOfLines={1}>
-                            {hasParts ? titleParts.map((p, i) => (
-                              <Text key={i} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
-                            )) : displayTitle}
-                          </Text>
-                          <Text style={styles.searchResultPage}>p.{item.page}</Text>
-                        </TouchableOpacity>
-                      );
-                    }}
-                  />
+      {/* ── Search overlay — director only ── */}
+      {searchVisible && syncRole === "director" && (() => {
+        const hasQuery = searchText.trim().length > 0;
+        const normalizedQ = normalizeText(searchText.trim());
+        const qWords = normalizedQ.split(/\s+/).filter(Boolean);
+
+        const renderSongRow = (item: typeof SEARCHABLE_SONGS[0], highlightQuery: boolean) => {
+          const displayTitle = item.title || `Canción ${item.song}`;
+          const titleParts: { text: string; bold: boolean }[] = [];
+          if (highlightQuery && qWords.length > 0 && !/^\d+$/.test(searchText.trim())) {
+            const normTitle = normalizeText(displayTitle);
+            let lastIdx = 0;
+            const matchPositions: { start: number; end: number }[] = [];
+            for (const w of qWords) {
+              const idx = normTitle.indexOf(w);
+              if (idx !== -1) matchPositions.push({ start: idx, end: idx + w.length });
+            }
+            matchPositions.sort((a, b) => a.start - b.start);
+            for (const mp of matchPositions) {
+              if (mp.start < lastIdx) continue;
+              if (mp.start > lastIdx) titleParts.push({ text: displayTitle.slice(lastIdx, mp.start), bold: false });
+              titleParts.push({ text: displayTitle.slice(mp.start, mp.end), bold: true });
+              lastIdx = mp.end;
+            }
+            if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
+          }
+          const hasParts = titleParts.length > 0;
+
+          // Compute keyword tags
+          const misaPart = getMisaPart(item);
+          const tempoTag = item.themes.find((t) => TIEMPO_IDS.has(t));
+          const temaTag = item.themes.find((t) => !TIEMPO_IDS.has(t) && !MISA_CATEGORY_IDS.has(t) && THEME_LABELS[t]);
+
+          return (
+            <TouchableOpacity
+              key={`row-${item.song}`}
+              style={styles.searchResultRow}
+              onPress={() => handleSearchResultTap(item.song)}
+              activeOpacity={0.6}
+            >
+              {/* Left: keyword pills */}
+              <View style={styles.songRowKeywords}>
+                {misaPart && (
+                  <View style={[styles.pill, { backgroundColor: MISA_PILL_COLORS[misaPart.idx % MISA_PILL_COLORS.length] }]}>
+                    <Text style={styles.pillText} numberOfLines={1}>
+                      {`${misaPart.label} ${misaPart.idx + 1}/${MISA_PARTS_ORDERED.length}`}
+                    </Text>
+                  </View>
                 )}
-                {searchText.trim().length > 0 && searchSections.length === 0 && (
-                  <View style={styles.searchEmpty}>
-                    <Text style={styles.searchEmptyText}>Sin resultados</Text>
+                {temaTag && (
+                  <View style={[styles.pill, { backgroundColor: TEMA_PILL_COLORS[temaTag] ?? "#555" }]}>
+                    <Text style={styles.pillText} numberOfLines={1}>{THEME_LABELS[temaTag]}</Text>
+                  </View>
+                )}
+                {tempoTag && (
+                  <View style={[styles.pill, { backgroundColor: TEMPO_PILL_COLORS[tempoTag] ?? "#5c4f7c" }]}>
+                    <Text style={styles.pillText} numberOfLines={1}>{THEME_LABELS[tempoTag] ?? tempoTag}</Text>
                   </View>
                 )}
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      )}
+              {/* Center: song number + title + snippet */}
+              <View style={styles.searchResultBody}>
+                <Text style={styles.searchResultTitle} numberOfLines={1}>
+                  <Text style={{ color: "#3b82f6", fontWeight: "800" }}>{item.song}. </Text>
+                  {hasParts ? titleParts.map((p, pi) => (
+                    <Text key={pi} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
+                  )) : displayTitle}
+                </Text>
+                {!!item.snippet && (
+                  <Text style={styles.searchResultSnippet} numberOfLines={2}>{"Letra: " + item.snippet}</Text>
+                )}
+              </View>
+              <Text style={styles.searchResultPage}>p.{item.page}</Text>
+            </TouchableOpacity>
+          );
+        };
 
-      {/* Nav trigger — tap: song modal, long press: sync modal */}
-      <TouchableOpacity
-        style={[styles.cornerButton, styles.navTrigger]}
-        onPress={openSongModal}
-        onLongPress={syncAvailable ? openSyncModal : undefined}
-        delayLongPress={500}
-        activeOpacity={0.75}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-      >
-        <Text style={styles.navTriggerIcon}>♪</Text>
-        <Text style={styles.navTriggerArrow}>›</Text>
-        {syncRole === "director" && <PulsingDot color="#4a90e2" />}
-        {syncRole === "follower" && <View style={[styles.syncDot, { backgroundColor: "#4cff91" }]} />}
-      </TouchableOpacity>
+        // Tab content for when there's no query
+        const recentSongEntries = recentSongsRef.current
+          .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
+          .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s);
+        const tabSections = !hasQuery ? (
+          searchTab === "todas" ? [{title: "", data: sortedTodas}] :
+          searchTab === "misa" ? sortedMisaSections :
+          searchTab === "tiempo" ? sortedTiempoSections :
+          searchTab === "temas" ? sortedTemasSections :
+          /* recientes */ [{title: "Recientes", data: recentSongEntries}]
+        ) : null;
 
-      {/* Director search button — top-right, same size as nav trigger */}
-      {syncRole === "director" && (
+        return (
+          <TouchableWithoutFeedback onPress={closeSearch}>
+            <View style={[styles.searchOverlay, { bottom: keyboardHeight }]}>
+              <TouchableWithoutFeedback>
+                <View style={styles.searchContainer}>
+
+                  {/* Search bar row */}
+                  <View style={styles.searchBar}>
+                    <TextInput
+                      ref={searchInputRef}
+                      style={styles.searchInput}
+                      value={searchText}
+                      onChangeText={setSearchText}
+                      onSubmitEditing={handleSearchSubmit}
+                      placeholder="Buscar canción, parte de misa, tema..."
+                      placeholderTextColor="rgba(255,255,255,0.4)"
+                      keyboardType="default"
+                      returnKeyType="go"
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      maxLength={40}
+                      selectTextOnFocus
+                    />
+                    {searchText.length > 0 && (
+                      <TouchableOpacity style={styles.clearBtn} onPress={() => setSearchText("")} activeOpacity={0.7}>
+                        <Text style={styles.clearBtnText}>✕</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity style={styles.sortBtn} onPress={cycleSortMode} activeOpacity={0.7}>
+                      <Text style={styles.sortBtnText}>{sortLabel}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.searchGoBtn} onPress={handleSearchSubmit} activeOpacity={0.7}>
+                      <Text style={styles.searchGoBtnText}>Ir</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Tabs — only when no query */}
+                  {!hasQuery && (
+                    <View style={styles.searchTabBar}>
+                      {(["recientes","todas","misa","tiempo","temas"] as const).map((tab) => (
+                        <TouchableOpacity
+                          key={tab}
+                          style={[styles.searchTabBtn, searchTab === tab && styles.searchTabBtnActive]}
+                          onPress={() => setSearchTab(tab)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.searchTabBtnText, searchTab === tab && styles.searchTabBtnTextActive]}>
+                            {tab === "recientes" ? "Recientes" : tab === "todas" ? "Todas" : tab === "misa" ? "Misa" : tab === "tiempo" ? "Temporada" : "Temas"}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Results — keyword search */}
+                  {hasQuery && searchSections.length > 0 && (
+                    <SectionList
+                      sections={searchSections}
+                      keyExtractor={(item, i) => `sr-${item.song}-${i}`}
+                      keyboardShouldPersistTaps="handled"
+                      style={styles.searchResults}
+                      contentContainerStyle={{ paddingBottom: 16 }}
+                      stickySectionHeadersEnabled={false}
+                      renderSectionHeader={({ section }) => (
+                        <View style={styles.searchSectionHeader}>
+                          <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
+                        </View>
+                      )}
+                      renderItem={({ item }) => renderSongRow(item as typeof SEARCHABLE_SONGS[0], true)}
+                    />
+                  )}
+                  {hasQuery && searchSections.length === 0 && (
+                    <View style={styles.searchEmpty}>
+                      <Text style={styles.searchEmptyText}>Sin resultados</Text>
+                    </View>
+                  )}
+
+                  {/* Tab content — shown when no query */}
+                  {!hasQuery && tabSections && (
+                    tabSections[0]?.data.length === 0 && searchTab === "recientes" ? (
+                      <View style={styles.searchEmpty}>
+                        <Text style={styles.searchEmptyText}>Sin canciones recientes</Text>
+                      </View>
+                    ) : (
+                      <SectionList
+                        sections={tabSections}
+                        keyExtractor={(item, i) => `tab-${item.song}-${i}`}
+                        keyboardShouldPersistTaps="handled"
+                        style={styles.searchResults}
+                        contentContainerStyle={{ paddingBottom: 16 }}
+                        stickySectionHeadersEnabled={false}
+                        renderSectionHeader={({ section }) =>
+                          section.title ? (
+                            <View style={styles.searchSectionHeader}>
+                              <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
+                            </View>
+                          ) : null
+                        }
+                        renderItem={({ item }) => renderSongRow(item as typeof SEARCHABLE_SONGS[0], false)}
+                      />
+                    )
+                  )}
+
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        );
+      })()}
+
+      {/* Top-right button cluster */}
+      <View style={styles.navCluster}>
+        {/* Nav trigger — tap: song modal, long press: sync modal */}
         <TouchableOpacity
-          style={[styles.cornerButton, styles.searchTrigger, isSmallScreen && styles.searchTriggerSmall]}
-          onPress={openSearch}
+          style={styles.clusterBtn}
+          onPress={openSongModal}
+          onLongPress={syncAvailable ? openSyncModal : undefined}
+          delayLongPress={500}
           activeOpacity={0.75}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          hitSlop={{ top: 16, bottom: 16, left: 16, right: 3 }}
         >
-          <Text style={styles.searchTriggerIcon}>⌕</Text>
+          <Text style={styles.navTriggerIcon}>♪</Text>
+          <Text style={styles.navTriggerArrow}>›</Text>
+          {syncRole === "director" && <PulsingDot color="#4a90e2" />}
+          {syncRole === "follower" && <PulsingDot color="#4cff91" />}
+          {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
         </TouchableOpacity>
-      )}
+        {/* Search button — director only, far-right — SAME explicit width as nav button */}
+        {syncRole === "director" && (
+          <TouchableOpacity
+            style={styles.clusterBtn}
+            onPress={searchVisible ? closeSearch : openSearch}
+            activeOpacity={0.75}
+            hitSlop={{ top: 16, bottom: 16, left: 3, right: 16 }}
+          >
+            <Text style={styles.searchTriggerIcon}>⌕</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Version label */}
       <Text style={styles.versionLabel} pointerEvents="none">1.0.{OFFLINE_WEB_BUNDLE_VERSION}</Text>
@@ -944,23 +1252,6 @@ export default function App() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* ── Follower connection banner (slide-down, swipe-up to dismiss) ── */}
-      {followerNotice && (
-        <Animated.View
-          style={[styles.noticeBanner, { transform: [{ translateY: followerBannerAnim }] }]}
-          {...followerBannerPan.panHandlers}
-        >
-          <TouchableWithoutFeedback onPress={hideFollowerBanner}>
-            <View style={styles.noticeBannerInner}>
-              <Text style={styles.noticeBannerEmoji}>📡</Text>
-              <View style={styles.noticeBannerText}>
-                <Text style={styles.noticeBannerTitle}>Conectado al director</Text>
-                <Text style={styles.noticeBannerBody}>Tu iPad seguirá automáticamente los cambios de página.</Text>
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </Animated.View>
-      )}
     </View>
   );
 }
@@ -969,9 +1260,23 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000" },
   missingText: { color: "rgba(255,255,255,0.15)", fontSize: 48 },
 
+  // clusterBtn: both nav and search buttons in navCluster — locked to same width
+  clusterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(26,26,46,0.38)",
+    borderRadius: 14,
+    width: 96,
+    height: 96,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 7,
+    gap: 4,
+  },
   cornerButton: {
-    position: "absolute",
-    top: 1.25,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(26,26,46,0.38)",
@@ -985,12 +1290,24 @@ const styles = StyleSheet.create({
     elevation: 7,
     gap: 4,
   },
-  navTrigger: { left: 1.25 },
-  navTriggerIcon: { fontSize: 32, color: "#fff", lineHeight: 38 },
-  navTriggerArrow: { fontSize: 36, color: "#7ec8f7", lineHeight: 38, fontWeight: "700" },
-  searchTrigger: { right: 1.25 },
-  searchTriggerSmall: { paddingHorizontal: 14, paddingVertical: 10 },
-  searchTriggerIcon: { fontSize: 32, color: "#7ec8f7", lineHeight: 38 },
+  navCluster: {
+    position: "absolute",
+    top: 1.25,
+    right: 1.25,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  navTriggerIcon: { fontSize: 54, color: "#fff", lineHeight: 76 },
+  navTriggerArrow: { fontSize: 54, color: "#7ec8f7", lineHeight: 76, fontWeight: "700" },
+  searchTriggerSmall: { paddingHorizontal: 16, paddingVertical: 12 },
+  searchTriggerIcon: { fontSize: 64, color: "#7ec8f7", lineHeight: 76 },
+  satelliteEmoji: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    fontSize: 16,
+  },
 
   // Director top-right button row
   directorBar: {
@@ -1105,6 +1422,7 @@ const styles = StyleSheet.create({
   gridToolbarText: { color: "#fff", fontSize: 16, fontWeight: "600" },
 
   // Search overlay (Spotlight-style)
+  // bottom is overridden inline with keyboardHeight so results never go under keyboard
   searchOverlay: {
     position: "absolute",
     top: 0, left: 0, right: 0, bottom: 0,
@@ -1112,6 +1430,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     paddingTop: 60,
     paddingHorizontal: 24,
+    paddingBottom: 12,
   },
   searchBar: {
     flexDirection: "row",
@@ -1136,14 +1455,54 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     flex: 1,
+    // Ensures SectionList inside can grow to fill available space above keyboard
+    overflow: "hidden",
   },
   searchGoBtn: {
     backgroundColor: "#3b82f6",
     borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    width: 72,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
   },
   searchGoBtnText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  clearBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+  },
+  clearBtnText: { color: "rgba(255,255,255,0.8)", fontSize: 14, fontWeight: "700" },
+  sortBtn: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginRight: 4,
+  },
+  sortBtnText: { color: "#7ec8f7", fontSize: 14, fontWeight: "700" },
+  searchTabBar: {
+    flexDirection: "row",
+    backgroundColor: "rgba(20,20,40,0.97)",
+    borderRadius: 10,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  searchTabBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  searchTabBtnActive: {
+    backgroundColor: "#3b82f6",
+    borderRadius: 8,
+  },
+  searchTabBtnText: { color: "rgba(255,255,255,0.5)", fontSize: 14, fontWeight: "600" },
+  searchTabBtnTextActive: { color: "#fff" },
   searchResults: {
     backgroundColor: "rgba(20,20,40,0.97)",
     borderRadius: 12,
@@ -1183,10 +1542,18 @@ const styles = StyleSheet.create({
     width: 48,
     fontVariant: ["tabular-nums"] as any,
   },
-  searchResultTitle: {
+  searchResultBody: {
     flex: 1,
+    gap: 2,
+  },
+  searchResultTitle: {
     fontSize: 16,
     color: "#fff",
+  },
+  searchResultSnippet: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.45)",
+    fontStyle: "italic",
   },
   searchResultPage: {
     fontSize: 13,
@@ -1234,7 +1601,26 @@ const styles = StyleSheet.create({
   browsePage: { fontSize: 14, color: "rgba(255,255,255,0.4)" },
   browseEmpty: { color: "rgba(255,255,255,0.3)", fontSize: 16, textAlign: "center", marginTop: 60 },
 
-  // Follower notification banner
+  // Song row keyword pills (director row redesign)
+  songRowKeywords: {
+    width: 120,
+    gap: 3,
+    justifyContent: "center",
+  },
+  pill: {
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    alignSelf: "flex-start",
+  },
+  pillText: {
+    fontSize: 10,
+    color: "#fff",
+    fontWeight: "700",
+    opacity: 0.92,
+  },
+
+  // Follower notification banner (kept for reference, no longer rendered)
   noticeBanner: {
     position: "absolute",
     top: 0,
