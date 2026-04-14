@@ -63,6 +63,23 @@ for (const entry of (PAGES_JSON as any).songIndex ?? []) {
   if (entry.themes?.length) SONG_THEMES[entry.song as number] = entry.themes;
 }
 
+// Spanish text normalizer — removes tokens that are clearly not Spanish words
+// (no vowels, contain digits, too short without being common words).
+const SPANISH_KEEP_SHORT = new Set(["y","a","o","e","u","de","la","el","en","es","al","lo","le","su","no","si","mi","tu","se","me","te","yo","ya","he","oh","di","fe","ha","vi","os","un","ay"]);
+const cleanSpanishText = (text: string): string => {
+  const tokens = text.split(/\s+/).filter((tok) => {
+    const bare = tok.replace(/[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/g, "");
+    if (!bare) return false;
+    if (/\d/.test(tok)) return false; // has digits — OCR noise
+    if (!/[aeiouáéíóúü]/i.test(bare)) return false; // no vowels — chord/noise
+    if (bare.length <= 2 && !SPANISH_KEEP_SHORT.has(bare.toLowerCase())) return false;
+    return true;
+  });
+  const result = tokens.join(" ").trim();
+  if (!result) return "";
+  return result.charAt(0).toUpperCase() + result.slice(1);
+};
+
 // Extract a lyric snippet from raw OCR text.
 // Starts at 30% to skip title/metadata. Strips chord tokens, stage directions,
 // and any line that is essentially just the song title repeated.
@@ -96,7 +113,8 @@ const extractLyricSnippet = (raw: string, title: string): string => {
     if (normTitle.length > 4 && normStripped.includes(normTitle)) continue;
     collected.push(stripped);
   }
-  return collected.join(" · ");
+  // Apply Spanish normalizer to remove OCR junk tokens
+  return cleanSpanishText(collected.join(" · "));
 };
 
 // Searchable song entries: title + full OCR text + theme tags + lyric snippet
@@ -137,25 +155,55 @@ const THEME_LABELS: Record<string, string> = {
   santos: "Santos",
 };
 
-// Which theme IDs to surface as "Parte de Misa" subgroups when searched
-const MISA_KEYWORDS: Record<string, string> = {
-  gloria: "Gloria",
-  santo: "Santo / Sanctus",
-  sanctus: "Santo / Sanctus",
-  aleluya: "Aleluya",
-  alleluia: "Aleluya",
-  cordero: "Cordero de Dios",
-  piedad: "Piedad / Kyrie",
-  kyrie: "Piedad / Kyrie",
-  ofertorio: "Ofertorio",
-  ofrenda: "Ofertorio",
-  comunion: "Comunión",
-  padre_nuestro: "Padre Nuestro",
-};
+// Ordered parts of the Mass for the Misa tab
+const MISA_PARTS_ORDERED = [
+  { label: "Entrada", keywords: ["entrada", "entrare", "venimos", "llegamos"] },
+  { label: "Gloria", keywords: ["gloria"] },
+  { label: "Aleluya", keywords: ["aleluya", "alleluia", "aleluia"] },
+  { label: "Ofertorio", keywords: ["ofertorio", "ofrenda"] },
+  { label: "Santo / Sanctus", keywords: ["santo", "sanctus", "hosanna"] },
+  { label: "Cordero de Dios", keywords: ["cordero"] },
+  { label: "Padre Nuestro", keywords: ["padre nuestro"] },
+  { label: "Comunión", keywords: ["comunion"] },
+  { label: "Paz", keywords: ["paz"] },
+  { label: "Despedida / Envío", keywords: ["despedida", "envio"] },
+];
 
-type SearchResultItem =
-  | { type: "header"; title: string; key: string }
-  | { type: "song"; song: number; page: number; title: string; matchContext?: string; key: string };
+const TIEMPO_GROUPS = [
+  { id: "adviento",      label: "Adviento" },
+  { id: "navidad",       label: "Navidad" },
+  { id: "cuaresma",      label: "Cuaresma / Semana Santa" },
+  { id: "resurreccion",  label: "Pascua / Resurrección" },
+  { id: "espiritu_santo",label: "Pentecostés / Espíritu Santo" },
+];
+
+const TEMAS_EXCLUDED = new Set(["misa","entrada","envio","eucaristia","adviento","navidad","cuaresma","resurreccion","espiritu_santo"]);
+
+// Precomputed tab sections (static — SEARCHABLE_SONGS never changes at runtime)
+const MISA_TAB_SECTIONS = MISA_PARTS_ORDERED.map((part, i) => ({
+  title: `Parte de Misa (${i + 1} de ${MISA_PARTS_ORDERED.length}): ${part.label}`,
+  data: SEARCHABLE_SONGS.filter((s) => part.keywords.some((kw) => s.normalized.includes(kw))).slice(0, 20),
+})).filter((s) => s.data.length > 0);
+
+const TIEMPO_TAB_SECTIONS = TIEMPO_GROUPS.map((g) => ({
+  title: g.label,
+  data: SEARCHABLE_SONGS.filter((s) => s.themes.includes(g.id)).slice(0, 20),
+})).filter((s) => s.data.length > 0);
+
+const TEMAS_TAB_SECTIONS = Object.entries(THEME_LABELS)
+  .filter(([id]) => !TEMAS_EXCLUDED.has(id))
+  .map(([id, label]) => ({
+    title: label,
+    data: SEARCHABLE_SONGS.filter((s) => s.themes.includes(id)).slice(0, 20),
+  })).filter((s) => s.data.length > 0);
+
+// Which theme IDs to surface in keyword search results (misa subgroups)
+const MISA_SEARCH_KEYWORDS: Record<string, string> = {
+  gloria: "Gloria", santo: "Santo / Sanctus", sanctus: "Santo / Sanctus",
+  aleluya: "Aleluya", alleluia: "Aleluya", cordero: "Cordero de Dios",
+  piedad: "Piedad / Kyrie", kyrie: "Piedad / Kyrie",
+  ofertorio: "Ofertorio", ofrenda: "Ofertorio", comunion: "Comunión",
+};
 
 const resolveSongPage = (input: string): number => {
   const n = parseInt(input, 10);
@@ -272,6 +320,8 @@ export default function App() {
   const [gridDensityIdx, setGridDensityIdx] = useState(0);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [searchTab, setSearchTab] = useState<"todas" | "misa" | "tiempo" | "temas">("todas");
+  const [sortMode, setSortMode] = useState<"number" | "az" | "za">("number");
   const [browseVisible, setBrowseVisible] = useState(false);
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [followerNotice, setFollowerNotice] = useState(false);
@@ -515,17 +565,20 @@ export default function App() {
     addSection("Letras", lyricMatches);
 
     // 5) Misa subgroup — match specific mass-part keywords in query
-    const misaMatch = Object.entries(MISA_KEYWORDS).find(([kw]) =>
+    const misaMatch = Object.entries(MISA_SEARCH_KEYWORDS).find(([kw]) =>
       normalizedQ.includes(kw) || kw.includes(normalizedQ)
     );
     if (misaMatch) {
       const [kw, label] = misaMatch;
+      const partIdx = MISA_PARTS_ORDERED.findIndex((p) => p.label === label || p.keywords.includes(kw));
+      const header = partIdx >= 0
+        ? `Parte de Misa (${partIdx + 1} de ${MISA_PARTS_ORDERED.length}): ${label}`
+        : `Parte de Misa: ${label}`;
       const misaSongs = SEARCHABLE_SONGS.filter((s) =>
         !seenSongs.has(s.song) &&
-        (s.themes.includes("misa") || s.themes.includes("eucaristia") || s.themes.includes("entrada")) &&
         (titleNorm(s).includes(kw) || s.normalized.includes(kw))
       ).slice(0, 10);
-      addSection(`Misa · ${label}`, misaSongs);
+      addSection(header, misaSongs);
     }
 
     // 6) Theme tag match — if query matches a theme label or ID, surface tagged songs
@@ -544,6 +597,20 @@ export default function App() {
 
     return sections;
   }, [searchText]);
+
+  // Sorted song list for the "Todas" tab
+  const sortedTodas = useMemo(() => {
+    const arr = [...SEARCHABLE_SONGS];
+    if (sortMode === "az") arr.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+    else if (sortMode === "za") arr.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
+    // "number" keeps natural order (already sorted by song number)
+    return arr;
+  }, [sortMode]);
+
+  const sortLabel = sortMode === "number" ? "#↑" : sortMode === "az" ? "A→Z" : "Z→A";
+  const cycleSortMode = useCallback(() => {
+    setSortMode((m) => m === "number" ? "az" : m === "az" ? "za" : "number");
+  }, []);
 
   const handleSearchResultTap = useCallback((song: number) => {
     const page = resolveSongPage(String(song));
@@ -765,104 +832,162 @@ export default function App() {
         </View>
       )}
 
-      {/* ── Search overlay (Spotlight-style) — director only ── */}
-      {searchVisible && syncRole === "director" && (
-        <TouchableWithoutFeedback onPress={closeSearch}>
-          <View style={[styles.searchOverlay, { bottom: keyboardHeight }]}>
-            <TouchableWithoutFeedback>
-              <View style={styles.searchContainer}>
-                <View style={styles.searchBar}>
-                  <TextInput
-                    ref={searchInputRef}
-                    style={styles.searchInput}
-                    value={searchText}
-                    onChangeText={setSearchText}
-                    onSubmitEditing={handleSearchSubmit}
-                    placeholder="Buscar canción, palabra, parte de misa..."
-                    placeholderTextColor="rgba(255,255,255,0.4)"
-                    keyboardType="default"
-                    returnKeyType="go"
-                    autoCorrect={false}
-                    autoCapitalize="none"
-                    maxLength={40}
-                    selectTextOnFocus
-                  />
-                  <TouchableOpacity style={styles.searchGoBtn} onPress={handleSearchSubmit} activeOpacity={0.7}>
-                    <Text style={styles.searchGoBtnText}>Ir</Text>
-                  </TouchableOpacity>
-                </View>
-                {searchSections.length > 0 && (
-                  <SectionList
-                    sections={searchSections}
-                    keyExtractor={(item, i) => `sr-${item.song}-${i}`}
-                    keyboardShouldPersistTaps="handled"
-                    style={styles.searchResults}
-                    contentContainerStyle={{ paddingBottom: 16 }}
-                    stickySectionHeadersEnabled={false}
-                    renderSectionHeader={({ section }) => (
-                      <View style={styles.searchSectionHeader}>
-                        <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
-                      </View>
-                    )}
-                    renderItem={({ item }) => {
-                      const displayTitle = item.title || `Canción ${item.song}`;
-                      const normalizedQ = normalizeText(searchText.trim());
-                      const qWords = normalizedQ.split(/\s+/).filter(Boolean);
-                      // Highlight matching words in title
-                      const titleParts: { text: string; bold: boolean }[] = [];
-                      if (qWords.length > 0 && !/^\d+$/.test(searchText.trim())) {
-                        const normTitle = normalizeText(displayTitle);
-                        let lastIdx = 0;
-                        // Find first matching word position for highlight
-                        const matchPositions: { start: number; end: number }[] = [];
-                        for (const w of qWords) {
-                          const idx = normTitle.indexOf(w);
-                          if (idx !== -1) matchPositions.push({ start: idx, end: idx + w.length });
-                        }
-                        matchPositions.sort((a, b) => a.start - b.start);
-                        for (const mp of matchPositions) {
-                          if (mp.start < lastIdx) continue;
-                          if (mp.start > lastIdx) titleParts.push({ text: displayTitle.slice(lastIdx, mp.start), bold: false });
-                          titleParts.push({ text: displayTitle.slice(mp.start, mp.end), bold: true });
-                          lastIdx = mp.end;
-                        }
-                        if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
-                      }
-                      const hasParts = titleParts.length > 0;
-                      const snippet = SEARCHABLE_SONGS.find((s) => s.song === item.song)?.snippet ?? "";
-                      return (
-                        <TouchableOpacity
-                          style={styles.searchResultRow}
-                          onPress={() => handleSearchResultTap(item.song)}
-                          activeOpacity={0.6}
-                        >
-                          <Text style={styles.searchResultNum}>{item.song}</Text>
-                          <View style={styles.searchResultBody}>
-                            <Text style={styles.searchResultTitle} numberOfLines={1}>
-                              {hasParts ? titleParts.map((p, i) => (
-                                <Text key={i} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
-                              )) : displayTitle}
-                            </Text>
-                            {!!snippet && (
-                              <Text style={styles.searchResultSnippet} numberOfLines={2}>{"Letra: " + snippet}</Text>
-                            )}
-                          </View>
-                          <Text style={styles.searchResultPage}>p.{item.page}</Text>
-                        </TouchableOpacity>
-                      );
-                    }}
-                  />
-                )}
-                {searchText.trim().length > 0 && searchSections.length === 0 && (
-                  <View style={styles.searchEmpty}>
-                    <Text style={styles.searchEmptyText}>Sin resultados</Text>
-                  </View>
+      {/* ── Search overlay — director only ── */}
+      {searchVisible && syncRole === "director" && (() => {
+        const hasQuery = searchText.trim().length > 0;
+        const normalizedQ = normalizeText(searchText.trim());
+        const qWords = normalizedQ.split(/\s+/).filter(Boolean);
+
+        const renderSongRow = (item: typeof SEARCHABLE_SONGS[0], highlightQuery: boolean) => {
+          const displayTitle = item.title || `Canción ${item.song}`;
+          const titleParts: { text: string; bold: boolean }[] = [];
+          if (highlightQuery && qWords.length > 0 && !/^\d+$/.test(searchText.trim())) {
+            const normTitle = normalizeText(displayTitle);
+            let lastIdx = 0;
+            const matchPositions: { start: number; end: number }[] = [];
+            for (const w of qWords) {
+              const idx = normTitle.indexOf(w);
+              if (idx !== -1) matchPositions.push({ start: idx, end: idx + w.length });
+            }
+            matchPositions.sort((a, b) => a.start - b.start);
+            for (const mp of matchPositions) {
+              if (mp.start < lastIdx) continue;
+              if (mp.start > lastIdx) titleParts.push({ text: displayTitle.slice(lastIdx, mp.start), bold: false });
+              titleParts.push({ text: displayTitle.slice(mp.start, mp.end), bold: true });
+              lastIdx = mp.end;
+            }
+            if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
+          }
+          const hasParts = titleParts.length > 0;
+          return (
+            <TouchableOpacity
+              key={`row-${item.song}`}
+              style={styles.searchResultRow}
+              onPress={() => handleSearchResultTap(item.song)}
+              activeOpacity={0.6}
+            >
+              <Text style={styles.searchResultNum}>{item.song}</Text>
+              <View style={styles.searchResultBody}>
+                <Text style={styles.searchResultTitle} numberOfLines={1}>
+                  {hasParts ? titleParts.map((p, pi) => (
+                    <Text key={pi} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
+                  )) : displayTitle}
+                </Text>
+                {!!item.snippet && (
+                  <Text style={styles.searchResultSnippet} numberOfLines={2}>{"Letra: " + item.snippet}</Text>
                 )}
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      )}
+              <Text style={styles.searchResultPage}>p.{item.page}</Text>
+            </TouchableOpacity>
+          );
+        };
+
+        // Tab content for when there's no query
+        const tabSections = !hasQuery ? (
+          searchTab === "todas" ? [{title: "", data: sortedTodas}] :
+          searchTab === "misa" ? MISA_TAB_SECTIONS :
+          searchTab === "tiempo" ? TIEMPO_TAB_SECTIONS :
+          TEMAS_TAB_SECTIONS
+        ) : null;
+
+        return (
+          <TouchableWithoutFeedback onPress={closeSearch}>
+            <View style={[styles.searchOverlay, { bottom: keyboardHeight }]}>
+              <TouchableWithoutFeedback>
+                <View style={styles.searchContainer}>
+
+                  {/* Search bar row */}
+                  <View style={styles.searchBar}>
+                    <TextInput
+                      ref={searchInputRef}
+                      style={styles.searchInput}
+                      value={searchText}
+                      onChangeText={setSearchText}
+                      onSubmitEditing={handleSearchSubmit}
+                      placeholder="Buscar canción, parte de misa, tema..."
+                      placeholderTextColor="rgba(255,255,255,0.4)"
+                      keyboardType="default"
+                      returnKeyType="go"
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      maxLength={40}
+                      selectTextOnFocus
+                    />
+                    <TouchableOpacity style={styles.sortBtn} onPress={cycleSortMode} activeOpacity={0.7}>
+                      <Text style={styles.sortBtnText}>{sortLabel}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.searchGoBtn} onPress={handleSearchSubmit} activeOpacity={0.7}>
+                      <Text style={styles.searchGoBtnText}>Ir</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Tabs — only when no query */}
+                  {!hasQuery && (
+                    <View style={styles.searchTabBar}>
+                      {(["todas","misa","tiempo","temas"] as const).map((tab) => (
+                        <TouchableOpacity
+                          key={tab}
+                          style={[styles.searchTabBtn, searchTab === tab && styles.searchTabBtnActive]}
+                          onPress={() => setSearchTab(tab)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.searchTabBtnText, searchTab === tab && styles.searchTabBtnTextActive]}>
+                            {tab === "todas" ? "Todas" : tab === "misa" ? "Misa" : tab === "tiempo" ? "Tiempo" : "Temas"}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Results — keyword search */}
+                  {hasQuery && searchSections.length > 0 && (
+                    <SectionList
+                      sections={searchSections}
+                      keyExtractor={(item, i) => `sr-${item.song}-${i}`}
+                      keyboardShouldPersistTaps="handled"
+                      style={styles.searchResults}
+                      contentContainerStyle={{ paddingBottom: 16 }}
+                      stickySectionHeadersEnabled={false}
+                      renderSectionHeader={({ section }) => (
+                        <View style={styles.searchSectionHeader}>
+                          <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
+                        </View>
+                      )}
+                      renderItem={({ item }) => renderSongRow(item as typeof SEARCHABLE_SONGS[0], true)}
+                    />
+                  )}
+                  {hasQuery && searchSections.length === 0 && (
+                    <View style={styles.searchEmpty}>
+                      <Text style={styles.searchEmptyText}>Sin resultados</Text>
+                    </View>
+                  )}
+
+                  {/* Tab content — shown when no query */}
+                  {!hasQuery && tabSections && (
+                    <SectionList
+                      sections={tabSections}
+                      keyExtractor={(item, i) => `tab-${item.song}-${i}`}
+                      keyboardShouldPersistTaps="handled"
+                      style={styles.searchResults}
+                      contentContainerStyle={{ paddingBottom: 16 }}
+                      stickySectionHeadersEnabled={false}
+                      renderSectionHeader={({ section }) =>
+                        section.title ? (
+                          <View style={styles.searchSectionHeader}>
+                            <Text style={styles.searchSectionHeaderText}>{section.title}</Text>
+                          </View>
+                        ) : null
+                      }
+                      renderItem={({ item }) => renderSongRow(item as typeof SEARCHABLE_SONGS[0], false)}
+                    />
+                  )}
+
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        );
+      })()}
 
       {/* Nav trigger — tap: song modal, long press: sync modal */}
       <TouchableOpacity
@@ -1033,8 +1158,8 @@ const styles = StyleSheet.create({
   navTriggerIcon: { fontSize: 32, color: "#fff", lineHeight: 38 },
   navTriggerArrow: { fontSize: 36, color: "#7ec8f7", lineHeight: 38, fontWeight: "700" },
   searchTrigger: { right: 1.25 },
-  searchTriggerSmall: { paddingHorizontal: 14, paddingVertical: 10 },
-  searchTriggerIcon: { fontSize: 32, color: "#7ec8f7", lineHeight: 38 },
+  searchTriggerSmall: { paddingHorizontal: 16, paddingVertical: 12 },
+  searchTriggerIcon: { fontSize: 40, color: "#7ec8f7", lineHeight: 46 },
 
   // Director top-right button row
   directorBar: {
@@ -1192,6 +1317,32 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   searchGoBtnText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  sortBtn: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginRight: 4,
+  },
+  sortBtnText: { color: "#7ec8f7", fontSize: 14, fontWeight: "700" },
+  searchTabBar: {
+    flexDirection: "row",
+    backgroundColor: "rgba(20,20,40,0.97)",
+    borderRadius: 10,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  searchTabBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  searchTabBtnActive: {
+    backgroundColor: "#3b82f6",
+    borderRadius: 8,
+  },
+  searchTabBtnText: { color: "rgba(255,255,255,0.5)", fontSize: 14, fontWeight: "600" },
+  searchTabBtnTextActive: { color: "#fff" },
   searchResults: {
     backgroundColor: "rgba(20,20,40,0.97)",
     borderRadius: 12,
