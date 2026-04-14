@@ -321,7 +321,7 @@ export default function App() {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [searchTab, setSearchTab] = useState<"todas" | "misa" | "tiempo" | "temas">("todas");
-  const [sortMode, setSortMode] = useState<"number" | "az" | "za">("number");
+  const [sortMode, setSortMode] = useState<"number" | "numberDesc" | "az" | "za">("number");
   const [browseVisible, setBrowseVisible] = useState(false);
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [followerNotice, setFollowerNotice] = useState(false);
@@ -601,15 +601,16 @@ export default function App() {
   // Sorted song list for the "Todas" tab
   const sortedTodas = useMemo(() => {
     const arr = [...SEARCHABLE_SONGS];
-    if (sortMode === "az") arr.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+    if (sortMode === "numberDesc") arr.sort((a, b) => b.song - a.song);
+    else if (sortMode === "az") arr.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
     else if (sortMode === "za") arr.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
-    // "number" keeps natural order (already sorted by song number)
+    // "number" keeps natural order (already sorted ascending by song number)
     return arr;
   }, [sortMode]);
 
-  const sortLabel = sortMode === "number" ? "#↑" : sortMode === "az" ? "A→Z" : "Z→A";
+  const sortLabel = sortMode === "number" ? "#↑" : sortMode === "numberDesc" ? "#↓" : sortMode === "az" ? "A→Z" : "Z→A";
   const cycleSortMode = useCallback(() => {
-    setSortMode((m) => m === "number" ? "az" : m === "az" ? "za" : "number");
+    setSortMode((m) => m === "number" ? "numberDesc" : m === "numberDesc" ? "az" : m === "az" ? "za" : "number");
   }, []);
 
   const handleSearchResultTap = useCallback((song: number) => {
@@ -913,6 +914,11 @@ export default function App() {
                       maxLength={40}
                       selectTextOnFocus
                     />
+                    {searchText.length > 0 && (
+                      <TouchableOpacity style={styles.clearBtn} onPress={() => setSearchText("")} activeOpacity={0.7}>
+                        <Text style={styles.clearBtnText}>✕</Text>
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity style={styles.sortBtn} onPress={cycleSortMode} activeOpacity={0.7}>
                       <Text style={styles.sortBtnText}>{sortLabel}</Text>
                     </TouchableOpacity>
@@ -932,7 +938,7 @@ export default function App() {
                           activeOpacity={0.7}
                         >
                           <Text style={[styles.searchTabBtnText, searchTab === tab && styles.searchTabBtnTextActive]}>
-                            {tab === "todas" ? "Todas" : tab === "misa" ? "Misa" : tab === "tiempo" ? "Tiempo" : "Temas"}
+                            {tab === "todas" ? "Todas" : tab === "misa" ? "Misa" : tab === "tiempo" ? "Temporada" : "Temas"}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -1313,10 +1319,22 @@ const styles = StyleSheet.create({
   searchGoBtn: {
     backgroundColor: "#3b82f6",
     borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
   },
   searchGoBtnText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  clearBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+  },
+  clearBtnText: { color: "rgba(255,255,255,0.8)", fontSize: 14, fontWeight: "700" },
   sortBtn: {
     backgroundColor: "rgba(255,255,255,0.12)",
     borderRadius: 8,
