@@ -70,7 +70,7 @@ const cleanSpanishText = (text: string): string => {
   const tokens = text.split(/\s+/).filter((tok) => {
     const bare = tok.replace(/[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/g, "");
     if (!bare) return false;
-    if (/\d/.test(tok)) return false; // has digits — OCR noise
+    if (/^\d+[.,]?$/.test(tok)) return false; // purely numeric token (verse numbers, page refs)
     if (!/[aeiouáéíóúü]/i.test(bare)) return false; // no vowels — chord/noise
     if (bare.length <= 2 && !SPANISH_KEEP_SHORT.has(bare.toLowerCase())) return false;
     return true;
