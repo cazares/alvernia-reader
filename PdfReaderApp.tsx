@@ -1205,8 +1205,6 @@ const styles = StyleSheet.create({
   missingText: { color: "rgba(255,255,255,0.15)", fontSize: 48 },
 
   cornerButton: {
-    position: "absolute",
-    top: 1.25,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(26,26,46,0.38)",
