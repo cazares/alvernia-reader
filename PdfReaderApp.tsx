@@ -1249,10 +1249,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  navTriggerIcon: { fontSize: 44, color: "#fff", lineHeight: 52 },
-  navTriggerArrow: { fontSize: 48, color: "#7ec8f7", lineHeight: 52, fontWeight: "700" },
+  navTriggerIcon: { fontSize: 54, color: "#fff", lineHeight: 76 },
+  navTriggerArrow: { fontSize: 54, color: "#7ec8f7", lineHeight: 76, fontWeight: "700" },
   searchTriggerSmall: { paddingHorizontal: 16, paddingVertical: 12 },
-  searchTriggerIcon: { fontSize: 52, color: "#7ec8f7", lineHeight: 58 },
+  searchTriggerIcon: { fontSize: 64, color: "#7ec8f7", lineHeight: 76 },
   satelliteEmoji: {
     position: "absolute",
     top: -8,
