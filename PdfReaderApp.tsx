@@ -64,40 +64,39 @@ for (const entry of (PAGES_JSON as any).songIndex ?? []) {
 }
 
 // Extract a lyric snippet from raw OCR text.
-// Starts at 30% to skip title/metadata. Strips chord tokens and stage directions,
-// leaving only sung text words.
-const extractLyricSnippet = (raw: string): string => {
+// Starts at 30% to skip title/metadata. Strips chord tokens, stage directions,
+// and any line that is essentially just the song title repeated.
+const extractLyricSnippet = (raw: string, title: string): string => {
+  const normTitle = normalizeText(title).replace(/[^a-z0-9 ]/g, "").trim();
   const start = Math.floor(raw.length * 0.30);
   const slice = raw.slice(start);
   const lines = slice.split("\n");
 
-  // A "chord token" is an isolated music chord: A-G optionally followed by
-  // accidental, quality, extension, slash bass — surrounded by whitespace/punctuation.
-  // e.g. "D", "Em", "A7", "G#m", "C/E", "Bm7", "A#", "D7", "G7"
   const chordToken = /\b[A-G][#b]?(m|maj|sus|dim|aug|add)?[0-9]{0,2}(\/[A-G][#b]?)?\b/g;
-
-  // Skip entire lines that are stage directions or pure metadata
   const skipLine = /^\s*(intro|coro|estrofa|puente|fin\s*$|bridge|verso|rev[\s\d]|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|2\s*veces|dos\s*veces|[0-9]+\.)/i;
 
+  const cleanLine = (t: string): string =>
+    t.replace(chordToken, " ")
+     .replace(/[_\-#:\\/*()[\]{}<>|^~`]/g, " ")
+     .replace(/\s{2,}/g, " ")
+     .trim();
+
+  const realWords = (s: string) => s.split(/\s+/).filter((w) => /[a-záéíóúüñ]{2,}/i.test(w));
+
+  // Collect ALL cleaned lyric lines — iOS numberOfLines={2} will truncate naturally
+  const collected: string[] = [];
   for (const line of lines) {
     const t = line.trim();
     if (t.length < 6) continue;
     if (skipLine.test(t)) continue;
-
-    // Strip chord tokens from the line, then clean up leftover punctuation/spaces
-    const stripped = t
-      .replace(chordToken, " ")
-      .replace(/[_\-#:\\/*()[\]{}<>|^~`]/g, " ")
-      .replace(/\s{2,}/g, " ")
-      .trim();
-
-    // Must have at least 3 real words after stripping
-    const wordCount = stripped.split(/\s+/).filter((w) => /[a-záéíóúüñ]{2,}/i.test(w)).length;
-    if (wordCount < 3) continue;
-
-    return stripped;
+    const stripped = cleanLine(t);
+    if (realWords(stripped).length < 2) continue;
+    // Skip lines that are just the title repeated
+    const normStripped = normalizeText(stripped).replace(/[^a-z0-9 ]/g, "").trim();
+    if (normTitle.length > 4 && normStripped.includes(normTitle)) continue;
+    collected.push(stripped);
   }
-  return "";
+  return collected.join(" · ");
 };
 
 // Searchable song entries: title + full OCR text + theme tags + lyric snippet
@@ -106,7 +105,7 @@ const SEARCHABLE_SONGS = SORTED_SONGS.map((s) => {
   const fullText = (SONG_SEARCH_INDEX as Record<string, string>)[String(s.song)] ?? title;
   const normalized = normalizeText(fullText);
   const themes: string[] = SONG_THEMES[s.song] ?? [];
-  const snippet = extractLyricSnippet(fullText);
+  const snippet = extractLyricSnippet(fullText, title);
   return { ...s, title, normalized, themes, snippet };
 });
 
@@ -845,7 +844,7 @@ export default function App() {
                               )) : displayTitle}
                             </Text>
                             {!!snippet && (
-                              <Text style={styles.searchResultSnippet} numberOfLines={2}>{snippet}</Text>
+                              <Text style={styles.searchResultSnippet} numberOfLines={2}>{"Letra: " + snippet}</Text>
                             )}
                           </View>
                           <Text style={styles.searchResultPage}>p.{item.page}</Text>
