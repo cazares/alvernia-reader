@@ -34,17 +34,20 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
-import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
+import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
 // @ts-ignore — Metro resolves JSON fine
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
 // @ts-ignore
 import SONG_SEARCH_INDEX from "./assets/offline-web/song-search-index.json";
 // @ts-ignore
 import PAGES_JSON from "./assets/offline-web/pages.json";
+// @ts-ignore — Metro resolves JSON fine
+import VERSION_INFO from "./version.json";
 
 const TOTAL_PAGES = 368;
 const START_PAGE = 2;
 const DIRECTOR_SESSION = "1234"; // fixed session — only one director per session
+const VISIBLE_BUILD_LABEL = `${VERSION_INFO.baseVersion}.${VERSION_INFO.buildNumber}`;
 
 const SONG_TO_PAGE = new Map<number, number>(
   ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]),
@@ -1322,7 +1325,7 @@ export default function App() {
       </View>
 
       {/* Version label */}
-      <Text style={styles.versionLabel} pointerEvents="none">1.0.{OFFLINE_WEB_BUNDLE_VERSION}</Text>
+      <Text style={styles.versionLabel} pointerEvents="none">{VISIBLE_BUILD_LABEL}</Text>
 
       {/* ── Song navigation modal ── */}
       <Modal visible={songModal} transparent animationType="fade" onRequestClose={closeSongModal} statusBarTranslucent>
