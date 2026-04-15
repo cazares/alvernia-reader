@@ -9,6 +9,7 @@ import {
   Modal,
   NativeModules,
   PanResponder,
+  Pressable,
   SectionList,
   StatusBar,
   StyleSheet,
@@ -22,6 +23,7 @@ import {
   type ViewabilityConfig,
   type ViewToken,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 
 import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
@@ -84,14 +86,27 @@ const cleanSpanishText = (text: string): string => {
 // Extract a lyric snippet from raw OCR text.
 // Starts at 30% to skip title/metadata. Strips chord tokens, stage directions,
 // and any line that is essentially just the song title repeated.
+// Rule 1 — OCR text corrections applied before snippet extraction
+const fixOcrText = (text: string): string =>
+  text
+    .replace(/\bSe[fh]i?or\b/g, "Señor")   // Sefor, Sefior, Sehor → Señor
+    .replace(/\bSeAO[PR]\b/gi, "Señor")     // SeAOP, SeAOR → Señor
+    .replace(/\bSeñof\b/g, "Señor")
+    .replace(/\bJe sus\b/gi, "Jesús")
+    .replace(/\bMarí a\b/g, "María")
+    .replace(/\bcoraz[oó]6n\b/gi, "corazón")
+    .replace(/\bcancién\b/gi, "canción");
+
 const extractLyricSnippet = (raw: string, title: string): string => {
+  const corrected = fixOcrText(raw);
   const normTitle = normalizeText(title).replace(/[^a-z0-9 ]/g, "").trim();
-  const start = Math.floor(raw.length * 0.30);
-  const slice = raw.slice(start);
+  const start = Math.floor(corrected.length * 0.30);
+  const slice = corrected.slice(start);
   const lines = slice.split("\n");
 
   const chordToken = /\b[A-G][#b]?(m|maj|sus|dim|aug|add)?[0-9]{0,2}(\/[A-G][#b]?)?\b/g;
-  const skipLine = /^\s*(intro|coro|estrofa|puente|fin\s*$|bridge|verso|rev[\s\d]|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|2\s*veces|dos\s*veces)/i;
+  // Rule 2 — skip entire lines that are performance/stage directions
+  const skipLine = /^\s*(intro|coro|estrofa|puente|fin\s*$|bridge|verso|rev[\s\d]|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|2\s*veces|dos\s*veces|veces\s*toda|solo\s*al\s*final|solista|guitarra|voces?|preparacion|opcional|para\s*arriba|para\s*abajo|inicio|al\s*coro|da\s*capo|bis\s*$|todos\s*$|hombres\s*$|mujeres\s*$|segunda\s*$|primera\s*$|segundo\s*$|repetir|cuantas\s*veces|con\s*guitarra|sin\s*guitarra|vuelta\s*$)/i;
 
   const cleanLine = (t: string): string =>
     t.replace(chordToken, " ")
@@ -372,6 +387,157 @@ function PulsingDot({ color }: { color: string }) {
 
   return <Animated.View style={[styles.syncDot, { backgroundColor: color, opacity }]} />;
 }
+
+// ── Song numpad ───────────────────────────────────────────────────────────────
+function SongNumpad({
+  onDigit,
+  onBackspace,
+  onGo,
+  goDisabled,
+}: {
+  onDigit: (d: string) => void;
+  onBackspace: () => void;
+  onGo: () => void;
+  goDisabled: boolean;
+}) {
+  const rows: (string | null)[][] = [
+    ["1", "2", "3"],
+    ["4", "5", "6"],
+    ["7", "8", "9"],
+    ["⌫", "0", "Ir"],
+  ];
+  const [pressedKey, setPressedKey] = useState<string | null>(null);
+  const repeatDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopBackspaceRepeat = useCallback(() => {
+    if (repeatDelayRef.current) {
+      clearTimeout(repeatDelayRef.current);
+      repeatDelayRef.current = null;
+    }
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => stopBackspaceRepeat, [stopBackspaceRepeat]);
+
+  const fireHaptic = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }, []);
+
+  const handlePressIn = useCallback((key: string, isBack: boolean, disabled: boolean) => {
+    if (disabled) return;
+    setPressedKey(key);
+    fireHaptic();
+    if (!isBack) return;
+    onBackspace();
+    stopBackspaceRepeat();
+    repeatDelayRef.current = setTimeout(() => {
+      repeatIntervalRef.current = setInterval(() => {
+        onBackspace();
+      }, 100);
+    }, 500);
+  }, [fireHaptic, onBackspace, stopBackspaceRepeat]);
+
+  const handlePressOut = useCallback(() => {
+    setPressedKey(null);
+    stopBackspaceRepeat();
+  }, [stopBackspaceRepeat]);
+
+  return (
+    <View style={numpadStyles.grid}>
+      {rows.map((row, ri) => (
+        <View key={ri} style={numpadStyles.row}>
+          {row.map((key, ki) => {
+            if (key === null) {
+              return <View key={ki} style={numpadStyles.emptyKey} />;
+            }
+            const isGo = key === "Ir";
+            const isBack = key === "⌫";
+            const disabled = isGo && goDisabled;
+            return (
+              <Pressable
+                key={ki}
+                style={[
+                  numpadStyles.key,
+                  isGo && numpadStyles.goKey,
+                  disabled && numpadStyles.goKeyDisabled,
+                  pressedKey === key && numpadStyles.keyPressed,
+                  isGo && pressedKey === key && numpadStyles.goKeyPressed,
+                ]}
+                onPressIn={() => handlePressIn(key, isBack, disabled)}
+                onPressOut={handlePressOut}
+                onPress={() => {
+                  if (isGo) { onGo(); }
+                  else if (isBack) { return; }
+                  else { onDigit(key); }
+                }}
+                disabled={disabled}
+              >
+                <Text style={[numpadStyles.keyText, isGo && numpadStyles.goKeyText]}>
+                  {key}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const numpadStyles = StyleSheet.create({
+  grid: {
+    marginTop: 16,
+    gap: 10,
+  },
+  row: {
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "center",
+  },
+  key: {
+    width: 72,
+    height: 52,
+    borderRadius: 10,
+    backgroundColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  keyPressed: {
+    backgroundColor: "#9CA3AF",
+  },
+  emptyKey: {
+    width: 72,
+    height: 52,
+  },
+  goKey: {
+    backgroundColor: "#3B82F6",
+  },
+  goKeyDisabled: {
+    backgroundColor: "#93C5FD",
+  },
+  goKeyPressed: {
+    backgroundColor: "#2563EB",
+  },
+  keyText: {
+    fontSize: 22,
+    fontWeight: "500",
+    color: "#111827",
+  },
+  goKeyText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+});
 
 // ── Main app ──────────────────────────────────────────────────────────────────
 type SyncRole = "off" | "director" | "follower";
@@ -1177,17 +1343,18 @@ export default function App() {
                   returnKeyType="go"
                   maxLength={4}
                   selectTextOnFocus
+                  showSoftInputOnFocus={false}
+                />
+                {/* Custom in-app numpad */}
+                <SongNumpad
+                  onDigit={(d) => setSongInput((prev) => (prev.length < 4 ? prev + d : prev))}
+                  onBackspace={() => setSongInput((prev) => prev.slice(0, -1))}
+                  onGo={handleSongSubmit}
+                  goDisabled={!songInput}
                 />
                 <View style={styles.modalButtons}>
                   <TouchableOpacity style={styles.cancelBtn} onPress={closeSongModal} activeOpacity={0.7}>
                     <Text style={styles.cancelText}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.goBtn, !songInput && styles.goBtnDisabled]}
-                    onPress={handleSongSubmit}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.goText}>Ir ›</Text>
                   </TouchableOpacity>
                 </View>
               </View>
