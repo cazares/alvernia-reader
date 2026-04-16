@@ -52,6 +52,13 @@ const START_PAGE = 2;
 const DIRECTOR_SESSION = "1234"; // fixed session — only one director per session
 const VISIBLE_BUILD_LABEL = `${VERSION_INFO.baseVersion}.${VERSION_INFO.buildNumber}`;
 
+const normalizeDirectorDeviceName = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
 const SONG_TO_PAGE = new Map<number, number>(
   ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]),
 );
@@ -573,6 +580,7 @@ export default function App() {
   const [browseVisible, setBrowseVisible] = useState(false);
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [showSatellite, setShowSatellite] = useState(false);
+  const [isSyncBootstrapped, setIsSyncBootstrapped] = useState(false);
   const lastFollowerNoticeRef = useRef(0);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
@@ -633,30 +641,43 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncAvailable]);
 
-  // Auto-start as follower on mount
+  // Bootstrap sync role once nearby sync is available.
+  // Brau MASTER should become director automatically; everyone else starts as follower.
   useEffect(() => {
     if (!syncAvailable) return;
-    startNearbyFollower(DIRECTOR_SESSION).then(() => setSyncRole("follower")).catch(() => {});
-    return () => { stopNearbyDirectorSync().catch(() => {}); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let cancelled = false;
 
-  // Auto-join as director if this is a known master device.
-  // Runs whenever syncAvailable flips true so it retries after init.
-  useEffect(() => {
-    if (!syncAvailable) return;
-    NativeModules.DirectorSyncModule?.getDeviceName?.().then((name: string) => {
-      if (name === "Brau MASTER") {
-        startNearbyDirector(DIRECTOR_SESSION)
-          .then(() => setSyncRole("director"))
-          .catch(() => {
-            // Mirror exactly what the modal does on failure
-            startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-            setSyncRole("follower");
-          });
+    const bootstrapSyncRole = async () => {
+      const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
+      if (cancelled) return;
+
+      const normalizedName = normalizeDirectorDeviceName(rawName || "");
+      const isBrauMaster = normalizedName === "braumaster";
+
+      if (isBrauMaster) {
+        try {
+          await startNearbyDirector(DIRECTOR_SESSION);
+          if (!cancelled) setSyncRole("director");
+        } catch {
+          // If the director startup fails transiently, fall back to follower so the device
+          // is still usable instead of sitting idle.
+          await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+          if (!cancelled) setSyncRole("follower");
+        }
+      } else {
+        await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+        if (!cancelled) setSyncRole("follower");
       }
-    }).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+      if (!cancelled) setIsSyncBootstrapped(true);
+    };
+
+    bootstrapSyncRole();
+
+    return () => {
+      cancelled = true;
+      stopNearbyDirectorSync().catch(() => {});
+    };
   }, [syncAvailable]);
 
   const goToPage = useCallback((page: number) => {
@@ -1155,7 +1176,7 @@ export default function App() {
       )}
 
       {/* ── Search overlay — director only ── */}
-      {searchVisible && syncRole === "director" && (() => {
+      {searchVisible && (() => {
         const hasQuery = searchText.trim().length > 0;
         const normalizedQ = normalizeText(searchText.trim());
         const qWords = normalizedQ.split(/\s+/).filter(Boolean);
@@ -1404,7 +1425,7 @@ export default function App() {
       {/* Top-right button cluster */}
       <View style={styles.navCluster}>
         {/* Nav trigger — tap: song modal, long press: sync modal */}
-        {(!searchVisible || syncRole !== "director") && (
+        {!searchVisible && (
           <TouchableOpacity
             style={styles.clusterBtn}
             onPress={openSongModal}
@@ -1420,7 +1441,7 @@ export default function App() {
             {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
           </TouchableOpacity>
         )}
-        {syncRole === "director" && !searchVisible && (
+        {!searchVisible && (
           <TouchableOpacity
             style={styles.clusterBtn}
             onPress={openSearch}
