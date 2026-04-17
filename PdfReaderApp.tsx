@@ -1447,7 +1447,7 @@ export default function App() {
       {/* Top-right button cluster */}
       <View style={styles.navCluster}>
         {/* Nav trigger — tap: song modal, long press: sync modal */}
-        {!searchVisible && (
+        {(!searchVisible || syncRole !== "director") && (
           <TouchableOpacity
             style={styles.clusterBtn}
             onPress={openSongModal}
@@ -1463,7 +1463,7 @@ export default function App() {
             {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
           </TouchableOpacity>
         )}
-        {!searchVisible && (
+        {syncRole === "director" && !searchVisible && (
           <TouchableOpacity
             style={styles.clusterBtn}
             onPress={openSearch}
