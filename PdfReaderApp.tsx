@@ -274,14 +274,36 @@ const TEMAS_TAB_SONGS_BY_GROUP = Object.entries(THEME_LABELS)
 type SearchSortMode = "best" | "az" | "number";
 
 // Helper: sort a song array by sortMode
+// For "best": score = title full match (10) + per-word title hits (3 each) + body occurrences (1 each), tiebreak by song#
 function sortSongs(
   arr: typeof SEARCHABLE_SONGS,
   mode: SearchSortMode,
+  queryWords: string[] = [],
 ): typeof SEARCHABLE_SONGS {
   const copy = [...arr];
-  if (mode === "az") copy.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
-  else if (mode === "number") copy.sort((a, b) => a.song - b.song);
-  // "best" preserves incoming order
+  if (mode === "az") {
+    copy.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+  } else if (mode === "number") {
+    copy.sort((a, b) => a.song - b.song);
+  } else if (mode === "best" && queryWords.length > 0) {
+    const score = (s: typeof SEARCHABLE_SONGS[0]) => {
+      const t = normalizeText(s.title);
+      const body = s.normalized ?? "";
+      const fullTitleMatch = queryWords.every((w) => t.includes(w)) ? 10 : 0;
+      const wordTitleHits = queryWords.filter((w) => t.includes(w)).length * 3;
+      const bodyHits = queryWords.reduce((acc, w) => {
+        let count = 0;
+        let idx = 0;
+        while ((idx = body.indexOf(w, idx)) !== -1) { count++; idx += w.length; }
+        return acc + count;
+      }, 0);
+      return fullTitleMatch + wordTitleHits + bodyHits;
+    };
+    copy.sort((a, b) => {
+      const diff = score(b) - score(a);
+      return diff !== 0 ? diff : a.song - b.song;
+    });
+  }
   return copy;
 }
 
@@ -784,7 +806,7 @@ export default function App() {
     const addSection = (title: string, songs: typeof SEARCHABLE_SONGS) => {
       const unique = songs.filter((s) => !seenSongs.has(s.song));
       if (unique.length === 0) return;
-      const sorted = sortSongs(unique, sortMode);
+      const sorted = sortSongs(unique, sortMode, words);
       sorted.forEach((s) => seenSongs.add(s.song));
       sections.push({ title, data: sorted });
     };
@@ -1883,8 +1905,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   searchHighlight: {
-    color: "#7ec8f7",
+    backgroundColor: "#F59E0B",
+    color: "#1a1a2e",
     fontWeight: "700",
+    borderRadius: 2,
   },
   searchResultNum: {
     fontSize: 18,

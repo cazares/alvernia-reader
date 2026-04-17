@@ -28,6 +28,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var pendingInvitePeer: MCPeerID?
   private var connectedDirectorPeer: MCPeerID?
   private var discoveryRefreshTimer: Timer?
+  private var currentPageNumber: Int?
+  private var currentTotalPages: Int = 0
 
   // MARK: - Convenience
 
@@ -45,6 +47,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     s.delegate = self
     mcSessions.append(s)
     return s
+  }
+
+  private func pagePayload(page: Int, totalPages: Int) -> Data? {
+    let payload: [String: Any] = [
+      "type": "page",
+      "page": max(1, page),
+      "totalPages": max(0, totalPages),
+    ]
+    return try? JSONSerialization.data(withJSONObject: payload)
+  }
+
+  private func sendCurrentPageSnapshot(to peerID: MCPeerID, via session: MCSession) {
+    guard currentRole == "director", let page = currentPageNumber, let data = pagePayload(page: page, totalPages: currentTotalPages) else {
+      return
+    }
+    do {
+      try session.send(data, toPeers: [peerID], with: .reliable)
+    } catch {
+      try? session.send(data, toPeers: [peerID], with: .unreliable)
+    }
   }
 
   override static func requiresMainQueueSetup() -> Bool { false }
@@ -148,6 +170,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         "page": max(1, page.intValue),
         "totalPages": max(0, totalPages.intValue),
       ]
+      self.currentPageNumber = max(1, page.intValue)
+      self.currentTotalPages = max(0, totalPages.intValue)
       guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
         resolve(["deliveredPeers": 0])
         return
@@ -227,6 +251,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     discoveredDirectors = [:]; discoveredFollowers = []
     pendingInvitePeer = nil; connectedDirectorPeer = nil
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
+    currentPageNumber = nil; currentTotalPages = 0
     if shouldEmitState { emitState(status: "idle") }
   }
 
@@ -384,6 +409,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       case .connected:
         if self.currentRole == "follower" {
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
+        } else if self.currentRole == "director" {
+          self.sendCurrentPageSnapshot(to: peerID, via: session)
         }
         self.emitState(status: "connected")
       case .connecting:
