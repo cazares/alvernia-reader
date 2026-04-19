@@ -6,7 +6,7 @@
 SignoVivo
 
 ## Subtítulo
-El Manual Alvernia en tu bolsillo
+Manual Alvernia en tu bolsillo
 
 ## Texto promocional (hasta 170 caracteres)
 Lleva todo el Manual Alvernia contigo. Busca cantos, navega por temporadas litúrgicas y sincroniza dispositivos en tiempo real, sin internet.
@@ -44,7 +44,7 @@ Todo el contenido —el PDF completo, los índices de búsqueda y las letras— 
 ---
 
 ## Palabras clave
-himnario,canto litúrgico,católico,misa,Manual Alvernia,coro,cantos,liturgia,director de coro,adviento,cuaresma,pascua,sincronización,PDF,rezar,alabanza,fe,español
+himnario,canto,católico,misa,Alvernia,coro,liturgia,adviento,cuaresma,pascua,alabanza,fe,rezar,PDF
 
 ---
 
