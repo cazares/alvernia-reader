@@ -62,10 +62,13 @@ Música
 ---
 
 ## URL de soporte
-(pendiente)
+https://cazares.github.io/alvernia-reader/support.html
 
 ## URL de privacidad
-(pendiente)
+https://cazares.github.io/alvernia-reader/privacy-policy.html
+
+## Copyright
+© 2026 Cazares
 
 ---
 
