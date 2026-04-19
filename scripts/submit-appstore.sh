@@ -1,11 +1,12 @@
 #!/bin/bash
 set -e
 
-WORKSPACE="ios/SignoVivo.xcworkspace"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WORKSPACE="$REPO_ROOT/ios/SignoVivo.xcworkspace"
 SCHEME="SignoVivo"
-ARCHIVE_PATH="build/SignoVivo.xcarchive"
-EXPORT_PATH="build/SignoVivo-ipa"
-EXPORT_OPTIONS="scripts/export-options.plist"
+ARCHIVE_PATH="$REPO_ROOT/build/SignoVivo.xcarchive"
+EXPORT_PATH="$REPO_ROOT/build/SignoVivo-ipa"
+EXPORT_OPTIONS="$REPO_ROOT/scripts/export-options.plist"
 
 echo "▶ Step 1: Archive"
 xcodebuild archive \
