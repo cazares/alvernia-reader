@@ -13,8 +13,7 @@ xcodebuild archive \
   -scheme "$SCHEME" \
   -configuration Release \
   -archivePath "$ARCHIVE_PATH" \
-  -allowProvisioningUpdates \
-  | xcpretty || true
+  -allowProvisioningUpdates
 
 echo "▶ Step 2: Export & Upload"
 xcodebuild -exportArchive \
