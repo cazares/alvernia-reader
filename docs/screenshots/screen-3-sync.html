@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SignoVivo – Modo Director</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #000;
+    color: #fff;
+    font-family: -apple-system, "SF Pro Display", sans-serif;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6vh 8vw;
+  }
+
+  .caption {
+    text-align: center;
+  }
+  .caption-title {
+    font-size: 6.5vw;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 1.5vw;
+  }
+  .caption-sub {
+    font-size: 3.8vw;
+    color: rgba(255,255,255,0.55);
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  .devices {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5vh;
+    width: 100%;
+  }
+
+  .director-device {
+    position: relative;
+    width: 55vw;
+    max-width: 300px;
+  }
+  .device-frame {
+    background: #111;
+    border: 2px solid rgba(255,255,255,0.15);
+    border-radius: 4vw;
+    padding: 3vw;
+    width: 100%;
+  }
+  .device-screen {
+    background: #fff;
+    border-radius: 2vw;
+    height: 30vw;
+    max-height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+  .fake-page {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 4%;
+    gap: 4%;
+  }
+  .fake-line { background: #ccc; border-radius: 2px; height: 8%; }
+  .fake-line.dark { background: #888; }
+  .fake-line.short { width: 40%; }
+  .fake-line.med { width: 65%; }
+  .fake-line.long { width: 90%; }
+
+  .device-label {
+    text-align: center;
+    margin-top: 2vw;
+    font-size: 3.5vw;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+  }
+
+  /* pulsing blue dot — director */
+  .dot-director {
+    position: absolute;
+    top: -2vw; right: -2vw;
+    width: 5vw; height: 5vw;
+    border-radius: 50%;
+    background: #2979ff;
+    box-shadow: 0 0 0 0 rgba(41,121,255,0.6);
+    animation: pulse-blue 2s infinite;
+  }
+  @keyframes pulse-blue {
+    0%   { box-shadow: 0 0 0 0 rgba(41,121,255,0.6); }
+    70%  { box-shadow: 0 0 0 3vw rgba(41,121,255,0); }
+    100% { box-shadow: 0 0 0 0 rgba(41,121,255,0); }
+  }
+
+  .followers-row {
+    display: flex;
+    gap: 4vw;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .follower-device {
+    position: relative;
+    width: 26vw;
+    max-width: 130px;
+  }
+  .follower-device .device-screen {
+    height: 18vw;
+    max-height: 90px;
+  }
+  .follower-device .device-label {
+    font-size: 2.8vw;
+  }
+
+  /* pulsing green dot — follower */
+  .dot-follower {
+    position: absolute;
+    top: -1.5vw; right: -1.5vw;
+    width: 4vw; height: 4vw;
+    border-radius: 50%;
+    background: #00c853;
+    box-shadow: 0 0 0 0 rgba(0,200,83,0.6);
+    animation: pulse-green 2s infinite;
+    animation-delay: 0.4s;
+  }
+  @keyframes pulse-green {
+    0%   { box-shadow: 0 0 0 0 rgba(0,200,83,0.6); }
+    70%  { box-shadow: 0 0 0 2.5vw rgba(0,200,83,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,200,83,0); }
+  }
+
+  .sync-arrow {
+    font-size: 6vw;
+    color: rgba(255,255,255,0.2);
+    text-align: center;
+  }
+
+  .legend {
+    display: flex;
+    gap: 6vw;
+    justify-content: center;
+    margin-top: 1vh;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 2vw;
+    font-size: 3.2vw;
+    color: rgba(255,255,255,0.5);
+  }
+  .legend-dot {
+    width: 3vw; height: 3vw;
+    border-radius: 50%;
+  }
+  .legend-dot.blue { background: #2979ff; }
+  .legend-dot.green { background: #00c853; }
+</style>
+</head>
+<body>
+
+  <div class="caption">
+    <div class="caption-title">Dirige a toda la comunidad</div>
+    <div class="caption-sub">Un iPad controla todos·<br>sin internet, sin cables</div>
+  </div>
+
+  <div class="devices">
+
+    <div class="director-device">
+      <div class="device-frame">
+        <div class="device-screen">
+          <div class="fake-page">
+            <div class="fake-line dark short"></div>
+            <div class="fake-line dark med"></div>
+            <div class="fake-line long"></div>
+            <div class="fake-line med"></div>
+            <div class="fake-line long"></div>
+            <div class="fake-line short"></div>
+            <div class="fake-line long"></div>
+            <div class="fake-line med"></div>
+          </div>
+        </div>
+      </div>
+      <div class="dot-director"></div>
+      <div class="device-label">Director</div>
+    </div>
+
+    <div class="sync-arrow">↓</div>
+
+    <div class="followers-row">
+      <div class="follower-device">
+        <div class="device-frame">
+          <div class="device-screen">
+            <div class="fake-page">
+              <div class="fake-line dark short"></div>
+              <div class="fake-line long"></div>
+              <div class="fake-line med"></div>
+              <div class="fake-line long"></div>
+            </div>
+          </div>
+        </div>
+        <div class="dot-follower"></div>
+        <div class="device-label">Seguidor</div>
+      </div>
+
+      <div class="follower-device">
+        <div class="device-frame">
+          <div class="device-screen">
+            <div class="fake-page">
+              <div class="fake-line dark short"></div>
+              <div class="fake-line long"></div>
+              <div class="fake-line med"></div>
+              <div class="fake-line long"></div>
+            </div>
+          </div>
+        </div>
+        <div class="dot-follower" style="animation-delay:0.8s"></div>
+        <div class="device-label">Seguidor</div>
+      </div>
+
+      <div class="follower-device">
+        <div class="device-frame">
+          <div class="device-screen">
+            <div class="fake-page">
+              <div class="fake-line dark short"></div>
+              <div class="fake-line long"></div>
+              <div class="fake-line med"></div>
+              <div class="fake-line long"></div>
+            </div>
+          </div>
+        </div>
+        <div class="dot-follower" style="animation-delay:1.2s"></div>
+        <div class="device-label">Seguidor</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-dot blue"></div>
+      <span>Director</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot green"></div>
+      <span>Seguidor</span>
+    </div>
+  </div>
+
+</body>
+</html>

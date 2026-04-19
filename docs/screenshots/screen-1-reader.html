@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SignoVivo – Lector</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #000;
+    color: #fff;
+    font-family: -apple-system, "SF Pro Display", sans-serif;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── top bar ── */
+  .topbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 3.5vh 5vw 1.5vh;
+    gap: 4vw;
+    z-index: 10;
+  }
+  .topbar-btn {
+    width: 10vw; max-width: 52px;
+    height: 10vw; max-width: 52px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 5vw;
+  }
+
+  /* ── page area ── */
+  .page-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4vw 2vh;
+  }
+  .hymn-page {
+    background: #fff;
+    color: #111;
+    border-radius: 2vw;
+    width: 100%;
+    max-height: 100%;
+    padding: 6vw 7vw;
+    overflow: hidden;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.7);
+  }
+  .hymn-num {
+    font-size: 4vw;
+    font-weight: 700;
+    color: #888;
+    margin-bottom: 1vw;
+  }
+  .hymn-title {
+    font-size: 7.5vw;
+    font-weight: 800;
+    color: #111;
+    line-height: 1.15;
+    margin-bottom: 5vw;
+  }
+  .staff-block {
+    margin-bottom: 5vw;
+  }
+  .staff {
+    position: relative;
+    height: 10vw;
+    margin-bottom: 1.5vw;
+  }
+  .staff-lines {
+    position: absolute;
+    top: 25%; left: 0; right: 0;
+    height: 50%;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .staff-line { height: 1px; background: #555; }
+  .note {
+    position: absolute;
+    width: 3vw; height: 3vw;
+    border-radius: 50%;
+    background: #222;
+    border: 2px solid #222;
+  }
+  .note.open { background: transparent; }
+  .stem {
+    position: absolute;
+    width: 1.5px;
+    background: #222;
+    height: 5vw;
+  }
+  .lyrics-line {
+    font-size: 4.5vw;
+    color: #222;
+    line-height: 1.6;
+    margin-bottom: 0.5vw;
+    letter-spacing: 0.01em;
+  }
+  .lyrics-section { margin-bottom: 4vw; }
+  .section-label {
+    font-size: 3vw;
+    font-weight: 700;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 1.5vw;
+  }
+
+  /* ── caption band ── */
+  .caption {
+    padding: 2.5vh 8vw 4vh;
+    text-align: center;
+  }
+  .caption-title {
+    font-size: 6vw;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 1.5vw;
+  }
+  .caption-sub {
+    font-size: 4vw;
+    color: rgba(255,255,255,0.55);
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="topbar-btn">♫</div>
+    <div class="topbar-btn">⊞</div>
+    <div class="topbar-btn">›</div>
+  </div>
+
+  <div class="page-area">
+    <div class="hymn-page">
+      <div class="hymn-num">45</div>
+      <div class="hymn-title">Canto de Entrada</div>
+
+      <div class="staff-block">
+        <!-- staff 1 -->
+        <div class="staff">
+          <div class="staff-lines">
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+          </div>
+          <div class="note" style="left:8%;top:22%"></div>
+          <div class="note" style="left:18%;top:30%"></div>
+          <div class="note" style="left:28%;top:18%"></div>
+          <div class="note" style="left:40%;top:28%"></div>
+          <div class="note open" style="left:52%;top:20%"></div>
+          <div class="note" style="left:64%;top:32%"></div>
+          <div class="note" style="left:75%;top:22%"></div>
+          <div class="note" style="left:86%;top:28%"></div>
+        </div>
+
+        <!-- staff 2 -->
+        <div class="staff">
+          <div class="staff-lines">
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+            <div class="staff-line"></div>
+          </div>
+          <div class="note" style="left:8%;top:28%"></div>
+          <div class="note open" style="left:20%;top:18%"></div>
+          <div class="note" style="left:34%;top:30%"></div>
+          <div class="note" style="left:46%;top:22%"></div>
+          <div class="note" style="left:58%;top:28%"></div>
+          <div class="note open" style="left:70%;top:18%"></div>
+          <div class="note" style="left:82%;top:24%"></div>
+        </div>
+      </div>
+
+      <div class="lyrics-section">
+        <div class="section-label">Estrofa 1</div>
+        <div class="lyrics-line">Ven, Señor, no tardes más,</div>
+        <div class="lyrics-line">tu pueblo te espera en paz.</div>
+        <div class="lyrics-line">En el nombre del Señor,</div>
+        <div class="lyrics-line">venimos con fe y amor.</div>
+      </div>
+
+      <div class="lyrics-section">
+        <div class="section-label">Estribillo</div>
+        <div class="lyrics-line">Aleluya, aleluya,</div>
+        <div class="lyrics-line">gloria a ti, Señor.</div>
+        <div class="lyrics-line">Aleluya, aleluya,</div>
+        <div class="lyrics-line">te adoramos hoy.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">
+    <div class="caption-title">312 cantos, siempre contigo</div>
+    <div class="caption-sub">El Manual Alvernia completo · sin internet</div>
+  </div>
+
+</body>
+</html>

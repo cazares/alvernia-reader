@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SignoVivo – Búsqueda</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #000;
+    color: #fff;
+    font-family: -apple-system, "SF Pro Display", sans-serif;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .caption {
+    padding: 4vh 8vw 2vh;
+    text-align: center;
+  }
+  .caption-title {
+    font-size: 6vw;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 1.5vw;
+  }
+  .caption-sub {
+    font-size: 3.8vw;
+    color: rgba(255,255,255,0.55);
+    font-weight: 500;
+  }
+
+  .search-bar {
+    margin: 2vh 5vw;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3vw;
+    padding: 2.5vw 4vw;
+    display: flex;
+    align-items: center;
+    gap: 3vw;
+    font-size: 4.5vw;
+    color: rgba(255,255,255,0.4);
+  }
+
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    margin: 0 5vw 0;
+    gap: 1vw;
+  }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 2.5vw 0;
+    font-size: 3.2vw;
+    font-weight: 600;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 0.02em;
+  }
+  .tab.active {
+    color: #fff;
+    border-bottom: 2px solid #fff;
+    margin-bottom: -1px;
+  }
+
+  .section-header {
+    padding: 3vw 5vw 1.5vw;
+    font-size: 3vw;
+    font-weight: 700;
+    color: rgba(255,255,255,0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .song-row {
+    display: flex;
+    align-items: center;
+    padding: 3vw 5vw;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    gap: 4vw;
+  }
+  .song-row.highlight { background: rgba(255,255,255,0.05); }
+  .song-num {
+    font-size: 5.5vw;
+    font-weight: 700;
+    color: rgba(255,255,255,0.3);
+    width: 12vw;
+    font-variant-numeric: tabular-nums;
+  }
+  .song-info { flex: 1; }
+  .song-title {
+    font-size: 4.5vw;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 0.8vw;
+  }
+  .song-tags { display: flex; gap: 1.5vw; flex-wrap: wrap; }
+  .tag {
+    font-size: 2.8vw;
+    font-weight: 700;
+    padding: 0.6vw 2vw;
+    border-radius: 1vw;
+    color: #fff;
+    opacity: 0.85;
+  }
+  .tag.misa { background: #1a3a5c; }
+  .tag.tiempo { background: #3a1a5c; }
+  .tag.alabanza { background: #1a5c2a; }
+  .tag.fe { background: #5c3a1a; }
+  .song-page {
+    font-size: 3.5vw;
+    color: rgba(255,255,255,0.25);
+  }
+</style>
+</head>
+<body>
+
+  <div class="caption">
+    <div class="caption-title">Encuentra cualquier canto</div>
+    <div class="caption-sub">Por número, letra, temporada o tema</div>
+  </div>
+
+  <div class="search-bar">
+    <span>⌕</span>
+    <span>Buscar cantos…</span>
+  </div>
+
+  <div class="tabs">
+    <div class="tab">Recientes</div>
+    <div class="tab active">Todas</div>
+    <div class="tab">Misa</div>
+    <div class="tab">Tiempo</div>
+    <div class="tab">Temas</div>
+  </div>
+
+  <div class="section-header">312 cantos</div>
+
+  <div class="song-row highlight">
+    <div class="song-num">1</div>
+    <div class="song-info">
+      <div class="song-title">Señor, ten piedad</div>
+      <div class="song-tags">
+        <span class="tag misa">Misa</span>
+        <span class="tag alabanza">Alabanza</span>
+      </div>
+    </div>
+    <div class="song-page">p. 2</div>
+  </div>
+
+  <div class="song-row">
+    <div class="song-num">45</div>
+    <div class="song-info">
+      <div class="song-title">Canto de Entrada</div>
+      <div class="song-tags">
+        <span class="tag misa">Misa</span>
+        <span class="tag tiempo">Adviento</span>
+      </div>
+    </div>
+    <div class="song-page">p. 48</div>
+  </div>
+
+  <div class="song-row">
+    <div class="song-num">72</div>
+    <div class="song-info">
+      <div class="song-title">Gloria a Dios</div>
+      <div class="song-tags">
+        <span class="tag misa">Gloria</span>
+      </div>
+    </div>
+    <div class="song-page">p. 76</div>
+  </div>
+
+  <div class="song-row highlight">
+    <div class="song-num">118</div>
+    <div class="song-info">
+      <div class="song-title">Aleluya Pascual</div>
+      <div class="song-tags">
+        <span class="tag tiempo">Pascua</span>
+        <span class="tag alabanza">Alabanza</span>
+      </div>
+    </div>
+    <div class="song-page">p. 124</div>
+  </div>
+
+  <div class="song-row">
+    <div class="song-num">155</div>
+    <div class="song-info">
+      <div class="song-title">Pan de Vida</div>
+      <div class="song-tags">
+        <span class="tag misa">Comunión</span>
+        <span class="tag fe">Fe</span>
+      </div>
+    </div>
+    <div class="song-page">p. 162</div>
+  </div>
+
+  <div class="song-row">
+    <div class="song-num">203</div>
+    <div class="song-info">
+      <div class="song-title">Madre del Camino</div>
+      <div class="song-tags">
+        <span class="tag alabanza">Alabanza</span>
+        <span class="tag fe">Fe</span>
+      </div>
+    </div>
+    <div class="song-page">p. 211</div>
+  </div>
+
+  <div class="song-row highlight">
+    <div class="song-num">247</div>
+    <div class="song-info">
+      <div class="song-title">Dios de la Vida</div>
+      <div class="song-tags">
+        <span class="tag tiempo">Cuaresma</span>
+        <span class="tag fe">Fe</span>
+      </div>
+    </div>
+    <div class="song-page">p. 256</div>
+  </div>
+
+  <div class="song-row">
+    <div class="song-num">312</div>
+    <div class="song-info">
+      <div class="song-title">Canto Final</div>
+      <div class="song-tags">
+        <span class="tag misa">Despedida</span>
+      </div>
+    </div>
+    <div class="song-page">p. 324</div>
+  </div>
+
+</body>
+</html>
