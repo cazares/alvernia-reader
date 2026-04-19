@@ -6,10 +6,12 @@ import {
   Dimensions,
   FlatList,
   Image,
+  InputAccessoryView,
   Keyboard,
   Modal,
   NativeModules,
   PanResponder,
+  Pressable,
   SectionList,
   StatusBar,
   StyleSheet,
@@ -18,11 +20,14 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  type NativeSyntheticEvent,
   type KeyboardEvent,
   type ListRenderItemInfo,
+  type NativeScrollEvent,
   type ViewabilityConfig,
   type ViewToken,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 
 import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
@@ -33,17 +38,27 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
-import { OFFLINE_WEB_BUNDLE_ASSETS, OFFLINE_WEB_BUNDLE_VERSION } from "./src/offlineWebBundle";
+import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
 // @ts-ignore — Metro resolves JSON fine
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
 // @ts-ignore
 import SONG_SEARCH_INDEX from "./assets/offline-web/song-search-index.json";
 // @ts-ignore
 import PAGES_JSON from "./assets/offline-web/pages.json";
+// @ts-ignore — Metro resolves JSON fine
+import VERSION_INFO from "./version.json";
 
 const TOTAL_PAGES = 368;
 const START_PAGE = 2;
 const DIRECTOR_SESSION = "1234"; // fixed session — only one director per session
+const VISIBLE_BUILD_LABEL = `${VERSION_INFO.baseVersion}.${VERSION_INFO.buildNumber}`;
+
+const normalizeDirectorDeviceName = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
 const SECURE_STORE_KEY = "alvernia_unlocked";
 
@@ -100,14 +115,27 @@ const cleanSpanishText = (text: string): string => {
 // Extract a lyric snippet from raw OCR text.
 // Starts at 30% to skip title/metadata. Strips chord tokens, stage directions,
 // and any line that is essentially just the song title repeated.
+// Rule 1 — OCR text corrections applied before snippet extraction
+const fixOcrText = (text: string): string =>
+  text
+    .replace(/\bSe[fh]i?or\b/g, "Señor")   // Sefor, Sefior, Sehor → Señor
+    .replace(/\bSeAO[PR]\b/gi, "Señor")     // SeAOP, SeAOR → Señor
+    .replace(/\bSeñof\b/g, "Señor")
+    .replace(/\bJe sus\b/gi, "Jesús")
+    .replace(/\bMarí a\b/g, "María")
+    .replace(/\bcoraz[oó]6n\b/gi, "corazón")
+    .replace(/\bcancién\b/gi, "canción");
+
 const extractLyricSnippet = (raw: string, title: string): string => {
+  const corrected = fixOcrText(raw);
   const normTitle = normalizeText(title).replace(/[^a-z0-9 ]/g, "").trim();
-  const start = Math.floor(raw.length * 0.30);
-  const slice = raw.slice(start);
+  const start = Math.floor(corrected.length * 0.30);
+  const slice = corrected.slice(start);
   const lines = slice.split("\n");
 
   const chordToken = /\b[A-G][#b]?(m|maj|sus|dim|aug|add)?[0-9]{0,2}(\/[A-G][#b]?)?\b/g;
-  const skipLine = /^\s*(intro|coro|estrofa|puente|fin\s*$|bridge|verso|rev[\s\d]|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|2\s*veces|dos\s*veces)/i;
+  // Rule 2 — skip entire lines that are performance/stage directions
+  const skipLine = /^\s*(intro|coro|estrofa|puente|fin\s*$|bridge|verso|rev[\s\d]|capo|posible|\(coro\)|\(h\)|\(m\)|\(t\)|\(s\)|2\s*veces|dos\s*veces|veces\s*toda|solo\s*al\s*final|solista|guitarra|voces?|preparacion|opcional|para\s*arriba|para\s*abajo|inicio|al\s*coro|da\s*capo|bis\s*$|todos\s*$|hombres\s*$|mujeres\s*$|segunda\s*$|primera\s*$|segundo\s*$|repetir|cuantas\s*veces|con\s*guitarra|sin\s*guitarra|vuelta\s*$)/i;
 
   const cleanLine = (t: string): string =>
     t.replace(chordToken, " ")
@@ -259,16 +287,39 @@ const TEMAS_TAB_SONGS_BY_GROUP = Object.entries(THEME_LABELS)
     songs: SEARCHABLE_SONGS.filter((s) => s.themes.includes(id)).slice(0, 20),
   })).filter((s) => s.songs.length > 0);
 
+type SearchSortMode = "best" | "az" | "number";
+
 // Helper: sort a song array by sortMode
+// For "best": score = title full match (10) + per-word title hits (3 each) + body occurrences (1 each), tiebreak by song#
 function sortSongs(
   arr: typeof SEARCHABLE_SONGS,
-  mode: "number" | "numberDesc" | "az" | "za",
+  mode: SearchSortMode,
+  queryWords: string[] = [],
 ): typeof SEARCHABLE_SONGS {
   const copy = [...arr];
-  if (mode === "numberDesc") copy.sort((a, b) => b.song - a.song);
-  else if (mode === "az") copy.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
-  else if (mode === "za") copy.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
-  // "number" — ascending by default
+  if (mode === "az") {
+    copy.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+  } else if (mode === "number") {
+    copy.sort((a, b) => a.song - b.song);
+  } else if (mode === "best" && queryWords.length > 0) {
+    const score = (s: typeof SEARCHABLE_SONGS[0]) => {
+      const t = normalizeText(s.title);
+      const body = s.normalized ?? "";
+      const fullTitleMatch = queryWords.every((w) => t.includes(w)) ? 10 : 0;
+      const wordTitleHits = queryWords.filter((w) => t.includes(w)).length * 3;
+      const bodyHits = queryWords.reduce((acc, w) => {
+        let count = 0;
+        let idx = 0;
+        while ((idx = body.indexOf(w, idx)) !== -1) { count++; idx += w.length; }
+        return acc + count;
+      }, 0);
+      return fullTitleMatch + wordTitleHits + bodyHits;
+    };
+    copy.sort((a, b) => {
+      const diff = score(b) - score(a);
+      return diff !== 0 ? diff : a.song - b.song;
+    });
+  }
   return copy;
 }
 
@@ -389,11 +440,163 @@ function PulsingDot({ color }: { color: string }) {
   return <Animated.View style={[styles.syncDot, { backgroundColor: color, opacity }]} />;
 }
 
+// ── Song numpad ───────────────────────────────────────────────────────────────
+function SongNumpad({
+  onDigit,
+  onBackspace,
+  onGo,
+  goDisabled,
+}: {
+  onDigit: (d: string) => void;
+  onBackspace: () => void;
+  onGo: () => void;
+  goDisabled: boolean;
+}) {
+  const rows: (string | null)[][] = [
+    ["1", "2", "3"],
+    ["4", "5", "6"],
+    ["7", "8", "9"],
+    ["⌫", "0", "Ir"],
+  ];
+  const [pressedKey, setPressedKey] = useState<string | null>(null);
+  const repeatDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopBackspaceRepeat = useCallback(() => {
+    if (repeatDelayRef.current) {
+      clearTimeout(repeatDelayRef.current);
+      repeatDelayRef.current = null;
+    }
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => stopBackspaceRepeat, [stopBackspaceRepeat]);
+
+  const fireHaptic = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }, []);
+
+  const handlePressIn = useCallback((key: string, isBack: boolean, disabled: boolean) => {
+    if (disabled) return;
+    setPressedKey(key);
+    fireHaptic();
+    if (!isBack) return;
+    onBackspace();
+    stopBackspaceRepeat();
+    repeatDelayRef.current = setTimeout(() => {
+      repeatIntervalRef.current = setInterval(() => {
+        onBackspace();
+      }, 100);
+    }, 500);
+  }, [fireHaptic, onBackspace, stopBackspaceRepeat]);
+
+  const handlePressOut = useCallback(() => {
+    setPressedKey(null);
+    stopBackspaceRepeat();
+  }, [stopBackspaceRepeat]);
+
+  return (
+    <View style={numpadStyles.grid}>
+      {rows.map((row, ri) => (
+        <View key={ri} style={numpadStyles.row}>
+          {row.map((key, ki) => {
+            if (key === null) {
+              return <View key={ki} style={numpadStyles.emptyKey} />;
+            }
+            const isGo = key === "Ir";
+            const isBack = key === "⌫";
+            const disabled = isGo && goDisabled;
+            return (
+              <Pressable
+                key={ki}
+                style={[
+                  numpadStyles.key,
+                  isGo && numpadStyles.goKey,
+                  disabled && numpadStyles.goKeyDisabled,
+                  pressedKey === key && numpadStyles.keyPressed,
+                  isGo && pressedKey === key && numpadStyles.goKeyPressed,
+                ]}
+                onPressIn={() => handlePressIn(key, isBack, disabled)}
+                onPressOut={handlePressOut}
+                onPress={() => {
+                  if (isGo) { onGo(); }
+                  else if (isBack) { return; }
+                  else { onDigit(key); }
+                }}
+                disabled={disabled}
+              >
+                <Text style={[numpadStyles.keyText, isGo && numpadStyles.goKeyText]}>
+                  {key}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const numpadStyles = StyleSheet.create({
+  grid: {
+    marginTop: 16,
+    gap: 10,
+  },
+  row: {
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "center",
+  },
+  key: {
+    width: 72,
+    height: 52,
+    borderRadius: 10,
+    backgroundColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  keyPressed: {
+    backgroundColor: "#9CA3AF",
+  },
+  emptyKey: {
+    width: 72,
+    height: 52,
+  },
+  goKey: {
+    backgroundColor: "#3B82F6",
+  },
+  goKeyDisabled: {
+    backgroundColor: "#93C5FD",
+  },
+  goKeyPressed: {
+    backgroundColor: "#2563EB",
+  },
+  keyText: {
+    fontSize: 22,
+    fontWeight: "500",
+    color: "#111827",
+  },
+  goKeyText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+});
+
 // ── Main app ──────────────────────────────────────────────────────────────────
 type SyncRole = "off" | "director" | "follower";
 
 export default function App() {
   const listRef = useRef<FlatList>(null);
+  const searchListRef = useRef<SectionList<any>>(null);
   const inputRef = useRef<TextInput>(null);
   const codeInputRef = useRef<TextInput>(null);
   const currentPageRef = useRef(START_PAGE);
@@ -413,14 +616,17 @@ export default function App() {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [searchTab, setSearchTab] = useState<"todas" | "misa" | "tiempo" | "temas" | "recientes">("todas");
-  const [sortMode, setSortMode] = useState<"number" | "numberDesc" | "az" | "za">("number");
+  const [sortMode, setSortMode] = useState<SearchSortMode>("best");
+  const [searchJumpDirection, setSearchJumpDirection] = useState<"up" | "down">("down");
   const [browseVisible, setBrowseVisible] = useState(false);
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [showSatellite, setShowSatellite] = useState(false);
+  const [isSyncBootstrapped, setIsSyncBootstrapped] = useState(false);
   const lastFollowerNoticeRef = useRef(0);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
+  const searchAccessoryId = "director-search-accessory";
   const syncAvailable = isNearbyDirectorSyncAvailable();
 
   const GRID_DENSITY = [2, 3, 4] as const;
@@ -496,30 +702,43 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncAvailable]);
 
-  // Auto-start as follower on mount
+  // Bootstrap sync role once nearby sync is available.
+  // Brau MASTER should become director automatically; everyone else starts as follower.
   useEffect(() => {
     if (!syncAvailable) return;
-    startNearbyFollower(DIRECTOR_SESSION).then(() => setSyncRole("follower")).catch(() => {});
-    return () => { stopNearbyDirectorSync().catch(() => {}); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let cancelled = false;
 
-  // Auto-join as director if this is a known master device.
-  // Runs whenever syncAvailable flips true so it retries after init.
-  useEffect(() => {
-    if (!syncAvailable) return;
-    NativeModules.DirectorSyncModule?.getDeviceName?.().then((name: string) => {
-      if (name === "Brau MASTER") {
-        startNearbyDirector(DIRECTOR_SESSION)
-          .then(() => setSyncRole("director"))
-          .catch(() => {
-            // Mirror exactly what the modal does on failure
-            startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-            setSyncRole("follower");
-          });
+    const bootstrapSyncRole = async () => {
+      const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
+      if (cancelled) return;
+
+      const normalizedName = normalizeDirectorDeviceName(rawName || "");
+      const isBrauMaster = normalizedName === "braumaster";
+
+      if (isBrauMaster) {
+        try {
+          await startNearbyDirector(DIRECTOR_SESSION);
+          if (!cancelled) setSyncRole("director");
+        } catch {
+          // If the director startup fails transiently, fall back to follower so the device
+          // is still usable instead of sitting idle.
+          await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+          if (!cancelled) setSyncRole("follower");
+        }
+      } else {
+        await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+        if (!cancelled) setSyncRole("follower");
       }
-    }).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+      if (!cancelled) setIsSyncBootstrapped(true);
+    };
+
+    bootstrapSyncRole();
+
+    return () => {
+      cancelled = true;
+      stopNearbyDirectorSync().catch(() => {});
+    };
   }, [syncAvailable]);
 
   const goToPage = useCallback((page: number) => {
@@ -604,11 +823,13 @@ export default function App() {
     setSearchVisible(true);
     setBrowseVisible(false);
     setGridVisible(false);
+    setSearchJumpDirection("down");
     setTimeout(() => searchInputRef.current?.focus(), 80);
   }, []);
   const closeSearch = useCallback(() => {
     Keyboard.dismiss();
     setSearchVisible(false);
+    setSearchJumpDirection("down");
   }, []);
 
   // Compute grouped search results on every keystroke
@@ -624,8 +845,9 @@ export default function App() {
     const addSection = (title: string, songs: typeof SEARCHABLE_SONGS) => {
       const unique = songs.filter((s) => !seenSongs.has(s.song));
       if (unique.length === 0) return;
-      unique.forEach((s) => seenSongs.add(s.song));
-      sections.push({ title, data: unique });
+      const sorted = sortSongs(unique, sortMode, words);
+      sorted.forEach((s) => seenSongs.add(s.song));
+      sections.push({ title, data: sorted });
     };
 
     // 1) Numeric → exact + prefix match at top
@@ -691,15 +913,14 @@ export default function App() {
     }
 
     return sections;
-  }, [searchText]);
+  }, [searchText, sortMode]);
 
   // Sorted song list for the "Todas" tab
   const sortedTodas = useMemo(() => {
     const arr = [...SEARCHABLE_SONGS];
-    if (sortMode === "numberDesc") arr.sort((a, b) => b.song - a.song);
-    else if (sortMode === "az") arr.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
-    else if (sortMode === "za") arr.sort((a, b) => normalizeText(b.title).localeCompare(normalizeText(a.title)));
-    // "number" keeps natural order (already sorted ascending by song number)
+    if (sortMode === "az") arr.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+    else if (sortMode === "number") arr.sort((a, b) => a.song - b.song);
+    // "best" keeps natural order
     return arr;
   }, [sortMode]);
 
@@ -740,9 +961,9 @@ export default function App() {
     return sections;
   }, [sortMode]);
 
-  const sortLabel = sortMode === "number" ? "#↑" : sortMode === "numberDesc" ? "#↓" : sortMode === "az" ? "A→Z" : "Z→A";
+  const sortLabel = sortMode === "best" ? "Mejor" : sortMode === "az" ? "A→Z" : "#";
   const cycleSortMode = useCallback(() => {
-    setSortMode((m) => m === "number" ? "numberDesc" : m === "numberDesc" ? "az" : m === "az" ? "za" : "number");
+    setSortMode((m) => m === "best" ? "az" : m === "az" ? "number" : "best");
   }, []);
 
   const handleSearchResultTap = useCallback((song: number) => {
@@ -764,6 +985,56 @@ export default function App() {
       }
     }
   }, [searchSections, searchText, goToPage, closeSearch, handleSearchResultTap]);
+
+  const handleSearchJump = useCallback(() => {
+    const hasQuery = searchText.trim().length > 0;
+    const sections = hasQuery
+      ? searchSections
+      : (
+          searchTab === "todas" ? [{ title: "", data: sortedTodas }] :
+          searchTab === "misa" ? sortedMisaSections :
+          searchTab === "tiempo" ? sortedTiempoSections :
+          searchTab === "temas" ? sortedTemasSections :
+          [{ title: "Recientes", data: recentSongsRef.current
+            .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
+            .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s) }]
+        );
+
+    if (!sections.length) return;
+    if (searchJumpDirection === "down") {
+      const lastSectionIndex = sections.length - 1;
+      const lastItemIndex = Math.max(0, sections[lastSectionIndex].data.length - 1);
+      searchListRef.current?.scrollToLocation({
+        sectionIndex: lastSectionIndex,
+        itemIndex: lastItemIndex,
+        animated: true,
+        viewPosition: 1,
+      });
+      setSearchJumpDirection("up");
+      return;
+    }
+    searchListRef.current?.scrollToLocation({
+      sectionIndex: 0,
+      itemIndex: 0,
+      animated: true,
+      viewPosition: 0,
+    });
+    setSearchJumpDirection("down");
+  }, [
+    searchJumpDirection,
+    searchSections,
+    searchTab,
+    searchText,
+    sortedMisaSections,
+    sortedTemasSections,
+    sortedTiempoSections,
+    sortedTodas,
+  ]);
+
+  const handleSearchListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = event.nativeEvent.contentOffset.y;
+    setSearchJumpDirection(y <= 20 ? "down" : "up");
+  }, []);
 
   // Browse categories
   const openBrowse = useCallback(() => {
@@ -999,7 +1270,7 @@ export default function App() {
       )}
 
       {/* ── Search overlay — director only ── */}
-      {searchVisible && syncRole === "director" && (() => {
+      {searchVisible && (() => {
         const hasQuery = searchText.trim().length > 0;
         const normalizedQ = normalizeText(searchText.trim());
         const qWords = normalizedQ.split(/\s+/).filter(Boolean);
@@ -1007,6 +1278,7 @@ export default function App() {
         const renderSongRow = (item: typeof SEARCHABLE_SONGS[0], highlightQuery: boolean) => {
           const displayTitle = item.title || `Canción ${item.song}`;
           const titleParts: { text: string; bold: boolean }[] = [];
+          const snippetParts: { text: string; bold: boolean }[] = [];
           if (highlightQuery && qWords.length > 0 && !/^\d+$/.test(searchText.trim())) {
             const normTitle = normalizeText(displayTitle);
             let lastIdx = 0;
@@ -1023,8 +1295,26 @@ export default function App() {
               lastIdx = mp.end;
             }
             if (lastIdx < displayTitle.length) titleParts.push({ text: displayTitle.slice(lastIdx), bold: false });
+
+            const snippetText = `Letra: ${item.snippet}`;
+            const normSnippet = normalizeText(snippetText);
+            let snippetLastIdx = 0;
+            const snippetMatchPositions: { start: number; end: number }[] = [];
+            for (const w of qWords) {
+              const idx = normSnippet.indexOf(w);
+              if (idx !== -1) snippetMatchPositions.push({ start: idx, end: idx + w.length });
+            }
+            snippetMatchPositions.sort((a, b) => a.start - b.start);
+            for (const mp of snippetMatchPositions) {
+              if (mp.start < snippetLastIdx) continue;
+              if (mp.start > snippetLastIdx) snippetParts.push({ text: snippetText.slice(snippetLastIdx, mp.start), bold: false });
+              snippetParts.push({ text: snippetText.slice(mp.start, mp.end), bold: true });
+              snippetLastIdx = mp.end;
+            }
+            if (snippetLastIdx < snippetText.length) snippetParts.push({ text: snippetText.slice(snippetLastIdx), bold: false });
           }
           const hasParts = titleParts.length > 0;
+          const hasSnippetParts = snippetParts.length > 0;
 
           // Compute keyword tags
           const misaPart = getMisaPart(item);
@@ -1067,7 +1357,13 @@ export default function App() {
                   )) : displayTitle}
                 </Text>
                 {!!item.snippet && (
-                  <Text style={styles.searchResultSnippet} numberOfLines={2}>{"Letra: " + item.snippet}</Text>
+                  <Text style={styles.searchResultSnippet} numberOfLines={2}>
+                    {hasSnippetParts
+                      ? snippetParts.map((p, pi) => (
+                          <Text key={pi} style={p.bold ? styles.searchHighlight : undefined}>{p.text}</Text>
+                        ))
+                      : `Letra: ${item.snippet}`}
+                  </Text>
                 )}
               </View>
               <Text style={styles.searchResultPage}>p.{item.page}</Text>
@@ -1079,32 +1375,44 @@ export default function App() {
         const recentSongEntries = recentSongsRef.current
           .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
           .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s);
+        const sortedRecentSongEntries = sortMode === "best" ? recentSongEntries : sortSongs(recentSongEntries, sortMode);
         const tabSections = !hasQuery ? (
           searchTab === "todas" ? [{title: "", data: sortedTodas}] :
           searchTab === "misa" ? sortedMisaSections :
           searchTab === "tiempo" ? sortedTiempoSections :
           searchTab === "temas" ? sortedTemasSections :
-          /* recientes */ [{title: "Recientes", data: recentSongEntries}]
+          /* recientes */ [{title: "Recientes", data: sortedRecentSongEntries}]
         ) : null;
 
         return (
           <TouchableWithoutFeedback onPress={closeSearch}>
             <View style={[styles.searchOverlay, { bottom: keyboardHeight }]}>
+              <TouchableOpacity
+                style={styles.searchOverlayTrigger}
+                onPress={closeSearch}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.searchOverlayTriggerIcon}>⌕</Text>
+              </TouchableOpacity>
               <TouchableWithoutFeedback>
                 <View style={styles.searchContainer}>
 
                   {/* Search bar row */}
                   <View style={styles.searchBar}>
+                    <TouchableOpacity style={styles.searchCloseBtn} onPress={closeSearch} activeOpacity={0.7}>
+                      <Text style={styles.searchCloseBtnText}>←</Text>
+                    </TouchableOpacity>
                     <TextInput
                       ref={searchInputRef}
                       style={styles.searchInput}
+                      inputAccessoryViewID={searchAccessoryId}
                       value={searchText}
                       onChangeText={setSearchText}
                       onSubmitEditing={handleSearchSubmit}
                       placeholder="Buscar canción, parte de misa, tema..."
                       placeholderTextColor="rgba(255,255,255,0.4)"
                       keyboardType="default"
-                      returnKeyType="go"
+                      returnKeyType="search"
                       autoCorrect={false}
                       autoCapitalize="none"
                       maxLength={40}
@@ -1115,11 +1423,11 @@ export default function App() {
                         <Text style={styles.clearBtnText}>✕</Text>
                       </TouchableOpacity>
                     )}
+                    <TouchableOpacity style={styles.jumpBtn} onPress={handleSearchJump} activeOpacity={0.7}>
+                      <Text style={styles.jumpBtnText}>{searchJumpDirection === "down" ? "↓" : "↑"}</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity style={styles.sortBtn} onPress={cycleSortMode} activeOpacity={0.7}>
                       <Text style={styles.sortBtnText}>{sortLabel}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.searchGoBtn} onPress={handleSearchSubmit} activeOpacity={0.7}>
-                      <Text style={styles.searchGoBtnText}>Ir</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -1144,9 +1452,12 @@ export default function App() {
                   {/* Results — keyword search */}
                   {hasQuery && searchSections.length > 0 && (
                     <SectionList
+                      ref={searchListRef}
                       sections={searchSections}
                       keyExtractor={(item, i) => `sr-${item.song}-${i}`}
                       keyboardShouldPersistTaps="handled"
+                      onScroll={handleSearchListScroll}
+                      scrollEventThrottle={16}
                       style={styles.searchResults}
                       contentContainerStyle={{ paddingBottom: 16 }}
                       stickySectionHeadersEnabled={false}
@@ -1172,9 +1483,12 @@ export default function App() {
                       </View>
                     ) : (
                       <SectionList
+                        ref={searchListRef}
                         sections={tabSections}
                         keyExtractor={(item, i) => `tab-${item.song}-${i}`}
                         keyboardShouldPersistTaps="handled"
+                        onScroll={handleSearchListScroll}
+                        scrollEventThrottle={16}
                         style={styles.searchResults}
                         contentContainerStyle={{ paddingBottom: 16 }}
                         stickySectionHeadersEnabled={false}
@@ -1192,6 +1506,11 @@ export default function App() {
 
                 </View>
               </TouchableWithoutFeedback>
+              <InputAccessoryView nativeID={searchAccessoryId}>
+                <TouchableOpacity style={styles.searchAccessoryBar} onPress={closeSearch} activeOpacity={0.8}>
+                  <Text style={styles.searchAccessoryText}>Cerrar búsqueda</Text>
+                </TouchableOpacity>
+              </InputAccessoryView>
             </View>
           </TouchableWithoutFeedback>
         );
@@ -1200,25 +1519,26 @@ export default function App() {
       {/* Top-right button cluster */}
       <View style={styles.navCluster}>
         {/* Nav trigger — tap: song modal, long press: sync modal */}
-        <TouchableOpacity
-          style={styles.clusterBtn}
-          onPress={openSongModal}
-          onLongPress={syncAvailable ? openSyncModal : undefined}
-          delayLongPress={500}
-          activeOpacity={0.75}
-          hitSlop={{ top: 16, bottom: 16, left: 16, right: 3 }}
-        >
-          <Text style={styles.navTriggerIcon}>♪</Text>
-          <Text style={styles.navTriggerArrow}>›</Text>
-          {syncRole === "director" && <PulsingDot color="#4a90e2" />}
-          {syncRole === "follower" && <PulsingDot color="#4cff91" />}
-          {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
-        </TouchableOpacity>
-        {/* Search button — director only, far-right — SAME explicit width as nav button */}
-        {syncRole === "director" && (
+        {(!searchVisible || syncRole !== "director") && (
           <TouchableOpacity
             style={styles.clusterBtn}
-            onPress={searchVisible ? closeSearch : openSearch}
+            onPress={openSongModal}
+            onLongPress={syncAvailable ? openSyncModal : undefined}
+            delayLongPress={500}
+            activeOpacity={0.75}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 3 }}
+          >
+            <Text style={styles.navTriggerIcon}>♪</Text>
+            <Text style={styles.navTriggerArrow}>›</Text>
+            {syncRole === "director" && <PulsingDot color="#4a90e2" />}
+            {syncRole === "follower" && <PulsingDot color="#4cff91" />}
+            {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
+          </TouchableOpacity>
+        )}
+        {syncRole === "director" && !searchVisible && (
+          <TouchableOpacity
+            style={styles.clusterBtn}
+            onPress={openSearch}
             activeOpacity={0.75}
             hitSlop={{ top: 16, bottom: 16, left: 3, right: 16 }}
           >
@@ -1228,7 +1548,7 @@ export default function App() {
       </View>
 
       {/* Version label */}
-      <Text style={styles.versionLabel} pointerEvents="none">1.0.{OFFLINE_WEB_BUNDLE_VERSION}</Text>
+      <Text style={styles.versionLabel} pointerEvents="none">{VISIBLE_BUILD_LABEL}</Text>
 
       {/* ── Song navigation modal ── */}
       <Modal visible={songModal} transparent animationType="fade" onRequestClose={closeSongModal} statusBarTranslucent>
@@ -1249,17 +1569,18 @@ export default function App() {
                   returnKeyType="go"
                   maxLength={4}
                   selectTextOnFocus
+                  showSoftInputOnFocus={false}
+                />
+                {/* Custom in-app numpad */}
+                <SongNumpad
+                  onDigit={(d) => setSongInput((prev) => (prev.length < 4 ? prev + d : prev))}
+                  onBackspace={() => setSongInput((prev) => prev.slice(0, -1))}
+                  onGo={handleSongSubmit}
+                  goDisabled={!songInput}
                 />
                 <View style={styles.modalButtons}>
                   <TouchableOpacity style={styles.cancelBtn} onPress={closeSongModal} activeOpacity={0.7}>
                     <Text style={styles.cancelText}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.goBtn, !songInput && styles.goBtnDisabled]}
-                    onPress={handleSongSubmit}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.goText}>Ir ›</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1504,6 +1825,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 12,
   },
+  searchOverlayTrigger: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 120,
+    height: 60,
+    backgroundColor: "rgba(26,26,46,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 20,
+  },
+  searchOverlayTriggerIcon: {
+    fontSize: 44,
+    color: "#7ec8f7",
+    lineHeight: 48,
+  },
   searchBar: {
     flexDirection: "row",
     backgroundColor: "rgba(30,30,50,0.95)",
@@ -1515,6 +1852,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 16,
     elevation: 12,
+  },
+  searchCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 2,
+    marginRight: 2,
+  },
+  searchCloseBtnText: {
+    color: "#fff",
+    fontSize: 26,
+    fontWeight: "700",
+    lineHeight: 28,
   },
   searchInput: {
     flex: 1,
@@ -1530,15 +1882,21 @@ const styles = StyleSheet.create({
     // Ensures SectionList inside can grow to fill available space above keyboard
     overflow: "hidden",
   },
-  searchGoBtn: {
-    backgroundColor: "#3b82f6",
-    borderRadius: 10,
-    width: 72,
-    height: 48,
+  jumpBtn: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 8,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
+    marginRight: 4,
   },
-  searchGoBtnText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  jumpBtnText: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
+    lineHeight: 22,
+  },
   clearBtn: {
     width: 32,
     height: 32,
@@ -1552,11 +1910,26 @@ const styles = StyleSheet.create({
   sortBtn: {
     backgroundColor: "rgba(255,255,255,0.12)",
     borderRadius: 8,
+    minWidth: 72,
+    height: 44,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginRight: 4,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sortBtnText: { color: "#7ec8f7", fontSize: 14, fontWeight: "700" },
+  searchAccessoryBar: {
+    backgroundColor: "#111827",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.12)",
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  searchAccessoryText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
   searchTabBar: {
     flexDirection: "row",
     backgroundColor: "rgba(20,20,40,0.97)",
@@ -1604,8 +1977,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   searchHighlight: {
-    color: "#7ec8f7",
+    backgroundColor: "#F59E0B",
+    color: "#1a1a2e",
     fontWeight: "700",
+    borderRadius: 2,
   },
   searchResultNum: {
     fontSize: 18,
