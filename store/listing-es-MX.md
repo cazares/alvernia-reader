@@ -62,10 +62,10 @@ Música
 ---
 
 ## URL de soporte
-https://cazares.github.io/alvernia-reader/support.html
+https://miguelengineer.com/signovivo/support.html
 
 ## URL de privacidad
-https://cazares.github.io/alvernia-reader/privacy-policy.html
+https://miguelengineer.com/signovivo/privacy-policy.html
 
 ## Copyright
 © 2026 Cazares
