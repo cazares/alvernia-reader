@@ -42,9 +42,6 @@ module.exports = ({ config }) => {
       enabled: false,
       checkAutomatically: "NEVER",
     },
-    plugins: [
-      "expo-secure-store",
-    ],
     ios: {
       ...(config.ios || {}),
       supportsTablet: true,
