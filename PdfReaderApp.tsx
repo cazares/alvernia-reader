@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as SecureStore from "expo-secure-store";
 import {
   Alert,
   Animated,
@@ -43,6 +44,21 @@ import PAGES_JSON from "./assets/offline-web/pages.json";
 const TOTAL_PAGES = 368;
 const START_PAGE = 2;
 const DIRECTOR_SESSION = "1234"; // fixed session — only one director per session
+
+const SECURE_STORE_KEY = "alvernia_unlocked";
+
+function normalizeCity(s: string) {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function isDelRio(city: string) {
+  const n = normalizeCity(city);
+  return n === "del rio" || n === "del río";
+}
 
 const SONG_TO_PAGE = new Map<number, number>(
   ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]),
@@ -383,6 +399,9 @@ export default function App() {
   const currentPageRef = useRef(START_PAGE);
 
   const [dims, setDims] = useState(() => Dimensions.get("window"));
+  const [cityPromptVisible, setCityPromptVisible] = useState(false);
+  const [cityInput, setCityInput] = useState("");
+  const [unlocked, setUnlocked] = useState<boolean | null>(null); // null = loading
   const [songModal, setSongModal] = useState(false);
   const [syncModal, setSyncModal] = useState(false);
   const [songInput, setSongInput] = useState("");
@@ -406,6 +425,26 @@ export default function App() {
 
   const GRID_DENSITY = [2, 3, 4] as const;
   const gridCols = GRID_DENSITY[gridDensityIdx];
+
+  // City unlock — persists through uninstall via iOS Keychain
+  useEffect(() => {
+    SecureStore.getItemAsync(SECURE_STORE_KEY).then((val) => {
+      if (val === "1") {
+        setUnlocked(true);
+      } else {
+        setUnlocked(false);
+        setCityPromptVisible(true);
+      }
+    });
+  }, []);
+
+  function handleCitySubmit() {
+    if (isDelRio(cityInput)) {
+      SecureStore.setItemAsync(SECURE_STORE_KEY, "1");
+      setUnlocked(true);
+    }
+    setCityPromptVisible(false);
+  }
 
   // Orientation handling
   useEffect(() => {
@@ -797,9 +836,42 @@ export default function App() {
   const availableHeight = height - keyboardHeight;
   const cardTop = Math.max(24, availableHeight / 2 - 80);
 
+  if (unlocked === null) {
+    return <View style={styles.screen} />;
+  }
+
   return (
     <View style={styles.screen}>
       <StatusBar hidden />
+
+      {cityPromptVisible && (
+        <View style={styles.cityOverlay}>
+          <View style={styles.cityCard}>
+            <Text style={styles.cityQuestion}>¿En qué ciudad está tu iglesia?</Text>
+            <TextInput
+              style={styles.cityInput}
+              value={cityInput}
+              onChangeText={setCityInput}
+              onSubmitEditing={handleCitySubmit}
+              returnKeyType="done"
+              autoFocus
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholder="Ciudad"
+            />
+            <TouchableOpacity style={styles.cityBtn} onPress={handleCitySubmit}>
+              <Text style={styles.cityBtnText}>Continuar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {!unlocked && !cityPromptVisible && (
+        <View style={styles.cityOverlay}>
+          <View style={styles.cityCard}>
+            <Text style={styles.cityQuestion}>Carga el himnario de tu comunidad para continuar.</Text>
+          </View>
+        </View>
+      )}
 
       <FlatList
         key={`${width}x${height}`}
@@ -1653,4 +1725,46 @@ const styles = StyleSheet.create({
   dirBtnSmall: { paddingHorizontal: 9, paddingVertical: 7 },
   dirBtnIconSmall: { fontSize: 20, lineHeight: 24 },
   gridDensityBadgeSmall: { fontSize: 12, lineHeight: 24 },
+
+  // City unlock prompt
+  cityOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#000",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+  },
+  cityCard: {
+    width: "80%",
+    maxWidth: 400,
+    gap: 20,
+    alignItems: "stretch",
+  },
+  cityQuestion: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 30,
+  },
+  cityInput: {
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.4)",
+    color: "#fff",
+    fontSize: 20,
+    paddingVertical: 10,
+    textAlign: "center",
+  },
+  cityBtn: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  cityBtnText: {
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "600",
+  },
 });
