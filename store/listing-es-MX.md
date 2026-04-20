@@ -91,10 +91,11 @@ https://miguelengineer.com/signovivo/privacy-policy.html
 ## Notas para el revisor de App Store (App Review Notes)
 
 ACCESO INICIAL
-Al primer lanzamiento, la app solicita un código de comunidad.
-→ Ingresar: 1234
+Al primer lanzamiento, la app solicita el estado y la ciudad de la iglesia.
+→ Estado: dejar en "Texas" (selección por defecto)
+→ Ciudad: ingresar cualquier ciudad (p. ej., San Antonio)
 → Tocar: Continuar
-Esto carga el himnario completo y da acceso a todas las funciones.
+Esto da acceso a todas las funciones de la app.
 
 PROBAR EL MODO DIRECTOR (en un solo dispositivo)
 1. Tocar el ícono de sincronización (círculo con ondas) en la esquina superior derecha.
