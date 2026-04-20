@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
+    "preios": "node scripts/bump-build.mjs",
     "ios": "expo run:ios",
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
