@@ -717,6 +717,13 @@ export default function App() {
           const storedMode = (await AsyncStorage.getItem(STORAGE_KEYS.mode)) as AppMode | null;
           const storedBook = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
           if (!cancelled) {
+            // Sad path: onboardingComplete can be written even if mode fails to persist (AsyncStorage partial write).
+            // Don't silently default to standard; force onboarding again so the user gets the right mode + UI.
+            if (storedMode !== "standard" && storedMode !== "nonStandard") {
+              setOnboardingVisible(true);
+              setBooted(true);
+              return;
+            }
             const nextMode: AppMode = storedMode === "nonStandard" ? "nonStandard" : "standard";
             let nextBook: BookId = "standard";
             if (nextMode === "nonStandard") {
@@ -1754,6 +1761,7 @@ export default function App() {
 
       {/* Version label */}
       <Text style={styles.versionLabel} pointerEvents="none">{VISIBLE_BUILD_LABEL}</Text>
+      <Text style={styles.modeDebugLabel} pointerEvents="none">{mode} · {activeBookId}</Text>
 
       {/* ── Song navigation modal ── */}
       <Modal visible={songModal} transparent animationType="fade" onRequestClose={closeSongModal} statusBarTranslucent>
@@ -1985,6 +1993,14 @@ const styles = StyleSheet.create({
     right: 12,
     fontSize: 10,
     color: "#aaa",
+    fontVariant: ["tabular-nums"],
+  },
+  modeDebugLabel: {
+    position: "absolute",
+    bottom: 24,
+    right: 12,
+    fontSize: 10,
+    color: "rgba(255,255,255,0.45)",
     fontVariant: ["tabular-nums"],
   },
 
