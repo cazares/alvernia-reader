@@ -77,3 +77,12 @@ test("iOS pod properties disable new architecture and network inspector", () => 
   assert.equal(props["newArchEnabled"], "false");
   assert.equal(props["EX_DEV_CLIENT_NETWORK_INSPECTOR"], "false");
 });
+
+test("Podfile includes EXConstants get-app-config wrapper to avoid script phase failures", () => {
+  const podfile = fs.readFileSync(path.join(APP_ROOT, "ios", "Podfile"), "utf8");
+  assert.match(podfile, /Ensured EXConstants get-app-config-ios\.sh wrapper exists/);
+  assert.ok(
+    podfile.includes("require.resolve('expo-constants/package.json')"),
+    "Expected Podfile wrapper to resolve expo-constants via require.resolve",
+  );
+});

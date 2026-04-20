@@ -2,6 +2,7 @@ require File.join(File.dirname(`node --print "require.resolve('expo/package.json
 require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
 
 require 'json'
+require 'fileutils'
 podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
 
 def ccache_enabled?(podfile_properties)
@@ -92,6 +93,32 @@ target 'SignoVivo' do
       end
     else
       puts "⚠ RNCWebViewImpl.m not found at #{rnwebview_src}"
+    end
+
+    # Fix ExpoConstants (EXConstants) build script phase path:
+    # The podspec expects `$PODS_TARGET_SRCROOT/../scripts/get-app-config-ios.sh` which resolves to:
+    #   Pods/Target Support Files/scripts/get-app-config-ios.sh
+    # Some CocoaPods setups fail to materialize this scripts directory, causing PhaseScriptExecution failures.
+    scripts_dir = File.join(installer.sandbox.root.to_s, 'Target Support Files', 'scripts')
+    FileUtils.mkdir_p(scripts_dir)
+    wrapper_path = File.join(scripts_dir, 'get-app-config-ios.sh')
+    wrapper = <<~'SH'
+      #!/usr/bin/env bash
+      set -eo pipefail
+
+      # Resolve expo-constants package dir via Node so the real script can locate its helpers.
+      PKG_JSON="$(node --print "require.resolve('expo-constants/package.json')")"
+      PKG_DIR="$(cd "$(dirname "$PKG_JSON")" && pwd -P)"
+
+      exec bash "$PKG_DIR/scripts/get-app-config-ios.sh"
+    SH
+    existing = File.exist?(wrapper_path) ? File.read(wrapper_path) : nil
+    if existing != wrapper
+      File.write(wrapper_path, wrapper)
+      FileUtils.chmod(0755, wrapper_path)
+      puts "✔ Ensured EXConstants get-app-config-ios.sh wrapper exists"
+    else
+      puts "✔ EXConstants get-app-config-ios.sh wrapper already present"
     end
   end
 end
