@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as SecureStore from "expo-secure-store";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Alert,
   Animated,
@@ -27,6 +27,7 @@ import {
   type ViewabilityConfig,
   type ViewToken,
 } from "react-native";
+import { Picker } from "@react-native-picker/picker";
 import * as Haptics from "expo-haptics";
 
 import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
@@ -39,6 +40,7 @@ import {
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
 import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
+import { BOOKS, NON_STANDARD_BOOK_IDS, STORAGE_KEYS, clearAllBookState, getBook, type AppMode, type BookId } from "./src/offlineBooks";
 // @ts-ignore — Metro resolves JSON fine
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
 // @ts-ignore
@@ -48,8 +50,7 @@ import PAGES_JSON from "./assets/offline-web/pages.json";
 // @ts-ignore — Metro resolves JSON fine
 import VERSION_INFO from "./version.json";
 
-const TOTAL_PAGES = 368;
-const START_PAGE = 2;
+const STANDARD_START_PAGE = 2;
 const DIRECTOR_SESSION = "1234"; // fixed session — only one director per session
 const VISIBLE_BUILD_LABEL = `${VERSION_INFO.baseVersion}.${VERSION_INFO.buildNumber}`;
 
@@ -60,20 +61,39 @@ const normalizeDirectorDeviceName = (value: string): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-const SECURE_STORE_KEY = "alvernia_unlocked";
-
-function normalizeCity(s: string) {
+function normalizeCityInput(s: string) {
   return s
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .trim();
+    .replace(/[_-]/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
-const UNLOCK_CODES = ["del rio", "del río", "1234"];
-
-function isValidCode(input: string) {
-  return UNLOCK_CODES.includes(normalizeCity(input));
+// Del Rio matching: strict enough to avoid over-match, tolerant of punctuation/spacing/accents and optional trailing "tx".
+function isDelRioMatch(rawCity: string): boolean {
+  const normalized = normalizeCityInput(rawCity).replace(/\s/g, "");
+  if (!normalized) return false;
+  const trimmed = normalized.endsWith("tx") ? normalized.slice(0, -2) : normalized;
+  if (trimmed !== "delrio") {
+    // modest typo tolerance: Levenshtein distance <= 1 for near-length inputs only
+    if (trimmed.length < 5 || trimmed.length > 8) return false;
+    const a = trimmed;
+    const b = "delrio";
+    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      }
+    }
+    return dp[a.length][b.length] <= 1;
+  }
+  return true;
 }
 
 const SONG_TO_PAGE = new Map<number, number>(
@@ -346,29 +366,33 @@ const MISA_SEARCH_KEYWORDS: Record<string, string> = {
   ofertorio: "Ofertorio", ofrenda: "Ofertorio", comunion: "Comunión",
 };
 
-const resolveSongPage = (input: string): number => {
+const resolveSongPage = (input: string, totalPages: number, songToPage: Map<number, number>, sortedSongs: typeof SORTED_SONGS): number => {
   const n = parseInt(input, 10);
   if (!Number.isInteger(n) || n <= 0) return 1;
-  const exact = SONG_TO_PAGE.get(n);
+  const exact = songToPage.get(n);
   if (exact !== undefined) return exact;
-  if (n < (SORTED_SONGS[0]?.song ?? 1)) return 1;
-  if (n > (SORTED_SONGS[SORTED_SONGS.length - 1]?.song ?? TOTAL_PAGES)) return TOTAL_PAGES;
-  const next = SORTED_SONGS.find((s) => s.song >= n);
-  return next ? next.page : TOTAL_PAGES;
+  // Fallback behavior mirrors standard: clamp into the nearest next song, else last page.
+  // For non-standard books (scanned PDFs), songToPage may be empty; we treat input as a page number.
+  if (!sortedSongs.length) return Math.max(1, Math.min(n, totalPages));
+  if (n < (sortedSongs[0]?.song ?? 1)) return 1;
+  if (n > (sortedSongs[sortedSongs.length - 1]?.song ?? totalPages)) return totalPages;
+  const next = sortedSongs.find((s) => s.song >= n);
+  return next ? next.page : totalPages;
 };
 
-const PAGE_ASSETS = Array.from({ length: TOTAL_PAGES }, (_, i) => {
-  const pageNum = i + 1;
-  const key = `pages/page-${String(pageNum).padStart(3, "0")}.jpg`;
-  return { page: pageNum, source: OFFLINE_WEB_BUNDLE_ASSETS[key] };
-});
+const buildPageAssets = (assets: Record<string, number>, totalPages: number) =>
+  Array.from({ length: totalPages }, (_, i) => {
+    const pageNum = i + 1;
+    const key = `pages/page-${String(pageNum).padStart(3, "0")}.jpg`;
+    return { page: pageNum, source: assets[key] };
+  });
 
-// Low-res thumbnails (150px wide) for the director song grid — prevents OOM crash
-const THUMB_ASSETS = Array.from({ length: TOTAL_PAGES }, (_, i) => {
-  const pageNum = i + 1;
-  const key = `thumbs/thumb-${String(pageNum).padStart(3, "0")}.jpg`;
-  return { page: pageNum, source: OFFLINE_WEB_BUNDLE_ASSETS[key] };
-});
+const buildThumbAssets = (assets: Record<string, number>, totalPages: number) =>
+  Array.from({ length: totalPages }, (_, i) => {
+    const pageNum = i + 1;
+    const key = `thumbs/thumb-${String(pageNum).padStart(3, "0")}.jpg`;
+    return { page: pageNum, source: assets[key] };
+  });
 
 // ── Zoomable page ─────────────────────────────────────────────────────────────
 function ZoomablePage({ source, width, height }: { source: number | undefined; width: number; height: number }) {
@@ -600,12 +624,15 @@ export default function App() {
   const searchListRef = useRef<SectionList<any>>(null);
   const inputRef = useRef<TextInput>(null);
   const codeInputRef = useRef<TextInput>(null);
-  const currentPageRef = useRef(START_PAGE);
+  const currentPageRef = useRef(STANDARD_START_PAGE);
 
   const [dims, setDims] = useState(() => Dimensions.get("window"));
-  const [cityPromptVisible, setCityPromptVisible] = useState(false);
-  const [cityInput, setCityInput] = useState("");
-  const [unlocked, setUnlocked] = useState<boolean | null>(null); // null = loading
+  const [booted, setBooted] = useState(false);
+  const [onboardingVisible, setOnboardingVisible] = useState(false);
+  const [onboardingState, setOnboardingState] = useState("Texas");
+  const [onboardingCity, setOnboardingCity] = useState("");
+  const [mode, setMode] = useState<AppMode>("standard");
+  const [activeBookId, setActiveBookId] = useState<BookId>("standard");
   const [songModal, setSongModal] = useState(false);
   const [syncModal, setSyncModal] = useState(false);
   const [songInput, setSongInput] = useState("");
@@ -623,35 +650,102 @@ export default function App() {
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [showSatellite, setShowSatellite] = useState(false);
   const [isSyncBootstrapped, setIsSyncBootstrapped] = useState(false);
+  const [bookPickerVisible, setBookPickerVisible] = useState(false);
   const lastFollowerNoticeRef = useRef(0);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
   const searchAccessoryId = "director-search-accessory";
   const syncAvailable = isNearbyDirectorSyncAvailable();
+  const appResetKeyRef = useRef(0);
+  const [, forceRerender] = useState(0);
+
+  const activeBook = useMemo(() => getBook(activeBookId), [activeBookId]);
+  const totalPages = activeBook.totalPages || 1;
+  const startPage = mode === "standard" ? STANDARD_START_PAGE : 1;
+  const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
+  const thumbAssets = useMemo(() => buildThumbAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
+  const isStandardMode = mode === "standard";
+
+  // Per-book song index/search. Standard uses existing enriched index; non-standard may be empty (scanned PDFs).
+  const songTitles = useMemo(() => (mode === "standard" ? (SONG_TITLES as any) : activeBook.songTitles) ?? {}, [mode, activeBook.songTitles]);
+  const songSearchIndex = useMemo(() => (mode === "standard" ? (SONG_SEARCH_INDEX as any) : activeBook.songSearchIndex) ?? [], [mode, activeBook.songSearchIndex]);
+  const bookSongToPage = useMemo(() => {
+    if (mode === "standard") return SONG_TO_PAGE;
+    const m = new Map<number, number>();
+    for (const entry of songSearchIndex) {
+      if (typeof entry?.song === "number" && typeof entry?.page === "number") m.set(entry.song, entry.page);
+    }
+    return m;
+  }, [mode, songSearchIndex]);
+  const bookSortedSongs = useMemo(() => {
+    if (mode === "standard") return SORTED_SONGS;
+    const copy = [...bookSongToPage.entries()].map(([song, page]) => ({ song, page }));
+    copy.sort((a, b) => a.song - b.song);
+    return copy;
+  }, [mode, bookSongToPage]);
 
   const GRID_DENSITY = [2, 3, 4] as const;
   const gridCols = GRID_DENSITY[gridDensityIdx];
 
-  // City unlock — persists through uninstall via iOS Keychain
+  // Bootstrap persisted mode/book selection and onboarding completion.
   useEffect(() => {
-    SecureStore.getItemAsync(SECURE_STORE_KEY).then((val) => {
-      if (val === "1") {
-        setUnlocked(true);
-      } else {
-        setUnlocked(false);
-        setCityPromptVisible(true);
+    let cancelled = false;
+    const boot = async () => {
+      try {
+        const done = await AsyncStorage.getItem(STORAGE_KEYS.onboardingComplete);
+        if (cancelled) return;
+        if (done === "1") {
+          const storedMode = (await AsyncStorage.getItem(STORAGE_KEYS.mode)) as AppMode | null;
+          const storedBook = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
+          if (!cancelled) {
+            setMode(storedMode === "nonStandard" ? "nonStandard" : "standard");
+            setActiveBookId(storedBook && BOOKS.some(b => b.id === storedBook) ? storedBook : "standard");
+            setOnboardingVisible(false);
+            setBooted(true);
+          }
+        } else {
+          setOnboardingVisible(true);
+          setBooted(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setOnboardingVisible(true);
+          setBooted(true);
+        }
       }
-    });
+    };
+    boot();
+    return () => { cancelled = true; };
   }, []);
 
-  function handleCitySubmit() {
-    if (isValidCode(cityInput)) {
-      SecureStore.setItemAsync(SECURE_STORE_KEY, "1");
-      setUnlocked(true);
+  const handleOnboardingContinue = useCallback(async () => {
+    const cityTrimmed = onboardingCity.trim();
+    if (!cityTrimmed) return;
+    const isTexas = onboardingState.trim().toLowerCase() === "texas";
+    const standard = isTexas && isDelRioMatch(cityTrimmed);
+    const nextMode: AppMode = standard ? "standard" : "nonStandard";
+    let nextBook: BookId = "standard";
+    if (!standard) {
+      const existing = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
+      if (existing && NON_STANDARD_BOOK_IDS.includes(existing)) {
+        nextBook = existing;
+      } else {
+        const idx = Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length);
+        nextBook = NON_STANDARD_BOOK_IDS[idx]!;
+      }
     }
-    setCityPromptVisible(false);
-  }
+    await AsyncStorage.multiSet([
+      [STORAGE_KEYS.onboardingComplete, "1"],
+      [STORAGE_KEYS.onboardingState, onboardingState],
+      [STORAGE_KEYS.onboardingCity, onboardingCity],
+      [STORAGE_KEYS.mode, nextMode],
+      [STORAGE_KEYS.activeBookId, nextBook],
+    ]);
+    setMode(nextMode);
+    setActiveBookId(nextBook);
+    setOnboardingVisible(false);
+  }, [onboardingCity, onboardingState]);
 
   // Orientation handling
   useEffect(() => {
@@ -743,10 +837,29 @@ export default function App() {
   }, [syncAvailable]);
 
   const goToPage = useCallback((page: number) => {
-    const clamped = Math.max(1, Math.min(page, TOTAL_PAGES));
+    const clamped = Math.max(1, Math.min(page, totalPages));
     currentPageRef.current = clamped;
     listRef.current?.scrollToIndex({ index: clamped - 1, animated: false });
-  }, []);
+  }, [totalPages]);
+
+  // Restore last page when entering a non-standard book (per-book saved state).
+  useEffect(() => {
+    if (!booted) return;
+    if (onboardingVisible) return;
+    if (mode !== "nonStandard") {
+      currentPageRef.current = startPage;
+      return;
+    }
+    let cancelled = false;
+    const restore = async () => {
+      const last = await AsyncStorage.getItem(`${STORAGE_KEYS.lastPagePrefix}${activeBookId}`).catch(() => null);
+      if (cancelled) return;
+      const p = Math.max(1, Math.min(parseInt(last || "1", 10) || 1, totalPages));
+      setTimeout(() => goToPage(p), 60);
+    };
+    restore();
+    return () => { cancelled = true; };
+  }, [booted, onboardingVisible, mode, activeBookId, totalPages, startPage, goToPage]);
 
   // Song modal
   const longPressedRef = useRef(false);
@@ -766,15 +879,48 @@ export default function App() {
     }
   }, [songModal]);
 
-  const handleSongSubmit = useCallback(() => {
+  const performColdBootReset = useCallback(async () => {
+    await clearAllBookState();
+    setOnboardingState("Texas");
+    setOnboardingCity("");
+    setMode("standard");
+    setActiveBookId("standard");
+    setSearchVisible(false);
+    setBrowseVisible(false);
+    setGridVisible(false);
+    setSongModal(false);
+    setSyncModal(false);
+    setOnboardingVisible(true);
+    // Force a remount-ish reset for any lingering state (cold-boot feel).
+    appResetKeyRef.current += 1;
+    forceRerender((v) => v + 1);
+  }, []);
+
+  const handleSongSubmit = useCallback(async () => {
     const trimmed = songInput.trim();
     closeSongModal();
-    if (trimmed !== "") {
-      const n = parseInt(trimmed, 10);
-      if (n > 0) recentSongsRef.current = [n, ...recentSongsRef.current.filter(s => s !== n)].slice(0, 20);
-      goToPage(resolveSongPage(trimmed));
+    if (!trimmed) return;
+    if (trimmed === "744668486") {
+      await performColdBootReset();
+      return;
     }
-  }, [songInput, goToPage, closeSongModal]);
+    const n = parseInt(trimmed, 10);
+    if (n > 0) recentSongsRef.current = [n, ...recentSongsRef.current.filter(s => s !== n)].slice(0, 20);
+    const page = resolveSongPage(trimmed, totalPages, bookSongToPage, bookSortedSongs as any);
+    goToPage(page);
+  }, [songInput, goToPage, closeSongModal, totalPages, bookSongToPage, bookSortedSongs, performColdBootReset]);
+
+  const switchBook = useCallback(async (nextId: BookId) => {
+    if (mode !== "nonStandard") return;
+    if (nextId === activeBookId) return;
+    const curPage = currentPageRef.current;
+    await AsyncStorage.setItem(`${STORAGE_KEYS.lastPagePrefix}${activeBookId}`, String(curPage));
+    await AsyncStorage.setItem(STORAGE_KEYS.activeBookId, nextId);
+    setActiveBookId(nextId);
+    const last = await AsyncStorage.getItem(`${STORAGE_KEYS.lastPagePrefix}${nextId}`);
+    const nextPage = Math.max(1, Math.min(parseInt(last || "1", 10) || 1, getBook(nextId).totalPages || 1));
+    setTimeout(() => goToPage(nextPage), 50);
+  }, [mode, activeBookId, goToPage]);
 
   // Sync modal
   const openSyncModal = useCallback(() => {
@@ -968,11 +1114,11 @@ export default function App() {
   }, []);
 
   const handleSearchResultTap = useCallback((song: number) => {
-    const page = resolveSongPage(String(song));
+    const page = resolveSongPage(String(song), totalPages, bookSongToPage, bookSortedSongs as any);
     goToPage(page);
     recentSongsRef.current = [song, ...recentSongsRef.current.filter((s) => s !== song)].slice(0, 20);
     closeSearch();
-  }, [goToPage, closeSearch]);
+  }, [goToPage, closeSearch, totalPages, bookSongToPage, bookSortedSongs]);
 
   const handleSearchSubmit = useCallback(() => {
     const firstSection = searchSections[0];
@@ -981,11 +1127,11 @@ export default function App() {
     } else {
       const trimmed = searchText.trim();
       if (trimmed && /^\d+$/.test(trimmed)) {
-        goToPage(resolveSongPage(trimmed));
+        goToPage(resolveSongPage(trimmed, totalPages, bookSongToPage, bookSortedSongs as any));
         closeSearch();
       }
     }
-  }, [searchSections, searchText, goToPage, closeSearch, handleSearchResultTap]);
+  }, [searchSections, searchText, goToPage, closeSearch, handleSearchResultTap, totalPages, bookSongToPage, bookSortedSongs]);
 
   const handleSearchJump = useCallback(() => {
     const hasQuery = searchText.trim().length > 0;
@@ -1045,11 +1191,11 @@ export default function App() {
   }, []);
   const closeBrowse = useCallback(() => setBrowseVisible(false), []);
   const handleBrowseSongTap = useCallback((song: number) => {
-    const page = resolveSongPage(String(song));
+    const page = resolveSongPage(String(song), totalPages, bookSongToPage, bookSortedSongs as any);
     goToPage(page);
     recentSongsRef.current = [song, ...recentSongsRef.current.filter(s => s !== song)].slice(0, 20);
     setBrowseVisible(false);
-  }, [goToPage]);
+  }, [goToPage, totalPages, bookSongToPage, bookSortedSongs]);
 
   const handleGridButtonPress = useCallback(() => {
     setSearchVisible(false);
@@ -1065,11 +1211,11 @@ export default function App() {
   const closeGrid = useCallback(() => setGridVisible(false), []);
 
   const handleGridSongTap = useCallback((song: number) => {
-    const page = resolveSongPage(String(song));
+    const page = resolveSongPage(String(song), totalPages, bookSongToPage, bookSortedSongs as any);
     goToPage(page);
     recentSongsRef.current = [song, ...recentSongsRef.current.filter(s => s !== song)].slice(0, 20);
     setGridVisible(false);
-  }, [goToPage]);
+  }, [goToPage, totalPages, bookSongToPage, bookSortedSongs]);
 
   const viewabilityConfig = useMemo<ViewabilityConfig>(
     () => ({ viewAreaCoveragePercentThreshold: 50 }),
@@ -1080,27 +1226,30 @@ export default function App() {
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
       if (!first?.item) return;
-      const page = (first.item as typeof PAGE_ASSETS[0]).page;
+      const page = (first.item as typeof pageAssets[0]).page;
       currentPageRef.current = page;
+      if (mode === "nonStandard") {
+        AsyncStorage.setItem(`${STORAGE_KEYS.lastPagePrefix}${activeBookId}`, String(page)).catch(() => {});
+      }
       // Director broadcasts page changes to all followers
       if (syncRole === "director") {
-        sendNearbyDirectorPageUpdate(page, TOTAL_PAGES).catch(() => {});
+        sendNearbyDirectorPageUpdate(page, totalPages).catch(() => {});
       }
     },
-    [syncRole],
+    [syncRole, mode, activeBookId, totalPages],
   );
 
   const { width, height } = dims;
   const isSmallScreen = Math.min(width, height) < 600;
 
-  const renderItem = useCallback(({ item }: ListRenderItemInfo<typeof PAGE_ASSETS[0]>) => (
+  const renderItem = useCallback(({ item }: ListRenderItemInfo<typeof pageAssets[0]>) => (
     <View style={{ width, height, backgroundColor: "#000" }}>
       <ZoomablePage source={item.source} width={width} height={height} />
     </View>
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [width, height]);
 
-  const keyExtractor = useCallback((item: typeof PAGE_ASSETS[0]) => String(item.page), []);
+  const keyExtractor = useCallback((item: typeof pageAssets[0]) => String(item.page), []);
   const getItemLayout = useCallback((_: unknown, index: number) => ({
     length: width, offset: width * index, index,
   }), [width]);
@@ -1108,7 +1257,7 @@ export default function App() {
   const availableHeight = height - keyboardHeight;
   const cardTop = Math.max(24, availableHeight / 2 - 80);
 
-  if (unlocked === null) {
+  if (!booted) {
     return <View style={styles.screen} />;
   }
 
@@ -1116,31 +1265,45 @@ export default function App() {
     <View style={styles.screen}>
       <StatusBar hidden />
 
-      {cityPromptVisible && (
+      {onboardingVisible && (
         <View style={styles.cityOverlay}>
           <View style={styles.cityCard}>
-            <Text style={styles.cityQuestion}>Código de comunidad</Text>
+            <Text style={styles.cityQuestion}>Selecciona tu estado y ciudad</Text>
+            <Text style={styles.citySubcopy}>Usaremos esta información para mostrarte el himnario más común de tu área.</Text>
+
+            <Text style={styles.fieldLabel}>Estado</Text>
+            <View style={styles.pickerWrap}>
+              <Picker selectedValue={onboardingState} onValueChange={(v) => setOnboardingState(String(v))} style={styles.picker}>
+                {[
+                  "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia",
+                  "Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland",
+                  "Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey",
+                  "New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina",
+                  "South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming",
+                ].map((s) => <Picker.Item key={s} label={s} value={s} />)}
+              </Picker>
+            </View>
+
+            <Text style={styles.fieldLabel}>Ciudad</Text>
             <TextInput
               style={styles.cityInput}
-              value={cityInput}
-              onChangeText={setCityInput}
-              onSubmitEditing={handleCitySubmit}
+              value={onboardingCity}
+              onChangeText={setOnboardingCity}
+              onSubmitEditing={() => { handleOnboardingContinue().catch(() => {}); }}
               returnKeyType="done"
               autoFocus
+              autoCorrect={false}
+              autoCapitalize="words"
               placeholderTextColor="rgba(255,255,255,0.3)"
               placeholder="Ciudad"
             />
-            <TouchableOpacity style={styles.cityBtn} onPress={handleCitySubmit}>
+            <TouchableOpacity
+              style={[styles.cityBtn, !onboardingCity.trim() && styles.cityBtnDisabled]}
+              onPress={() => { handleOnboardingContinue().catch(() => {}); }}
+              disabled={!onboardingCity.trim()}
+            >
               <Text style={styles.cityBtnText}>Continuar</Text>
             </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {!unlocked && !cityPromptVisible && (
-        <View style={styles.cityOverlay}>
-          <View style={styles.cityCard}>
-            <Text style={styles.cityQuestion}>Carga el himnario de tu comunidad para continuar.</Text>
           </View>
         </View>
       )}
@@ -1148,14 +1311,14 @@ export default function App() {
       <FlatList
         key={`${width}x${height}`}
         ref={listRef}
-        data={PAGE_ASSETS}
+        data={pageAssets}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         getItemLayout={getItemLayout}
-        initialScrollIndex={START_PAGE - 1}
+        initialScrollIndex={Math.max(0, startPage - 1)}
         viewabilityConfig={viewabilityConfig}
         onViewableItemsChanged={onViewableItemsChanged}
         removeClippedSubviews
@@ -1165,7 +1328,7 @@ export default function App() {
       />
 
       {/* ── Song grid (thumbnails) — full-screen overlay ── */}
-      {gridVisible && syncRole === "director" && (() => {
+      {gridVisible && syncRole === "director" && isStandardMode && (() => {
         const GAP = 6;
         const cellW = (width - GAP * (gridCols + 1)) / gridCols;
         const imgH = Math.round(cellW * 1.33);
@@ -1190,7 +1353,7 @@ export default function App() {
                 index,
               })}
               renderItem={({ item }) => {
-                const thumb = THUMB_ASSETS[item.page - 1];
+                const thumb = thumbAssets[item.page - 1];
                 return (
                   <TouchableOpacity
                     style={{ width: cellW, margin: GAP / 2, backgroundColor: "#111", borderRadius: 6, overflow: "hidden" }}
@@ -1223,7 +1386,7 @@ export default function App() {
       })()}
 
       {/* ── Browse overlay — director only ── */}
-      {browseVisible && syncRole === "director" && (
+      {browseVisible && syncRole === "director" && isStandardMode && (
         <View style={styles.gridOverlay}>
           {/* Tab bar */}
           <View style={styles.browseTabBar}>
@@ -1271,7 +1434,7 @@ export default function App() {
       )}
 
       {/* ── Search overlay — director only ── */}
-      {searchVisible && (() => {
+      {searchVisible && isStandardMode && (() => {
         const hasQuery = searchText.trim().length > 0;
         const normalizedQ = normalizeText(searchText.trim());
         const qWords = normalizedQ.split(/\s+/).filter(Boolean);
@@ -1536,7 +1699,7 @@ export default function App() {
             {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
           </TouchableOpacity>
         )}
-        {syncRole === "director" && !searchVisible && (
+        {syncRole === "director" && isStandardMode && !searchVisible && (
           <TouchableOpacity
             style={styles.clusterBtn}
             onPress={openSearch}
@@ -1557,31 +1720,76 @@ export default function App() {
           <View style={styles.modalBackdrop}>
             <TouchableWithoutFeedback>
               <View style={[styles.inputCard, { top: cardTop }]}>
+                {mode === "nonStandard" && (
+                  <>
+                    <Text style={styles.sectionHeader}>IR A LIBRO</Text>
+                    <TouchableOpacity style={styles.bookSelectBtn} onPress={() => setBookPickerVisible(true)} activeOpacity={0.75}>
+                      <Text style={styles.bookSelectText} numberOfLines={1}>
+                        {getBook(activeBookId).title}
+                      </Text>
+                      <Text style={styles.bookSelectChevron}>▾</Text>
+                    </TouchableOpacity>
+                    <View style={{ height: 14 }} />
+                  </>
+                )}
+
                 <Text style={styles.inputLabel}>Ir a canción</Text>
                 <TextInput
                   ref={inputRef}
                   style={styles.songInput}
                   value={songInput}
                   onChangeText={(t) => setSongInput(t.replace(/[^0-9]/g, ""))}
-                  onSubmitEditing={handleSongSubmit}
+                  onSubmitEditing={() => { handleSongSubmit().catch(() => {}); }}
                   placeholder="Número de canción"
                   placeholderTextColor="rgba(0,0,0,0.35)"
                   keyboardType="number-pad"
                   returnKeyType="go"
-                  maxLength={4}
+                  maxLength={9}
                   selectTextOnFocus
                   showSoftInputOnFocus={false}
                 />
                 {/* Custom in-app numpad */}
                 <SongNumpad
-                  onDigit={(d) => setSongInput((prev) => (prev.length < 4 ? prev + d : prev))}
+                  onDigit={(d) => setSongInput((prev) => (prev.length < 9 ? prev + d : prev))}
                   onBackspace={() => setSongInput((prev) => prev.slice(0, -1))}
-                  onGo={handleSongSubmit}
+                  onGo={() => { handleSongSubmit().catch(() => {}); }}
                   goDisabled={!songInput}
                 />
                 <View style={styles.modalButtons}>
                   <TouchableOpacity style={styles.cancelBtn} onPress={closeSongModal} activeOpacity={0.7}>
                     <Text style={styles.cancelText}>Cancelar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* ── Hymnal picker (non-standard only) ── */}
+      <Modal visible={bookPickerVisible} transparent animationType="fade" onRequestClose={() => setBookPickerVisible(false)} statusBarTranslucent>
+        <TouchableWithoutFeedback onPress={() => setBookPickerVisible(false)}>
+          <View style={styles.modalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.inputCard, { top: cardTop }]}>
+                <Text style={styles.inputLabel}>Selecciona himnario</Text>
+                {NON_STANDARD_BOOK_IDS.map((id) => {
+                  const book = getBook(id);
+                  const selected = id === activeBookId;
+                  return (
+                    <TouchableOpacity
+                      key={id}
+                      style={[styles.bookRow, selected && styles.bookRowSelected]}
+                      onPress={() => { setBookPickerVisible(false); switchBook(id).catch(() => {}); }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.bookRowText, selected && styles.bookRowTextSelected]}>{book.title}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setBookPickerVisible(false)} activeOpacity={0.7}>
+                    <Text style={styles.cancelText}>Cerrar</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -2123,6 +2331,32 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 30,
   },
+  citySubcopy: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    marginTop: -8,
+  },
+  fieldLabel: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    textAlign: "center",
+    marginBottom: -10,
+  },
+  pickerWrap: {
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  picker: {
+    color: "#fff",
+  },
   cityInput: {
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.4)",
@@ -2138,9 +2372,66 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 4,
   },
+  cityBtnDisabled: {
+    opacity: 0.45,
+  },
   cityBtnText: {
     color: "#fff",
     fontSize: 17,
     fontWeight: "600",
+  },
+  sectionHeader: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    textAlign: "center",
+  },
+  bookSelectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  bookSelectText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+    maxWidth: 280,
+  },
+  bookSelectChevron: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: -1,
+  },
+  bookRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    marginTop: 10,
+  },
+  bookRowSelected: {
+    backgroundColor: "rgba(74,144,226,0.18)",
+    borderColor: "rgba(74,144,226,0.45)",
+  },
+  bookRowText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  bookRowTextSelected: {
+    color: "#fff",
   },
 });
