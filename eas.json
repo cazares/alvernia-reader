@@ -34,9 +34,9 @@
     "production": {
       "ios": {
         "ascAppId": "6760515687",
-        "appleApiKeyId": "SF9J7DCBTMI1",
-        "appleApiIssuerId": "69a6de94-6d09-47e3-e053-5b8c7c11a4d1",
-        "appleApiKey": "/Users/cazares/Downloads/ApiKey_SF9J7DCBTMI1.p8"
+        "ascApiKeyId": "SF9J7DCBTMI1",
+        "ascApiKeyIssuerId": "69a6de94-6d09-47e3-e053-5b8c7c11a4d1",
+        "ascApiKeyPath": "/Users/cazares/Downloads/ApiKey_SF9J7DCBTMI1.p8"
       }
     }
   }
