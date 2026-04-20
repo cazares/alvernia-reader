@@ -33,7 +33,10 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6760515687"
+        "ascAppId": "6760515687",
+        "appleApiKeyId": "47BH695N8R",
+        "appleApiIssuerId": "69a6de94-6d09-47e3-e053-5b8c7c11a4d1",
+        "appleApiKey": "/home/user/.appstore/AuthKey_47BH695N8R.p8"
       }
     }
   }
