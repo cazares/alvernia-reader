@@ -678,18 +678,27 @@ export default function App() {
 
   // Per-book song index/search. Standard uses existing enriched index; non-standard may be empty (scanned PDFs).
   const songTitles = useMemo(() => (mode === "standard" ? (SONG_TITLES as any) : activeBook.songTitles) ?? {}, [mode, activeBook.songTitles]);
-  const songSearchIndex = useMemo(() => (mode === "standard" ? (SONG_SEARCH_INDEX as any) : activeBook.songSearchIndex) ?? [], [mode, activeBook.songSearchIndex]);
+  const songSearchIndex = useMemo(() => {
+    const raw = (mode === "standard" ? (SONG_SEARCH_INDEX as any) : activeBook.songSearchIndex) ?? [];
+    // Some RN/Hermes builds can surface "iterator method is not callable" when a value has a bad @@iterator.
+    // Avoid iterators by forcing a plain Array shape here.
+    return Array.isArray(raw) ? raw : [];
+  }, [mode, activeBook.songSearchIndex]);
   const bookSongToPage = useMemo(() => {
     if (mode === "standard") return SONG_TO_PAGE;
     const m = new Map<number, number>();
-    for (const entry of songSearchIndex) {
+    // Avoid `for..of` to keep this resilient even if `songSearchIndex` has a broken iterator.
+    for (let i = 0; i < songSearchIndex.length; i++) {
+      const entry = songSearchIndex[i] as any;
       if (typeof entry?.song === "number" && typeof entry?.page === "number") m.set(entry.song, entry.page);
     }
     return m;
   }, [mode, songSearchIndex]);
   const bookSortedSongs = useMemo(() => {
     if (mode === "standard") return SORTED_SONGS;
-    const copy = [...bookSongToPage.entries()].map(([song, page]) => ({ song, page }));
+    const copy: Array<{ song: number; page: number }> = [];
+    // Avoid spreading iterators (Map#entries) to prevent "iterator method is not callable" crashes.
+    bookSongToPage.forEach((page, song) => copy.push({ song, page }));
     copy.sort((a, b) => a.song - b.song);
     return copy;
   }, [mode, bookSongToPage]);
