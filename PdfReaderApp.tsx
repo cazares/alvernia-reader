@@ -1298,7 +1298,12 @@ export default function App() {
 
             <Text style={styles.fieldLabel}>Estado</Text>
             <View style={styles.pickerWrap}>
-              <Picker selectedValue={onboardingState} onValueChange={(v) => setOnboardingState(String(v))} style={styles.picker}>
+              <Picker
+                selectedValue={onboardingState}
+                onValueChange={(v) => setOnboardingState(String(v))}
+                style={styles.picker}
+                itemStyle={styles.pickerItem}
+              >
                 {[
                   "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia",
                   "Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland",
@@ -1319,7 +1324,7 @@ export default function App() {
               autoFocus
               autoCorrect={false}
               autoCapitalize="words"
-              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholderTextColor="rgba(15,23,42,0.35)"
               placeholder="Ciudad"
             />
             <TouchableOpacity
@@ -2338,7 +2343,7 @@ const styles = StyleSheet.create({
   // City unlock prompt
   cityOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#000",
+    backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
     zIndex: 9999,
@@ -2350,21 +2355,21 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
   },
   cityQuestion: {
-    color: "#fff",
+    color: "#0F172A",
     fontSize: 22,
     fontWeight: "600",
     textAlign: "center",
     lineHeight: 30,
   },
   citySubcopy: {
-    color: "rgba(255,255,255,0.65)",
+    color: "rgba(15,23,42,0.65)",
     fontSize: 14,
     lineHeight: 20,
     textAlign: "center",
     marginTop: -8,
   },
   fieldLabel: {
-    color: "rgba(255,255,255,0.75)",
+    color: "rgba(15,23,42,0.75)",
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 1,
@@ -2375,23 +2380,28 @@ const styles = StyleSheet.create({
   pickerWrap: {
     borderRadius: 12,
     overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "#F1F5F9",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(15,23,42,0.16)",
   },
   picker: {
-    color: "#fff",
+    color: "#0F172A",
+    backgroundColor: "#F1F5F9",
+  },
+  pickerItem: {
+    color: "#0F172A",
+    fontSize: 18,
   },
   cityInput: {
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.4)",
-    color: "#fff",
+    borderBottomColor: "rgba(15,23,42,0.28)",
+    color: "#0F172A",
     fontSize: 20,
     paddingVertical: 10,
     textAlign: "center",
   },
   cityBtn: {
-    backgroundColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(15,23,42,0.10)",
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: "center",
@@ -2401,7 +2411,7 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   cityBtnText: {
-    color: "#fff",
+    color: "#0F172A",
     fontSize: 17,
     fontWeight: "600",
   },
