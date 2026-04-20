@@ -7,6 +7,8 @@
     "start": "expo start",
     "preios": "node scripts/bump-build.mjs",
     "ios": "expo run:ios",
+    "preios:mpad": "node scripts/bump-build.mjs",
+    "ios:mpad": "npx react-native run-ios --udid 2A43D1DE-7C10-540A-A1A3-43D96532C69C",
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
     "build:web": "node ./web/build.mjs",
