@@ -6,18 +6,18 @@
 SignoVivo
 
 ## Subtítulo
-Manual Alvernia en tu bolsillo
+PDF para coros de iglesia
 
 ## Texto promocional (hasta 170 caracteres)
-Lleva todo el Manual Alvernia contigo. Busca cantos, navega por temporadas litúrgicas y sincroniza dispositivos en tiempo real, sin internet.
+Lleva el himnario de tu comunidad siempre contigo. Busca cantos, navega por temporadas litúrgicas y sincroniza dispositivos en tiempo real, sin internet.
 
 ---
 
 ## Descripción (hasta 4 000 caracteres)
 
-SignoVivo es el acompañante oficial del Manual Alvernia: 312 cantos litúrgicos católicos siempre contigo, sin necesidad de conexión a internet.
+SignoVivo convierte cualquier iPhone o iPad en el himnario digital de tu coro: busca cantos, navega páginas y sincroniza todos los dispositivos en tiempo real, completamente sin internet.
 
-Pensada para directores de coro, cantores y comunidades de fe hispanohablantes, la app convierte cualquier iPhone o iPad en un himnario digital completo que funciona desde el primer toque, en el salón de ensayo, en el templo o en el retiro más alejado.
+Pensada para directores de coro, cantores y comunidades de fe hispanohablantes, la app funciona desde el primer toque — en el salón de ensayo, en el templo o en el retiro más alejado.
 
 MODO DIRECTOR Y MODO SEGUIDOR — SINCRONIZACIÓN AUTOMÁTICA EN TIEMPO REAL
 
@@ -47,7 +47,7 @@ Explora los cantos agrupados por:
 
 LECTOR DE PDF INTEGRADO
 
-Visualiza el Manual Alvernia completo (368 páginas) con zoom de pinza (hasta 6×), fondo negro para cuidar la vista y navegación horizontal por deslizamiento.
+Visualiza el himnario completo (368 páginas) con zoom de pinza (hasta 6×), fondo negro para cuidar la vista y navegación horizontal por deslizamiento.
 
 VISTA DE CUADRÍCULA (modo Director)
 
@@ -91,8 +91,8 @@ https://miguelengineer.com/signovivo/privacy-policy.html
 ## Notas para el revisor de App Store (App Review Notes)
 
 ACCESO INICIAL
-Al primer lanzamiento, la app muestra la pantalla "¿En qué ciudad está tu iglesia?"
-→ Escribir: Del Rio
+Al primer lanzamiento, la app solicita un código de comunidad.
+→ Ingresar: 1234
 → Tocar: Continuar
 Esto carga el himnario completo y da acceso a todas las funciones.
 
@@ -104,7 +104,7 @@ PROBAR EL MODO DIRECTOR (en un solo dispositivo)
 5. Navegar páginas con deslizamiento horizontal — en un entorno real, los Seguidores seguirían automáticamente.
 
 PROBAR EL MODO SEGUIDOR
-1. En el mismo u otro dispositivo, tocar el ícono de sincronización.
+1. Tocar el ícono de sincronización.
 2. Seleccionar "Seguidor" — se conecta automáticamente al Director en la red local.
 3. El punto verde pulsante confirma la conexión.
 
@@ -112,5 +112,5 @@ NOTAS TÉCNICAS
 - La app no requiere cuenta de usuario ni inicio de sesión.
 - Bluetooth y red local (Bonjour) se usan exclusivamente para sincronización de páginas entre dispositivos en el mismo espacio. No se transmite ningún dato a internet.
 - No se recopilan datos personales ni de uso.
-- El código de Director (1234) es un identificador de sesión fijo, no una contraseña de seguridad de datos.
+- El código 1234 es un identificador de sesión fijo, no una contraseña de seguridad de datos.
 - ITSAppUsesNonExemptEncryption = false.

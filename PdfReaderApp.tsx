@@ -70,9 +70,10 @@ function normalizeCity(s: string) {
     .trim();
 }
 
-function isDelRio(city: string) {
-  const n = normalizeCity(city);
-  return n === "del rio" || n === "del río";
+const UNLOCK_CODES = ["del rio", "del río", "1234"];
+
+function isValidCode(input: string) {
+  return UNLOCK_CODES.includes(normalizeCity(input));
 }
 
 const SONG_TO_PAGE = new Map<number, number>(
@@ -645,7 +646,7 @@ export default function App() {
   }, []);
 
   function handleCitySubmit() {
-    if (isDelRio(cityInput)) {
+    if (isValidCode(cityInput)) {
       SecureStore.setItemAsync(SECURE_STORE_KEY, "1");
       setUnlocked(true);
     }
@@ -1118,7 +1119,7 @@ export default function App() {
       {cityPromptVisible && (
         <View style={styles.cityOverlay}>
           <View style={styles.cityCard}>
-            <Text style={styles.cityQuestion}>¿En qué ciudad está tu iglesia?</Text>
+            <Text style={styles.cityQuestion}>Código de comunidad</Text>
             <TextInput
               style={styles.cityInput}
               value={cityInput}
