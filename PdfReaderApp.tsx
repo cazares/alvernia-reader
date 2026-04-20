@@ -1296,6 +1296,8 @@ export default function App() {
             <Text style={styles.cityQuestion}>Selecciona tu estado y ciudad</Text>
             <Text style={styles.citySubcopy}>Usaremos esta información para mostrarte el himnario más común de tu área.</Text>
 
+            <Text style={styles.buildHint}>Versión {VISIBLE_BUILD_LABEL}</Text>
+
             <Text style={styles.fieldLabel}>Estado</Text>
             <View style={styles.pickerWrap}>
               <Picker
@@ -2378,6 +2380,13 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textAlign: "center",
     marginTop: -8,
+  },
+  buildHint: {
+    color: "rgba(15,23,42,0.45)",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: -10,
   },
   fieldLabel: {
     color: "rgba(15,23,42,0.75)",
