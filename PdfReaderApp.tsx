@@ -1324,7 +1324,7 @@ export default function App() {
               autoFocus
               autoCorrect={false}
               autoCapitalize="words"
-              placeholderTextColor="rgba(15,23,42,0.35)"
+              placeholderTextColor="rgba(255,255,255,0.35)"
               placeholder="Ciudad"
             />
             <TouchableOpacity
@@ -1336,7 +1336,7 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.buildCorner}>Versión {VISIBLE_BUILD_LABEL}</Text>
+          <Text style={styles.buildCorner}>{VISIBLE_BUILD_LABEL}</Text>
         </View>
       )}
 
@@ -2345,7 +2345,7 @@ const styles = StyleSheet.create({
   // City unlock prompt
   cityOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#05070B",
     justifyContent: "center",
     alignItems: "center",
     zIndex: 9999,
@@ -2355,27 +2355,27 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     gap: 20,
     alignItems: "stretch",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(15,23,42,0.70)",
     paddingVertical: 22,
     paddingHorizontal: 18,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(15,23,42,0.10)",
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.10,
+    borderColor: "rgba(255,255,255,0.12)",
+    shadowColor: "#000",
+    shadowOpacity: 0.45,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 10 },
     elevation: 6,
   },
   cityQuestion: {
-    color: "#0F172A",
+    color: "#FFFFFF",
     fontSize: 22,
     fontWeight: "600",
     textAlign: "center",
     lineHeight: 30,
   },
   citySubcopy: {
-    color: "rgba(15,23,42,0.65)",
+    color: "rgba(255,255,255,0.65)",
     fontSize: 14,
     lineHeight: 20,
     textAlign: "center",
@@ -2385,12 +2385,12 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 10,
     bottom: 8,
-    color: "rgba(15,23,42,0.35)",
+    color: "rgba(255,255,255,0.35)",
     fontSize: 10,
     fontWeight: "600",
   },
   fieldLabel: {
-    color: "rgba(15,23,42,0.75)",
+    color: "rgba(255,255,255,0.75)",
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 1,
@@ -2403,7 +2403,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba(15,23,42,0.16)",
+    borderColor: "rgba(255,255,255,0.12)",
   },
   picker: {
     color: "#0F172A",
@@ -2415,14 +2415,14 @@ const styles = StyleSheet.create({
   },
   cityInput: {
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(15,23,42,0.28)",
-    color: "#0F172A",
+    borderBottomColor: "rgba(255,255,255,0.28)",
+    color: "#FFFFFF",
     fontSize: 20,
     paddingVertical: 10,
     textAlign: "center",
   },
   cityBtn: {
-    backgroundColor: "rgba(15,23,42,0.10)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: "center",
@@ -2432,7 +2432,7 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   cityBtnText: {
-    color: "#0F172A",
+    color: "#FFFFFF",
     fontSize: 17,
     fontWeight: "600",
   },
