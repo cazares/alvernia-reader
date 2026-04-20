@@ -54,20 +54,28 @@ const STANDARD_START_PAGE = 2;
 const DIRECTOR_SESSION = "1234"; // fixed session — only one director per session
 const VISIBLE_BUILD_LABEL = `${VERSION_INFO.baseVersion}.${VERSION_INFO.buildNumber}`;
 
-const normalizeDirectorDeviceName = (value: string): string =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
+const normalizeDirectorDeviceName = (value: string): string => {
+  let v = value || "";
+  try {
+    v = v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  } catch {
+    // Hermes builds may lack String.prototype.normalize; fall back to best-effort.
+  }
+  return v.toLowerCase().replace(/[^a-z0-9]/g, "");
+};
 
 function normalizeCityInput(s: string) {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+  // Avoid Unicode property escapes (`\\p{L}`) which can crash some Hermes builds at parse time.
+  // Also guard String.prototype.normalize for older Hermes builds.
+  let v = (s || "").toLowerCase();
+  try {
+    v = v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  } catch {
+    // best-effort
+  }
+  return v
     .replace(/[_-]/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
