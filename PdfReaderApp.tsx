@@ -631,6 +631,7 @@ export default function App() {
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [onboardingState, setOnboardingState] = useState("Texas");
   const [onboardingCity, setOnboardingCity] = useState("");
+  const onboardingSubmittingRef = useRef(false);
   const [mode, setMode] = useState<AppMode>("standard");
   const [activeBookId, setActiveBookId] = useState<BookId>("standard");
   const [songModal, setSongModal] = useState(false);
@@ -699,8 +700,14 @@ export default function App() {
           const storedMode = (await AsyncStorage.getItem(STORAGE_KEYS.mode)) as AppMode | null;
           const storedBook = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
           if (!cancelled) {
-            setMode(storedMode === "nonStandard" ? "nonStandard" : "standard");
-            setActiveBookId(storedBook && BOOKS.some(b => b.id === storedBook) ? storedBook : "standard");
+            const nextMode: AppMode = storedMode === "nonStandard" ? "nonStandard" : "standard";
+            let nextBook: BookId = "standard";
+            if (nextMode === "nonStandard") {
+              if (storedBook && NON_STANDARD_BOOK_IDS.includes(storedBook)) nextBook = storedBook;
+              else nextBook = NON_STANDARD_BOOK_IDS[Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length)]!;
+            }
+            setMode(nextMode);
+            setActiveBookId(nextBook);
             setOnboardingVisible(false);
             setBooted(true);
           }
@@ -722,6 +729,8 @@ export default function App() {
   const handleOnboardingContinue = useCallback(async () => {
     const cityTrimmed = onboardingCity.trim();
     if (!cityTrimmed) return;
+    if (onboardingSubmittingRef.current) return;
+    onboardingSubmittingRef.current = true;
     const isTexas = onboardingState.trim().toLowerCase() === "texas";
     const standard = isTexas && isDelRioMatch(cityTrimmed);
     const nextMode: AppMode = standard ? "standard" : "nonStandard";
@@ -735,16 +744,20 @@ export default function App() {
         nextBook = NON_STANDARD_BOOK_IDS[idx]!;
       }
     }
-    await AsyncStorage.multiSet([
-      [STORAGE_KEYS.onboardingComplete, "1"],
-      [STORAGE_KEYS.onboardingState, onboardingState],
-      [STORAGE_KEYS.onboardingCity, onboardingCity],
-      [STORAGE_KEYS.mode, nextMode],
-      [STORAGE_KEYS.activeBookId, nextBook],
-    ]);
-    setMode(nextMode);
-    setActiveBookId(nextBook);
-    setOnboardingVisible(false);
+    try {
+      await AsyncStorage.multiSet([
+        [STORAGE_KEYS.onboardingComplete, "1"],
+        [STORAGE_KEYS.onboardingState, onboardingState],
+        [STORAGE_KEYS.onboardingCity, onboardingCity],
+        [STORAGE_KEYS.mode, nextMode],
+        [STORAGE_KEYS.activeBookId, nextBook],
+      ]);
+      setMode(nextMode);
+      setActiveBookId(nextBook);
+      setOnboardingVisible(false);
+    } finally {
+      onboardingSubmittingRef.current = false;
+    }
   }, [onboardingCity, onboardingState]);
 
   // Orientation handling
@@ -752,7 +765,11 @@ export default function App() {
     const sub = Dimensions.addEventListener("change", ({ window }) => {
       setDims(window);
       setTimeout(() => {
-        listRef.current?.scrollToIndex({ index: currentPageRef.current - 1, animated: false });
+        try {
+          listRef.current?.scrollToIndex({ index: currentPageRef.current - 1, animated: false });
+        } catch {
+          // Ignore stale measurement scroll errors during rotations.
+        }
       }, 50);
     });
     return () => sub.remove();
