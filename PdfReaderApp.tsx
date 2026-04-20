@@ -2353,6 +2353,17 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     gap: 20,
     alignItems: "stretch",
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 22,
+    paddingHorizontal: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(15,23,42,0.10)",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.10,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
   cityQuestion: {
     color: "#0F172A",
@@ -2380,13 +2391,13 @@ const styles = StyleSheet.create({
   pickerWrap: {
     borderRadius: 12,
     overflow: "hidden",
-    backgroundColor: "#F1F5F9",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "rgba(15,23,42,0.16)",
   },
   picker: {
     color: "#0F172A",
-    backgroundColor: "#F1F5F9",
+    backgroundColor: "#FFFFFF",
   },
   pickerItem: {
     color: "#0F172A",
