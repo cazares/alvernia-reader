@@ -1099,10 +1099,28 @@ export default function App() {
 
   const activeSearchables = useMemo((): typeof SEARCHABLE_SONGS => {
     if (isStandardMode) return SEARCHABLE_SONGS;
+    if (songSearchIndex.length > 0) {
+      return songSearchIndex
+        .map((raw: any) => {
+          const song = Number(raw?.song || 0);
+          const page = Number(raw?.page || 0);
+          const title = String(raw?.title || (songTitles as any)?.[String(song)] || `Canción ${song || "?"}`);
+          const snippet = String(raw?.lyrics || "");
+          return {
+            song: Number.isFinite(song) ? song : 0,
+            page: Number.isFinite(page) ? page : 1,
+            title,
+            normalized: normalizeText(`${song}. ${title}`),
+            themes: [],
+            snippet,
+          };
+        })
+        .filter((s: any) => Number.isFinite(s.song) && s.song > 0);
+    }
     const pages = Math.max(1, totalPages || 1);
     return Array.from({ length: pages }, (_, i) => {
       const page = i + 1;
-      const title = `Página ${page}`;
+      const title = (songTitles as Record<string, string>)[String(page)] || `Página ${page}`;
       return {
         song: page,
         page,
@@ -1112,7 +1130,7 @@ export default function App() {
         snippet: "",
       };
     }) as unknown as typeof SEARCHABLE_SONGS;
-  }, [isStandardMode, totalPages]);
+  }, [isStandardMode, totalPages, songTitles, songSearchIndex]);
 
   const activeSearchablesBySong = useMemo(() => {
     const m = new Map<number, typeof SEARCHABLE_SONGS[0]>();
@@ -1870,31 +1888,6 @@ export default function App() {
           <View style={styles.modalBackdrop}>
             <TouchableWithoutFeedback>
               <View style={[styles.inputCard, { top: cardTop }]}>
-                {mode === "nonStandard" && (
-                  <>
-                    <Text style={styles.sectionHeader}>IR A LIBRO</Text>
-                    <View style={styles.bookList}>
-                      {NON_STANDARD_BOOK_IDS.map((id) => {
-                        const book = getBook(id);
-                        const selected = id === activeBookId;
-                        return (
-                          <TouchableOpacity
-                            key={id}
-                            style={[styles.bookRow, selected && styles.bookRowSelected]}
-                            onPress={() => { switchBook(id).catch(() => {}); }}
-                            activeOpacity={0.75}
-                          >
-                            <Text style={[styles.bookRowText, selected && styles.bookRowTextSelected]} numberOfLines={1}>
-                              {book.title}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                    <View style={{ height: 14 }} />
-                  </>
-                )}
-
                 <Text style={styles.inputLabel}>Ir a canción</Text>
                 <TextInput
                   ref={inputRef}
