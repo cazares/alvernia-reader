@@ -20,6 +20,7 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  Platform,
   type NativeSyntheticEvent,
   type KeyboardEvent,
   type ListRenderItemInfo,
@@ -27,7 +28,6 @@ import {
   type ViewabilityConfig,
   type ViewToken,
 } from "react-native";
-import { Picker } from "@react-native-picker/picker";
 import * as Haptics from "expo-haptics";
 
 import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
@@ -64,45 +64,17 @@ const normalizeDirectorDeviceName = (value: string): string => {
   return v.toLowerCase().replace(/[^a-z0-9]/g, "");
 };
 
-function normalizeCityInput(s: string) {
-  // Avoid Unicode property escapes (`\\p{L}`) which can crash some Hermes builds at parse time.
-  // Also guard String.prototype.normalize for older Hermes builds.
-  let v = (s || "").toLowerCase();
-  try {
-    v = v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  } catch {
-    // best-effort
-  }
-  return v
-    .replace(/[_-]/g, " ")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-// Del Rio matching: strict enough to avoid over-match, tolerant of punctuation/spacing/accents and optional trailing "tx".
-function isDelRioMatch(rawCity: string): boolean {
-  const normalized = normalizeCityInput(rawCity).replace(/\s/g, "");
-  if (!normalized) return false;
-  const trimmed = normalized.endsWith("tx") ? normalized.slice(0, -2) : normalized;
-  if (trimmed !== "delrio") {
-    // modest typo tolerance: Levenshtein distance <= 1 for near-length inputs only
-    if (trimmed.length < 5 || trimmed.length > 8) return false;
-    const a = trimmed;
-    const b = "delrio";
-    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-    for (let i = 1; i <= a.length; i++) {
-      for (let j = 1; j <= b.length; j++) {
-        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-      }
-    }
-    return dp[a.length][b.length] <= 1;
-  }
-  return true;
-}
+const DEVICE_ALLOWLIST = new Set(
+  [
+    "Brau 3 🎶 😎",
+    "Brau MASTER",
+    "Ipad 2 Caty y Raul Leal",
+    "Ipad 2 Rita y Alfredo Varela",
+    "iPad de Adrian",
+    "iPad de Braulio",
+    "mPad",
+  ].map((name) => normalizeText(name)),
+);
 
 const SONG_TO_PAGE = new Map<number, number>(
   ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]),
@@ -637,8 +609,7 @@ export default function App() {
   const [dims, setDims] = useState(() => Dimensions.get("window"));
   const [booted, setBooted] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
-  const [onboardingState, setOnboardingState] = useState("Texas");
-  const [onboardingCity, setOnboardingCity] = useState("");
+  const [onboardingDeviceName, setOnboardingDeviceName] = useState("");
   const onboardingSubmittingRef = useRef(false);
   const [mode, setMode] = useState<AppMode>("standard");
   const [activeBookId, setActiveBookId] = useState<BookId>("standard");
@@ -799,28 +770,19 @@ export default function App() {
   }
 
   const handleOnboardingContinue = useCallback(async () => {
-    const cityTrimmed = onboardingCity.trim();
-    if (!cityTrimmed) return;
     if (onboardingSubmittingRef.current) return;
     onboardingSubmittingRef.current = true;
     try {
-      const isTexas = onboardingState.trim().toLowerCase() === "texas";
-      const standard = isTexas && isDelRioMatch(cityTrimmed);
+      const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
+      const normalizedName = normalizeText(rawName || "");
+      const standard = Platform.OS === "ios" && Platform.isPad && DEVICE_ALLOWLIST.has(normalizedName);
       const nextMode: AppMode = standard ? "standard" : "nonStandard";
-      let nextBook: BookId = "standard";
-      if (!standard) {
-        const existing = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId).catch(() => null)) as BookId | null;
-        if (existing && NON_STANDARD_BOOK_IDS.includes(existing)) {
-          nextBook = existing;
-        } else {
-          const idx = Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length);
-          nextBook = NON_STANDARD_BOOK_IDS[idx] ?? "hymns-1";
-        }
-      }
+      const nextBook: BookId = standard ? "standard" : "hymns-4";
+      setOnboardingDeviceName(rawName || "iPad");
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.onboardingComplete, "1"],
-        [STORAGE_KEYS.onboardingState, onboardingState],
-        [STORAGE_KEYS.onboardingCity, onboardingCity],
+        [STORAGE_KEYS.onboardingState, rawName || "iPad"],
+        [STORAGE_KEYS.onboardingCity, rawName || "iPad"],
         [STORAGE_KEYS.mode, nextMode],
         [STORAGE_KEYS.activeBookId, nextBook],
       ]);
@@ -835,7 +797,7 @@ export default function App() {
     } finally {
       onboardingSubmittingRef.current = false;
     }
-  }, [onboardingCity, onboardingState]);
+  }, []);
 
   // Orientation handling
   useEffect(() => {
@@ -999,8 +961,6 @@ export default function App() {
 
   const performColdBootReset = useCallback(async () => {
     await clearAllBookState();
-    setOnboardingState("Texas");
-    setOnboardingCity("");
     setMode("standard");
     setActiveBookId("standard");
     setSearchVisible(false);
@@ -1426,45 +1386,14 @@ export default function App() {
       {onboardingVisible && (
         <View style={styles.cityOverlay}>
           <View style={styles.cityCard}>
-            <Text style={styles.cityQuestion}>Selecciona tu estado y ciudad</Text>
-            <Text style={styles.citySubcopy}>Usaremos esta información para mostrarte el himnario más común de tu área.</Text>
-
-            <Text style={styles.fieldLabel}>Estado</Text>
-            <View style={styles.pickerWrap}>
-              <Picker
-                selectedValue={onboardingState}
-                onValueChange={(v) => setOnboardingState(String(v))}
-                style={styles.picker}
-                itemStyle={styles.pickerItem}
-              >
-                {[
-                  "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia",
-                  "Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland",
-                  "Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey",
-                  "New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina",
-                  "South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming",
-                ].map((s) => <Picker.Item key={s} label={s} value={s} />)}
-              </Picker>
-            </View>
-
-            <Text style={styles.fieldLabel}>Ciudad</Text>
-            <TextInput
-              style={styles.cityInput}
-              value={onboardingCity}
-              onChangeText={setOnboardingCity}
-              onSubmitEditing={() => { handleOnboardingContinue().catch(() => {}); }}
-              returnKeyType="done"
-              autoFocus
-              autoCorrect={false}
-              autoCapitalize="words"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              placeholder="Ciudad"
-            />
-            <TouchableOpacity
-              style={[styles.cityBtn, !onboardingCity.trim() && styles.cityBtnDisabled]}
-              onPress={() => { handleOnboardingContinue().catch(() => {}); }}
-              disabled={!onboardingCity.trim()}
-            >
+            <Text style={styles.cityQuestion}>Detectando tu iPad</Text>
+            <Text style={styles.citySubcopy}>
+              Este build usará modo principal para los iPads autorizados y modo himnarios para el resto.
+            </Text>
+            <Text style={styles.citySubcopy}>
+              Dispositivo detectado: {onboardingDeviceName || "iPad"}
+            </Text>
+            <TouchableOpacity style={styles.cityBtn} onPress={() => { handleOnboardingContinue().catch(() => {}); }} activeOpacity={0.8}>
               <Text style={styles.cityBtnText}>Continuar</Text>
             </TouchableOpacity>
           </View>
@@ -2499,47 +2428,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
   },
-  fieldLabel: {
-    color: "rgba(255,255,255,0.75)",
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    textAlign: "center",
-    marginBottom: -10,
-  },
-  pickerWrap: {
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-  },
-  picker: {
-    color: "#0F172A",
-    backgroundColor: "#FFFFFF",
-  },
-  pickerItem: {
-    color: "#0F172A",
-    fontSize: 18,
-  },
-  cityInput: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.28)",
-    color: "#FFFFFF",
-    fontSize: 20,
-    paddingVertical: 10,
-    textAlign: "center",
-  },
   cityBtn: {
     backgroundColor: "rgba(255,255,255,0.10)",
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: "center",
     marginTop: 4,
-  },
-  cityBtnDisabled: {
-    opacity: 0.45,
   },
   cityBtnText: {
     color: "#FFFFFF",
