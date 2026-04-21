@@ -7,39 +7,25 @@ const APP_ROOT = path.resolve(new URL("..", import.meta.url).pathname);
 const SOURCE = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
 
 test("onboarding modal exists with required Spanish strings", () => {
-  assert.match(SOURCE, /Selecciona tu estado y ciudad/);
-  assert.match(SOURCE, /Usaremos esta información para mostrarte el himnario más común de tu área\./);
-  assert.match(SOURCE, /Estado/);
-  assert.match(SOURCE, /Ciudad/);
+  assert.match(SOURCE, /Detectando tu iPad/);
+  assert.match(SOURCE, /Este build usará modo principal para los iPads autorizados y modo himnarios para el resto\./);
+  assert.match(SOURCE, /Dispositivo detectado:/);
   assert.match(SOURCE, /Continuar/);
 });
 
-test("Del Rio sanitization accepts variants and blocks over-matches", () => {
-  // Accept cases
-  for (const s of [
-    "del rio",
-    "Del Rio",
-    "DEL RIO",
-    "delrio",
-    "del-rio",
-    "del_rio",
-    "del rió",
-    "Del Río",
-    "delrio tx",
-    "del rio tx",
-    "DEL-RIO",
-    " del  rio ",
-  ]) {
-    // We can't execute TS in node tests, but we can ensure the function exists and is used.
-    assert.match(SOURCE, /function isDelRioMatch/);
-    assert.match(SOURCE, /isDelRioMatch\(cityTrimmed\)/);
-    assert.ok(s.length > 0);
-  }
-
-  // Explicitly disallowed fragments (ensure we are not using an overly permissive regex).
-  // This guards against future "contains rio" style matches.
-  assert.doesNotMatch(SOURCE, /includes\(\"rio\"\)/);
-  assert.doesNotMatch(SOURCE, /includes\(\"del\"\)/);
+test("allowlist uses explicit device names and no city gate", () => {
+  assert.match(SOURCE, /const DEVICE_ALLOWLIST = new Set/);
+  assert.match(SOURCE, /Platform\.OS === "ios" && Platform\.isPad && DEVICE_ALLOWLIST\.has\(normalizedName\)/);
+  assert.match(SOURCE, /Brau 3 🎶 😎/);
+  assert.match(SOURCE, /Brau MASTER/);
+  assert.match(SOURCE, /Ipad 2 Caty y Raul Leal/);
+  assert.match(SOURCE, /Ipad 2 Rita y Alfredo Varela/);
+  assert.match(SOURCE, /iPad de Adrian/);
+  assert.match(SOURCE, /iPad de Braulio/);
+  assert.match(SOURCE, /mPad/);
+  assert.doesNotMatch(SOURCE, /isDelRioMatch/);
+  assert.doesNotMatch(SOURCE, /setOnboardingState/);
+  assert.doesNotMatch(SOURCE, /setOnboardingCity/);
 });
 
 test("non-standard build removes the IR A LIBRO section entirely", () => {
@@ -54,7 +40,7 @@ test("reset code 744668486 is intercepted before normal navigation", () => {
 });
 
 test("city onboarding storage failures stay inside the submit handler", () => {
-  assert.match(SOURCE, /await AsyncStorage\.getItem\(STORAGE_KEYS\.activeBookId\)\.catch\(\(\) => null\)/);
+  assert.match(SOURCE, /await AsyncStorage\.multiSet\(\[/);
   assert.match(SOURCE, /catch \{\n\s+Alert\.alert\(/);
   assert.match(SOURCE, /onboardingSubmittingRef\.current = false/);
 });
