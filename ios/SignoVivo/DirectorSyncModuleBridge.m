@@ -19,6 +19,8 @@ RCT_EXTERN_METHOD(stop:(RCTPromiseResolveBlock)resolve
 
 RCT_EXTERN_METHOD(sendPageUpdate:(nonnull NSNumber *)page
                   totalPages:(nonnull NSNumber *)totalPages
+                  mode:(NSString *)mode
+                  bookId:(NSString *)bookId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

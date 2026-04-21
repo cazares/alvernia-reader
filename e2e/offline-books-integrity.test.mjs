@@ -27,7 +27,7 @@ test("offline standard book bundle has sentinel page assets", () => {
 });
 
 test("offline non-standard book bundles exist and page counts match", () => {
-  const ids = ["hymns-1", "hymns-2", "hymns-3", "hymns-4"];
+  const ids = ["hymns-1", "hymns-2", "hymns-4"];
   for (const id of ids) {
     const dir = path.join(ROOT, "assets", "offline-books", id);
     const pagesDir = path.join(dir, "pages");

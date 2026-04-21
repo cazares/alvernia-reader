@@ -36,6 +36,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var lastFollowerPageReceivedAt: TimeInterval = 0
   private var currentPageNumber: Int?
   private var currentTotalPages: Int = 0
+  private var currentMode = ""
+  private var currentBookId = ""
 
   // MARK: - Convenience
 
@@ -61,6 +63,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       "type": "page",
       "page": max(1, page),
       "totalPages": max(0, totalPages),
+      "mode": currentMode,
+      "bookId": currentBookId,
     ]
     return try? JSONSerialization.data(withJSONObject: payload)
   }
@@ -170,10 +174,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     resolve(name)
   }
 
-  @objc(sendPageUpdate:totalPages:resolver:rejecter:)
+  @objc(sendPageUpdate:totalPages:mode:bookId:resolver:rejecter:)
   func sendPageUpdate(
     _ page: NSNumber,
     totalPages: NSNumber,
+    mode: String,
+    bookId: String,
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
@@ -189,12 +195,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         return
       }
       let payload: [String: Any] = [
+        "v": Self.protocolVersion,
         "type": "page",
         "page": max(1, page.intValue),
         "totalPages": max(0, totalPages.intValue),
+        "mode": mode,
+        "bookId": bookId,
       ]
       self.currentPageNumber = max(1, page.intValue)
       self.currentTotalPages = max(0, totalPages.intValue)
+      self.currentMode = mode
+      self.currentBookId = bookId
       guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
         resolve(["deliveredPeers": 0])
         return
@@ -314,6 +325,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     lastFollowerHelloAt = 0
     lastFollowerPageReceivedAt = 0
     currentPageNumber = nil; currentTotalPages = 0
+    currentMode = ""; currentBookId = ""
     if shouldEmitState { emitState(status: "idle") }
   }
 
@@ -338,10 +350,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     ] as [String: Any])
   }
 
-  private func emitPage(page: Int, totalPages: Int) {
+  private func emitPage(page: Int, totalPages: Int, mode: String, bookId: String) {
     sendEvent(withName: Self.eventName, body: [
       "type": "page", "page": page, "totalPages": totalPages,
-      "sessionCode": currentSessionCode,
+      "mode": mode, "bookId": bookId, "sessionCode": currentSessionCode,
     ] as [String: Any])
   }
 
@@ -513,9 +525,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       guard type == "page" else { return }
       guard let page = payload["page"] as? Int else { return }
       let totalPages = payload["totalPages"] as? Int ?? 0
+      let mode = payload["mode"] as? String ?? ""
+      let bookId = payload["bookId"] as? String ?? ""
       if self.currentRole == "follower" {
         self.lastFollowerPageReceivedAt = Date().timeIntervalSince1970
-        self.emitPage(page: max(1, page), totalPages: max(0, totalPages))
+        self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId)
       }
     }
   }
