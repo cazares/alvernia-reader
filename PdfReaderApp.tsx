@@ -1226,12 +1226,16 @@ export default function App() {
     setSortMode((m) => m === "best" ? "az" : m === "az" ? "number" : "best");
   }, []);
 
-  const handleSearchResultTap = useCallback((song: number) => {
+  const navigateToSong = useCallback((song: number, afterNavigate?: () => void) => {
     const page = resolveSongPage(String(song), totalPages, bookSongToPage, bookSortedSongs as any);
     goToPage(page);
     recentSongsRef.current = [song, ...recentSongsRef.current.filter((s) => s !== song)].slice(0, 20);
-    closeSearch();
-  }, [goToPage, closeSearch, totalPages, bookSongToPage, bookSortedSongs]);
+    afterNavigate?.();
+  }, [goToPage, totalPages, bookSongToPage, bookSortedSongs]);
+
+  const handleSearchResultTap = useCallback((song: number) => {
+    navigateToSong(song, closeSearch);
+  }, [closeSearch, navigateToSong]);
 
   const handleSearchSubmit = useCallback(() => {
     const firstSection = searchSections[0];
@@ -1304,11 +1308,8 @@ export default function App() {
   }, []);
   const closeBrowse = useCallback(() => setBrowseVisible(false), []);
   const handleBrowseSongTap = useCallback((song: number) => {
-    const page = resolveSongPage(String(song), totalPages, bookSongToPage, bookSortedSongs as any);
-    goToPage(page);
-    recentSongsRef.current = [song, ...recentSongsRef.current.filter(s => s !== song)].slice(0, 20);
-    setBrowseVisible(false);
-  }, [goToPage, totalPages, bookSongToPage, bookSortedSongs]);
+    navigateToSong(song, closeBrowse);
+  }, [closeBrowse, navigateToSong]);
 
   const handleGridButtonPress = useCallback(() => {
     setSearchVisible(false);
@@ -1324,11 +1325,8 @@ export default function App() {
   const closeGrid = useCallback(() => setGridVisible(false), []);
 
   const handleGridSongTap = useCallback((song: number) => {
-    const page = resolveSongPage(String(song), totalPages, bookSongToPage, bookSortedSongs as any);
-    goToPage(page);
-    recentSongsRef.current = [song, ...recentSongsRef.current.filter(s => s !== song)].slice(0, 20);
-    setGridVisible(false);
-  }, [goToPage, totalPages, bookSongToPage, bookSortedSongs]);
+    navigateToSong(song, closeGrid);
+  }, [closeGrid, navigateToSong]);
 
   const viewabilityConfig = useMemo<ViewabilityConfig>(
     () => ({ viewAreaCoveragePercentThreshold: 50 }),

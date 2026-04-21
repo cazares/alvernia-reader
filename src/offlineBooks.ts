@@ -14,8 +14,6 @@ const H1 = require("./offlineBookAssets.hymns-1.js") as { BOOK_ID: string; ASSET
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const H2 = require("./offlineBookAssets.hymns-2.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const H3 = require("./offlineBookAssets.hymns-3.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const H4 = require("./offlineBookAssets.hymns-4.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
 
 // @ts-ignore
@@ -23,30 +21,10 @@ import H1_PAGES_JSON from "../assets/offline-books/hymns-1/pages.json";
 // @ts-ignore
 import H2_PAGES_JSON from "../assets/offline-books/hymns-2/pages.json";
 // @ts-ignore
-import H3_PAGES_JSON from "../assets/offline-books/hymns-3/pages.json";
-// @ts-ignore
 import H4_PAGES_JSON from "../assets/offline-books/hymns-4/pages.json";
 
-// @ts-ignore
-import H1_TITLES_JSON from "../assets/offline-books/hymns-1/song-titles.json";
-// @ts-ignore
-import H2_TITLES_JSON from "../assets/offline-books/hymns-2/song-titles.json";
-// @ts-ignore
-import H3_TITLES_JSON from "../assets/offline-books/hymns-3/song-titles.json";
-// @ts-ignore
-import H4_TITLES_JSON from "../assets/offline-books/hymns-4/song-titles.json";
-
-// @ts-ignore
-import H1_SEARCH_JSON from "../assets/offline-books/hymns-1/song-search-index.json";
-// @ts-ignore
-import H2_SEARCH_JSON from "../assets/offline-books/hymns-2/song-search-index.json";
-// @ts-ignore
-import H3_SEARCH_JSON from "../assets/offline-books/hymns-3/song-search-index.json";
-// @ts-ignore
-import H4_SEARCH_JSON from "../assets/offline-books/hymns-4/song-search-index.json";
-
 export type AppMode = "standard" | "nonStandard";
-export type BookId = "standard" | "hymns-1" | "hymns-2" | "hymns-3" | "hymns-4";
+export type BookId = "standard" | "hymns-1" | "hymns-2" | "hymns-4";
 
 export type OfflineBook = {
   id: BookId;
@@ -72,32 +50,24 @@ export const BOOKS: OfflineBook[] = [
     title: "Himnos Evangélicos",
     assets: H1.ASSETS,
     totalPages: Number((H1_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: (H1_TITLES_JSON as any) ?? {},
-    songSearchIndex: (H1_SEARCH_JSON as any) ?? [],
+    songTitles: {},
+    songSearchIndex: [],
   },
   {
     id: "hymns-2",
     title: "El Nuevo Himnario Evangélico",
     assets: H2.ASSETS,
     totalPages: Number((H2_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: (H2_TITLES_JSON as any) ?? {},
-    songSearchIndex: (H2_SEARCH_JSON as any) ?? [],
-  },
-  {
-    id: "hymns-3",
-    title: "Himnario Provisional",
-    assets: H3.ASSETS,
-    totalPages: Number((H3_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: (H3_TITLES_JSON as any) ?? {},
-    songSearchIndex: (H3_SEARCH_JSON as any) ?? [],
+    songTitles: {},
+    songSearchIndex: [],
   },
   {
     id: "hymns-4",
     title: "Himnos de Sión",
     assets: H4.ASSETS,
     totalPages: Number((H4_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: (H4_TITLES_JSON as any) ?? {},
-    songSearchIndex: (H4_SEARCH_JSON as any) ?? [],
+    songTitles: {},
+    songSearchIndex: [],
   },
 ];
 
@@ -128,7 +98,7 @@ export const validateOfflineBookAssets = (book: OfflineBook): OfflineBookAssetsV
   return { ok: missing.length === 0, missingCount: missing.length, sampleMissingKeys: missing.slice(0, 3) };
 };
 
-export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-1", "hymns-2", "hymns-3", "hymns-4"];
+export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-1", "hymns-2", "hymns-4"];
 
 export const STORAGE_KEYS = {
   onboardingComplete: "sv.onboarding.complete",
