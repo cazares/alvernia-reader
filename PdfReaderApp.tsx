@@ -1741,7 +1741,7 @@ export default function App() {
                       placeholder="Buscar canción, parte de misa, tema..."
                       placeholderTextColor="rgba(255,255,255,0.4)"
                       keyboardType="default"
-                      returnKeyType="search"
+                      returnKeyType="go"
                       autoCorrect={false}
                       autoCapitalize="none"
                       maxLength={40}
