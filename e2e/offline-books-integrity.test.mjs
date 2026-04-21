@@ -42,3 +42,14 @@ test("offline non-standard book bundles exist and page counts match", () => {
     assert.equal(jpgCount, total, `${id} pages/*.jpg (${jpgCount}) must match pages.json.totalPages (${total})`);
   }
 });
+
+test("offline non-standard Metro asset maps include every page and thumbnail", () => {
+  const ids = ["hymns-1", "hymns-2", "hymns-4"];
+  for (const id of ids) {
+    const pagesJson = readJson(path.join(ROOT, "assets", "offline-books", id, "pages.json"));
+    const total = Number(pagesJson.totalPages || 0);
+    const assetMap = fs.readFileSync(path.join(ROOT, "src", `offlineBookAssets.${id}.js`), "utf8");
+    assert.match(assetMap, new RegExp(`pages/page-${String(total).padStart(3, "0")}\\.jpg`), `${id} asset map must include final page`);
+    assert.match(assetMap, new RegExp(`thumbs/thumb-${String(total).padStart(3, "0")}\\.jpg`), `${id} asset map must include final thumb`);
+  }
+});
