@@ -1092,6 +1092,29 @@ export default function App() {
     setSearchJumpDirection("down");
   }, []);
 
+  const activeSearchables = useMemo((): typeof SEARCHABLE_SONGS => {
+    if (isStandardMode) return SEARCHABLE_SONGS;
+    const pages = Math.max(1, totalPages || 1);
+    return Array.from({ length: pages }, (_, i) => {
+      const page = i + 1;
+      const title = `Página ${page}`;
+      return {
+        song: page,
+        page,
+        title,
+        normalized: normalizeText(title),
+        themes: [],
+        snippet: "",
+      };
+    }) as unknown as typeof SEARCHABLE_SONGS;
+  }, [isStandardMode, totalPages]);
+
+  const activeSearchablesBySong = useMemo(() => {
+    const m = new Map<number, typeof SEARCHABLE_SONGS[0]>();
+    for (const s of activeSearchables) m.set(s.song, s);
+    return m;
+  }, [activeSearchables]);
+
   // Compute grouped search results on every keystroke
   const searchSections = useMemo(() => {
     const q = searchText.trim();
@@ -1102,7 +1125,7 @@ export default function App() {
     const sections: { title: string; data: { song: number; page: number; title: string }[] }[] = [];
     const seenSongs = new Set<number>();
 
-    const addSection = (title: string, songs: typeof SEARCHABLE_SONGS) => {
+    const addSection = (title: string, songs: typeof activeSearchables) => {
       const unique = songs.filter((s) => !seenSongs.has(s.song));
       if (unique.length === 0) return;
       const sorted = sortSongs(unique, sortMode, words);
@@ -1113,9 +1136,9 @@ export default function App() {
     // 1) Numeric → exact + prefix match at top
     if (isNumeric) {
       const n = parseInt(q, 10);
-      const exact = SEARCHABLE_SONGS.find((s) => s.song === n);
+      const exact = activeSearchablesBySong.get(n);
       if (exact) addSection("Canción", [exact]);
-      const prefix = SEARCHABLE_SONGS.filter((s) => s.song !== n && String(s.song).startsWith(q)).slice(0, 12);
+      const prefix = activeSearchables.filter((s) => s.song !== n && String(s.song).startsWith(q)).slice(0, 12);
       if (prefix.length > 0) addSection("Canciones", prefix);
       return sections;
     }
@@ -1125,18 +1148,18 @@ export default function App() {
 
     // 2) Recents matching query (title or lyrics)
     const recentMatches = recentSongsRef.current
-      .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
+      .map((sn) => activeSearchablesBySong.get(sn))
       .filter((s): s is typeof SEARCHABLE_SONGS[0] =>
         !!s && (matchesWords(titleNorm(s)) || matchesWords(s.normalized)))
       .slice(0, 5);
     addSection("Recientes", recentMatches);
 
     // 3) Title matches
-    const titleMatches = SEARCHABLE_SONGS.filter((s) => matchesWords(titleNorm(s))).slice(0, 15);
+    const titleMatches = activeSearchables.filter((s) => matchesWords(titleNorm(s))).slice(0, 15);
     addSection("Canciones", titleMatches);
 
     // 4) Lyric-only matches (not already in title section)
-    const lyricMatches = SEARCHABLE_SONGS.filter((s) =>
+    const lyricMatches = activeSearchables.filter((s) =>
       !seenSongs.has(s.song) && s.normalized && matchesWords(s.normalized)
     ).slice(0, 10);
     addSection("Letras", lyricMatches);
@@ -1151,7 +1174,7 @@ export default function App() {
       const header = partIdx >= 0
         ? `Parte de Misa (${partIdx + 1} de ${MISA_PARTS_ORDERED.length}): ${label}`
         : `Parte de Misa: ${label}`;
-      const misaSongs = SEARCHABLE_SONGS.filter((s) =>
+      const misaSongs = activeSearchables.filter((s) =>
         !seenSongs.has(s.song) &&
         (titleNorm(s).includes(kw) || s.normalized.includes(kw))
       ).slice(0, 10);
@@ -1166,60 +1189,60 @@ export default function App() {
     });
     if (themeEntry) {
       const [themeId, themeLabel] = themeEntry;
-      const themeSongs = SEARCHABLE_SONGS.filter((s) =>
+      const themeSongs = activeSearchables.filter((s) =>
         !seenSongs.has(s.song) && s.themes.includes(themeId)
       ).slice(0, 12);
       addSection(themeLabel, themeSongs);
     }
 
     return sections;
-  }, [searchText, sortMode]);
+  }, [searchText, sortMode, activeSearchables, activeSearchablesBySong, isStandardMode]);
 
   // Sorted song list for the "Todas" tab
   const sortedTodas = useMemo(() => {
-    const arr = [...SEARCHABLE_SONGS];
+    const arr = [...activeSearchables];
     if (sortMode === "az") arr.sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
     else if (sortMode === "number") arr.sort((a, b) => a.song - b.song);
     // "best" keeps natural order
     return arr;
-  }, [sortMode]);
+  }, [sortMode, activeSearchables]);
 
   // Sorted tab sections (re-sorted whenever sortMode changes)
   const sortedMisaSections = useMemo(() => {
     const seenMisa = new Set<number>();
     const sections = MISA_TAB_SONGS_BY_PART.map((part) => {
-      const data = sortSongs(part.songs, sortMode);
+      const data = sortSongs(part.songs.filter((s) => activeSearchablesBySong.has(s.song)) as typeof SEARCHABLE_SONGS, sortMode);
       data.forEach((s) => seenMisa.add(s.song));
       return { title: part.title, data };
     });
-    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenMisa.has(s.song)), sortMode);
+    const otros = sortSongs(activeSearchables.filter((s) => !seenMisa.has(s.song)) as typeof SEARCHABLE_SONGS, sortMode);
     if (otros.length > 0) sections.push({ title: "Otros", data: otros });
     return sections;
-  }, [sortMode]);
+  }, [sortMode, activeSearchables, activeSearchablesBySong]);
 
   const sortedTiempoSections = useMemo(() => {
     const seenTiempo = new Set<number>();
     const sections = TIEMPO_TAB_SONGS_BY_GROUP.map((g) => {
-      const data = sortSongs(g.songs, sortMode);
+      const data = sortSongs(g.songs.filter((s) => activeSearchablesBySong.has(s.song)) as typeof SEARCHABLE_SONGS, sortMode);
       data.forEach((s) => seenTiempo.add(s.song));
       return { title: g.title, data };
     });
-    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenTiempo.has(s.song)), sortMode);
+    const otros = sortSongs(activeSearchables.filter((s) => !seenTiempo.has(s.song)) as typeof SEARCHABLE_SONGS, sortMode);
     if (otros.length > 0) sections.push({ title: "Otros", data: otros });
     return sections;
-  }, [sortMode]);
+  }, [sortMode, activeSearchables, activeSearchablesBySong]);
 
   const sortedTemasSections = useMemo(() => {
     const seenTemas = new Set<number>();
     const sections = TEMAS_TAB_SONGS_BY_GROUP.map((g) => {
-      const data = sortSongs(g.songs, sortMode);
+      const data = sortSongs(g.songs.filter((s) => activeSearchablesBySong.has(s.song)) as typeof SEARCHABLE_SONGS, sortMode);
       data.forEach((s) => seenTemas.add(s.song));
       return { title: g.title, data };
     });
-    const otros = sortSongs(SEARCHABLE_SONGS.filter((s) => !seenTemas.has(s.song)), sortMode);
+    const otros = sortSongs(activeSearchables.filter((s) => !seenTemas.has(s.song)) as typeof SEARCHABLE_SONGS, sortMode);
     if (otros.length > 0) sections.push({ title: "Otros", data: otros });
     return sections;
-  }, [sortMode]);
+  }, [sortMode, activeSearchables, activeSearchablesBySong]);
 
   const sortLabel = sortMode === "best" ? "Mejor" : sortMode === "az" ? "A→Z" : "#";
   const cycleSortMode = useCallback(() => {
@@ -1260,7 +1283,7 @@ export default function App() {
           searchTab === "tiempo" ? sortedTiempoSections :
           searchTab === "temas" ? sortedTemasSections :
           [{ title: "Recientes", data: recentSongsRef.current
-            .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
+            .map((sn) => activeSearchablesBySong.get(sn))
             .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s) }]
         );
 
@@ -1289,6 +1312,7 @@ export default function App() {
     searchSections,
     searchTab,
     searchText,
+    activeSearchablesBySong,
     sortedMisaSections,
     sortedTemasSections,
     sortedTiempoSections,
@@ -1552,7 +1576,7 @@ export default function App() {
       )}
 
       {/* ── Search overlay — director only ── */}
-      {searchVisible && isStandardMode && (() => {
+      {searchVisible && (() => {
         const hasQuery = searchText.trim().length > 0;
         const normalizedQ = normalizeText(searchText.trim());
         const qWords = normalizedQ.split(/\s+/).filter(Boolean);
@@ -1655,7 +1679,7 @@ export default function App() {
 
         // Tab content for when there's no query
         const recentSongEntries = recentSongsRef.current
-          .map((sn) => SEARCHABLE_SONGS.find((s) => s.song === sn))
+          .map((sn) => activeSearchablesBySong.get(sn))
           .filter((s): s is typeof SEARCHABLE_SONGS[0] => !!s);
         const sortedRecentSongEntries = sortMode === "best" ? recentSongEntries : sortSongs(recentSongEntries, sortMode);
         const tabSections = !hasQuery ? (
@@ -1817,7 +1841,7 @@ export default function App() {
             {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
           </TouchableOpacity>
         )}
-        {syncRole === "director" && isStandardMode && !searchVisible && (
+        {syncRole === "director" && !searchVisible && (
           <TouchableOpacity
             style={styles.clusterBtn}
             onPress={openSearch}
