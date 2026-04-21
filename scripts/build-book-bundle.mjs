@@ -26,6 +26,9 @@ const getArg = (name) => {
 const pdfRel = getArg("--pdf");
 const outRel = getArg("--out");
 const reuse = args.includes("--reuse");
+const dpi = Number(getArg("--dpi") ?? "144") || 144;
+const thumbWidth = Number(getArg("--thumb-width") ?? "150") || 150;
+const thumbQuality = Number(getArg("--thumb-quality") ?? "40") || 40;
 if (!pdfRel || !outRel) {
   console.error("Missing required args: --pdf <path> --out <path>");
   process.exit(2);
@@ -44,7 +47,7 @@ if (!reuse) {
 
   const pdftoppm = spawnSync(
     "pdftoppm",
-    ["-jpeg", "-jpegopt", "quality=80", "-r", "144", pdfPath, path.join(pagesDir, "page")],
+    ["-jpeg", "-jpegopt", "quality=92", "-r", String(dpi), pdfPath, path.join(pagesDir, "page")],
     { stdio: "inherit" },
   );
   if (pdftoppm.status !== 0) {
@@ -68,7 +71,7 @@ if (!reuse) {
     const pageNum = Number(m[1]);
     const src = path.join(pagesDir, file);
     const out = path.join(thumbsDir, `thumb-${String(pageNum).padStart(3, "0")}.jpg`);
-    const sips = spawnSync("sips", ["-Z", "150", "-s", "format", "jpeg", "-s", "formatOptions", "40", src, "--out", out], {
+    const sips = spawnSync("sips", ["-Z", String(thumbWidth), "-s", "format", "jpeg", "-s", "formatOptions", String(thumbQuality), src, "--out", out], {
       stdio: "pipe",
     });
     if (sips.status !== 0 || !fs.existsSync(out)) {
