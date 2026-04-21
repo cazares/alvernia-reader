@@ -82,12 +82,14 @@ if (!reuse) {
 }
 
 // Extract text for per-page title/lyrics metadata (best-effort).
+let rawAllText = "";
 const pdftotext = spawnSync("pdftotext", ["-layout", "-enc", "UTF-8", pdfPath, "-"], { encoding: "utf8" });
-if (pdftotext.status !== 0) {
-  throw new Error(`pdftotext failed with exit code ${pdftotext.status ?? 1}`);
+if (pdftotext.status === 0) {
+  rawAllText = pdftotext.stdout || "";
+} else {
+  console.warn(`pdftotext failed for ${path.basename(pdfPath)}; continuing without text index.`);
 }
 
-const rawAllText = pdftotext.stdout || "";
 const pageTextsRaw = rawAllText.split("\f");
 
 const normalizeText = (s) => {
