@@ -1298,6 +1298,12 @@ export default function App() {
   const availableHeight = height - keyboardHeight;
   const cardTop = Math.max(24, availableHeight / 2 - 80);
 
+  const [bookPickerSelection, setBookPickerSelection] = useState<BookId>("standard");
+  const openBookPicker = useCallback(() => {
+    setBookPickerSelection(activeBookId);
+    setBookPickerVisible(true);
+  }, [activeBookId]);
+
   if (!booted) {
     return <View style={styles.screen} />;
   }
@@ -1761,7 +1767,9 @@ export default function App() {
 
       {/* Version label */}
       <Text style={styles.versionLabel} pointerEvents="none">{VISIBLE_BUILD_LABEL}</Text>
-      <Text style={styles.modeDebugLabel} pointerEvents="none">{mode} · {activeBookId}</Text>
+      <Text style={styles.modeDebugLabel} pointerEvents="none">
+        {isStandardMode ? "Modo: Principal" : "Modo: Himnarios"} · {getBook(activeBookId).title}
+      </Text>
 
       {/* ── Song navigation modal ── */}
       <Modal visible={songModal} transparent animationType="fade" onRequestClose={closeSongModal} statusBarTranslucent>
@@ -1772,7 +1780,7 @@ export default function App() {
                 {mode === "nonStandard" && (
                   <>
                     <Text style={styles.sectionHeader}>IR A LIBRO</Text>
-                    <TouchableOpacity style={styles.bookSelectBtn} onPress={() => setBookPickerVisible(true)} activeOpacity={0.75}>
+                    <TouchableOpacity style={styles.bookSelectBtn} onPress={openBookPicker} activeOpacity={0.75}>
                       <Text style={styles.bookSelectText} numberOfLines={1}>
                         {getBook(activeBookId).title}
                       </Text>
@@ -1822,23 +1830,33 @@ export default function App() {
             <TouchableWithoutFeedback>
               <View style={[styles.inputCard, { top: cardTop }]}>
                 <Text style={styles.inputLabel}>Selecciona himnario</Text>
-                {NON_STANDARD_BOOK_IDS.map((id) => {
-                  const book = getBook(id);
-                  const selected = id === activeBookId;
-                  return (
-                    <TouchableOpacity
-                      key={id}
-                      style={[styles.bookRow, selected && styles.bookRowSelected]}
-                      onPress={() => { setBookPickerVisible(false); switchBook(id).catch(() => {}); }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.bookRowText, selected && styles.bookRowTextSelected]}>{book.title}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                <View style={styles.pickerWrap}>
+                  <Picker
+                    selectedValue={bookPickerSelection}
+                    onValueChange={(v) => setBookPickerSelection(String(v) as BookId)}
+                    style={styles.picker}
+                    itemStyle={styles.pickerItem}
+                  >
+                    {NON_STANDARD_BOOK_IDS.map((id) => {
+                      const book = getBook(id);
+                      return <Picker.Item key={id} label={book.title} value={id} />;
+                    })}
+                  </Picker>
+                </View>
                 <View style={styles.modalButtons}>
                   <TouchableOpacity style={styles.cancelBtn} onPress={() => setBookPickerVisible(false)} activeOpacity={0.7}>
                     <Text style={styles.cancelText}>Cerrar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.goBtn}
+                    onPress={() => {
+                      const next = bookPickerSelection;
+                      setBookPickerVisible(false);
+                      switchBook(next).catch(() => {});
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.goText}>Listo</Text>
                   </TouchableOpacity>
                 </View>
               </View>
