@@ -63,6 +63,8 @@ test("iOS app keeps exempt-encryption declaration and nearby sync permissions", 
   assert.match(plistSource, /NSBonjourServices/);
   assert.match(plistSource, /_signovivo\._tcp/);
   assert.match(plistSource, /_signovivo\._udp/);
+  assert.doesNotMatch(plistSource, /NSAllowsArbitraryLoads/);
+  assert.match(plistSource, /<key>LSMinimumSystemVersion<\/key>\s*<string>15\.1<\/string>/);
 });
 
 test("metro bundles the offline html and bundle assets", () => {

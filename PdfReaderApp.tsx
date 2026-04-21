@@ -40,7 +40,7 @@ import {
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
 import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
-import { BOOKS, NON_STANDARD_BOOK_IDS, STORAGE_KEYS, clearAllBookState, getBook, type AppMode, type BookId } from "./src/offlineBooks";
+import { BOOKS, NON_STANDARD_BOOK_IDS, STORAGE_KEYS, clearAllBookState, getBook, validateOfflineBookAssets, type AppMode, type BookId } from "./src/offlineBooks";
 // @ts-ignore — Metro resolves JSON fine
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
 // @ts-ignore
@@ -660,6 +660,7 @@ export default function App() {
   const [showSatellite, setShowSatellite] = useState(false);
   const [isSyncBootstrapped, setIsSyncBootstrapped] = useState(false);
   const [bookPickerVisible, setBookPickerVisible] = useState(false);
+  const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
   const lastFollowerNoticeRef = useRef(0);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
@@ -675,6 +676,19 @@ export default function App() {
   const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
   const thumbAssets = useMemo(() => buildThumbAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
   const isStandardMode = mode === "standard";
+
+  // Safety: if bundled offline assets are missing/corrupt, fail closed with a recovery UI
+  // instead of risking crashes or broken navigation.
+  useEffect(() => {
+    const validation = validateOfflineBookAssets(activeBook);
+    if (validation.ok) {
+      setOfflineAssetsError(null);
+      return;
+    }
+    setOfflineAssetsError(
+      `Faltan archivos offline del libro "${activeBook.title}". (${validation.sampleMissingKeys.join(", ")})`,
+    );
+  }, [activeBook]);
 
   // Per-book song index/search. Standard uses existing enriched index; non-standard may be empty (scanned PDFs).
   const songTitles = useMemo(() => (mode === "standard" ? (SONG_TITLES as any) : activeBook.songTitles) ?? {}, [mode, activeBook.songTitles]);
@@ -749,6 +763,40 @@ export default function App() {
     boot();
     return () => { cancelled = true; };
   }, []);
+
+  if (offlineAssetsError) {
+    return (
+      <View style={[styles.screen, { padding: 24, justifyContent: "center" }]}>
+        <Text style={{ color: "#fff", fontSize: 22, fontWeight: "700", marginBottom: 12 }}>
+          Error de archivos offline
+        </Text>
+        <Text style={{ color: "#ddd", fontSize: 16, lineHeight: 22, marginBottom: 18 }}>
+          {offlineAssetsError}
+        </Text>
+        <Text style={{ color: "#bbb", fontSize: 14, lineHeight: 20, marginBottom: 18 }}>
+          Esto normalmente significa que la instalación está incompleta. Vuelve a instalar la app desde TestFlight/App
+          Store o vuelve a compilar e instalar el build.
+        </Text>
+        <TouchableOpacity
+          style={[styles.recoveryButton, { alignSelf: "flex-start" }]}
+          onPress={() => {
+            clearAllBookState()
+              .catch(() => {})
+              .finally(() => {
+                appResetKeyRef.current += 1;
+                setActiveBookId("standard");
+                setMode("standard");
+                setOnboardingVisible(true);
+                forceRerender((x) => x + 1);
+              });
+          }}
+        >
+          <Text style={styles.recoveryButtonText}>Restablecer ajustes</Text>
+        </TouchableOpacity>
+        <Text style={{ color: "#666", marginTop: 18, fontSize: 12 }}>{VISIBLE_BUILD_LABEL}</Text>
+      </View>
+    );
+  }
 
   const handleOnboardingContinue = useCallback(async () => {
     const cityTrimmed = onboardingCity.trim();
@@ -1928,6 +1976,17 @@ export default function App() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000" },
   missingText: { color: "rgba(255,255,255,0.15)", fontSize: 48 },
+  recoveryButton: {
+    backgroundColor: "#1f6feb",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  recoveryButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
 
   // clusterBtn: both nav and search buttons in navCluster — locked to same width
   clusterBtn: {

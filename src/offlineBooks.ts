@@ -106,6 +106,28 @@ export const getBook = (id: BookId): OfflineBook => {
   return found ?? BOOKS[0];
 };
 
+export type OfflineBookAssetsValidation = {
+  ok: boolean;
+  missingCount: number;
+  sampleMissingKeys: string[];
+};
+
+export const validateOfflineBookAssets = (book: OfflineBook): OfflineBookAssetsValidation => {
+  const totalPages = Math.max(0, Number(book.totalPages || 0) || 0);
+  if (!totalPages) {
+    return { ok: false, missingCount: 1, sampleMissingKeys: ["pages.json.totalPages"] };
+  }
+  const missing: string[] = [];
+  const check = (key: string) => {
+    if (!book.assets || typeof book.assets[key] !== "number") missing.push(key);
+  };
+  // Validate a few sentinel pages to avoid heavy work on-device.
+  check(`pages/page-${String(1).padStart(3, "0")}.jpg`);
+  check(`pages/page-${String(Math.min(totalPages, 2)).padStart(3, "0")}.jpg`);
+  check(`pages/page-${String(totalPages).padStart(3, "0")}.jpg`);
+  return { ok: missing.length === 0, missingCount: missing.length, sampleMissingKeys: missing.slice(0, 3) };
+};
+
 export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-1", "hymns-2", "hymns-3", "hymns-4"];
 
 export const STORAGE_KEYS = {
