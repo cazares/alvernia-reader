@@ -47,6 +47,14 @@ test("non-standard-only IR A LIBRO is gated on mode", () => {
   assert.match(SOURCE, /IR A LIBRO/);
 });
 
+test("IR A LIBRO lists non-standard books directly without a nested picker modal", () => {
+  assert.match(SOURCE, /styles\.bookList/);
+  assert.match(SOURCE, /NON_STANDARD_BOOK_IDS\.map/);
+  assert.match(SOURCE, /switchBook\(id\)/);
+  assert.doesNotMatch(SOURCE, /bookPickerVisible/);
+  assert.doesNotMatch(SOURCE, /bookPickerSelection/);
+});
+
 test("reset code 744668486 is intercepted before normal navigation", () => {
   assert.match(SOURCE, /trimmed === \"744668486\"/);
   assert.match(SOURCE, /performColdBootReset/);

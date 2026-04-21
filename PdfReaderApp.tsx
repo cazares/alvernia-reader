@@ -659,7 +659,6 @@ export default function App() {
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [showSatellite, setShowSatellite] = useState(false);
   const [isSyncBootstrapped, setIsSyncBootstrapped] = useState(false);
-  const [bookPickerVisible, setBookPickerVisible] = useState(false);
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
   const lastFollowerNoticeRef = useRef(0);
   const searchInputRef = useRef<TextInput>(null);
@@ -1344,13 +1343,7 @@ export default function App() {
   }), [width]);
 
   const availableHeight = height - keyboardHeight;
-  const cardTop = Math.max(24, availableHeight / 2 - 80);
-
-  const [bookPickerSelection, setBookPickerSelection] = useState<BookId>("standard");
-  const openBookPicker = useCallback(() => {
-    setBookPickerSelection(activeBookId);
-    setBookPickerVisible(true);
-  }, [activeBookId]);
+  const cardTop = Math.max(16, availableHeight / 2 - (mode === "nonStandard" ? 260 : 80));
 
   if (!booted) {
     return <View style={styles.screen} />;
@@ -1828,12 +1821,24 @@ export default function App() {
                 {mode === "nonStandard" && (
                   <>
                     <Text style={styles.sectionHeader}>IR A LIBRO</Text>
-                    <TouchableOpacity style={styles.bookSelectBtn} onPress={openBookPicker} activeOpacity={0.75}>
-                      <Text style={styles.bookSelectText} numberOfLines={1}>
-                        {getBook(activeBookId).title}
-                      </Text>
-                      <Text style={styles.bookSelectChevron}>▾</Text>
-                    </TouchableOpacity>
+                    <View style={styles.bookList}>
+                      {NON_STANDARD_BOOK_IDS.map((id) => {
+                        const book = getBook(id);
+                        const selected = id === activeBookId;
+                        return (
+                          <TouchableOpacity
+                            key={id}
+                            style={[styles.bookRow, selected && styles.bookRowSelected]}
+                            onPress={() => { switchBook(id).catch(() => {}); }}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={[styles.bookRowText, selected && styles.bookRowTextSelected]} numberOfLines={1}>
+                              {book.title}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                     <View style={{ height: 14 }} />
                   </>
                 )}
@@ -1863,48 +1868,6 @@ export default function App() {
                 <View style={styles.modalButtons}>
                   <TouchableOpacity style={styles.cancelBtn} onPress={closeSongModal} activeOpacity={0.7}>
                     <Text style={styles.cancelText}>Cancelar</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-
-      {/* ── Hymnal picker (non-standard only) ── */}
-      <Modal visible={bookPickerVisible} transparent animationType="fade" onRequestClose={() => setBookPickerVisible(false)} statusBarTranslucent>
-        <TouchableWithoutFeedback onPress={() => setBookPickerVisible(false)}>
-          <View style={styles.modalBackdrop}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.inputCard, { top: cardTop }]}>
-                <Text style={styles.inputLabel}>Selecciona himnario</Text>
-                <View style={styles.pickerWrap}>
-                  <Picker
-                    selectedValue={bookPickerSelection}
-                    onValueChange={(v) => setBookPickerSelection(String(v) as BookId)}
-                    style={styles.picker}
-                    itemStyle={styles.pickerItem}
-                  >
-                    {NON_STANDARD_BOOK_IDS.map((id) => {
-                      const book = getBook(id);
-                      return <Picker.Item key={id} label={book.title} value={id} />;
-                    })}
-                  </Picker>
-                </View>
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setBookPickerVisible(false)} activeOpacity={0.7}>
-                    <Text style={styles.cancelText}>Cerrar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.goBtn}
-                    onPress={() => {
-                      const next = bookPickerSelection;
-                      setBookPickerVisible(false);
-                      switchBook(next).catch(() => {});
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.goText}>Listo</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -2546,45 +2509,23 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     textAlign: "center",
   },
-  bookSelectBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: "#f0f0f0",
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  bookSelectText: {
-    color: "#111",
-    fontSize: 16,
-    fontWeight: "700",
-    maxWidth: 280,
-  },
-  bookSelectChevron: {
-    color: "#555",
-    fontSize: 18,
-    fontWeight: "900",
-    marginTop: -1,
+  bookList: {
+    gap: 8,
   },
   bookRow: {
-    paddingVertical: 12,
+    paddingVertical: 11,
     paddingHorizontal: 14,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "#f3f4f6",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    marginTop: 10,
+    borderColor: "#e5e7eb",
   },
   bookRowSelected: {
-    backgroundColor: "rgba(74,144,226,0.18)",
-    borderColor: "rgba(74,144,226,0.45)",
+    backgroundColor: "#1a1a2e",
+    borderColor: "#1a1a2e",
   },
   bookRowText: {
-    color: "#fff",
+    color: "#111827",
     fontSize: 15,
     fontWeight: "700",
     textAlign: "center",
