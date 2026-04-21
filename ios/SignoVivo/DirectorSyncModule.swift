@@ -6,10 +6,13 @@ import React
 final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate, MCSessionDelegate {
   private static let serviceType = "signovivo"
   private static let eventName = "DirectorSyncEvent"
+  private static let protocolVersion = 1
   private static let maxSessionCodeLength = 12
   private static let discoveryRefreshInterval: TimeInterval = 25
   private static let inviteTimeout: TimeInterval = 30
   private static let followerRetryDelay: TimeInterval = 2
+  private static let followerHelloInterval: TimeInterval = 8
+  private static let maxInboundPayloadBytes = 8 * 1024
   /// MCSession hard limit is 8 peers total (including local). Director occupies 1 slot → 7 followers/session.
   private static let maxFollowersPerSession = 7
   /// Two sessions → up to 14 followers simultaneously.
@@ -28,6 +31,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var pendingInvitePeer: MCPeerID?
   private var connectedDirectorPeer: MCPeerID?
   private var discoveryRefreshTimer: Timer?
+  private var followerHelloTimer: Timer?
+  private var lastFollowerHelloAt: TimeInterval = 0
+  private var lastFollowerPageReceivedAt: TimeInterval = 0
   private var currentPageNumber: Int?
   private var currentTotalPages: Int = 0
 
@@ -51,11 +57,28 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func pagePayload(page: Int, totalPages: Int) -> Data? {
     let payload: [String: Any] = [
+      "v": Self.protocolVersion,
       "type": "page",
       "page": max(1, page),
       "totalPages": max(0, totalPages),
     ]
     return try? JSONSerialization.data(withJSONObject: payload)
+  }
+
+  private func helloPayload() -> Data? {
+    let payload: [String: Any] = [
+      "v": Self.protocolVersion,
+      "type": "hello",
+      "ts": Int(Date().timeIntervalSince1970),
+    ]
+    return try? JSONSerialization.data(withJSONObject: payload)
+  }
+
+  private func parseInboundPayload(_ data: Data) -> [String: Any]? {
+    // Protect against pathological payload sizes (should never happen for our protocol).
+    guard data.count > 0, data.count <= Self.maxInboundPayloadBytes else { return nil }
+    guard let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
+    return obj as? [String: Any]
   }
 
   private func sendCurrentPageSnapshot(to peerID: MCPeerID, via session: MCSession) {
@@ -233,6 +256,42 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  private func startFollowerHelloTimer() {
+    followerHelloTimer?.invalidate()
+    lastFollowerHelloAt = 0
+    lastFollowerPageReceivedAt = 0
+    followerHelloTimer = Timer.scheduledTimer(withTimeInterval: Self.followerHelloInterval, repeats: true) { [weak self] _ in
+      DispatchQueue.main.async { self?.sendFollowerHelloIfNeeded() }
+    }
+  }
+
+  private func stopFollowerHelloTimer() {
+    followerHelloTimer?.invalidate()
+    followerHelloTimer = nil
+  }
+
+  private func sendFollowerHelloIfNeeded() {
+    guard currentRole == "follower", let session = mcSessions.first else { return }
+    guard let directorPeer = connectedDirectorPeer else { return }
+    guard session.connectedPeers.contains(directorPeer) else { return }
+
+    let now = Date().timeIntervalSince1970
+    // If we've received a page recently, avoid spamming.
+    if lastFollowerPageReceivedAt > 0, now - lastFollowerPageReceivedAt < Self.followerHelloInterval * 2 {
+      return
+    }
+    if lastFollowerHelloAt > 0, now - lastFollowerHelloAt < Self.followerHelloInterval {
+      return
+    }
+    guard let data = helloPayload() else { return }
+    do {
+      try session.send(data, toPeers: [directorPeer], with: .reliable)
+      lastFollowerHelloAt = now
+    } catch {
+      // Best-effort: don't emit an error for transient MPC send failures.
+    }
+  }
+
   private func refreshDiscovery() {
     guard currentRole != "off" else { return }
     advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
@@ -243,6 +302,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func resetTransport(emitState shouldEmitState: Bool) {
     discoveryRefreshTimer?.invalidate(); discoveryRefreshTimer = nil
+    stopFollowerHelloTimer()
     advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
     browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
     for s in mcSessions { s.disconnect(); s.delegate = nil }
@@ -251,6 +311,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     discoveredDirectors = [:]; discoveredFollowers = []
     pendingInvitePeer = nil; connectedDirectorPeer = nil
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
+    lastFollowerHelloAt = 0
+    lastFollowerPageReceivedAt = 0
     currentPageNumber = nil; currentTotalPages = 0
     if shouldEmitState { emitState(status: "idle") }
   }
@@ -409,6 +471,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       case .connected:
         if self.currentRole == "follower" {
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
+          self.startFollowerHelloTimer()
+          self.sendFollowerHelloIfNeeded()
         } else if self.currentRole == "director" {
           self.sendCurrentPageSnapshot(to: peerID, via: session)
         }
@@ -418,6 +482,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       case .notConnected:
         if self.currentRole == "follower", self.connectedDirectorPeer == peerID {
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
+          self.stopFollowerHelloTimer()
           self.emitState(status: "searching", message: "El director se desconectó. Reconectando...")
           DispatchQueue.main.asyncAfter(deadline: .now() + Self.followerRetryDelay) { [weak self] in
             self?.reconsiderFollowerTarget()
@@ -433,13 +498,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
     DispatchQueue.main.async {
-      guard
-        let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let type = payload["type"] as? String, type == "page",
-        let page = payload["page"] as? Int
-      else { return }
+      guard let payload = self.parseInboundPayload(data) else { return }
+      guard let type = payload["type"] as? String else { return }
+      let v = payload["v"] as? Int ?? 0
+      if v != 0, v != Self.protocolVersion { return }
+
+      if type == "hello" {
+        if self.currentRole == "director" {
+          self.sendCurrentPageSnapshot(to: peerID, via: session)
+        }
+        return
+      }
+
+      guard type == "page" else { return }
+      guard let page = payload["page"] as? Int else { return }
       let totalPages = payload["totalPages"] as? Int ?? 0
-      if self.currentRole == "follower" { self.emitPage(page: page, totalPages: totalPages) }
+      if self.currentRole == "follower" {
+        self.lastFollowerPageReceivedAt = Date().timeIntervalSince1970
+        self.emitPage(page: max(1, page), totalPages: max(0, totalPages))
+      }
     }
   }
 
