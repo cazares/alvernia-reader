@@ -53,3 +53,12 @@ test("offline non-standard Metro asset maps include every page and thumbnail", (
     assert.match(assetMap, new RegExp(`thumbs/thumb-${String(total).padStart(3, "0")}\\.jpg`), `${id} asset map must include final thumb`);
   }
 });
+
+test("offline hymns-4 has OCR-derived song titles for Todas", () => {
+  const titles = readJson(path.join(ROOT, "assets", "offline-books", "hymns-4", "song-titles.json"));
+  const index = readJson(path.join(ROOT, "assets", "offline-books", "hymns-4", "song-search-index.json"));
+  assert.ok(Object.keys(titles).length >= 80, "hymns-4 song-titles.json should have a meaningful number of entries");
+  assert.ok(Array.isArray(index) && index.length >= 80, "hymns-4 song-search-index.json should have a meaningful number of entries");
+  const anyTitle = Object.values(titles).find((v) => typeof v === "string" && v.trim().length >= 5);
+  assert.ok(anyTitle, "hymns-4 should have at least one non-empty title");
+});

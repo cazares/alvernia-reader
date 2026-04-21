@@ -22,6 +22,10 @@ import H1_PAGES_JSON from "../assets/offline-books/hymns-1/pages.json";
 import H2_PAGES_JSON from "../assets/offline-books/hymns-2/pages.json";
 // @ts-ignore
 import H4_PAGES_JSON from "../assets/offline-books/hymns-4/pages.json";
+// @ts-ignore
+import H4_TITLES_JSON from "../assets/offline-books/hymns-4/song-titles.json";
+// @ts-ignore
+import H4_SEARCH_JSON from "../assets/offline-books/hymns-4/song-search-index.json";
 
 export type AppMode = "standard" | "nonStandard";
 export type BookId = "standard" | "hymns-1" | "hymns-2" | "hymns-4";
@@ -66,8 +70,8 @@ export const BOOKS: OfflineBook[] = [
     title: "Himnos de Sión",
     assets: H4.ASSETS,
     totalPages: Number((H4_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: {},
-    songSearchIndex: [],
+    songTitles: (H4_TITLES_JSON as any) ?? {},
+    songSearchIndex: (H4_SEARCH_JSON as any) ?? [],
   },
 ];
 
@@ -98,7 +102,8 @@ export const validateOfflineBookAssets = (book: OfflineBook): OfflineBookAssetsV
   return { ok: missing.length === 0, missingCount: missing.length, sampleMissingKeys: missing.slice(0, 3) };
 };
 
-export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-1", "hymns-2", "hymns-4"];
+// App Store submission hardening: keep non-standard mode to the single high-res book we ship.
+export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-4"];
 
 export const STORAGE_KEYS = {
   onboardingComplete: "sv.onboarding.complete",
