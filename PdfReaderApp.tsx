@@ -803,20 +803,20 @@ export default function App() {
     if (!cityTrimmed) return;
     if (onboardingSubmittingRef.current) return;
     onboardingSubmittingRef.current = true;
-    const isTexas = onboardingState.trim().toLowerCase() === "texas";
-    const standard = isTexas && isDelRioMatch(cityTrimmed);
-    const nextMode: AppMode = standard ? "standard" : "nonStandard";
-    let nextBook: BookId = "standard";
-    if (!standard) {
-      const existing = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
-      if (existing && NON_STANDARD_BOOK_IDS.includes(existing)) {
-        nextBook = existing;
-      } else {
-        const idx = Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length);
-        nextBook = NON_STANDARD_BOOK_IDS[idx]!;
-      }
-    }
     try {
+      const isTexas = onboardingState.trim().toLowerCase() === "texas";
+      const standard = isTexas && isDelRioMatch(cityTrimmed);
+      const nextMode: AppMode = standard ? "standard" : "nonStandard";
+      let nextBook: BookId = "standard";
+      if (!standard) {
+        const existing = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId).catch(() => null)) as BookId | null;
+        if (existing && NON_STANDARD_BOOK_IDS.includes(existing)) {
+          nextBook = existing;
+        } else {
+          const idx = Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length);
+          nextBook = NON_STANDARD_BOOK_IDS[idx] ?? "hymns-1";
+        }
+      }
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.onboardingComplete, "1"],
         [STORAGE_KEYS.onboardingState, onboardingState],
@@ -827,6 +827,11 @@ export default function App() {
       setMode(nextMode);
       setActiveBookId(nextBook);
       setOnboardingVisible(false);
+    } catch {
+      Alert.alert(
+        "No se pudo guardar",
+        "La app seguirá funcionando con estos ajustes por ahora. Intenta de nuevo si vuelve a aparecer.",
+      );
     } finally {
       onboardingSubmittingRef.current = false;
     }

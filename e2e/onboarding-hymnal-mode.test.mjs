@@ -59,3 +59,9 @@ test("reset code 744668486 is intercepted before normal navigation", () => {
   assert.match(SOURCE, /trimmed === \"744668486\"/);
   assert.match(SOURCE, /performColdBootReset/);
 });
+
+test("city onboarding storage failures stay inside the submit handler", () => {
+  assert.match(SOURCE, /await AsyncStorage\.getItem\(STORAGE_KEYS\.activeBookId\)\.catch\(\(\) => null\)/);
+  assert.match(SOURCE, /catch \{\n\s+Alert\.alert\(/);
+  assert.match(SOURCE, /onboardingSubmittingRef\.current = false/);
+});
