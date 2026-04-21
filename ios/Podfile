@@ -13,6 +13,51 @@ def ccache_enabled?(podfile_properties)
   podfile_properties['apple.ccacheEnabled'] == 'true'
 end
 
+def ensure_exconstants_get_app_config_wrapper(installer)
+  # Fix ExpoConstants (EXConstants) build script phase path:
+  # The podspec expects `$PODS_TARGET_SRCROOT/../scripts/get-app-config-ios.sh` which resolves to:
+  #   Pods/Target Support Files/scripts/get-app-config-ios.sh
+  # Some CocoaPods setups don't materialize/persist this scripts directory, causing PhaseScriptExecution failures.
+  scripts_dir = File.join(installer.sandbox.root.to_s, 'Target Support Files', 'scripts')
+  FileUtils.mkdir_p(scripts_dir)
+  wrapper_path = File.join(scripts_dir, 'get-app-config-ios.sh')
+  # Capture the current machine's node path at pod-install time so Xcode builds
+  # don't depend on PATH being set up correctly.
+  node_bin = ENV['NODE_BINARY'].to_s.strip
+  if node_bin.empty?
+    node_bin = `command -v node 2>/dev/null`.to_s.strip
+  end
+  node_fallback = node_bin.empty? ? 'node' : node_bin
+
+  wrapper = <<~'SH'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Xcode script phases often run with a minimal PATH, so prefer the absolute NODE_BINARY if provided.
+    NODE="${NODE_BINARY:-__NODE_FALLBACK__}"
+
+    if ! command -v "$NODE" >/dev/null 2>&1; then
+      echo "[EXConstants] node not found (NODE_BINARY='$NODE_BINARY')." >&2
+      echo "[EXConstants] Set NODE_BINARY (e.g. export NODE_BINARY=\"$(command -v node)\") and retry." >&2
+      exit 1
+    fi
+
+    PKG_JSON="$("$NODE" --print "require.resolve('expo-constants/package.json')")"
+    PKG_DIR="$(cd "$(dirname "$PKG_JSON")" && pwd -P)"
+
+    exec bash "$PKG_DIR/scripts/get-app-config-ios.sh"
+  SH
+  wrapper = wrapper.gsub('__NODE_FALLBACK__', node_fallback)
+  existing = File.exist?(wrapper_path) ? File.read(wrapper_path) : nil
+  if existing != wrapper
+    File.write(wrapper_path, wrapper)
+    FileUtils.chmod(0755, wrapper_path)
+    puts "✔ Ensured EXConstants get-app-config-ios.sh wrapper exists at #{wrapper_path}"
+  else
+    puts "✔ EXConstants get-app-config-ios.sh wrapper already present"
+  end
+end
+
 ENV['RCT_NEW_ARCH_ENABLED'] ||= '0' if podfile_properties['newArchEnabled'] == 'false'
 ENV['EX_DEV_CLIENT_NETWORK_INSPECTOR'] ||= podfile_properties['EX_DEV_CLIENT_NETWORK_INSPECTOR']
 ENV['RCT_USE_RN_DEP'] ||= '1' if podfile_properties['ios.buildReactNativeFromSource'] != 'true' && podfile_properties['newArchEnabled'] != 'false'
@@ -95,30 +140,11 @@ target 'SignoVivo' do
       puts "⚠ RNCWebViewImpl.m not found at #{rnwebview_src}"
     end
 
-    # Fix ExpoConstants (EXConstants) build script phase path:
-    # The podspec expects `$PODS_TARGET_SRCROOT/../scripts/get-app-config-ios.sh` which resolves to:
-    #   Pods/Target Support Files/scripts/get-app-config-ios.sh
-    # Some CocoaPods setups fail to materialize this scripts directory, causing PhaseScriptExecution failures.
-    scripts_dir = File.join(installer.sandbox.root.to_s, 'Target Support Files', 'scripts')
-    FileUtils.mkdir_p(scripts_dir)
-    wrapper_path = File.join(scripts_dir, 'get-app-config-ios.sh')
-    wrapper = <<~'SH'
-      #!/usr/bin/env bash
-      set -eo pipefail
+    # Best-effort: we also run this again in post_integrate to avoid any later CocoaPods cleanup.
+    ensure_exconstants_get_app_config_wrapper(installer)
+  end
 
-      # Resolve expo-constants package dir via Node so the real script can locate its helpers.
-      PKG_JSON="$(node --print "require.resolve('expo-constants/package.json')")"
-      PKG_DIR="$(cd "$(dirname "$PKG_JSON")" && pwd -P)"
-
-      exec bash "$PKG_DIR/scripts/get-app-config-ios.sh"
-    SH
-    existing = File.exist?(wrapper_path) ? File.read(wrapper_path) : nil
-    if existing != wrapper
-      File.write(wrapper_path, wrapper)
-      FileUtils.chmod(0755, wrapper_path)
-      puts "✔ Ensured EXConstants get-app-config-ios.sh wrapper exists"
-    else
-      puts "✔ EXConstants get-app-config-ios.sh wrapper already present"
-    end
+  post_integrate do |installer|
+    ensure_exconstants_get_app_config_wrapper(installer)
   end
 end
