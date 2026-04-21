@@ -1,4 +1,4 @@
-const OFFLINE_WEB_BUNDLE_VERSION = "236";
+const OFFLINE_WEB_BUNDLE_VERSION = "237";
 
 const OFFLINE_WEB_BUNDLE_ASSETS = {
   "app.bundle": require("../assets/offline-web/app.bundle"),
@@ -6,6 +6,7 @@ const OFFLINE_WEB_BUNDLE_ASSETS = {
   "icon-512.png": require("../assets/offline-web/icon-512.png"),
   "icon.png": require("../assets/offline-web/icon.png"),
   "index.html": require("../assets/offline-web/index.html"),
+  "pages.json": require("../assets/offline-web/pages.json"),
   "pages/page-001.jpg": require("../assets/offline-web/pages/page-001.jpg"),
   "pages/page-002.jpg": require("../assets/offline-web/pages/page-002.jpg"),
   "pages/page-003.jpg": require("../assets/offline-web/pages/page-003.jpg"),
@@ -374,7 +375,9 @@ const OFFLINE_WEB_BUNDLE_ASSETS = {
   "pages/page-366.jpg": require("../assets/offline-web/pages/page-366.jpg"),
   "pages/page-367.jpg": require("../assets/offline-web/pages/page-367.jpg"),
   "pages/page-368.jpg": require("../assets/offline-web/pages/page-368.jpg"),
-
+  "search-index.json": require("../assets/offline-web/search-index.json"),
+  "song-search-index.json": require("../assets/offline-web/song-search-index.json"),
+  "song-titles.json": require("../assets/offline-web/song-titles.json"),
   "thumbs/thumb-001.jpg": require("../assets/offline-web/thumbs/thumb-001.jpg"),
   "thumbs/thumb-002.jpg": require("../assets/offline-web/thumbs/thumb-002.jpg"),
   "thumbs/thumb-003.jpg": require("../assets/offline-web/thumbs/thumb-003.jpg"),
@@ -743,8 +746,6 @@ const OFFLINE_WEB_BUNDLE_ASSETS = {
   "thumbs/thumb-366.jpg": require("../assets/offline-web/thumbs/thumb-366.jpg"),
   "thumbs/thumb-367.jpg": require("../assets/offline-web/thumbs/thumb-367.jpg"),
   "thumbs/thumb-368.jpg": require("../assets/offline-web/thumbs/thumb-368.jpg"),
-  "pages.json": require("../assets/offline-web/pages.json"),
-  "search-index.json": require("../assets/offline-web/search-index.json"),
 };
 
 module.exports = {

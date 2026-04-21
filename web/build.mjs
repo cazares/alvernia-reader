@@ -482,6 +482,8 @@ const scoreThemes = (rawText) => {
 
 // ─── Enrich songIndex with titles + themes + keys + intro ────────────────────
 
+const songSearchIndex = {};
+
 for (let i = 0; i < songIndex.length; i += 1) {
   const entry = songIndex[i];
   const nextEntry = songIndex[i + 1] || null;
@@ -495,6 +497,8 @@ for (let i = 0; i < songIndex.length; i += 1) {
   entry.title = TITLE_OVERRIDES[entry.song] || extractTitle(firstPageText) || null;
   entry.themes = scoreThemes(firstPageText);
   entry.lyrics = extractLyrics(songPages.join("\n"));
+  // For native in-app search we keep the full OCR blob per song.
+  songSearchIndex[String(entry.song)] = songText;
 
   // Detect key from all chord lines in the song
   const allChords = extractChordsFromText(songText);
@@ -538,6 +542,14 @@ fs.writeFileSync(
   path.join(distDir, "pages.json"),
   JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex }),
 );
+
+// Used by the native reader for fast title lookups without pulling the full songIndex.
+const songTitles = {};
+for (const entry of songIndex) {
+  if (entry?.song && entry?.title) songTitles[String(entry.song)] = entry.title;
+}
+fs.writeFileSync(path.join(distDir, "song-titles.json"), JSON.stringify(songTitles));
+fs.writeFileSync(path.join(distDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
 
 // Inject page manifest and search index into HTML for .webarchive compatibility
 const pagesJson = JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex });
