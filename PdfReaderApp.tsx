@@ -664,6 +664,7 @@ export default function App() {
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
+  const pendingSyncPageRef = useRef<number | null>(null);
   const searchAccessoryId = "director-search-accessory";
   const syncAvailable = isNearbyDirectorSyncAvailable();
   const appResetKeyRef = useRef(0);
@@ -857,6 +858,19 @@ export default function App() {
     return () => { s1.remove(); s2.remove(); s3.remove(); s4.remove(); };
   }, []);
 
+  const goToPage = useCallback((page: number) => {
+    const clamped = Math.max(1, Math.min(page, totalPages));
+    currentPageRef.current = clamped;
+    listRef.current?.scrollToIndex({ index: clamped - 1, animated: false });
+  }, [totalPages]);
+
+  useEffect(() => {
+    if (pendingSyncPageRef.current === null) return;
+    const page = pendingSyncPageRef.current;
+    pendingSyncPageRef.current = null;
+    setTimeout(() => goToPage(page), 60);
+  }, [activeBookId, goToPage, mode, totalPages]);
+
   // Keep ref in sync for use inside event callbacks
   useEffect(() => { syncRoleRef.current = syncRole; }, [syncRole]);
 
@@ -865,7 +879,25 @@ export default function App() {
     if (!syncAvailable) return;
     const sub = addNearbyDirectorSyncListener((event: any) => {
       if (event.type === "page" && typeof event.page === "number") {
-        // Follower: jump to director's page
+        const incomingMode: AppMode | null =
+          event.mode === "standard" || event.mode === "nonStandard" ? event.mode : null;
+        const incomingBookId: BookId | null =
+          incomingMode === "standard"
+            ? "standard"
+            : incomingMode === "nonStandard" && NON_STANDARD_BOOK_IDS.includes(event.bookId)
+              ? event.bookId
+              : null;
+
+        if (incomingMode && incomingBookId && (incomingMode !== mode || incomingBookId !== activeBookId)) {
+          pendingSyncPageRef.current = event.page;
+          setMode(incomingMode);
+          setActiveBookId(incomingBookId);
+          AsyncStorage.multiSet([
+            [STORAGE_KEYS.mode, incomingMode],
+            [STORAGE_KEYS.activeBookId, incomingBookId],
+          ]).catch(() => {});
+          return;
+        }
         goToPage(event.page);
       } else if (event.type === "error" && event.code === "DIRECTOR_CONFLICT") {
         // A newer director took over — Swift already cleaned up transport.
@@ -882,8 +914,7 @@ export default function App() {
       }
     });
     return () => sub.remove();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncAvailable]);
+  }, [activeBookId, goToPage, mode, syncAvailable]);
 
   // Bootstrap sync role once nearby sync is available.
   // Brau MASTER should become director automatically; everyone else starts as follower.
@@ -923,12 +954,6 @@ export default function App() {
       stopNearbyDirectorSync().catch(() => {});
     };
   }, [syncAvailable]);
-
-  const goToPage = useCallback((page: number) => {
-    const clamped = Math.max(1, Math.min(page, totalPages));
-    currentPageRef.current = clamped;
-    listRef.current?.scrollToIndex({ index: clamped - 1, animated: false });
-  }, [totalPages]);
 
   // Restore last page when entering a non-standard book (per-book saved state).
   useEffect(() => {
@@ -1321,7 +1346,7 @@ export default function App() {
       }
       // Director broadcasts page changes to all followers
       if (syncRole === "director") {
-        sendNearbyDirectorPageUpdate(page, totalPages).catch(() => {});
+        sendNearbyDirectorPageUpdate(page, totalPages, { mode, bookId: activeBookId }).catch(() => {});
       }
     },
     [syncRole, mode, activeBookId, totalPages],

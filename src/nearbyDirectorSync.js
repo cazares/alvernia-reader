@@ -26,11 +26,16 @@ export const stopNearbyDirectorSync = async () => {
   return nativeModule.stop();
 };
 
-export const sendNearbyDirectorPageUpdate = async (page, totalPages = 0) => {
+export const sendNearbyDirectorPageUpdate = async (page, totalPages = 0, context = {}) => {
   if (!isNearbyDirectorSyncAvailable()) {
     return null;
   }
-  return nativeModule.sendPageUpdate(page, totalPages);
+  return nativeModule.sendPageUpdate(
+    page,
+    totalPages,
+    String(context.mode || ""),
+    String(context.bookId || ""),
+  );
 };
 
 export const addNearbyDirectorSyncListener = (listener) => {
