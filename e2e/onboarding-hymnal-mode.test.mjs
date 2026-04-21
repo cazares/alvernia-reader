@@ -15,7 +15,9 @@ test("onboarding modal exists with required Spanish strings", () => {
 
 test("allowlist uses explicit device names and no city gate", () => {
   assert.match(SOURCE, /const DEVICE_ALLOWLIST = new Set/);
-  assert.match(SOURCE, /Platform\.OS === "ios" && Platform\.isPad && DEVICE_ALLOWLIST\.has\(normalizedName\)/);
+  assert.match(SOURCE, /Platform\.OS === "ios" && Platform\.isPad && DEVICE_ALLOWLIST\.has\(deviceName\)/);
+  assert.doesNotMatch(SOURCE, /normalizeText\(name\)/);
+  assert.doesNotMatch(SOURCE, /normalizeText\(rawName \|\| ""\)/);
   assert.match(SOURCE, /Brau 3 🎶 😎/);
   assert.match(SOURCE, /Brau MASTER/);
   assert.match(SOURCE, /Ipad 2 Caty y Raul Leal/);

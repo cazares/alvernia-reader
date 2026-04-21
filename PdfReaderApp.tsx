@@ -73,7 +73,7 @@ const DEVICE_ALLOWLIST = new Set(
     "iPad de Adrian",
     "iPad de Braulio",
     "mPad",
-  ].map((name) => normalizeText(name)),
+  ],
 );
 
 const SONG_TO_PAGE = new Map<number, number>(
@@ -774,15 +774,15 @@ export default function App() {
     onboardingSubmittingRef.current = true;
     try {
       const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
-      const normalizedName = normalizeText(rawName || "");
-      const standard = Platform.OS === "ios" && Platform.isPad && DEVICE_ALLOWLIST.has(normalizedName);
+      const deviceName = String(rawName || "").trim();
+      const standard = Platform.OS === "ios" && Platform.isPad && DEVICE_ALLOWLIST.has(deviceName);
       const nextMode: AppMode = standard ? "standard" : "nonStandard";
       const nextBook: BookId = standard ? "standard" : "hymns-4";
-      setOnboardingDeviceName(rawName || "iPad");
+      setOnboardingDeviceName(deviceName || "iPad");
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.onboardingComplete, "1"],
-        [STORAGE_KEYS.onboardingState, rawName || "iPad"],
-        [STORAGE_KEYS.onboardingCity, rawName || "iPad"],
+        [STORAGE_KEYS.onboardingState, deviceName || "iPad"],
+        [STORAGE_KEYS.onboardingCity, deviceName || "iPad"],
         [STORAGE_KEYS.mode, nextMode],
         [STORAGE_KEYS.activeBookId, nextBook],
       ]);
