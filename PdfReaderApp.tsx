@@ -76,6 +76,9 @@ const DEVICE_ALLOWLIST = new Set(
   ],
 );
 
+const isAllowlistedStandardDevice = (deviceName: string): boolean =>
+  Platform.OS === "ios" && Platform.isPad && DEVICE_ALLOWLIST.has(String(deviceName || "").trim());
+
 const SONG_TO_PAGE = new Map<number, number>(
   ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]),
 );
@@ -611,6 +614,7 @@ export default function App() {
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [onboardingDeviceName, setOnboardingDeviceName] = useState("");
   const onboardingSubmittingRef = useRef(false);
+  const standardLockedRef = useRef(false);
   const [mode, setMode] = useState<AppMode>("standard");
   const [activeBookId, setActiveBookId] = useState<BookId>("standard");
   const [songModal, setSongModal] = useState(false);
@@ -696,6 +700,10 @@ export default function App() {
     let cancelled = false;
     const boot = async () => {
       try {
+        const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
+        if (cancelled) return;
+        standardLockedRef.current = isAllowlistedStandardDevice(String(rawName || "").trim());
+
         const done = await AsyncStorage.getItem(STORAGE_KEYS.onboardingComplete);
         if (cancelled) return;
         if (done === "1") {
@@ -709,9 +717,13 @@ export default function App() {
               setBooted(true);
               return;
             }
-            const nextMode: AppMode = storedMode === "nonStandard" ? "nonStandard" : "standard";
+            const nextMode: AppMode = standardLockedRef.current
+              ? "standard"
+              : storedMode === "nonStandard"
+                ? "nonStandard"
+                : "standard";
             let nextBook: BookId = "standard";
-            if (nextMode === "nonStandard") {
+            if (!standardLockedRef.current && nextMode === "nonStandard") {
               if (storedBook && NON_STANDARD_BOOK_IDS.includes(storedBook)) nextBook = storedBook;
               else nextBook = NON_STANDARD_BOOK_IDS[Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length)]!;
             }
@@ -775,7 +787,8 @@ export default function App() {
     try {
       const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
       const deviceName = String(rawName || "").trim();
-      const standard = Platform.OS === "ios" && Platform.isPad && DEVICE_ALLOWLIST.has(deviceName);
+      const standard = isAllowlistedStandardDevice(deviceName);
+      standardLockedRef.current = standard;
       const nextMode: AppMode = standard ? "standard" : "nonStandard";
       const nextBook: BookId = standard ? "standard" : "hymns-4";
       setOnboardingDeviceName(deviceName || "iPad");
@@ -854,6 +867,10 @@ export default function App() {
             : incomingMode === "nonStandard" && NON_STANDARD_BOOK_IDS.includes(event.bookId)
               ? event.bookId
               : null;
+
+        if (standardLockedRef.current && (incomingMode !== "standard" || incomingBookId !== "standard")) {
+          return;
+        }
 
         if (incomingMode && incomingBookId && (incomingMode !== mode || incomingBookId !== activeBookId)) {
           pendingSyncPageRef.current = event.page;
