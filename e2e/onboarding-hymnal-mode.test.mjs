@@ -67,6 +67,18 @@ test("reset code 744668486 performs a soft app reset before normal navigation", 
   assert.doesNotMatch(SOURCE, /trimmed === \"744668486\"[\s\S]{0,250}clearAllBookState/);
 });
 
+test("song modal uses IR A CANTO copy and full 10 digit choir codes", () => {
+  assert.match(SOURCE, /SONG_MODAL_INPUT_MAX_LENGTH = 10/);
+  assert.match(SOURCE, />IR A CANTO</);
+  assert.match(SOURCE, /placeholder=\"Número de canto\"/);
+  assert.match(SOURCE, /♪ Abrir Canto ♪/);
+  assert.match(SOURCE, /\[null, \"0\", \"⌫\"\]/);
+  assert.match(SOURCE, /songModalBackdrop/);
+  assert.match(SOURCE, /backKey/);
+  assert.doesNotMatch(SOURCE, /IR A CANCION/);
+  assert.doesNotMatch(SOURCE, /♪\s+Go/);
+});
+
 test("city onboarding storage failures stay inside the submit handler", () => {
   assert.match(SOURCE, /await AsyncStorage\.multiSet\(\[/);
   assert.match(SOURCE, /catch \{\n\s+Alert\.alert\(/);

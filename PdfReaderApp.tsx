@@ -471,7 +471,7 @@ function SongNumpad({
     ["1", "2", "3"],
     ["4", "5", "6"],
     ["7", "8", "9"],
-    ["⌫", "0", null],
+    [null, "0", "⌫"],
   ];
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const repeatDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -529,9 +529,11 @@ function SongNumpad({
                 key={ki}
                 style={[
                   numpadStyles.key,
+                  isBack && numpadStyles.backKey,
                   isGo && numpadStyles.goKey,
                   disabled && numpadStyles.goKeyDisabled,
                   pressedKey === key && numpadStyles.keyPressed,
+                  isBack && pressedKey === key && numpadStyles.backKeyPressed,
                   isGo && pressedKey === key && numpadStyles.goKeyPressed,
                 ]}
                 onPressIn={() => handlePressIn(key, isBack, disabled)}
@@ -582,6 +584,14 @@ const numpadStyles = StyleSheet.create({
   },
   keyPressed: {
     backgroundColor: "#9CA3AF",
+  },
+  backKey: {
+    backgroundColor: "#E8F2FF",
+    borderWidth: 2,
+    borderColor: "#0A84FF",
+  },
+  backKeyPressed: {
+    backgroundColor: "#BBD7FF",
   },
   emptyKey: {
     flex: 1,
@@ -2039,17 +2049,17 @@ export default function App() {
       {/* ── Song navigation modal ── */}
       <Modal visible={songModal} transparent animationType="fade" onRequestClose={closeSongModal} statusBarTranslucent>
         <TouchableWithoutFeedback onPress={closeSongModal}>
-          <View style={styles.modalBackdrop}>
+          <View style={styles.songModalBackdrop}>
             <TouchableWithoutFeedback>
-              <View style={[styles.inputCard, { top: cardTop }]}>
-                <Text style={styles.songInputLabel}>IR A CANCION</Text>
+              <View style={styles.songInputCard}>
+                <Text style={styles.songInputLabel}>IR A CANTO</Text>
                 <TextInput
                   ref={inputRef}
                   style={styles.songInput}
                   value={songInput}
                   onChangeText={(t) => setSongInput(t.replace(/[^0-9]/g, ""))}
                   onSubmitEditing={() => { handleSongSubmit().catch(() => {}); }}
-                  placeholder="Número de canción"
+                  placeholder="Número de canto"
                   placeholderTextColor="rgba(0,0,0,0.35)"
                   keyboardType="number-pad"
                   returnKeyType="go"
@@ -2071,7 +2081,7 @@ export default function App() {
                     activeOpacity={0.7}
                     disabled={!songInput}
                   >
-                    <Text style={styles.songGoText}>♪  Go</Text>
+                    <Text style={styles.songGoText}>♪ Abrir Canto ♪</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.songCancelBtn} onPress={closeSongModal} activeOpacity={0.7}>
                     <Text style={styles.songCancelText}>Cancelar</Text>
@@ -2313,12 +2323,32 @@ const styles = StyleSheet.create({
   },
 
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
+  songModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
   inputCard: {
     position: "absolute",
     left: 32,
     right: 32,
     maxWidth: 460,
     alignSelf: "center",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+    gap: 8,
+  },
+  songInputCard: {
+    width: "100%",
+    maxWidth: 460,
     backgroundColor: "#fff",
     borderRadius: 16,
     padding: 20,
@@ -2378,20 +2408,20 @@ const styles = StyleSheet.create({
   goText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   songActionButtons: { gap: 10, marginTop: 8 },
   songGoBtn: {
-    paddingVertical: 18,
+    paddingVertical: 27,
     borderRadius: 12,
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#0A84FF",
     alignItems: "center",
   },
   songGoBtnDisabled: { backgroundColor: "#9CA3AF" },
-  songGoText: { color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
+  songGoText: { color: "#FFFFFF", fontSize: 27, fontWeight: "800", textAlign: "center" },
   songCancelBtn: {
-    paddingVertical: 18,
+    paddingVertical: 27,
     borderRadius: 12,
     backgroundColor: "#f0f0f0",
     alignItems: "center",
   },
-  songCancelText: { color: "#555", fontSize: 24, fontWeight: "700" },
+  songCancelText: { color: "#555", fontSize: 27, fontWeight: "700" },
   reconnectBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.62)",
