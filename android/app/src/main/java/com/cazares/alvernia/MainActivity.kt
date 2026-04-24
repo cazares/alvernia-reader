@@ -1,4 +1,4 @@
-package com.cazares.alverniareader
+package com.cazares.alvernia
 
 import android.os.Build
 import android.os.Bundle

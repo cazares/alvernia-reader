@@ -2,8 +2,6 @@ import Expo
 import React
 import ReactAppDependencyProvider
 
-private let debugMetroHost = "192.168.1.197:8081"
-
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
   var window: UIWindow?
@@ -22,7 +20,6 @@ public class AppDelegate: ExpoAppDelegate {
     reactNativeDelegate = delegate
     reactNativeFactory = factory
     bindReactNativeFactory(factory)
-    UIApplication.shared.isIdleTimerDisabled = true
 
 #if os(iOS) || os(tvOS)
     window = UIWindow(frame: UIScreen.main.bounds)
@@ -65,24 +62,7 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
-    if let embeddedBundleURL = Bundle.main.url(forResource: "main", withExtension: "jsbundle") {
-      return embeddedBundleURL
-    }
-
-    if let bundleURL = RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: ".expo/.virtual-metro-entry") {
-      return bundleURL
-    }
-
-    return RCTBundleURLProvider.jsBundleURL(
-      forBundleRoot: ".expo/.virtual-metro-entry",
-      packagerHost: debugMetroHost,
-      packagerScheme: "http",
-      enableDev: true,
-      enableMinification: false,
-      inlineSourceMap: false,
-      modulesOnly: false,
-      runModule: true
-    )
+    return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: ".expo/.virtual-metro-entry")
 #else
     return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif

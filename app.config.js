@@ -32,9 +32,9 @@ module.exports = ({ config }) => {
     runtimeVersion: baseVersion,
     newArchEnabled: false,
     platforms: ["ios", "android"],
-    icon: "./assets/icon.png",
+    icon: "./assets/03_icon_1024x1024.png",
     splash: {
-      image: "./assets/splash.png",
+      image: "./assets/04_splash_1668x2388.png",
       resizeMode: "contain",
       backgroundColor: "#000000",
     },
