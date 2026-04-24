@@ -59,10 +59,22 @@ target 'SignoVivo' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+    # Fix Xcode 26 beta consteval incompatibilities in Folly and fmt
+    # 1. Patch fmt/base.h: force FMT_USE_CONSTEVAL=0 so consteval is never used
+    fmt_base = File.join(__dir__, "Pods/fmt/include/fmt/base.h")
+    if File.exist?(fmt_base)
+      File.chmod(0644, fmt_base)
+      content = File.read(fmt_base)
+      patched = content.gsub(/#\s*define FMT_USE_CONSTEVAL 1/, '#  define FMT_USE_CONSTEVAL 0')
+      File.write(fmt_base, patched) if patched != content
+    end
+    # 2. Override FOLLY_CONSTEVAL to constexpr via preprocessor define
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
-        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
-        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'FMT_CONSTEVAL='
+        defines = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+        defines = [defines] if defines.is_a?(String)
+        defines << 'FOLLY_CONSTEVAL=constexpr'
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defines
       end
     end
   end
