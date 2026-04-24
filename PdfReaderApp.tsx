@@ -82,7 +82,7 @@ const CHOIR_STANDARD_ACCESS = new Map<string, string>([
   ["83078840", "Hector y Adrian"],
 ]);
 
-const DIRECTOR_ACCESS_CODES = new Set(["8303130470", "8307197000", "1234"]);
+const DIRECTOR_ACCESS_CODES = new Set(["8303130470", "8307197000", "8771178844", "1234"]);
 
 const normalizeAccessCode = (value: string): string => String(value || "").replace(/[^0-9]/g, "");
 
