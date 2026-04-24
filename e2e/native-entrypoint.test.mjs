@@ -67,6 +67,13 @@ test("iOS app keeps exempt-encryption declaration and nearby sync permissions", 
   assert.match(plistSource, /<key>LSMinimumSystemVersion<\/key>\s*<string>15\.1<\/string>/);
 });
 
+test("iOS app supports upside-down orientation on every device class", () => {
+  const plistSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "Info.plist"), "utf8");
+  assert.match(plistSource, /UISupportedInterfaceOrientations/);
+  assert.match(plistSource, /UIInterfaceOrientationPortraitUpsideDown/);
+  assert.doesNotMatch(plistSource, /UISupportedInterfaceOrientations~ipad/);
+});
+
 test("metro bundles the offline html and bundle assets", () => {
   const source = fs.readFileSync(path.join(APP_ROOT, "metro.config.js"), "utf8");
   assert.match(source, /assetExts\.push\("html"\)/);

@@ -7,35 +7,51 @@ const APP_ROOT = path.resolve(new URL("..", import.meta.url).pathname);
 const SOURCE = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
 
 test("onboarding modal exists with required Spanish strings", () => {
-  assert.match(SOURCE, /Detectando tu iPad/);
-  assert.match(SOURCE, /Este build usará modo principal para los iPads autorizados y modo himnarios para el resto\./);
-  assert.match(SOURCE, /Dispositivo detectado:/);
-  assert.match(SOURCE, /Continuar/);
+  assert.match(SOURCE, /Código del coro/);
+  assert.match(SOURCE, /Ingresa tu número autorizado para entrar al modo principal\./);
+  assert.match(SOURCE, /Continuar como himnario/);
 });
 
-test("allowlist uses explicit device names and no city gate", () => {
-  assert.match(SOURCE, /const DEVICE_ALLOWLIST = new Set/);
-  assert.match(SOURCE, /const isAllowlistedStandardDevice = \(deviceName: string\): boolean =>/);
+test("standard mode uses explicit choir codes and no city or device gate", () => {
+  assert.match(SOURCE, /const CHOIR_STANDARD_ACCESS = new Map/);
+  assert.match(SOURCE, /const normalizeAccessCode = \(value: string\): string =>/);
   assert.match(SOURCE, /const standardLockedRef = useRef\(false\);/);
-  assert.match(SOURCE, /Platform\.OS === "ios" && Platform\.isPad && DEVICE_ALLOWLIST\.has\(String\(deviceName \|\| ""\)\.trim\(\)\)/);
-  assert.doesNotMatch(SOURCE, /normalizeText\(name\)/);
-  assert.doesNotMatch(SOURCE, /normalizeText\(rawName \|\| ""\)/);
-  assert.match(SOURCE, /Brau 3 🎶 😎/);
-  assert.match(SOURCE, /Brau MASTER/);
-  assert.match(SOURCE, /Ipad 2 Caty y Raul Leal/);
-  assert.match(SOURCE, /Ipad 2 Rita y Alfredo Varela/);
-  assert.match(SOURCE, /iPad de Adrian/);
-  assert.match(SOURCE, /iPad de Braulio/);
-  assert.match(SOURCE, /mPad/);
+  assert.match(SOURCE, /\["83078840", "Hector y Adrian"\]/);
+  assert.match(SOURCE, /\["8303130470", "Braulio \(Original\)"\]/);
+  const forbiddenCode = "830" + "7343376";
+  assert.equal(SOURCE.includes(forbiddenCode), false);
+  assert.doesNotMatch(SOURCE, /DEVICE_ALLOWLIST/);
+  assert.doesNotMatch(SOURCE, /isAllowlistedStandardDevice/);
+  assert.doesNotMatch(SOURCE, /Platform\.isPad/);
   assert.doesNotMatch(SOURCE, /isDelRioMatch/);
   assert.doesNotMatch(SOURCE, /setOnboardingState/);
   assert.doesNotMatch(SOURCE, /setOnboardingCity/);
 });
 
-test("allowlisted iPads stay pinned to standard mode", () => {
-  assert.match(SOURCE, /standardLockedRef\.current = isAllowlistedStandardDevice\(String\(rawName \|\| ""\)\.trim\(\)\);/);
-  assert.match(SOURCE, /const nextMode: AppMode = standardLockedRef\.current\s+\?\s+"standard"\s+:\s+storedMode === "nonStandard"/);
+test("choir-code devices stay pinned to standard mode", () => {
+  assert.match(SOURCE, /standardLockedRef\.current = storedMode === "standard" && !!storedAccessName;/);
+  assert.match(SOURCE, /await AsyncStorage\.multiSet\(\[\s+\[STORAGE_KEYS\.onboardingComplete, "1"\],\s+\[STORAGE_KEYS\.standardAccessName, name\],\s+\[STORAGE_KEYS\.mode, "standard"\]/s);
   assert.match(SOURCE, /if \(\s*standardLockedRef\.current && \(incomingMode !== "standard" \|\| incomingBookId !== "standard"\)\)\s*{\s*return;\s*}/s);
+});
+
+test("director mode cannot be unlocked by the internal session code", () => {
+  assert.match(SOURCE, /const DIRECTOR_ACCESS_CODES = new Set\(\["8303130470", "8307197000"\]\);/);
+  assert.match(SOURCE, /if \(!DIRECTOR_ACCESS_CODES\.has\(normalizeAccessCode\(codeInput\)\)\)/);
+  assert.doesNotMatch(SOURCE, /DIRECTOR_ACCESS_CODES = new Set\(\[[^\]]*"1234"/);
+});
+
+test("followers have a reconnect flow with third-press restart prompt", () => {
+  assert.match(SOURCE, /syncRole === "follower" && !searchVisible && !onboardingVisible/);
+  assert.match(SOURCE, /handleReconnectPress/);
+  assert.match(SOURCE, /now - t <= 25_000/);
+  assert.match(SOURCE, /reconnectPressesRef\.current\.length >= 3/);
+  assert.match(SOURCE, /¿Quieres reiniciar la app\?/);
+  assert.match(SOURCE, /Verificando Bluetooth, Wi-Fi local y la conexión con el director\./);
+});
+
+test("the reader keeps the screen awake while open", () => {
+  assert.match(SOURCE, /import \{ useKeepAwake \} from "expo-keep-awake"/);
+  assert.match(SOURCE, /useKeepAwake\("signovivo-reader"\)/);
 });
 
 test("non-standard build removes the IR A LIBRO section entirely", () => {

@@ -91,27 +91,23 @@ https://miguelengineer.com/signovivo/privacy-policy.html
 ## Notas para el revisor de App Store (App Review Notes)
 
 ACCESO INICIAL
-Al primer lanzamiento, la app solicita el estado y la ciudad de la iglesia.
-→ Estado: dejar en "Texas" (selección por defecto)
-→ Ciudad: ingresar cualquier ciudad (p. ej., San Antonio)
-→ Tocar: Continuar
-Esto da acceso a todas las funciones de la app.
+Al primer lanzamiento, la app solicita un código del coro.
+→ Dejar vacío y tocar "Continuar como himnario" para probar el modo himnario.
+→ Ingresar un código autorizado del coro para probar el modo principal.
 
 PROBAR EL MODO DIRECTOR (en un solo dispositivo)
-1. Tocar el ícono de sincronización (círculo con ondas) en la esquina superior derecha.
-2. Seleccionar "Director".
-3. Ingresar el código de sesión: 1234
-4. El punto azul pulsante confirma que el dispositivo es Director.
-5. Navegar páginas con deslizamiento horizontal — en un entorno real, los Seguidores seguirían automáticamente.
+1. Mantener presionado el botón musical en la esquina superior derecha.
+2. Ingresar un código autorizado de director.
+3. El punto azul pulsante confirma que el dispositivo es Director.
+4. Navegar páginas con deslizamiento horizontal — en un entorno real, los Seguidores seguirían automáticamente.
 
 PROBAR EL MODO SEGUIDOR
-1. Tocar el ícono de sincronización.
-2. Seleccionar "Seguidor" — se conecta automáticamente al Director en la red local.
-3. El punto verde pulsante confirma la conexión.
+1. Abrir la app en otro dispositivo.
+2. Se conecta automáticamente como Seguidor en la red local.
+3. El punto verde pulsante confirma la conexión. El botón superior izquierdo fuerza un intento de reconexión local.
 
 NOTAS TÉCNICAS
 - La app no requiere cuenta de usuario ni inicio de sesión.
 - Bluetooth y red local (Bonjour) se usan exclusivamente para sincronización de páginas entre dispositivos en el mismo espacio. No se transmite ningún dato a internet.
 - No se recopilan datos personales ni de uso.
-- El código 1234 es un identificador de sesión fijo, no una contraseña de seguridad de datos.
 - ITSAppUsesNonExemptEncryption = false.

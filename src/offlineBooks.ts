@@ -109,6 +109,7 @@ export const STORAGE_KEYS = {
   onboardingComplete: "sv.onboarding.complete",
   onboardingState: "sv.onboarding.state",
   onboardingCity: "sv.onboarding.city",
+  standardAccessName: "sv.standard.accessName",
   mode: "sv.mode",
   activeBookId: "sv.book.active",
   // per-book saved position
@@ -121,6 +122,7 @@ export const clearAllBookState = async () => {
     k === STORAGE_KEYS.onboardingComplete ||
     k === STORAGE_KEYS.onboardingState ||
     k === STORAGE_KEYS.onboardingCity ||
+    k === STORAGE_KEYS.standardAccessName ||
     k === STORAGE_KEYS.mode ||
     k === STORAGE_KEYS.activeBookId ||
     k.startsWith(STORAGE_KEYS.lastPagePrefix),
