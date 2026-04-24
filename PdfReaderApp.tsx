@@ -586,12 +586,13 @@ const numpadStyles = StyleSheet.create({
     backgroundColor: "#9CA3AF",
   },
   backKey: {
-    backgroundColor: "#E8F2FF",
-    borderWidth: 2,
-    borderColor: "#0A84FF",
+    // Subtle distinction from number keys (no bright blue / no heavy border).
+    backgroundColor: "#E5E7EB",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
   },
   backKeyPressed: {
-    backgroundColor: "#BBD7FF",
+    backgroundColor: "#D1D5DB",
   },
   emptyKey: {
     flex: 1,
@@ -1098,14 +1099,18 @@ export default function App() {
     }
   }, [bootstrapNearbySyncRole, clearVolatileRuntimeState, loadPersistedLaunchState]);
 
-  const confirmResetApp = useCallback(() => {
+  const confirmResetApp = useCallback((source: "manual" | "reconnect" = "manual") => {
     if (isResettingApp) return;
+    const title = source === "reconnect" ? "Volver a conectar" : "Restablecer app";
+    const message = source === "reconnect"
+      ? "Si todavia no conecta, podemos restablecer la app ahora mismo. Esto vuelve a empezar la conexion sin borrar cantos ni ajustes."
+      : "Esto vuelve a empezar la app y la conexion desde cero. Tus cantos, ajustes y contenido no se borran.";
     Alert.alert(
-      "Reset App?",
-      "This will restart the app and reconnect from a fresh state. Settings and hymnal content will not be affected.",
+      title,
+      message,
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Reset", onPress: () => { performSoftAppReset().catch(() => {}); } },
+        { text: "Cancelar", style: "cancel" },
+        { text: source === "reconnect" ? "Restablecer ahora" : "Restablecer app", onPress: () => { performSoftAppReset().catch(() => {}); } },
       ],
     );
   }, [isResettingApp, performSoftAppReset]);
@@ -1191,26 +1196,6 @@ export default function App() {
     );
   }, []);
 
-  const requestAppRestart = useCallback(() => {
-    Alert.alert(
-      "Reiniciar app",
-      "¿Quieres reiniciar la app? Normalmente resuelve la mayoría de problemas de conexión.",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Reiniciar",
-          onPress: () => {
-            const reload = NativeModules.DevSettings?.reload;
-            if (typeof reload === "function") reload();
-            else {
-              Alert.alert("Reinicia manualmente", "Cierra SignoVivo y vuelve a abrirlo.");
-            }
-          },
-        },
-      ],
-    );
-  }, []);
-
   const handleReconnectPress = useCallback(async () => {
     if (syncRoleRef.current === "director") return;
     const now = Date.now();
@@ -1219,7 +1204,7 @@ export default function App() {
 
     if (reconnectPressesRef.current.length >= 3) {
       reconnectPressesRef.current = [];
-      requestAppRestart();
+      confirmResetApp("reconnect");
       return;
     }
 
@@ -1247,7 +1232,7 @@ export default function App() {
         showConnectivityHelp();
       }
     }
-  }, [requestAppRestart, showConnectivityHelp, syncAvailable]);
+  }, [confirmResetApp, showConnectivityHelp, syncAvailable]);
 
   const cancelReconnect = useCallback(() => {
     reconnectCancelledRef.current = true;
@@ -2146,11 +2131,11 @@ export default function App() {
                 <View style={styles.resetAppDivider} />
                 <TouchableOpacity
                   style={[styles.resetAppButton, isResettingApp && styles.resetAppButtonDisabled]}
-                  onPress={confirmResetApp}
+                  onPress={() => { confirmResetApp(); }}
                   activeOpacity={0.7}
                   disabled={isResettingApp}
                 >
-                  <Text style={styles.resetAppButtonText}>{isResettingApp ? "Resetting..." : "Reset App"}</Text>
+                  <Text style={styles.resetAppButtonText}>{isResettingApp ? "Restableciendo..." : "Restablecer app"}</Text>
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
@@ -2177,14 +2162,14 @@ export default function App() {
         <View style={styles.resettingBackdrop}>
           <View style={styles.resettingCard}>
             <ActivityIndicator size="large" color="#0A84FF" />
-            <Text style={styles.resettingTitle}>Resetting...</Text>
+            <Text style={styles.resettingTitle}>Restableciendo...</Text>
           </View>
         </View>
       </Modal>
 
       {resetCompleteVisible && (
         <View style={styles.resetCompleteBanner} pointerEvents="none">
-          <Text style={styles.resetCompleteText}>App reset complete</Text>
+          <Text style={styles.resetCompleteText}>Listo</Text>
         </View>
       )}
 

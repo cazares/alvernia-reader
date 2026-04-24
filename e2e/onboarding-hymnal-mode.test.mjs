@@ -40,13 +40,17 @@ test("director mode cannot be unlocked by the internal session code", () => {
   assert.doesNotMatch(SOURCE, /DIRECTOR_ACCESS_CODES = new Set\(\[[^\]]*"1234"/);
 });
 
-test("followers have a reconnect flow with third-press restart prompt", () => {
+test("followers can reach the in-app reset flow from the third refresh press", () => {
   assert.match(SOURCE, /syncRole === "follower" && !searchVisible && !onboardingVisible/);
   assert.match(SOURCE, /handleReconnectPress/);
   assert.match(SOURCE, /now - t <= 25_000/);
   assert.match(SOURCE, /reconnectPressesRef\.current\.length >= 3/);
-  assert.match(SOURCE, /¿Quieres reiniciar la app\?/);
+  assert.match(SOURCE, /confirmResetApp\("reconnect"\)/);
+  assert.match(SOURCE, /Si todavia no conecta, podemos restablecer la app ahora mismo\./);
+  assert.match(SOURCE, /Esto vuelve a empezar la conexion sin borrar cantos ni ajustes\./);
   assert.match(SOURCE, /Verificando Bluetooth, Wi-Fi local y la conexión con el director\./);
+  assert.doesNotMatch(SOURCE, /¿Quieres reiniciar la app\?/);
+  assert.doesNotMatch(SOURCE, /Reinicia manualmente/);
 });
 
 test("the reader keeps the screen awake while open", () => {

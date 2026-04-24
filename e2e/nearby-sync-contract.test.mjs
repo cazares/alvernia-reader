@@ -31,12 +31,15 @@ test("followers switch to the director book before applying synced pages", () =>
 });
 
 test("soft app reset clears native sync transport and guards stale callbacks", () => {
-  assert.match(appSource, /Reset App\?/);
-  assert.match(appSource, /This will restart the app and reconnect from a fresh state\. Settings and hymnal content will not be affected\./);
+  assert.match(appSource, /Restablecer app/);
+  assert.match(appSource, /Esto vuelve a empezar la app y la conexion desde cero\./);
+  assert.match(appSource, /Tus cantos, ajustes y contenido no se borran\./);
   assert.match(appSource, /performSoftAppReset/);
   assert.match(appSource, /resetNearbyDirectorSync/);
   assert.match(appSource, /setAppResetKey\(\(v\) => v \+ 1\)/);
   assert.match(appSource, /if \(appResettingRef\.current\) return/);
+  assert.match(appSource, /Restableciendo\.\.\./);
+  assert.match(appSource, /Listo/);
   assert.match(jsSyncSource, /resetNearbyDirectorSync/);
   assert.match(jsSyncSource, /nativeModule\.resetForAppReset/);
   assert.match(dtsSyncSource, /resetNearbyDirectorSync/);
