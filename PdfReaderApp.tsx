@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
@@ -20,7 +21,6 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
-  Platform,
   type NativeSyntheticEvent,
   type KeyboardEvent,
   type ListRenderItemInfo,
@@ -29,6 +29,7 @@ import {
   type ViewToken,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { useKeepAwake } from "expo-keep-awake";
 
 import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
@@ -64,20 +65,24 @@ const normalizeDirectorDeviceName = (value: string): string => {
   return v.toLowerCase().replace(/[^a-z0-9]/g, "");
 };
 
-const DEVICE_ALLOWLIST = new Set(
-  [
-    "Brau 3 🎶 😎",
-    "Brau MASTER",
-    "Ipad 2 Caty y Raul Leal",
-    "Ipad 2 Rita y Alfredo Varela",
-    "iPad de Adrian",
-    "iPad de Braulio",
-    "mPad",
-  ],
-);
+const CHOIR_STANDARD_ACCESS = new Map<string, string>([
+  ["8304699366", "Celia"],
+  ["8305156458", "Yvonne"],
+  ["8304699781", "Laura B"],
+  ["8302128096", "Fredy"],
+  ["8303130470", "Braulio (Original)"],
+  ["8307197000", "Braulio (Personal)"],
+  ["8307340943", "Catalina"],
+  ["8307193848", "Rita"],
+  ["8304883005", "Marisol"],
+  ["8307655103", "Michelle"],
+  ["8307197547", "Jesus"],
+  ["83078840", "Hector y Adrian"],
+]);
 
-const isAllowlistedStandardDevice = (deviceName: string): boolean =>
-  Platform.OS === "ios" && Platform.isPad && DEVICE_ALLOWLIST.has(String(deviceName || "").trim());
+const DIRECTOR_ACCESS_CODES = new Set(["8303130470", "8307197000"]);
+
+const normalizeAccessCode = (value: string): string => String(value || "").replace(/[^0-9]/g, "");
 
 const SONG_TO_PAGE = new Map<number, number>(
   ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]),
@@ -464,7 +469,7 @@ function SongNumpad({
     ["1", "2", "3"],
     ["4", "5", "6"],
     ["7", "8", "9"],
-    ["⌫", "0", "Ir"],
+    ["⌫", "0", null],
   ];
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const repeatDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -514,7 +519,7 @@ function SongNumpad({
             if (key === null) {
               return <View key={ki} style={numpadStyles.emptyKey} />;
             }
-            const isGo = key === "Ir";
+            const isGo = key === "Go";
             const isBack = key === "⌫";
             const disabled = isGo && goDisabled;
             return (
@@ -551,17 +556,19 @@ function SongNumpad({
 const numpadStyles = StyleSheet.create({
   grid: {
     marginTop: 16,
-    gap: 10,
+    gap: 12,
   },
   row: {
     flexDirection: "row",
-    gap: 10,
+    gap: 12,
     justifyContent: "center",
   },
   key: {
-    width: 72,
-    height: 52,
-    borderRadius: 10,
+    flex: 1,
+    maxWidth: 108,
+    minWidth: 72,
+    height: 78,
+    borderRadius: 12,
     backgroundColor: "#D1D5DB",
     alignItems: "center",
     justifyContent: "center",
@@ -575,8 +582,10 @@ const numpadStyles = StyleSheet.create({
     backgroundColor: "#9CA3AF",
   },
   emptyKey: {
-    width: 72,
-    height: 52,
+    flex: 1,
+    maxWidth: 108,
+    minWidth: 72,
+    height: 78,
   },
   goKey: {
     backgroundColor: "#3B82F6",
@@ -588,7 +597,7 @@ const numpadStyles = StyleSheet.create({
     backgroundColor: "#2563EB",
   },
   keyText: {
-    fontSize: 22,
+    fontSize: 33,
     fontWeight: "500",
     color: "#111827",
   },
@@ -603,6 +612,8 @@ const numpadStyles = StyleSheet.create({
 type SyncRole = "off" | "director" | "follower";
 
 export default function App() {
+  useKeepAwake("signovivo-reader");
+
   const listRef = useRef<FlatList>(null);
   const searchListRef = useRef<SectionList<any>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -612,9 +623,10 @@ export default function App() {
   const [dims, setDims] = useState(() => Dimensions.get("window"));
   const [booted, setBooted] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
-  const [onboardingDeviceName, setOnboardingDeviceName] = useState("");
+  const [onboardingCode, setOnboardingCode] = useState("");
   const onboardingSubmittingRef = useRef(false);
   const standardLockedRef = useRef(false);
+  const standardAccessNameRef = useRef<string | null>(null);
   const [mode, setMode] = useState<AppMode>("standard");
   const [activeBookId, setActiveBookId] = useState<BookId>("standard");
   const [songModal, setSongModal] = useState(false);
@@ -634,8 +646,12 @@ export default function App() {
   const [browseTab, setBrowseTab] = useState<"todas" | "recientes">("todas");
   const [showSatellite, setShowSatellite] = useState(false);
   const [isSyncBootstrapped, setIsSyncBootstrapped] = useState(false);
+  const [reconnectBusy, setReconnectBusy] = useState(false);
+  const [reconnectMessage, setReconnectMessage] = useState("");
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
   const lastFollowerNoticeRef = useRef(0);
+  const reconnectPressesRef = useRef<number[]>([]);
+  const reconnectCancelledRef = useRef(false);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
@@ -700,15 +716,12 @@ export default function App() {
     let cancelled = false;
     const boot = async () => {
       try {
-        const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
-        if (cancelled) return;
-        standardLockedRef.current = isAllowlistedStandardDevice(String(rawName || "").trim());
-
         const done = await AsyncStorage.getItem(STORAGE_KEYS.onboardingComplete);
         if (cancelled) return;
         if (done === "1") {
           const storedMode = (await AsyncStorage.getItem(STORAGE_KEYS.mode)) as AppMode | null;
           const storedBook = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
+          const storedAccessName = await AsyncStorage.getItem(STORAGE_KEYS.standardAccessName);
           if (!cancelled) {
             // Sad path: onboardingComplete can be written even if mode fails to persist (AsyncStorage partial write).
             // Don't silently default to standard; force onboarding again so the user gets the right mode + UI.
@@ -717,13 +730,11 @@ export default function App() {
               setBooted(true);
               return;
             }
-            const nextMode: AppMode = standardLockedRef.current
-              ? "standard"
-              : storedMode === "nonStandard"
-                ? "nonStandard"
-                : "standard";
+            standardLockedRef.current = storedMode === "standard" && !!storedAccessName;
+            standardAccessNameRef.current = storedAccessName || null;
+            const nextMode: AppMode = storedMode === "nonStandard" ? "nonStandard" : "standard";
             let nextBook: BookId = "standard";
-            if (!standardLockedRef.current && nextMode === "nonStandard") {
+            if (nextMode === "nonStandard") {
               if (storedBook && NON_STANDARD_BOOK_IDS.includes(storedBook)) nextBook = storedBook;
               else nextBook = NON_STANDARD_BOOK_IDS[Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length)]!;
             }
@@ -781,27 +792,55 @@ export default function App() {
     );
   }
 
+  const enableStandardMode = useCallback(async (name: string) => {
+    standardLockedRef.current = true;
+    standardAccessNameRef.current = name;
+    await AsyncStorage.multiSet([
+      [STORAGE_KEYS.onboardingComplete, "1"],
+      [STORAGE_KEYS.standardAccessName, name],
+      [STORAGE_KEYS.mode, "standard"],
+      [STORAGE_KEYS.activeBookId, "standard"],
+    ]);
+    setMode("standard");
+    setActiveBookId("standard");
+    setOnboardingVisible(false);
+    setSongModal(false);
+    currentPageRef.current = STANDARD_START_PAGE;
+    setTimeout(() => {
+      listRef.current?.scrollToIndex({ index: STANDARD_START_PAGE - 1, animated: false });
+    }, 60);
+  }, []);
+
+  const enableNonStandardMode = useCallback(async () => {
+    standardLockedRef.current = false;
+    standardAccessNameRef.current = null;
+    const nextBook: BookId = "hymns-4";
+    await AsyncStorage.multiSet([
+      [STORAGE_KEYS.onboardingComplete, "1"],
+      [STORAGE_KEYS.mode, "nonStandard"],
+      [STORAGE_KEYS.activeBookId, nextBook],
+    ]);
+    await AsyncStorage.removeItem(STORAGE_KEYS.standardAccessName);
+    setMode("nonStandard");
+    setActiveBookId(nextBook);
+    setOnboardingVisible(false);
+  }, []);
+
   const handleOnboardingContinue = useCallback(async () => {
     if (onboardingSubmittingRef.current) return;
     onboardingSubmittingRef.current = true;
     try {
-      const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
-      const deviceName = String(rawName || "").trim();
-      const standard = isAllowlistedStandardDevice(deviceName);
-      standardLockedRef.current = standard;
-      const nextMode: AppMode = standard ? "standard" : "nonStandard";
-      const nextBook: BookId = standard ? "standard" : "hymns-4";
-      setOnboardingDeviceName(deviceName || "iPad");
-      await AsyncStorage.multiSet([
-        [STORAGE_KEYS.onboardingComplete, "1"],
-        [STORAGE_KEYS.onboardingState, deviceName || "iPad"],
-        [STORAGE_KEYS.onboardingCity, deviceName || "iPad"],
-        [STORAGE_KEYS.mode, nextMode],
-        [STORAGE_KEYS.activeBookId, nextBook],
-      ]);
-      setMode(nextMode);
-      setActiveBookId(nextBook);
-      setOnboardingVisible(false);
+      const code = normalizeAccessCode(onboardingCode);
+      if (!code) {
+        await enableNonStandardMode();
+      } else {
+        const name = CHOIR_STANDARD_ACCESS.get(code);
+        if (!name) {
+          Alert.alert("Código no reconocido", "Revisa el número e intenta de nuevo, o continúa como himnario.");
+          return;
+        }
+        await enableStandardMode(name);
+      }
     } catch {
       Alert.alert(
         "No se pudo guardar",
@@ -810,7 +849,7 @@ export default function App() {
     } finally {
       onboardingSubmittingRef.current = false;
     }
-  }, []);
+  }, [enableNonStandardMode, enableStandardMode, onboardingCode]);
 
   // Orientation handling
   useEffect(() => {
@@ -999,11 +1038,16 @@ export default function App() {
       await performColdBootReset();
       return;
     }
+    const standardAccessName = CHOIR_STANDARD_ACCESS.get(normalizeAccessCode(trimmed));
+    if (standardAccessName) {
+      await enableStandardMode(standardAccessName);
+      return;
+    }
     const n = parseInt(trimmed, 10);
     if (n > 0) recentSongsRef.current = [n, ...recentSongsRef.current.filter(s => s !== n)].slice(0, 20);
     const page = resolveSongPage(trimmed, totalPages, bookSongToPage, bookSortedSongs as any);
     goToPage(page);
-  }, [songInput, goToPage, closeSongModal, totalPages, bookSongToPage, bookSortedSongs, performColdBootReset]);
+  }, [songInput, goToPage, closeSongModal, totalPages, bookSongToPage, bookSortedSongs, performColdBootReset, enableStandardMode]);
 
   const switchBook = useCallback(async (nextId: BookId) => {
     if (mode !== "nonStandard") return;
@@ -1031,7 +1075,7 @@ export default function App() {
   }, []);
 
   const handleBecomeDirector = useCallback(async () => {
-    if (codeInput !== DIRECTOR_SESSION) {
+    if (!DIRECTOR_ACCESS_CODES.has(normalizeAccessCode(codeInput))) {
       Alert.alert("Código incorrecto", "El código ingresado no es válido.");
       return;
     }
@@ -1059,6 +1103,78 @@ export default function App() {
       setSyncRole("follower");
     }
   }, [closeSyncModal]);
+
+  const showConnectivityHelp = useCallback(() => {
+    Alert.alert(
+      "Revisa la conexión",
+      "Activa Bluetooth y Wi-Fi, acepta permisos de red local si iOS los pide, y mantente cerca del director.",
+    );
+  }, []);
+
+  const requestAppRestart = useCallback(() => {
+    Alert.alert(
+      "Reiniciar app",
+      "¿Quieres reiniciar la app? Normalmente resuelve la mayoría de problemas de conexión.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Reiniciar",
+          onPress: () => {
+            const reload = NativeModules.DevSettings?.reload;
+            if (typeof reload === "function") reload();
+            else {
+              Alert.alert("Reinicia manualmente", "Cierra SignoVivo y vuelve a abrirlo.");
+            }
+          },
+        },
+      ],
+    );
+  }, []);
+
+  const handleReconnectPress = useCallback(async () => {
+    if (syncRoleRef.current === "director") return;
+    const now = Date.now();
+    reconnectPressesRef.current = reconnectPressesRef.current.filter((t) => now - t <= 25_000);
+    reconnectPressesRef.current.push(now);
+
+    if (reconnectPressesRef.current.length >= 3) {
+      reconnectPressesRef.current = [];
+      requestAppRestart();
+      return;
+    }
+
+    if (!syncAvailable) {
+      showConnectivityHelp();
+      return;
+    }
+
+    reconnectCancelledRef.current = false;
+    setReconnectMessage("Reconectando con el director...");
+    setReconnectBusy(true);
+    try {
+      await stopNearbyDirectorSync().catch(() => {});
+      if (reconnectCancelledRef.current) return;
+      await startNearbyFollower(DIRECTOR_SESSION);
+      if (reconnectCancelledRef.current) return;
+      setSyncRole("follower");
+      setReconnectMessage("Listo.");
+      setTimeout(() => {
+        if (!reconnectCancelledRef.current) setReconnectBusy(false);
+      }, 350);
+    } catch {
+      if (!reconnectCancelledRef.current) {
+        setReconnectBusy(false);
+        showConnectivityHelp();
+      }
+    }
+  }, [requestAppRestart, showConnectivityHelp, syncAvailable]);
+
+  const cancelReconnect = useCallback(() => {
+    reconnectCancelledRef.current = true;
+    setReconnectBusy(false);
+    setReconnectMessage("");
+    startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+  }, []);
 
   // Spotlight-style keyword search
   const openSearch = useCallback(() => {
@@ -1390,7 +1506,7 @@ export default function App() {
   }), [width]);
 
   const availableHeight = height - keyboardHeight;
-  const cardTop = Math.max(16, availableHeight / 2 - (mode === "nonStandard" ? 260 : 80));
+  const cardTop = Math.max(8, availableHeight / 2 - (songModal ? 340 : mode === "nonStandard" ? 260 : 80));
 
   if (!booted) {
     return <View style={styles.screen} />;
@@ -1403,15 +1519,25 @@ export default function App() {
       {onboardingVisible && (
         <View style={styles.cityOverlay}>
           <View style={styles.cityCard}>
-            <Text style={styles.cityQuestion}>Detectando tu iPad</Text>
+            <Text style={styles.cityQuestion}>Código del coro</Text>
             <Text style={styles.citySubcopy}>
-              Este build usará modo principal para los iPads autorizados y modo himnarios para el resto.
+              Ingresa tu número autorizado para entrar al modo principal.
             </Text>
-            <Text style={styles.citySubcopy}>
-              Dispositivo detectado: {onboardingDeviceName || "iPad"}
-            </Text>
+            <TextInput
+              style={styles.cityInput}
+              value={onboardingCode}
+              onChangeText={(t) => setOnboardingCode(normalizeAccessCode(t))}
+              onSubmitEditing={() => { handleOnboardingContinue().catch(() => {}); }}
+              placeholder="Número o código"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              keyboardType="number-pad"
+              returnKeyType="go"
+              maxLength={10}
+              secureTextEntry
+              selectTextOnFocus
+            />
             <TouchableOpacity style={styles.cityBtn} onPress={() => { handleOnboardingContinue().catch(() => {}); }} activeOpacity={0.8}>
-              <Text style={styles.cityBtnText}>Continuar</Text>
+              <Text style={styles.cityBtnText}>{onboardingCode ? "Entrar" : "Continuar como himnario"}</Text>
             </TouchableOpacity>
           </View>
 
@@ -1792,6 +1918,18 @@ export default function App() {
       })()}
 
       {/* Top-right button cluster */}
+      {syncRole === "follower" && !searchVisible && !onboardingVisible && (
+        <TouchableOpacity
+          style={styles.reconnectButton}
+          onPress={() => { handleReconnectPress().catch(() => {}); }}
+          activeOpacity={0.75}
+          hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+        >
+          <Text style={styles.reconnectIcon}>↻</Text>
+          <PulsingDot color="#4cff91" />
+        </TouchableOpacity>
+      )}
+
       <View style={styles.navCluster}>
         {/* Nav trigger — tap: song modal, long press: sync modal */}
         {(!searchVisible || syncRole !== "director") && (
@@ -1834,7 +1972,7 @@ export default function App() {
           <View style={styles.modalBackdrop}>
             <TouchableWithoutFeedback>
               <View style={[styles.inputCard, { top: cardTop }]}>
-                <Text style={styles.inputLabel}>Ir a canción</Text>
+                <Text style={styles.songInputLabel}>IR A CANCION</Text>
                 <TextInput
                   ref={inputRef}
                   style={styles.songInput}
@@ -1856,9 +1994,17 @@ export default function App() {
                   onGo={() => { handleSongSubmit().catch(() => {}); }}
                   goDisabled={!songInput}
                 />
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.cancelBtn} onPress={closeSongModal} activeOpacity={0.7}>
-                    <Text style={styles.cancelText}>Cancelar</Text>
+                <View style={styles.songActionButtons}>
+                  <TouchableOpacity
+                    style={[styles.songGoBtn, !songInput && styles.songGoBtnDisabled]}
+                    onPress={() => { handleSongSubmit().catch(() => {}); }}
+                    activeOpacity={0.7}
+                    disabled={!songInput}
+                  >
+                    <Text style={styles.songGoText}>♪  Go</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.songCancelBtn} onPress={closeSongModal} activeOpacity={0.7}>
+                    <Text style={styles.songCancelText}>Cancelar</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1899,7 +2045,7 @@ export default function App() {
                       placeholderTextColor="rgba(0,0,0,0.35)"
                       keyboardType="number-pad"
                       returnKeyType="go"
-                      maxLength={6}
+                      maxLength={10}
                       secureTextEntry
                       selectTextOnFocus
                     />
@@ -1921,6 +2067,20 @@ export default function App() {
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* ── Reconnect blocking overlay ── */}
+      <Modal visible={reconnectBusy} transparent animationType="fade" onRequestClose={cancelReconnect} statusBarTranslucent>
+        <View style={styles.reconnectBackdrop}>
+          <View style={styles.reconnectCard}>
+            <ActivityIndicator size="large" color="#1a1a2e" />
+            <Text style={styles.reconnectTitle}>{reconnectMessage || "Reconectando..."}</Text>
+            <Text style={styles.reconnectBody}>Verificando Bluetooth, Wi-Fi local y la conexión con el director.</Text>
+            <TouchableOpacity style={styles.reconnectCancelBtn} onPress={cancelReconnect} activeOpacity={0.75}>
+              <Text style={styles.reconnectCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
     </View>
@@ -1979,6 +2139,28 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+  },
+  reconnectButton: {
+    position: "absolute",
+    top: 1.25,
+    left: 1.25,
+    width: 96,
+    height: 96,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(26,26,46,0.38)",
+    borderRadius: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 7,
+  },
+  reconnectIcon: {
+    fontSize: 58,
+    color: "#fff",
+    lineHeight: 76,
+    fontWeight: "700",
   },
   navTriggerIcon: { fontSize: 54, color: "#fff", lineHeight: 76 },
   navTriggerArrow: { fontSize: 54, color: "#7ec8f7", lineHeight: 76, fontWeight: "700" },
@@ -2040,6 +2222,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 32,
     right: 32,
+    maxWidth: 460,
+    alignSelf: "center",
     backgroundColor: "#fff",
     borderRadius: 16,
     padding: 20,
@@ -2057,6 +2241,14 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
     marginBottom: 4,
+  },
+  songInputLabel: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#1a1a2e",
+    textTransform: "uppercase",
+    textAlign: "center",
+    lineHeight: 34,
   },
   syncHint: { fontSize: 13, color: "#666", marginBottom: 4 },
   syncStatusText: { fontSize: 17, fontWeight: "600", color: "#222", textAlign: "center", paddingVertical: 8 },
@@ -2089,6 +2281,62 @@ const styles = StyleSheet.create({
   },
   goBtnDisabled: { backgroundColor: "#bbb" },
   goText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  songActionButtons: { gap: 10, marginTop: 8 },
+  songGoBtn: {
+    paddingVertical: 18,
+    borderRadius: 12,
+    backgroundColor: "#1a1a2e",
+    alignItems: "center",
+  },
+  songGoBtnDisabled: { backgroundColor: "#9CA3AF" },
+  songGoText: { color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
+  songCancelBtn: {
+    paddingVertical: 18,
+    borderRadius: 12,
+    backgroundColor: "#f0f0f0",
+    alignItems: "center",
+  },
+  songCancelText: { color: "#555", fontSize: 24, fontWeight: "700" },
+  reconnectBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.62)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  reconnectCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 16,
+    backgroundColor: "#fff",
+    padding: 22,
+    alignItems: "center",
+    gap: 12,
+  },
+  reconnectTitle: {
+    color: "#111827",
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  reconnectBody: {
+    color: "#4B5563",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  reconnectCancelBtn: {
+    marginTop: 4,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+    backgroundColor: "#f0f0f0",
+  },
+  reconnectCancelText: {
+    color: "#555",
+    fontSize: 17,
+    fontWeight: "700",
+  },
 
   gridOverlay: {
     position: "absolute",
@@ -2436,6 +2684,19 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textAlign: "center",
     marginTop: -8,
+  },
+  cityInput: {
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 12,
+    color: "#FFFFFF",
+    fontSize: 28,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    textAlign: "center",
   },
   buildCorner: {
     position: "absolute",
