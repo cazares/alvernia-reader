@@ -26,6 +26,16 @@ export const stopNearbyDirectorSync = async () => {
   return nativeModule.stop();
 };
 
+export const resetNearbyDirectorSync = async () => {
+  if (!isNearbyDirectorSyncAvailable()) {
+    return null;
+  }
+  if (typeof nativeModule.resetForAppReset === "function") {
+    return nativeModule.resetForAppReset();
+  }
+  return nativeModule.stop();
+};
+
 export const sendNearbyDirectorPageUpdate = async (page, totalPages = 0, context = {}) => {
   if (!isNearbyDirectorSyncAvailable()) {
     return null;

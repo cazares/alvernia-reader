@@ -35,6 +35,7 @@ import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
   addNearbyDirectorSyncListener,
   isNearbyDirectorSyncAvailable,
+  resetNearbyDirectorSync,
   sendNearbyDirectorPageUpdate,
   startNearbyDirector,
   startNearbyFollower,
@@ -649,17 +650,21 @@ export default function App() {
   const [isSyncBootstrapped, setIsSyncBootstrapped] = useState(false);
   const [reconnectBusy, setReconnectBusy] = useState(false);
   const [reconnectMessage, setReconnectMessage] = useState("");
+  const [isResettingApp, setIsResettingApp] = useState(false);
+  const [resetCompleteVisible, setResetCompleteVisible] = useState(false);
+  const [appResetKey, setAppResetKey] = useState(0);
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
   const lastFollowerNoticeRef = useRef(0);
   const reconnectPressesRef = useRef<number[]>([]);
   const reconnectCancelledRef = useRef(false);
+  const appResettingRef = useRef(false);
+  const resetCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<TextInput>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
   const pendingSyncPageRef = useRef<number | null>(null);
   const searchAccessoryId = "director-search-accessory";
   const syncAvailable = isNearbyDirectorSyncAvailable();
-  const appResetKeyRef = useRef(0);
   const [, forceRerender] = useState(0);
 
   const activeBook = useMemo(() => getBook(activeBookId), [activeBookId]);
@@ -712,52 +717,58 @@ export default function App() {
   const GRID_DENSITY = [2, 3, 4] as const;
   const gridCols = GRID_DENSITY[gridDensityIdx];
 
+  const loadPersistedLaunchState = useCallback(async (isCancelled: () => boolean = () => false) => {
+    try {
+      const done = await AsyncStorage.getItem(STORAGE_KEYS.onboardingComplete);
+      if (isCancelled()) return;
+      if (done === "1") {
+        const storedMode = (await AsyncStorage.getItem(STORAGE_KEYS.mode)) as AppMode | null;
+        const storedBook = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
+        const storedAccessName = await AsyncStorage.getItem(STORAGE_KEYS.standardAccessName);
+        if (isCancelled()) return;
+        // Sad path: onboardingComplete can be written even if mode fails to persist (AsyncStorage partial write).
+        // Don't silently default to standard; force onboarding again so the user gets the right mode + UI.
+        if (storedMode !== "standard" && storedMode !== "nonStandard") {
+          setOnboardingVisible(true);
+          setBooted(true);
+          return;
+        }
+        standardLockedRef.current = storedMode === "standard" && !!storedAccessName;
+        standardAccessNameRef.current = storedAccessName || null;
+        const nextMode: AppMode = storedMode === "nonStandard" ? "nonStandard" : "standard";
+        let nextBook: BookId = "standard";
+        if (nextMode === "nonStandard") {
+          if (storedBook && NON_STANDARD_BOOK_IDS.includes(storedBook)) nextBook = storedBook;
+          else nextBook = NON_STANDARD_BOOK_IDS[Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length)]!;
+        }
+        currentPageRef.current = nextMode === "standard" ? STANDARD_START_PAGE : 1;
+        setMode(nextMode);
+        setActiveBookId(nextBook);
+        setOnboardingVisible(false);
+        setBooted(true);
+      } else {
+        standardLockedRef.current = false;
+        standardAccessNameRef.current = null;
+        currentPageRef.current = STANDARD_START_PAGE;
+        setMode("standard");
+        setActiveBookId("standard");
+        setOnboardingVisible(true);
+        setBooted(true);
+      }
+    } catch {
+      if (!isCancelled()) {
+        setOnboardingVisible(true);
+        setBooted(true);
+      }
+    }
+  }, []);
+
   // Bootstrap persisted mode/book selection and onboarding completion.
   useEffect(() => {
     let cancelled = false;
-    const boot = async () => {
-      try {
-        const done = await AsyncStorage.getItem(STORAGE_KEYS.onboardingComplete);
-        if (cancelled) return;
-        if (done === "1") {
-          const storedMode = (await AsyncStorage.getItem(STORAGE_KEYS.mode)) as AppMode | null;
-          const storedBook = (await AsyncStorage.getItem(STORAGE_KEYS.activeBookId)) as BookId | null;
-          const storedAccessName = await AsyncStorage.getItem(STORAGE_KEYS.standardAccessName);
-          if (!cancelled) {
-            // Sad path: onboardingComplete can be written even if mode fails to persist (AsyncStorage partial write).
-            // Don't silently default to standard; force onboarding again so the user gets the right mode + UI.
-            if (storedMode !== "standard" && storedMode !== "nonStandard") {
-              setOnboardingVisible(true);
-              setBooted(true);
-              return;
-            }
-            standardLockedRef.current = storedMode === "standard" && !!storedAccessName;
-            standardAccessNameRef.current = storedAccessName || null;
-            const nextMode: AppMode = storedMode === "nonStandard" ? "nonStandard" : "standard";
-            let nextBook: BookId = "standard";
-            if (nextMode === "nonStandard") {
-              if (storedBook && NON_STANDARD_BOOK_IDS.includes(storedBook)) nextBook = storedBook;
-              else nextBook = NON_STANDARD_BOOK_IDS[Math.floor(Math.random() * NON_STANDARD_BOOK_IDS.length)]!;
-            }
-            setMode(nextMode);
-            setActiveBookId(nextBook);
-            setOnboardingVisible(false);
-            setBooted(true);
-          }
-        } else {
-          setOnboardingVisible(true);
-          setBooted(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setOnboardingVisible(true);
-          setBooted(true);
-        }
-      }
-    };
-    boot();
+    loadPersistedLaunchState(() => cancelled);
     return () => { cancelled = true; };
-  }, []);
+  }, [loadPersistedLaunchState]);
 
   if (offlineAssetsError) {
     return (
@@ -778,7 +789,7 @@ export default function App() {
             clearAllBookState()
               .catch(() => {})
               .finally(() => {
-                appResetKeyRef.current += 1;
+                setAppResetKey((v) => v + 1);
                 setActiveBookId("standard");
                 setMode("standard");
                 setOnboardingVisible(true);
@@ -894,6 +905,35 @@ export default function App() {
   // Keep ref in sync for use inside event callbacks
   useEffect(() => { syncRoleRef.current = syncRole; }, [syncRole]);
 
+  const bootstrapNearbySyncRole = useCallback(async (isCancelled: () => boolean = () => false) => {
+    if (!syncAvailable) {
+      setSyncRole("off");
+      setIsSyncBootstrapped(false);
+      return;
+    }
+
+    const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
+    if (isCancelled()) return;
+
+    const normalizedName = normalizeDirectorDeviceName(rawName || "");
+    const isBrauMaster = normalizedName === "braumaster";
+
+    if (isBrauMaster) {
+      try {
+        await startNearbyDirector(DIRECTOR_SESSION);
+        if (!isCancelled()) setSyncRole("director");
+      } catch {
+        await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+        if (!isCancelled()) setSyncRole("follower");
+      }
+    } else {
+      await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+      if (!isCancelled()) setSyncRole("follower");
+    }
+
+    if (!isCancelled()) setIsSyncBootstrapped(true);
+  }, [syncAvailable]);
+
   // Sync listener
   useEffect(() => {
     if (!syncAvailable) return;
@@ -945,39 +985,13 @@ export default function App() {
   useEffect(() => {
     if (!syncAvailable) return;
     let cancelled = false;
-
-    const bootstrapSyncRole = async () => {
-      const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
-      if (cancelled) return;
-
-      const normalizedName = normalizeDirectorDeviceName(rawName || "");
-      const isBrauMaster = normalizedName === "braumaster";
-
-      if (isBrauMaster) {
-        try {
-          await startNearbyDirector(DIRECTOR_SESSION);
-          if (!cancelled) setSyncRole("director");
-        } catch {
-          // If the director startup fails transiently, fall back to follower so the device
-          // is still usable instead of sitting idle.
-          await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-          if (!cancelled) setSyncRole("follower");
-        }
-      } else {
-        await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-        if (!cancelled) setSyncRole("follower");
-      }
-
-      if (!cancelled) setIsSyncBootstrapped(true);
-    };
-
-    bootstrapSyncRole();
+    bootstrapNearbySyncRole(() => cancelled);
 
     return () => {
       cancelled = true;
       stopNearbyDirectorSync().catch(() => {});
     };
-  }, [syncAvailable]);
+  }, [bootstrapNearbySyncRole, syncAvailable]);
 
   // Restore last page when entering a non-standard book (per-book saved state).
   useEffect(() => {
@@ -1016,27 +1030,82 @@ export default function App() {
     }
   }, [songModal]);
 
-  const performColdBootReset = useCallback(async () => {
-    await clearAllBookState();
-    setMode("standard");
-    setActiveBookId("standard");
+  const clearVolatileRuntimeState = useCallback(() => {
+    Keyboard.dismiss();
+    reconnectCancelledRef.current = true;
+    reconnectPressesRef.current = [];
+    pendingSyncPageRef.current = null;
+    recentSongsRef.current = [];
+    lastFollowerNoticeRef.current = 0;
+    longPressedRef.current = false;
+    currentPageRef.current = STANDARD_START_PAGE;
+    setSongInput("");
+    setCodeInput("");
+    setKeyboardHeight(0);
     setSearchVisible(false);
+    setSearchText("");
+    setSearchTab("todas");
+    setSortMode("best");
+    setSearchJumpDirection("down");
     setBrowseVisible(false);
+    setBrowseTab("todas");
     setGridVisible(false);
+    setGridDensityIdx(0);
     setSongModal(false);
     setSyncModal(false);
-    setOnboardingVisible(true);
-    // Force a remount-ish reset for any lingering state (cold-boot feel).
-    appResetKeyRef.current += 1;
-    forceRerender((v) => v + 1);
   }, []);
+
+  const performSoftAppReset = useCallback(async () => {
+    if (appResettingRef.current) return;
+    appResettingRef.current = true;
+    reconnectCancelledRef.current = true;
+    if (resetCompleteTimerRef.current) {
+      clearTimeout(resetCompleteTimerRef.current);
+      resetCompleteTimerRef.current = null;
+    }
+    setResetCompleteVisible(false);
+    setIsResettingApp(true);
+    setReconnectBusy(false);
+    setReconnectMessage("");
+    setSyncRole("off");
+    setIsSyncBootstrapped(false);
+
+    try {
+      await resetNearbyDirectorSync().catch(() => stopNearbyDirectorSync().catch(() => null));
+      clearVolatileRuntimeState();
+      await loadPersistedLaunchState();
+      setAppResetKey((v) => v + 1);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await bootstrapNearbySyncRole();
+      setResetCompleteVisible(true);
+      resetCompleteTimerRef.current = setTimeout(() => {
+        setResetCompleteVisible(false);
+        resetCompleteTimerRef.current = null;
+      }, 2200);
+    } finally {
+      setIsResettingApp(false);
+      appResettingRef.current = false;
+    }
+  }, [bootstrapNearbySyncRole, clearVolatileRuntimeState, loadPersistedLaunchState]);
+
+  const confirmResetApp = useCallback(() => {
+    if (isResettingApp) return;
+    Alert.alert(
+      "Reset App?",
+      "This will restart the app and reconnect from a fresh state. Settings and hymnal content will not be affected.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Reset", onPress: () => { performSoftAppReset().catch(() => {}); } },
+      ],
+    );
+  }, [isResettingApp, performSoftAppReset]);
 
   const handleSongSubmit = useCallback(async () => {
     const trimmed = songInput.trim();
     closeSongModal();
     if (!trimmed) return;
     if (trimmed === "744668486") {
-      await performColdBootReset();
+      await performSoftAppReset();
       return;
     }
     const standardAccessName = CHOIR_STANDARD_ACCESS.get(normalizeAccessCode(trimmed));
@@ -1048,7 +1117,7 @@ export default function App() {
     if (n > 0) recentSongsRef.current = [n, ...recentSongsRef.current.filter(s => s !== n)].slice(0, 20);
     const page = resolveSongPage(trimmed, totalPages, bookSongToPage, bookSortedSongs as any);
     goToPage(page);
-  }, [songInput, goToPage, closeSongModal, totalPages, bookSongToPage, bookSortedSongs, performColdBootReset, enableStandardMode]);
+  }, [songInput, goToPage, closeSongModal, totalPages, bookSongToPage, bookSortedSongs, performSoftAppReset, enableStandardMode]);
 
   const switchBook = useCallback(async (nextId: BookId) => {
     if (mode !== "nonStandard") return;
@@ -1514,7 +1583,7 @@ export default function App() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View key={`app-reset-${appResetKey}`} style={styles.screen}>
       <StatusBar hidden />
 
       {onboardingVisible && (
@@ -2064,6 +2133,15 @@ export default function App() {
                     </View>
                   </>
                 )}
+                <View style={styles.resetAppDivider} />
+                <TouchableOpacity
+                  style={[styles.resetAppButton, isResettingApp && styles.resetAppButtonDisabled]}
+                  onPress={confirmResetApp}
+                  activeOpacity={0.7}
+                  disabled={isResettingApp}
+                >
+                  <Text style={styles.resetAppButtonText}>{isResettingApp ? "Resetting..." : "Reset App"}</Text>
+                </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -2083,6 +2161,22 @@ export default function App() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Soft reset blocking overlay ── */}
+      <Modal visible={isResettingApp} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.resettingBackdrop}>
+          <View style={styles.resettingCard}>
+            <ActivityIndicator size="large" color="#0A84FF" />
+            <Text style={styles.resettingTitle}>Resetting...</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {resetCompleteVisible && (
+        <View style={styles.resetCompleteBanner} pointerEvents="none">
+          <Text style={styles.resetCompleteText}>App reset complete</Text>
+        </View>
+      )}
 
     </View>
   );
@@ -2337,6 +2431,67 @@ const styles = StyleSheet.create({
     color: "#555",
     fontSize: 17,
     fontWeight: "700",
+  },
+  resetAppDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(0,0,0,0.12)",
+    marginTop: 12,
+    marginBottom: 2,
+  },
+  resetAppButton: {
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: "#0A84FF",
+    alignItems: "center",
+  },
+  resetAppButtonDisabled: {
+    backgroundColor: "#93C5FD",
+  },
+  resetAppButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  resettingBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.68)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  resettingCard: {
+    width: "100%",
+    maxWidth: 300,
+    borderRadius: 16,
+    backgroundColor: "#fff",
+    padding: 24,
+    alignItems: "center",
+    gap: 14,
+  },
+  resettingTitle: {
+    color: "#111827",
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  resetCompleteBanner: {
+    position: "absolute",
+    top: 18,
+    alignSelf: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "rgba(17,24,39,0.92)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 12,
+  },
+  resetCompleteText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
   },
 
   gridOverlay: {
