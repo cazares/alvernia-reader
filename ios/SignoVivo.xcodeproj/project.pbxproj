@@ -25,7 +25,7 @@
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		CA2858B38F2348B02B519D6F /* Pods-SignoVivo.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SignoVivo.release.xcconfig"; path = "Target Support Files/Pods-SignoVivo/Pods-SignoVivo.release.xcconfig"; sourceTree = "<group>"; };
 		CC1C8C7013D71B20DEFEEF75 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-SignoVivo/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		CF20DDFF80796950EA7C43A0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = SignoVivo/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		CF20DDFF80796950EA7C43A0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = SignoVivo/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = SignoVivo/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "SignoVivo-Bridging-Header.h"; path = "SignoVivo/SignoVivo-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -128,7 +128,6 @@
 				F5BA1DE0523234ABF80A7618 /* Pods-SignoVivo.debug.xcconfig */,
 				CA2858B38F2348B02B519D6F /* Pods-SignoVivo.release.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -341,6 +340,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = SignoVivo/SignoVivo.entitlements;
 				CURRENT_PROJECT_VERSION = 258;
+				DEVELOPMENT_TEAM = 7QRW68DD5X;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -360,7 +360,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cazares.alvernia;
-				PRODUCT_NAME = "SignoVivo";
+				PRODUCT_NAME = SignoVivo;
 				SWIFT_OBJC_BRIDGING_HEADER = "SignoVivo/SignoVivo-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -377,6 +377,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = SignoVivo/SignoVivo.entitlements;
 				CURRENT_PROJECT_VERSION = 258;
+				DEVELOPMENT_TEAM = 7QRW68DD5X;
 				INFOPLIST_FILE = SignoVivo/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -391,7 +392,7 @@
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cazares.alvernia;
-				PRODUCT_NAME = "SignoVivo";
+				PRODUCT_NAME = SignoVivo;
 				SWIFT_OBJC_BRIDGING_HEADER = "SignoVivo/SignoVivo-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
