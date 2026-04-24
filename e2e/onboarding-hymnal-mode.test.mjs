@@ -60,9 +60,11 @@ test("non-standard build removes the IR A LIBRO section entirely", () => {
   assert.doesNotMatch(SOURCE, /switchBook\\(id\\)/);
 });
 
-test("reset code 744668486 is intercepted before normal navigation", () => {
+test("reset code 744668486 performs a soft app reset before normal navigation", () => {
   assert.match(SOURCE, /trimmed === \"744668486\"/);
-  assert.match(SOURCE, /performColdBootReset/);
+  assert.match(SOURCE, /performSoftAppReset/);
+  assert.match(SOURCE, /resetNearbyDirectorSync/);
+  assert.doesNotMatch(SOURCE, /trimmed === \"744668486\"[\s\S]{0,250}clearAllBookState/);
 });
 
 test("city onboarding storage failures stay inside the submit handler", () => {

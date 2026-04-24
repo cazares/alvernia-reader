@@ -29,3 +29,19 @@ test("followers switch to the director book before applying synced pages", () =>
   assert.match(appSource, /setActiveBookId\(incomingBookId\)/);
   assert.match(appSource, /sendNearbyDirectorPageUpdate\(page, totalPages, \{ mode, bookId: activeBookId \}\)/);
 });
+
+test("soft app reset clears native sync transport and guards stale callbacks", () => {
+  assert.match(appSource, /Reset App\?/);
+  assert.match(appSource, /This will restart the app and reconnect from a fresh state\. Settings and hymnal content will not be affected\./);
+  assert.match(appSource, /performSoftAppReset/);
+  assert.match(appSource, /resetNearbyDirectorSync/);
+  assert.match(appSource, /setAppResetKey\(\(v\) => v \+ 1\)/);
+  assert.match(appSource, /if \(appResettingRef\.current\) return/);
+  assert.match(jsSyncSource, /resetNearbyDirectorSync/);
+  assert.match(jsSyncSource, /nativeModule\.resetForAppReset/);
+  assert.match(dtsSyncSource, /resetNearbyDirectorSync/);
+  assert.match(bridgeSource, /resetForAppReset/);
+  assert.match(swiftSource, /resetGeneration = UUID\(\)/);
+  assert.match(swiftSource, /guard self\.mcSessions\.contains\(where: \{ \$0 === session \}\) else \{ return \}/);
+  assert.doesNotMatch(appSource, /exit\(0\)/);
+});

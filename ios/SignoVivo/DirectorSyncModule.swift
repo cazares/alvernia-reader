@@ -38,6 +38,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var currentTotalPages: Int = 0
   private var currentMode = ""
   private var currentBookId = ""
+  private var resetGeneration = UUID()
 
   // MARK: - Convenience
 
@@ -159,6 +160,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     DispatchQueue.main.async {
       self.resetTransport(emitState: true)
       resolve(["stopped": true])
+    }
+  }
+
+  @objc(resetForAppReset:rejecter:)
+  func resetForAppReset(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      self.resetTransport(emitState: true)
+      resolve(["reset": true])
     }
   }
 
@@ -314,6 +326,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private func resetTransport(emitState shouldEmitState: Bool) {
+    resetGeneration = UUID()
     discoveryRefreshTimer?.invalidate(); discoveryRefreshTimer = nil
     stopFollowerHelloTimer()
     advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
@@ -404,6 +417,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     invitationHandler: @escaping (Bool, MCSession?) -> Void
   ) {
     DispatchQueue.main.async {
+      guard advertiser === self.advertiser else {
+        invitationHandler(false, nil); return
+      }
       guard self.currentRole == "director" || self.currentRole == "follower" else {
         invitationHandler(false, nil); return
       }
@@ -423,7 +439,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-      guard let self = self, self.currentRole != "off" else { return }
+      guard let self = self, advertiser === self.advertiser, self.currentRole != "off" else { return }
       self.advertiser?.stopAdvertisingPeer(); self.advertiser?.delegate = nil; self.advertiser = nil
       self.startAdvertising()
     }
@@ -433,6 +449,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
     DispatchQueue.main.async {
+      guard browser === self.browser else { return }
       guard let sessionCode = info?["session"], sessionCode == self.currentSessionCode else { return }
       let role = info?["role"] ?? ""
 
@@ -457,6 +474,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
     DispatchQueue.main.async {
+      guard browser === self.browser else { return }
       self.discoveredDirectors.removeValue(forKey: peerID)
       self.discoveredFollowers.remove(peerID)
       if self.currentRole == "follower" {
@@ -471,7 +489,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-      guard let self = self, self.currentRole != "off" else { return }
+      guard let self = self, browser === self.browser, self.currentRole != "off" else { return }
       self.browser?.stopBrowsingForPeers(); self.browser?.delegate = nil; self.browser = nil
       self.startBrowsing()
     }
@@ -481,6 +499,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
     DispatchQueue.main.async {
+      guard self.mcSessions.contains(where: { $0 === session }) else { return }
       switch state {
       case .connected:
         if self.currentRole == "follower" {
@@ -498,8 +517,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
           self.emitState(status: "searching", message: "El director se desconectó. Reconectando...")
+          let generation = self.resetGeneration
           DispatchQueue.main.asyncAfter(deadline: .now() + Self.followerRetryDelay) { [weak self] in
-            self?.reconsiderFollowerTarget()
+            guard let self = self, self.resetGeneration == generation else { return }
+            self.reconsiderFollowerTarget()
           }
         } else if self.currentRole == "director" {
           self.emitState(status: self.allConnectedPeers.isEmpty ? "waiting-followers" : "connected")
@@ -512,6 +533,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
     DispatchQueue.main.async {
+      guard self.mcSessions.contains(where: { $0 === session }) else { return }
       guard let payload = self.parseInboundPayload(data) else { return }
       guard let type = payload["type"] as? String else { return }
       let v = payload["v"] as? Int ?? 0
