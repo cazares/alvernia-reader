@@ -53,6 +53,7 @@ import VERSION_INFO from "./version.json";
 
 const STANDARD_START_PAGE = 2;
 const DIRECTOR_SESSION = "1234"; // fixed session — only one director per session
+const SONG_MODAL_INPUT_MAX_LENGTH = 10;
 const VISIBLE_BUILD_LABEL = `${VERSION_INFO.baseVersion}.${VERSION_INFO.buildNumber}`;
 
 const normalizeDirectorDeviceName = (value: string): string => {
@@ -1983,13 +1984,13 @@ export default function App() {
                   placeholderTextColor="rgba(0,0,0,0.35)"
                   keyboardType="number-pad"
                   returnKeyType="go"
-                  maxLength={9}
+                  maxLength={SONG_MODAL_INPUT_MAX_LENGTH}
                   selectTextOnFocus
                   showSoftInputOnFocus={false}
                 />
                 {/* Custom in-app numpad */}
                 <SongNumpad
-                  onDigit={(d) => setSongInput((prev) => (prev.length < 9 ? prev + d : prev))}
+                  onDigit={(d) => setSongInput((prev) => (prev.length < SONG_MODAL_INPUT_MAX_LENGTH ? prev + d : prev))}
                   onBackspace={() => setSongInput((prev) => prev.slice(0, -1))}
                   onGo={() => { handleSongSubmit().catch(() => {}); }}
                   goDisabled={!songInput}
