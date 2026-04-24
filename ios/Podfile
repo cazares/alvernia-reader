@@ -2,7 +2,6 @@ require File.join(File.dirname(`node --print "require.resolve('expo/package.json
 require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
 
 require 'json'
-require 'fileutils'
 podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
 
 def ccache_enabled?(podfile_properties)
@@ -11,78 +10,6 @@ def ccache_enabled?(podfile_properties)
   
   # Fall back to Podfile properties
   podfile_properties['apple.ccacheEnabled'] == 'true'
-end
-
-def ensure_exconstants_get_app_config_wrapper(installer)
-  # Fix ExpoConstants (EXConstants) build script phase path:
-  # The podspec expects `$PODS_TARGET_SRCROOT/../scripts/get-app-config-ios.sh` which resolves to:
-  #   Pods/Target Support Files/scripts/get-app-config-ios.sh
-  # Some CocoaPods setups don't materialize/persist this scripts directory, causing PhaseScriptExecution failures.
-  scripts_dir = File.join(installer.sandbox.root.to_s, 'Target Support Files', 'scripts')
-  FileUtils.mkdir_p(scripts_dir)
-  wrapper_path = File.join(scripts_dir, 'get-app-config-ios.sh')
-  # Capture the current machine's node path at pod-install time so Xcode builds
-  # don't depend on PATH being set up correctly.
-  node_bin = ENV['NODE_BINARY'].to_s.strip
-  if node_bin.empty?
-    node_bin = `command -v node 2>/dev/null`.to_s.strip
-  end
-  node_fallback = node_bin.empty? ? 'node' : node_bin
-
-  wrapper = <<~'SH'
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    # Xcode script phases often run with a minimal PATH, so prefer the absolute NODE_BINARY if provided.
-    NODE="${NODE_BINARY:-__NODE_FALLBACK__}"
-
-    if ! command -v "$NODE" >/dev/null 2>&1; then
-      echo "[EXConstants] node not found (NODE_BINARY='$NODE_BINARY')." >&2
-      echo "[EXConstants] Set NODE_BINARY (e.g. export NODE_BINARY=\"$(command -v node)\") and retry." >&2
-      exit 1
-    fi
-
-    PKG_JSON="$("$NODE" --print "require.resolve('expo-constants/package.json')")"
-    PKG_DIR="$(cd "$(dirname "$PKG_JSON")" && pwd -P)"
-
-    exec bash "$PKG_DIR/scripts/get-app-config-ios.sh"
-  SH
-  wrapper = wrapper.gsub('__NODE_FALLBACK__', node_fallback)
-  existing = File.exist?(wrapper_path) ? File.read(wrapper_path) : nil
-  if existing != wrapper
-    File.write(wrapper_path, wrapper)
-    FileUtils.chmod(0755, wrapper_path)
-    puts "✔ Ensured EXConstants get-app-config-ios.sh wrapper exists at #{wrapper_path}"
-  else
-    puts "✔ EXConstants get-app-config-ios.sh wrapper already present"
-  end
-end
-
-def patch_exconstants_script_phase(installer)
-  # Patch the EXConstants build phase to call our wrapper from a stable path.
-  # This avoids brittle `$PODS_TARGET_SRCROOT/../scripts/...` resolution and ensures the wrapper logs errors.
-  wrapper_abs = File.join(installer.sandbox.root.to_s, 'Target Support Files', 'scripts', 'get-app-config-ios.sh')
-  return unless File.exist?(wrapper_abs)
-
-  installer.pods_project.targets.each do |t|
-    next unless t.name == 'EXConstants'
-
-    t.shell_script_build_phases.each do |phase|
-      next unless phase.name.to_s.include?('Generate app.config')
-
-      desired = <<~'SH'
-        set -euo pipefail
-        "${PODS_ROOT}/Target Support Files/scripts/get-app-config-ios.sh"
-      SH
-
-      if phase.shell_script != desired
-        phase.shell_script = desired
-        puts "✔ Patched EXConstants script phase to call wrapper"
-      else
-        puts "✔ EXConstants script phase already patched"
-      end
-    end
-  end
 end
 
 ENV['RCT_NEW_ARCH_ENABLED'] ||= '0' if podfile_properties['newArchEnabled'] == 'false'
@@ -132,49 +59,5 @@ target 'SignoVivo' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
-
-    # Workaround: fmt 11.0.2 consteval error on Xcode 17 / Apple Clang 17
-    # Downgrade C++ standard for fmt to avoid consteval issues
-    installer.pods_project.targets.each do |target|
-      if target.name == 'fmt'
-        target.build_configurations.each do |config|
-          config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
-        end
-      end
-    end
-
-    # Fix react-native-webview bug: for file:// URLs, request.URL.host is @"" (empty
-    # NSString — non-nil, so truthy in ObjC), which makes `if (request.URL.host)` branch
-    # to loadRequest: instead of loadFileURL:allowingReadAccessToURL:, rendering the
-    # allowingReadAccessToURL prop completely inert. Replace with a length guard.
-    rnwebview_src = File.join(
-      File.dirname(`node --print "require.resolve('react-native-webview/package.json')"`.strip),
-      'apple', 'RNCWebViewImpl.m'
-    )
-    if File.exist?(rnwebview_src)
-      content = File.read(rnwebview_src)
-      patched = content.gsub(
-        'if (request.URL.host) {',
-        'if ([request.URL.host length] > 0) {'
-      )
-      if patched != content
-        File.write(rnwebview_src, patched)
-        puts "✔ Patched RNCWebViewImpl.m: file:// URL host-length fix applied"
-      else
-        puts "✔ RNCWebViewImpl.m: file:// URL patch already applied or pattern not found"
-      end
-    else
-      puts "⚠ RNCWebViewImpl.m not found at #{rnwebview_src}"
-    end
-
-    # Best-effort: we also run this again in post_integrate to avoid any later CocoaPods cleanup.
-    ensure_exconstants_get_app_config_wrapper(installer)
-    patch_exconstants_script_phase(installer)
-  end
-
-  post_integrate do |installer|
-    ensure_exconstants_get_app_config_wrapper(installer)
-    patch_exconstants_script_phase(installer)
-    installer.pods_project.save
   end
 end
