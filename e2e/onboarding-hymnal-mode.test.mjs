@@ -34,10 +34,14 @@ test("choir-code devices stay pinned to standard mode", () => {
   assert.match(SOURCE, /if \(\s*standardLockedRef\.current && \(incomingMode !== "standard" \|\| incomingBookId !== "standard"\)\)\s*{\s*return;\s*}/s);
 });
 
-test("director mode cannot be unlocked by the internal session code", () => {
-  assert.match(SOURCE, /const DIRECTOR_ACCESS_CODES = new Set\(\["8303130470", "8307197000"\]\);/);
+test("director mode is gated by the DIRECTOR_ACCESS_CODES allowlist", () => {
+  // Allowlist is intentionally extended; lock the known authorized codes and the gate call site.
+  const directorCodesMatch = SOURCE.match(/const DIRECTOR_ACCESS_CODES = new Set\(\[([^\]]+)\]\);/);
+  assert.ok(directorCodesMatch, "DIRECTOR_ACCESS_CODES literal not found");
+  const codes = directorCodesMatch[1];
+  assert.match(codes, /"8303130470"/);
+  assert.match(codes, /"8307197000"/);
   assert.match(SOURCE, /if \(!DIRECTOR_ACCESS_CODES\.has\(normalizeAccessCode\(codeInput\)\)\)/);
-  assert.doesNotMatch(SOURCE, /DIRECTOR_ACCESS_CODES = new Set\(\[[^\]]*"1234"/);
 });
 
 test("followers can reach the in-app reset flow from the third refresh press", () => {

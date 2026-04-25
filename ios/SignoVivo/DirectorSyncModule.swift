@@ -174,19 +174,44 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  // Held strongly so they survive long enough for iOS to surface the permission dialog.
+  private var primingBrowser: MCNearbyServiceBrowser?
+  private var primingAdvertiser: MCNearbyServiceAdvertiser?
+  private var primingPeerID: MCPeerID?
+
   @objc(primePermissions:rejecter:)
   func primePermissions(
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
     DispatchQueue.main.async {
-      // Briefly start browsing to trigger the iOS Local Network permission dialog,
-      // then stop immediately. This fires on first app launch regardless of mode.
-      let tempPeerID = MCPeerID(displayName: UIDevice.current.name.isEmpty ? "signovivo" : UIDevice.current.name)
-      let browser = MCNearbyServiceBrowser(peer: tempPeerID, serviceType: Self.serviceType)
+      // Start a real, delegated browser+advertiser pair to trigger the iOS Local Network
+      // permission dialog. Without a delegate iOS will silently no-op; we also retain
+      // them strongly so the system-level service lasts long enough for the prompt.
+      let rawDisplay = UIDevice.current.name.isEmpty ? "signovivo" : UIDevice.current.name
+      let displayName = String(rawDisplay.prefix(50))
+      let peerID = MCPeerID(displayName: "\(displayName)-prime")
+      self.primingPeerID = peerID
+
+      let browser = MCNearbyServiceBrowser(peer: peerID, serviceType: Self.serviceType)
+      browser.delegate = self
       browser.startBrowsingForPeers()
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-        browser.stopBrowsingForPeers()
+      self.primingBrowser = browser
+
+      let advertiser = MCNearbyServiceAdvertiser(peer: peerID, discoveryInfo: ["session": "prime", "role": "prime"], serviceType: Self.serviceType)
+      advertiser.delegate = self
+      advertiser.startAdvertisingPeer()
+      self.primingAdvertiser = advertiser
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+        guard let self = self else { return }
+        self.primingBrowser?.stopBrowsingForPeers()
+        self.primingBrowser?.delegate = nil
+        self.primingBrowser = nil
+        self.primingAdvertiser?.stopAdvertisingPeer()
+        self.primingAdvertiser?.delegate = nil
+        self.primingAdvertiser = nil
+        self.primingPeerID = nil
       }
       resolve(nil)
     }
@@ -220,6 +245,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         reject("DIRECTOR_ROLE_INVALID", "Solo el director puede enviar páginas.", nil)
         return
       }
+      // Always store state so late-joining followers receive the correct snapshot.
+      self.currentPageNumber = max(1, page.intValue)
+      self.currentTotalPages = max(0, totalPages.intValue)
+      self.currentMode = mode
+      self.currentBookId = bookId
       let connected = self.allConnectedPeers
       guard !connected.isEmpty else {
         self.emitState(status: "waiting-followers")
@@ -234,10 +264,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         "mode": mode,
         "bookId": bookId,
       ]
-      self.currentPageNumber = max(1, page.intValue)
-      self.currentTotalPages = max(0, totalPages.intValue)
-      self.currentMode = mode
-      self.currentBookId = bookId
       guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
         resolve(["deliveredPeers": 0])
         return
@@ -259,7 +285,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   // MARK: - Transport setup
 
   private func configureTransport() {
-    let peerName = UIDevice.current.name.isEmpty ? UUID().uuidString : UIDevice.current.name
+    let rawName = UIDevice.current.name.isEmpty ? UUID().uuidString : UIDevice.current.name
+    let peerName = String(rawName.prefix(50)) // MCPeerID displayName hard limit is 63 chars
     let peerID = MCPeerID(displayName: "\(peerName)-\(UUID().uuidString.prefix(6))")
     localPeerID = peerID
 
@@ -405,6 +432,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     if sorted.count > 1 {
       emitState(status: "resolving-conflict", message: "Hay varios directores cercanos. Eligiendo uno automáticamente.")
     }
+    // Don't re-invite a director we're already connecting to.
+    guard pendingInvitePeer != target else { emitState(status: "connecting"); return }
     pendingInvitePeer = target
     browser?.invitePeer(target, to: session, withContext: nil, timeout: Self.inviteTimeout)
     emitState(status: "connecting")
@@ -480,12 +509,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.reconsiderFollowerTarget()
         }
       } else if role == "follower", self.currentRole == "director" {
+        // Followers initiate the connection — director accepts via advertiser delegate.
+        // Recording discovery only; never call invitePeer from the director side to
+        // avoid the duplicate-session race that breaks MPC reliability.
         self.discoveredFollowers.insert(peerID)
-        // Only invite if not already connected in any session
-        guard !self.allConnectedPeers.contains(peerID) else { return }
-        if let session = self.availableSessionForNewFollower() {
-          self.browser?.invitePeer(peerID, to: session, withContext: nil, timeout: Self.inviteTimeout)
-        }
       }
     }
   }
@@ -531,10 +558,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       case .connecting:
         break
       case .notConnected:
-        if self.currentRole == "follower", self.connectedDirectorPeer == peerID {
+        if self.currentRole == "follower",
+           (self.connectedDirectorPeer == peerID || self.pendingInvitePeer == peerID) {
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
-          self.emitState(status: "searching", message: "El director se desconectó. Reconectando...")
+          self.emitState(status: "searching", message: "Reconectando con el director...")
           let generation = self.resetGeneration
           DispatchQueue.main.asyncAfter(deadline: .now() + Self.followerRetryDelay) { [weak self] in
             guard let self = self, self.resetGeneration == generation else { return }
