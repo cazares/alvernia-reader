@@ -35,6 +35,7 @@ import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
   addNearbyDirectorSyncListener,
   isNearbyDirectorSyncAvailable,
+  primeNearbyPermissions,
   resetNearbyDirectorSync,
   sendNearbyDirectorPageUpdate,
   startNearbyDirector,
@@ -1007,6 +1008,12 @@ export default function App() {
     return () => sub.remove();
   }, [activeBookId, goToPage, mode, syncAvailable]);
 
+  // Fire immediately on mount to trigger the iOS Local Network permission dialog
+  // before any other state is ready — works regardless of mode or onboarding state.
+  useEffect(() => {
+    primeNearbyPermissions().catch(() => {});
+  }, []);
+
   // Bootstrap sync role once nearby sync is available.
   // Brau MASTER should become director automatically; everyone else starts as follower.
   useEffect(() => {
@@ -1187,10 +1194,13 @@ export default function App() {
       await startNearbyDirector(DIRECTOR_SESSION);
       setSyncRole("director");
     } catch {
-      // If director fails, go back to follower
       startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
       setSyncRole("follower");
-      Alert.alert("Error", "No se pudo iniciar el modo director.");
+      Alert.alert(
+        "No se pudo activar el modo director",
+        "Verifica que SignoVivo tenga acceso a Red Local: Ajustes → Privacidad → Red local → activa SignoVivo.",
+        [{ text: "OK" }]
+      );
     }
   }, [codeInput, closeSyncModal]);
 

@@ -174,6 +174,24 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  @objc(primePermissions:rejecter:)
+  func primePermissions(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      // Briefly start browsing to trigger the iOS Local Network permission dialog,
+      // then stop immediately. This fires on first app launch regardless of mode.
+      let tempPeerID = MCPeerID(displayName: UIDevice.current.name.isEmpty ? "signovivo" : UIDevice.current.name)
+      let browser = MCNearbyServiceBrowser(peer: tempPeerID, serviceType: Self.serviceType)
+      browser.startBrowsingForPeers()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        browser.stopBrowsingForPeers()
+      }
+      resolve(nil)
+    }
+  }
+
   @objc(getDeviceName:rejecter:)
   func getDeviceName(
     _ resolve: @escaping RCTPromiseResolveBlock,
