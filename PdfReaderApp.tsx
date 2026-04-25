@@ -758,12 +758,21 @@ export default function App() {
         setOnboardingVisible(false);
         setBooted(true);
       } else {
+        // First launch — skip code prompt, boot directly as hymnal
         standardLockedRef.current = false;
         standardAccessNameRef.current = null;
-        currentPageRef.current = STANDARD_START_PAGE;
-        setMode("standard");
-        setActiveBookId("standard");
-        setOnboardingVisible(true);
+        const firstBook: BookId = "hymns-4";
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.onboardingComplete, "1"],
+          [STORAGE_KEYS.mode, "nonStandard"],
+          [STORAGE_KEYS.activeBookId, firstBook],
+        ]).catch(() => {});
+        await AsyncStorage.removeItem(STORAGE_KEYS.standardAccessName).catch(() => {});
+        if (isCancelled()) return;
+        currentPageRef.current = 1;
+        setMode("nonStandard");
+        setActiveBookId(firstBook);
+        setOnboardingVisible(false);
         setBooted(true);
       }
     } catch {
@@ -800,10 +809,17 @@ export default function App() {
             clearAllBookState()
               .catch(() => {})
               .finally(() => {
+                const book: BookId = "hymns-4";
+                AsyncStorage.multiSet([
+                  [STORAGE_KEYS.onboardingComplete, "1"],
+                  [STORAGE_KEYS.mode, "nonStandard"],
+                  [STORAGE_KEYS.activeBookId, book],
+                ]).catch(() => {});
+                AsyncStorage.removeItem(STORAGE_KEYS.standardAccessName).catch(() => {});
                 setAppResetKey((v) => v + 1);
-                setActiveBookId("standard");
-                setMode("standard");
-                setOnboardingVisible(true);
+                setActiveBookId(book);
+                setMode("nonStandard");
+                setOnboardingVisible(false);
                 forceRerender((x) => x + 1);
               });
           }}
