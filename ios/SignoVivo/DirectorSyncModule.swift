@@ -260,6 +260,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
       self.refreshDiscovery()
       self.scheduleNextDiscoveryRefresh()
+      // Restart the self-directed countdown so the user gets a fresh 10 s window
+      // after a manual refresh before the "Modo libre" label re-appears.
+      if self.currentRole == "follower", self.connectedDirectorPeer == nil {
+        self.startSelfDirectedTimer()
+      }
+      resolve(nil)
+    }
+  }
+
+  // Prevents iOS from auto-locking the screen during active sync sessions. MPC is throttled
+  // when the screen locks, which silently breaks director-follower connectivity mid-rehearsal.
+  @objc(setIdleTimerDisabled:resolver:rejecter:)
+  func setIdleTimerDisabled(
+    _ disabled: Bool,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      UIApplication.shared.isIdleTimerDisabled = disabled
       resolve(nil)
     }
   }
@@ -376,12 +395,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private func scheduleNextDiscoveryRefresh() {
+    let generation = resetGeneration
     let interval: TimeInterval = earlyRefreshCyclesRemaining > 0
       ? Self.earlyRefreshInterval
       : Self.discoveryRefreshInterval
     discoveryRefreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
       DispatchQueue.main.async {
-        guard let self = self, self.currentRole != "off" else { return }
+        guard let self = self, self.currentRole != "off", self.resetGeneration == generation else { return }
         if self.earlyRefreshCyclesRemaining > 0 { self.earlyRefreshCyclesRemaining -= 1 }
         self.refreshDiscovery()
         self.scheduleNextDiscoveryRefresh()
@@ -391,9 +411,19 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func startSelfDirectedTimer() {
     selfDirectedTimer?.invalidate()
+    let generation = resetGeneration
     selfDirectedTimer = Timer.scheduledTimer(withTimeInterval: Self.selfDirectedTimeoutSeconds, repeats: false) { [weak self] _ in
       DispatchQueue.main.async {
-        guard let self = self, self.currentRole == "follower", self.connectedDirectorPeer == nil else { return }
+        // Also guard pendingInvitePeer: don't fire while mid-handshake with a director.
+        guard let self = self,
+              self.resetGeneration == generation,
+              self.currentRole == "follower",
+              self.connectedDirectorPeer == nil,
+              self.pendingInvitePeer == nil else { return }
+        // Restart fast burst so a director who comes online right now is found within 5 s.
+        self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+        self.refreshDiscovery()
+        self.scheduleNextDiscoveryRefresh()
         self.emitState(status: "self-directed")
       }
     }
@@ -406,10 +436,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func startFollowerHelloTimer() {
     followerHelloTimer?.invalidate()
+    let generation = resetGeneration
     lastFollowerHelloAt = 0
     lastFollowerPageReceivedAt = 0
     followerHelloTimer = Timer.scheduledTimer(withTimeInterval: Self.followerHelloInterval, repeats: true) { [weak self] _ in
-      DispatchQueue.main.async { self?.sendFollowerHelloIfNeeded() }
+      DispatchQueue.main.async {
+        guard let self = self, self.resetGeneration == generation else { return }
+        self.sendFollowerHelloIfNeeded()
+      }
     }
   }
 
@@ -511,8 +545,20 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     if sorted.count > 1 {
       emitState(status: "resolving-conflict", message: "Hay varios directores cercanos. Eligiendo uno automáticamente.")
     }
-    // Don't re-invite a director we're already connecting to.
-    guard pendingInvitePeer != target else { emitState(status: "connecting"); return }
+    // Don't issue parallel invites while we already have one in flight.
+    if let pending = pendingInvitePeer {
+      if pending == target {
+        emitState(status: "connecting")
+        return
+      }
+      // If the pending peer is still visible, finish that handshake before switching targets.
+      if discoveredDirectors[pending] != nil {
+        emitState(status: "connecting")
+        return
+      }
+      // Pending peer disappeared; clear stale state and proceed with a fresh invite.
+      pendingInvitePeer = nil
+    }
     // A director was found — cancel the self-directed fallback; we're about to connect.
     cancelSelfDirectedTimer()
     pendingInvitePeer = target

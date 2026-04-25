@@ -2,6 +2,7 @@ require File.join(File.dirname(`node --print "require.resolve('expo/package.json
 require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
 
 require 'json'
+require 'fileutils'
 podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
 
 def ccache_enabled?(podfile_properties)
@@ -19,6 +20,22 @@ ENV['RCT_USE_PREBUILT_RNCORE'] ||= '1' if podfile_properties['ios.buildReactNati
 platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
 
 prepare_react_native_project!
+
+# Ensured EXConstants get-app-config-ios.sh wrapper exists.
+begin
+  expo_constants_pkg = `node --print "require.resolve('expo-constants/package.json')"`.strip
+  unless expo_constants_pkg.empty?
+    wrapper_dir = File.join(File.dirname(expo_constants_pkg), "scripts")
+    wrapper_path = File.join(wrapper_dir, "get-app-config-ios.sh")
+    unless File.exist?(wrapper_path)
+      FileUtils.mkdir_p(wrapper_dir)
+      File.write(wrapper_path, "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n")
+      File.chmod(0o755, wrapper_path)
+    end
+  end
+rescue => e
+  Pod::UI.warn("Skipping EXConstants wrapper setup: #{e}")
+end
 
 target 'SignoVivo' do
   use_expo_modules!

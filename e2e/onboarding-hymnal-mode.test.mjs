@@ -48,7 +48,10 @@ test("followers can reach the in-app reset flow from the third refresh press", (
   assert.match(SOURCE, /syncRole === "follower" && !searchVisible && !onboardingVisible/);
   assert.match(SOURCE, /handleReconnectPress/);
   assert.match(SOURCE, /now - t <= 25_000/);
+  assert.match(SOURCE, /reconnectPressesRef\.current\.push\(now\)/);
   assert.match(SOURCE, /pressCount >= 3/);
+  assert.match(SOURCE, /if \(pressCount === 1\)/);
+  assert.match(SOURCE, /Tap 2: full stop → start follower/);
   assert.match(SOURCE, /confirmResetApp\("reconnect"\)/);
   assert.match(SOURCE, /Si todavia no conecta, podemos restablecer la app ahora mismo\./);
   assert.match(SOURCE, /Esto vuelve a empezar la conexion sin borrar cantos ni ajustes\./);
