@@ -9,6 +9,7 @@ import {
   Image,
   InputAccessoryView,
   Keyboard,
+  Linking,
   Modal,
   NativeModules,
   PanResponder,
@@ -35,6 +36,7 @@ import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
   addNearbyDirectorSyncListener,
   isNearbyDirectorSyncAvailable,
+  primeNearbyPermissions,
   resetNearbyDirectorSync,
   sendNearbyDirectorPageUpdate,
   startNearbyDirector,
@@ -674,6 +676,10 @@ export default function App() {
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
   const pendingSyncPageRef = useRef<number | null>(null);
+  // Refs for values needed inside bootstrapNearbySyncRole without adding them as deps.
+  const modeRef = useRef<AppMode>(mode);
+  const activeBookIdRef = useRef<BookId>(activeBookId);
+  const totalPagesRef = useRef<number>(totalPages);
   const searchAccessoryId = "director-search-accessory";
   const syncAvailable = isNearbyDirectorSyncAvailable();
   const [, forceRerender] = useState(0);
@@ -758,12 +764,21 @@ export default function App() {
         setOnboardingVisible(false);
         setBooted(true);
       } else {
+        // First launch — skip code prompt, boot directly as hymnal
         standardLockedRef.current = false;
         standardAccessNameRef.current = null;
-        currentPageRef.current = STANDARD_START_PAGE;
-        setMode("standard");
-        setActiveBookId("standard");
-        setOnboardingVisible(true);
+        const firstBook: BookId = "hymns-4";
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.onboardingComplete, "1"],
+          [STORAGE_KEYS.mode, "nonStandard"],
+          [STORAGE_KEYS.activeBookId, firstBook],
+        ]).catch(() => {});
+        await AsyncStorage.removeItem(STORAGE_KEYS.standardAccessName).catch(() => {});
+        if (isCancelled()) return;
+        currentPageRef.current = 1;
+        setMode("nonStandard");
+        setActiveBookId(firstBook);
+        setOnboardingVisible(false);
         setBooted(true);
       }
     } catch {
@@ -800,10 +815,17 @@ export default function App() {
             clearAllBookState()
               .catch(() => {})
               .finally(() => {
+                const book: BookId = "hymns-4";
+                AsyncStorage.multiSet([
+                  [STORAGE_KEYS.onboardingComplete, "1"],
+                  [STORAGE_KEYS.mode, "nonStandard"],
+                  [STORAGE_KEYS.activeBookId, book],
+                ]).catch(() => {});
+                AsyncStorage.removeItem(STORAGE_KEYS.standardAccessName).catch(() => {});
                 setAppResetKey((v) => v + 1);
-                setActiveBookId("standard");
-                setMode("standard");
-                setOnboardingVisible(true);
+                setActiveBookId(book);
+                setMode("nonStandard");
+                setOnboardingVisible(false);
                 forceRerender((x) => x + 1);
               });
           }}
@@ -913,8 +935,11 @@ export default function App() {
     setTimeout(() => goToPage(page), 60);
   }, [activeBookId, goToPage, mode, totalPages]);
 
-  // Keep ref in sync for use inside event callbacks
+  // Keep refs in sync for use inside callbacks that can't list state as deps.
   useEffect(() => { syncRoleRef.current = syncRole; }, [syncRole]);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { activeBookIdRef.current = activeBookId; }, [activeBookId]);
+  useEffect(() => { totalPagesRef.current = totalPages; }, [totalPages]);
 
   const bootstrapNearbySyncRole = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!syncAvailable) {
@@ -932,7 +957,15 @@ export default function App() {
     if (isBrauMaster) {
       try {
         await startNearbyDirector(DIRECTOR_SESSION);
-        if (!isCancelled()) setSyncRole("director");
+        if (!isCancelled()) {
+          setSyncRole("director");
+          // Pre-populate Swift's snapshot state so late-joining followers get the correct page.
+          sendNearbyDirectorPageUpdate(
+            currentPageRef.current,
+            totalPagesRef.current,
+            { mode: modeRef.current, bookId: activeBookIdRef.current },
+          ).catch(() => {});
+        }
       } catch {
         await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
         if (!isCancelled()) setSyncRole("follower");
@@ -990,6 +1023,12 @@ export default function App() {
     });
     return () => sub.remove();
   }, [activeBookId, goToPage, mode, syncAvailable]);
+
+  // Fire immediately on mount to trigger the iOS Local Network permission dialog
+  // before any other state is ready — works regardless of mode or onboarding state.
+  useEffect(() => {
+    primeNearbyPermissions().catch(() => {});
+  }, []);
 
   // Bootstrap sync role once nearby sync is available.
   // Brau MASTER should become director automatically; everyone else starts as follower.
@@ -1081,6 +1120,7 @@ export default function App() {
     setSyncRole("off");
     setIsSyncBootstrapped(false);
 
+    let resetSucceeded = false;
     try {
       await resetNearbyDirectorSync().catch(() => stopNearbyDirectorSync().catch(() => null));
       clearVolatileRuntimeState();
@@ -1088,14 +1128,17 @@ export default function App() {
       setAppResetKey((v) => v + 1);
       await new Promise((resolve) => setTimeout(resolve, 120));
       await bootstrapNearbySyncRole();
+      resetSucceeded = true;
+    } finally {
+      setIsResettingApp(false);
+      appResettingRef.current = false;
+    }
+    if (resetSucceeded) {
       setResetCompleteVisible(true);
       resetCompleteTimerRef.current = setTimeout(() => {
         setResetCompleteVisible(false);
         resetCompleteTimerRef.current = null;
       }, 2200);
-    } finally {
-      setIsResettingApp(false);
-      appResettingRef.current = false;
     }
   }, [bootstrapNearbySyncRole, clearVolatileRuntimeState, loadPersistedLaunchState]);
 
@@ -1170,11 +1213,22 @@ export default function App() {
       // Skipping stopSync avoids a state:idle event that would race with setSyncRole("director").
       await startNearbyDirector(DIRECTOR_SESSION);
       setSyncRole("director");
+      sendNearbyDirectorPageUpdate(
+        currentPageRef.current,
+        totalPagesRef.current,
+        { mode: modeRef.current, bookId: activeBookIdRef.current },
+      ).catch(() => {});
     } catch {
-      // If director fails, go back to follower
       startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
       setSyncRole("follower");
-      Alert.alert("Error", "No se pudo iniciar el modo director.");
+      Alert.alert(
+        "No se pudo activar el modo director",
+        "SignoVivo necesita acceso a Red Local. Abre Ajustes y activa el permiso. Si no aparece, desinstala y reinstala la app.",
+        [
+          { text: "Abrir Ajustes", onPress: () => Linking.openURL("app-settings:").catch(() => {}) },
+          { text: "OK", style: "cancel" },
+        ]
+      );
     }
   }, [codeInput, closeSyncModal]);
 

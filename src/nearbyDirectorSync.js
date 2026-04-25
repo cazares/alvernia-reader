@@ -48,6 +48,14 @@ export const sendNearbyDirectorPageUpdate = async (page, totalPages = 0, context
   );
 };
 
+export const primeNearbyPermissions = async () => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.primePermissions === "function") {
+    return nativeModule.primePermissions();
+  }
+  return null;
+};
+
 export const addNearbyDirectorSyncListener = (listener) => {
   if (!nearbyEventEmitter) {
     return { remove() {} };

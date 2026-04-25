@@ -27,4 +27,7 @@ RCT_EXTERN_METHOD(sendPageUpdate:(nonnull NSNumber *)page
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(primePermissions:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end
