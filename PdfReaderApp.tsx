@@ -667,6 +667,8 @@ export default function App() {
   const [resetCompleteVisible, setResetCompleteVisible] = useState(false);
   const [appResetKey, setAppResetKey] = useState(0);
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
+  const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed">("");
+  const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFollowerNoticeRef = useRef(0);
   const reconnectPressesRef = useRef<number[]>([]);
   const reconnectCancelledRef = useRef(false);
@@ -1011,18 +1013,23 @@ export default function App() {
         // A newer director took over — Swift already cleaned up transport.
         setSyncRole("follower");
         startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-      } else if (event.type === "state" && event.status === "connected" && syncRoleRef.current === "follower") {
-        // Follower just connected to director — show satellite emoji briefly (30s cooldown)
-        const now = Date.now();
-        if (now - lastFollowerNoticeRef.current > 30_000) {
-          lastFollowerNoticeRef.current = now;
-          setShowSatellite(true);
-          setTimeout(() => setShowSatellite(false), 3000);
+      } else if (event.type === "state" && syncRoleRef.current === "follower") {
+        if (event.status === "connected") {
+          // Show satellite emoji with 30s cooldown between notices.
+          const now = Date.now();
+          if (now - lastFollowerNoticeRef.current > 30_000) {
+            lastFollowerNoticeRef.current = now;
+            setShowSatellite(true);
+            setTimeout(() => setShowSatellite(false), 3000);
+          }
+          setFollowerStatus("connected", 4000);
+        } else if (event.status === "searching" || event.status === "connecting") {
+          setFollowerStatus("searching");
         }
       }
     });
     return () => sub.remove();
-  }, [activeBookId, goToPage, mode, syncAvailable]);
+  }, [activeBookId, goToPage, mode, setFollowerStatus, syncAvailable]);
 
   // Fire immediately on mount to trigger the iOS Local Network permission dialog
   // before any other state is ready — works regardless of mode or onboarding state.
@@ -1080,6 +1087,20 @@ export default function App() {
     }
   }, [songModal]);
 
+  const setFollowerStatus = useCallback((label: typeof followerStatusLabel, autoClearMs = 0) => {
+    if (followerStatusTimerRef.current) {
+      clearTimeout(followerStatusTimerRef.current);
+      followerStatusTimerRef.current = null;
+    }
+    setFollowerStatusLabel(label);
+    if (autoClearMs > 0 && label !== "") {
+      followerStatusTimerRef.current = setTimeout(() => {
+        setFollowerStatusLabel("");
+        followerStatusTimerRef.current = null;
+      }, autoClearMs);
+    }
+  }, []);
+
   const clearVolatileRuntimeState = useCallback(() => {
     Keyboard.dismiss();
     reconnectCancelledRef.current = true;
@@ -1089,6 +1110,11 @@ export default function App() {
     lastFollowerNoticeRef.current = 0;
     longPressedRef.current = false;
     currentPageRef.current = STANDARD_START_PAGE;
+    if (followerStatusTimerRef.current) {
+      clearTimeout(followerStatusTimerRef.current);
+      followerStatusTimerRef.current = null;
+    }
+    setFollowerStatusLabel("");
     setSongInput("");
     setCodeInput("");
     setKeyboardHeight(0);
@@ -1139,11 +1165,19 @@ export default function App() {
         setResetCompleteVisible(false);
         resetCompleteTimerRef.current = null;
       }, 2200);
+      // If the device re-bootstrapped as a follower, show "searching" until a
+      // state:connected event arrives from the native layer.
+      if (syncRoleRef.current === "follower") {
+        setFollowerStatus("searching");
+      }
     }
-  }, [bootstrapNearbySyncRole, clearVolatileRuntimeState, loadPersistedLaunchState]);
+  }, [bootstrapNearbySyncRole, clearVolatileRuntimeState, loadPersistedLaunchState, setFollowerStatus]);
 
   const confirmResetApp = useCallback((source: "manual" | "reconnect" = "manual") => {
     if (isResettingApp) return;
+    // Dismiss the sync modal before showing the alert so they never appear stacked.
+    Keyboard.dismiss();
+    setSyncModal(false);
     const title = source === "reconnect" ? "Volver a conectar" : "Restablecer app";
     const message = source === "reconnect"
       ? "Si todavia no conecta, podemos restablecer la app ahora mismo. Esto vuelve a empezar la conexion sin borrar cantos ni ajustes."
@@ -1194,7 +1228,8 @@ export default function App() {
     longPressedRef.current = true;
     setCodeInput("");
     setSyncModal(true);
-    setTimeout(() => codeInputRef.current?.focus(), 50);
+    // Do not auto-focus — hidden focus summons the keyboard immediately on iPad,
+    // which breaks layout and surprises non-technical users. Let them tap to type.
   }, []);
   const closeSyncModal = useCallback(() => {
     Keyboard.dismiss();
@@ -1223,7 +1258,7 @@ export default function App() {
       setSyncRole("follower");
       Alert.alert(
         "No se pudo activar el modo director",
-        "SignoVivo necesita acceso a Red Local. Abre Ajustes y activa el permiso. Si no aparece, desinstala y reinstala la app.",
+        "Abre Ajustes → Privacidad y seguridad → Red local y verifica que SignoVivo esté activado. Si no aparece en esa lista, cierra la app completamente y vuelve a abrirla.",
         [
           { text: "Abrir Ajustes", onPress: () => Linking.openURL("app-settings:").catch(() => {}) },
           { text: "OK", style: "cancel" },
@@ -2038,15 +2073,29 @@ export default function App() {
 
       {/* Top-right button cluster */}
       {syncRole === "follower" && !searchVisible && !onboardingVisible && (
-        <TouchableOpacity
-          style={styles.reconnectButton}
-          onPress={() => { handleReconnectPress().catch(() => {}); }}
-          activeOpacity={0.75}
-          hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-        >
-          <Text style={styles.reconnectIcon}>↻</Text>
-          <PulsingDot color="#4cff91" />
-        </TouchableOpacity>
+        <View style={styles.reconnectCluster}>
+          <TouchableOpacity
+            style={styles.reconnectButton}
+            onPress={() => { handleReconnectPress().catch(() => {}); }}
+            activeOpacity={0.75}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+          >
+            <Text style={styles.reconnectIcon}>↻</Text>
+            <PulsingDot color="#4cff91" />
+          </TouchableOpacity>
+          {followerStatusLabel !== "" && (
+            <Text style={[
+              styles.followerStatusLabel,
+              followerStatusLabel === "connected" && styles.followerStatusConnected,
+              followerStatusLabel === "searching" && styles.followerStatusSearching,
+              followerStatusLabel === "failed" && styles.followerStatusFailed,
+            ]}>
+              {followerStatusLabel === "connected" ? "Conectado ✓" :
+               followerStatusLabel === "searching" ? "Buscando..." :
+               "Sin conexión"}
+            </Text>
+          )}
+        </View>
       )}
 
       <View style={styles.navCluster}>
@@ -2284,10 +2333,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  reconnectButton: {
+  reconnectCluster: {
     position: "absolute",
     top: 1.25,
     left: 1.25,
+    alignItems: "center",
+    gap: 4,
+  },
+  reconnectButton: {
     width: 96,
     height: 96,
     alignItems: "center",
@@ -2300,6 +2353,16 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 7,
   },
+  followerStatusLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#ccc",
+    textAlign: "center",
+    paddingHorizontal: 4,
+  },
+  followerStatusConnected: { color: "#4cff91" },
+  followerStatusSearching: { color: "#f0c040" },
+  followerStatusFailed: { color: "#ff6b6b" },
   reconnectIcon: {
     fontSize: 58,
     color: "#fff",
