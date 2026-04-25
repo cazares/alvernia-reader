@@ -56,6 +56,14 @@ export const primeNearbyPermissions = async () => {
   return null;
 };
 
+export const refreshNearbyDiscovery = async () => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.refreshNearbyDiscovery === "function") {
+    return nativeModule.refreshNearbyDiscovery();
+  }
+  return null;
+};
+
 export const addNearbyDirectorSyncListener = (listener) => {
   if (!nearbyEventEmitter) {
     return { remove() {} };

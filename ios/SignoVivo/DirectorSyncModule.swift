@@ -9,10 +9,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let eventName = "DirectorSyncEvent"
   private static let protocolVersion = 1
   private static let maxSessionCodeLength = 12
+  /// Normal (steady-state) discovery refresh interval.
   private static let discoveryRefreshInterval: TimeInterval = 25
+  /// Fast refresh interval used for the first N cycles after starting, so followers find
+  /// a late-arriving director within a few seconds rather than up to 25 s.
+  private static let earlyRefreshInterval: TimeInterval = 5
+  private static let earlyRefreshCycleCount = 6           // 6 × 5 s = 30 s burst window
   private static let inviteTimeout: TimeInterval = 30
   private static let followerRetryDelay: TimeInterval = 2
   private static let followerHelloInterval: TimeInterval = 8
+  /// Seconds a follower waits for a director before entering self-directed mode.
+  private static let selfDirectedTimeoutSeconds: TimeInterval = 10
   private static let maxInboundPayloadBytes = 8 * 1024
   /// MCSession hard limit is 8 peers total (including local). Director occupies 1 slot → 7 followers/session.
   private static let maxFollowersPerSession = 7
@@ -32,6 +39,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var pendingInvitePeer: MCPeerID?
   private var connectedDirectorPeer: MCPeerID?
   private var discoveryRefreshTimer: Timer?
+  private var earlyRefreshCyclesRemaining: Int = 0
+  private var selfDirectedTimer: Timer?
   private var followerHelloTimer: Timer?
   private var lastFollowerHelloAt: TimeInterval = 0
   private var lastFollowerPageReceivedAt: TimeInterval = 0
@@ -148,6 +157,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.startAdvertising()
       self.startBrowsing()
       self.startDiscoveryRefreshTimer()
+      self.startSelfDirectedTimer()
       self.emitState(status: "searching")
       resolve(["role": "follower", "sessionCode": normalizedSessionCode])
     }
@@ -232,6 +242,24 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.primingAdvertiser = nil
         self.primingPeerID = nil
       }
+      resolve(nil)
+    }
+  }
+
+  // Lightweight discovery refresh exposed to JS — restarts browser+advertiser without
+  // tearing down existing MCSession connections. Used for the first tap on the reconnect
+  // button so followers can re-find the director without dropping the current session.
+  @objc(refreshNearbyDiscovery:rejecter:)
+  func refreshNearbyDiscovery(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole != "off" else { resolve(nil); return }
+      // Reset to early-burst mode so the next few cycles are fast (5 s each).
+      self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+      self.refreshDiscovery()
+      self.scheduleNextDiscoveryRefresh()
       resolve(nil)
     }
   }
@@ -338,11 +366,42 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     browser = b
   }
 
+  // Adaptive discovery refresh: fast burst for the first earlyRefreshCycleCount cycles,
+  // then settle into the normal interval. This means a follower finds a late-arriving
+  // director within earlyRefreshInterval seconds rather than up to discoveryRefreshInterval.
   private func startDiscoveryRefreshTimer() {
     discoveryRefreshTimer?.invalidate()
-    discoveryRefreshTimer = Timer.scheduledTimer(withTimeInterval: Self.discoveryRefreshInterval, repeats: true) { [weak self] _ in
-      DispatchQueue.main.async { self?.refreshDiscovery() }
+    earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+    scheduleNextDiscoveryRefresh()
+  }
+
+  private func scheduleNextDiscoveryRefresh() {
+    let interval: TimeInterval = earlyRefreshCyclesRemaining > 0
+      ? Self.earlyRefreshInterval
+      : Self.discoveryRefreshInterval
+    discoveryRefreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+      DispatchQueue.main.async {
+        guard let self = self, self.currentRole != "off" else { return }
+        if self.earlyRefreshCyclesRemaining > 0 { self.earlyRefreshCyclesRemaining -= 1 }
+        self.refreshDiscovery()
+        self.scheduleNextDiscoveryRefresh()
+      }
     }
+  }
+
+  private func startSelfDirectedTimer() {
+    selfDirectedTimer?.invalidate()
+    selfDirectedTimer = Timer.scheduledTimer(withTimeInterval: Self.selfDirectedTimeoutSeconds, repeats: false) { [weak self] _ in
+      DispatchQueue.main.async {
+        guard let self = self, self.currentRole == "follower", self.connectedDirectorPeer == nil else { return }
+        self.emitState(status: "self-directed")
+      }
+    }
+  }
+
+  private func cancelSelfDirectedTimer() {
+    selfDirectedTimer?.invalidate()
+    selfDirectedTimer = nil
   }
 
   private func startFollowerHelloTimer() {
@@ -392,6 +451,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private func resetTransport(emitState shouldEmitState: Bool) {
     resetGeneration = UUID()
     discoveryRefreshTimer?.invalidate(); discoveryRefreshTimer = nil
+    cancelSelfDirectedTimer()
     stopFollowerHelloTimer()
     advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
     browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
@@ -453,6 +513,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
     // Don't re-invite a director we're already connecting to.
     guard pendingInvitePeer != target else { emitState(status: "connecting"); return }
+    // A director was found — cancel the self-directed fallback; we're about to connect.
+    cancelSelfDirectedTimer()
     pendingInvitePeer = target
     browser?.invitePeer(target, to: session, withContext: nil, timeout: Self.inviteTimeout)
     emitState(status: "connecting")
@@ -578,6 +640,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       case .connected:
         if self.currentRole == "follower" {
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
+          self.cancelSelfDirectedTimer()
           self.startFollowerHelloTimer()
           self.sendFollowerHelloIfNeeded()
         } else if self.currentRole == "director" {
@@ -591,6 +654,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
            (self.connectedDirectorPeer == peerID || self.pendingInvitePeer == peerID) {
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
+          // Give the director a grace window to reconnect before going self-directed.
+          self.startSelfDirectedTimer()
           self.emitState(status: "searching", message: "Reconectando con el director...")
           let generation = self.resetGeneration
           DispatchQueue.main.asyncAfter(deadline: .now() + Self.followerRetryDelay) { [weak self] in

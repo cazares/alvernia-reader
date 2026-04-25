@@ -37,6 +37,7 @@ import {
   addNearbyDirectorSyncListener,
   isNearbyDirectorSyncAvailable,
   primeNearbyPermissions,
+  refreshNearbyDiscovery,
   resetNearbyDirectorSync,
   sendNearbyDirectorPageUpdate,
   startNearbyDirector,
@@ -667,7 +668,7 @@ export default function App() {
   const [resetCompleteVisible, setResetCompleteVisible] = useState(false);
   const [appResetKey, setAppResetKey] = useState(0);
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
-  const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed">("");
+  const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed" | "self-directed">("");
   const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFollowerNoticeRef = useRef(0);
   const directorStartFailedAlertShownRef = useRef(false);
@@ -1051,6 +1052,9 @@ export default function App() {
             setTimeout(() => setShowSatellite(false), 3000);
           }
           setFollowerStatus("connected", 4000);
+        } else if (event.status === "self-directed") {
+          // No director found yet — let the user navigate freely, show a subtle indicator.
+          setFollowerStatus("self-directed");
         } else if (event.status === "searching" || event.status === "connecting") {
           setFollowerStatus("searching");
         }
@@ -1320,8 +1324,10 @@ export default function App() {
     const now = Date.now();
     reconnectPressesRef.current = reconnectPressesRef.current.filter((t) => now - t <= 25_000);
     reconnectPressesRef.current.push(now);
+    const pressCount = reconnectPressesRef.current.length;
 
-    if (reconnectPressesRef.current.length >= 3) {
+    // Tap 3+: full soft reset (most drastic — only if lighter attempts failed)
+    if (pressCount >= 3) {
       reconnectPressesRef.current = [];
       confirmResetApp("reconnect");
       return;
@@ -1336,11 +1342,18 @@ export default function App() {
     setReconnectMessage("Reconectando con el director...");
     setReconnectBusy(true);
     try {
-      await stopNearbyDirectorSync().catch(() => {});
-      if (reconnectCancelledRef.current) return;
-      await startNearbyFollower(DIRECTOR_SESSION);
-      if (reconnectCancelledRef.current) return;
-      setSyncRole("follower");
+      if (pressCount === 1) {
+        // Tap 1: lightweight — restart browser+advertiser without dropping the session.
+        // Resets to fast-burst discovery (5 s cycles for 30 s). Preserves existing connections.
+        await refreshNearbyDiscovery().catch(() => {});
+      } else {
+        // Tap 2: full stop → start follower (session teardown + fresh session).
+        await stopNearbyDirectorSync().catch(() => {});
+        if (reconnectCancelledRef.current) return;
+        await startNearbyFollower(DIRECTOR_SESSION);
+        if (reconnectCancelledRef.current) return;
+        setSyncRole("follower");
+      }
       setReconnectMessage("Listo.");
       setTimeout(() => {
         if (!reconnectCancelledRef.current) setReconnectBusy(false);
@@ -2119,9 +2132,11 @@ export default function App() {
               followerStatusLabel === "connected" && styles.followerStatusConnected,
               followerStatusLabel === "searching" && styles.followerStatusSearching,
               followerStatusLabel === "failed" && styles.followerStatusFailed,
+              followerStatusLabel === "self-directed" && styles.followerStatusSelfDirected,
             ]}>
               {followerStatusLabel === "connected" ? "Conectado ✓" :
                followerStatusLabel === "searching" ? "Buscando..." :
+               followerStatusLabel === "self-directed" ? "Modo libre" :
                "Sin conexión"}
             </Text>
           )}
@@ -2393,6 +2408,7 @@ const styles = StyleSheet.create({
   followerStatusConnected: { color: "#4cff91" },
   followerStatusSearching: { color: "#f0c040" },
   followerStatusFailed: { color: "#ff6b6b" },
+  followerStatusSelfDirected: { color: "#a0a8c0" },
   reconnectIcon: {
     fontSize: 58,
     color: "#fff",

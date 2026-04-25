@@ -4,6 +4,7 @@ export function startNearbyFollower(sessionCode: string): Promise<Record<string,
 export function stopNearbyDirectorSync(): Promise<Record<string, unknown> | null>;
 export function resetNearbyDirectorSync(): Promise<Record<string, unknown> | null>;
 export function primeNearbyPermissions(): Promise<Record<string, unknown> | null>;
+export function refreshNearbyDiscovery(): Promise<Record<string, unknown> | null>;
 export function sendNearbyDirectorPageUpdate(
   page: number,
   totalPages?: number,

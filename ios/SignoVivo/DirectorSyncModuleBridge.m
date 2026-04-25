@@ -30,4 +30,7 @@ RCT_EXTERN_METHOD(sendPageUpdate:(nonnull NSNumber *)page
 RCT_EXTERN_METHOD(primePermissions:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(refreshNearbyDiscovery:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end
