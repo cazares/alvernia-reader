@@ -557,6 +557,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
+    // Guard against priming browser failures — only the real browser emits to JS.
+    // Fires when Local Network permission is denied or the radio is unavailable.
+    if browser === self.browser, currentRole == "follower" {
+      emitError(code: "FOLLOWER_START_FAILED", message: error.localizedDescription)
+    }
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
       guard let self = self, browser === self.browser, self.currentRole != "off" else { return }
       self.browser?.stopBrowsingForPeers(); self.browser?.delegate = nil; self.browser = nil

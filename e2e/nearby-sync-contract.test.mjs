@@ -115,6 +115,24 @@ test("UX Fix E: follower status label with connected/searching/failed variants i
   assert.match(appSource, /Sin conexión/);
 });
 
+// Follower-first scenario: browser failure (permission denied) must surface to JS so the
+// follower is told to check Settings rather than waiting forever on "searching".
+test("FOLLOWER_START_FAILED: browser failure emits error to JS and shows Settings alert", () => {
+  assert.match(swiftSource, /FOLLOWER_START_FAILED/);
+  // Must guard against the priming browser — only the real browser emits.
+  assert.match(swiftSource, /browser === self\.browser.*currentRole == "follower"[\s\S]{0,60}FOLLOWER_START_FAILED/);
+  assert.match(appSource, /FOLLOWER_START_FAILED/);
+  assert.match(appSource, /followerStartFailedAlertShownRef/);
+  assert.match(appSource, /No se puede buscar al director/);
+});
+
+// Both start-failed refs must be cleared on soft reset so alerts can fire again on next session.
+test("start-failed alert refs reset on soft app reset", () => {
+  const resetBlock = appSource.match(/clearVolatileRuntimeState[\s\S]*?setFollowerStatusLabel/)?.[0] ?? "";
+  assert.match(resetBlock, /directorStartFailedAlertShownRef\.current = false/);
+  assert.match(resetBlock, /followerStartFailedAlertShownRef\.current = false/);
+});
+
 // UX Fix E: follower status must auto-clear after a timeout via a timer ref — no permanent label.
 test("UX Fix E: follower status label uses auto-clear timer via ref", () => {
   assert.match(appSource, /followerStatusTimerRef/);

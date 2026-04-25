@@ -671,6 +671,7 @@ export default function App() {
   const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFollowerNoticeRef = useRef(0);
   const directorStartFailedAlertShownRef = useRef(false);
+  const followerStartFailedAlertShownRef = useRef(false);
   const reconnectPressesRef = useRef<number[]>([]);
   const reconnectCancelledRef = useRef(false);
   const appResettingRef = useRef(false);
@@ -1010,6 +1011,18 @@ export default function App() {
           return;
         }
         goToPage(event.page);
+      } else if (event.type === "error" && event.code === "FOLLOWER_START_FAILED" && syncRoleRef.current === "follower") {
+        if (!followerStartFailedAlertShownRef.current) {
+          followerStartFailedAlertShownRef.current = true;
+          Alert.alert(
+            "No se puede buscar al director",
+            "Abre Ajustes → Privacidad y seguridad → Red local y verifica que SignoVivo esté activado. Si no aparece en esa lista, cierra la app completamente y vuelve a abrirla.",
+            [
+              { text: "Abrir Ajustes", onPress: () => Linking.openURL("app-settings:").catch(() => {}) },
+              { text: "OK", style: "cancel" },
+            ]
+          );
+        }
       } else if (event.type === "error" && event.code === "DIRECTOR_START_FAILED" && syncRoleRef.current === "director") {
         // Advertiser/browser failed to start — most common cause is Local Network permission denied.
         // Swift will retry automatically; show a one-time alert so the director knows to check Settings.
@@ -1124,6 +1137,7 @@ export default function App() {
     recentSongsRef.current = [];
     lastFollowerNoticeRef.current = 0;
     directorStartFailedAlertShownRef.current = false;
+    followerStartFailedAlertShownRef.current = false;
     longPressedRef.current = false;
     currentPageRef.current = STANDARD_START_PAGE;
     if (followerStatusTimerRef.current) {
