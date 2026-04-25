@@ -1,5 +1,6 @@
 import Foundation
 import MultipeerConnectivity
+import Network
 import React
 
 @objc(DirectorSyncModule)
@@ -178,6 +179,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var primingBrowser: MCNearbyServiceBrowser?
   private var primingAdvertiser: MCNearbyServiceAdvertiser?
   private var primingPeerID: MCPeerID?
+  // NWBrowser is the reliable iOS 14+ trigger for the Local Network permission prompt and
+  // for registering the app toggle under Settings > Privacy > Local Network.
+  private var primingNWBrowser: NWBrowser?
 
   @objc(primePermissions:rejecter:)
   func primePermissions(
@@ -185,9 +189,22 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
     DispatchQueue.main.async {
-      // Start a real, delegated browser+advertiser pair to trigger the iOS Local Network
-      // permission dialog. Without a delegate iOS will silently no-op; we also retain
-      // them strongly so the system-level service lasts long enough for the prompt.
+      // NWBrowser is the guaranteed way to trigger the iOS 14+ Local Network permission
+      // dialog. MCNearbyServiceBrowser alone does NOT reliably surface the prompt or
+      // register the toggle in Settings > Privacy > Local Network on all iOS versions.
+      let nwParams = NWParameters()
+      nwParams.includePeerToPeer = true
+      let nwBrowser = NWBrowser(
+        for: .bonjour(type: "_\(Self.serviceType)._tcp", domain: nil),
+        using: nwParams
+      )
+      nwBrowser.stateUpdateHandler = { _ in }
+      nwBrowser.browseResultsChangedHandler = { _, _ in }
+      nwBrowser.start(queue: .main)
+      self.primingNWBrowser = nwBrowser
+
+      // MPC priming: start a real browser+advertiser with a delegate so iOS also
+      // records the Bluetooth usage for the Bluetooth permission path.
       let rawDisplay = UIDevice.current.name.isEmpty ? "signovivo" : UIDevice.current.name
       let displayName = String(rawDisplay.prefix(50))
       let peerID = MCPeerID(displayName: "\(displayName)-prime")
@@ -203,8 +220,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       advertiser.startAdvertisingPeer()
       self.primingAdvertiser = advertiser
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+      DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
         guard let self = self else { return }
+        self.primingNWBrowser?.cancel()
+        self.primingNWBrowser = nil
         self.primingBrowser?.stopBrowsingForPeers()
         self.primingBrowser?.delegate = nil
         self.primingBrowser = nil

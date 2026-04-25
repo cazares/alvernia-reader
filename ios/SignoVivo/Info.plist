@@ -32,7 +32,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>263</string>
+	<string>264</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSMinimumSystemVersion</key>
@@ -54,6 +54,7 @@
 	<array>
 		<string>_signovivo._tcp</string>
 		<string>_signovivo._udp</string>
+		<string>_device-info._tcp</string>
 	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
