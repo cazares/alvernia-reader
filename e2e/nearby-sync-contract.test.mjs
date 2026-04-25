@@ -61,6 +61,14 @@ test("director does not call invitePeer in browser:foundPeer — followers are s
   assert.doesNotMatch(browserFoundPeerBlock, /\.invitePeer\(/, "director must not call .invitePeer() in foundPeer");
 });
 
+test("follower invite ownership lives in reconsiderFollowerTarget", () => {
+  const reconsiderBlock = swiftSource.match(
+    /private func reconsiderFollowerTarget\(\)[\s\S]*?(?=\n  private func )/
+  )?.[0] ?? "";
+  assert.ok(reconsiderBlock.length > 0, "reconsiderFollowerTarget must exist");
+  assert.match(reconsiderBlock, /browser\?\.invitePeer\(target, to: session/);
+});
+
 // Peer display names longer than 63 chars cause an ObjC exception in MCPeerID init.
 test("Swift caps peer display name to 50 chars before creating MCPeerID", () => {
   assert.match(swiftSource, /prefix\(50\)/);
@@ -82,7 +90,9 @@ test("Swift stores page state before the empty-peers guard in sendPageUpdate", (
 
 // Dedup guard prevents multiple in-flight invitations to the same peer (reconsiderFollowerTarget).
 test("Swift deduplicates in-flight invitations with pendingInvitePeer guard", () => {
-  assert.match(swiftSource, /guard pendingInvitePeer != target else/);
+  assert.match(swiftSource, /if let pending = pendingInvitePeer/);
+  assert.match(swiftSource, /if pending == target/);
+  assert.match(swiftSource, /if discoveredDirectors\[pending\] != nil/);
 });
 
 // UX Fix B: reset confirmation alert must not stack on top of sync modal — modal must be
@@ -137,4 +147,37 @@ test("start-failed alert refs reset on soft app reset", () => {
 test("UX Fix E: follower status label uses auto-clear timer via ref", () => {
   assert.match(appSource, /followerStatusTimerRef/);
   assert.match(appSource, /clearTimeout\(followerStatusTimerRef\.current\)/);
+});
+
+test("late joiners receive immediate snapshots from the director", () => {
+  assert.match(swiftSource, /sendCurrentPageSnapshot\(to: peerID, via: session\)/);
+  assert.match(swiftSource, /if type == "hello"[\s\S]*sendCurrentPageSnapshot\(to: peerID, via: session\)/);
+});
+
+test("discovery cadence keeps early burst then steady 25-second refreshes", () => {
+  assert.match(swiftSource, /private static let discoveryRefreshInterval: TimeInterval = 25/);
+  assert.match(swiftSource, /private static let earlyRefreshInterval: TimeInterval = 5/);
+  assert.match(swiftSource, /private static let earlyRefreshCycleCount = 6/);
+  assert.match(swiftSource, /earlyRefreshCyclesRemaining = Self\.earlyRefreshCycleCount/);
+  assert.match(swiftSource, /let interval: TimeInterval = earlyRefreshCyclesRemaining > 0/);
+});
+
+test("timers are generation-guarded so stale callbacks cannot survive reset", () => {
+  assert.match(swiftSource, /let generation = resetGeneration/);
+  assert.match(swiftSource, /self\.resetGeneration == generation/);
+  assert.match(swiftSource, /DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ Self\.followerRetryDelay\)[\s\S]*self\.resetGeneration == generation/);
+});
+
+test("director can accept up to 10 followers via multi-session allocation", () => {
+  assert.match(swiftSource, /private static let maxFollowersPerSession = 7/);
+  assert.match(swiftSource, /private static let maxSessions = 2/);
+  assert.match(swiftSource, /availableSessionForNewFollower\(\)/);
+});
+
+test("follower reconnect and bootstrap paths emit explicit searching/failed states", () => {
+  assert.match(appSource, /event\.status === "searching" \|\|/);
+  assert.match(appSource, /event\.status === "resolving-conflict"/);
+  assert.match(appSource, /setFollowerStatus\("failed", 6000\)/);
+  assert.match(appSource, /setFollowerStatus\("failed", 5000\)/);
+  assert.match(appSource, /setFollowerStatus\("searching"\)/);
 });

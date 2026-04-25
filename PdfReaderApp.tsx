@@ -1013,6 +1013,7 @@ export default function App() {
         }
         goToPage(event.page);
       } else if (event.type === "error" && event.code === "FOLLOWER_START_FAILED" && syncRoleRef.current === "follower") {
+        setFollowerStatus("failed", 6000);
         if (!followerStartFailedAlertShownRef.current) {
           followerStartFailedAlertShownRef.current = true;
           Alert.alert(
@@ -1055,8 +1056,14 @@ export default function App() {
         } else if (event.status === "self-directed") {
           // No director found yet — let the user navigate freely, show a subtle indicator.
           setFollowerStatus("self-directed");
-        } else if (event.status === "searching" || event.status === "connecting") {
+        } else if (
+          event.status === "searching" ||
+          event.status === "connecting" ||
+          event.status === "resolving-conflict"
+        ) {
           setFollowerStatus("searching");
+        } else if (event.status === "waiting-followers" || event.status === "idle") {
+          setFollowerStatus("failed", 5000);
         }
       }
     });
@@ -1361,6 +1368,7 @@ export default function App() {
     } catch {
       if (!reconnectCancelledRef.current) {
         setReconnectBusy(false);
+        setFollowerStatus("failed", 5000);
         showConnectivityHelp();
       }
     }
