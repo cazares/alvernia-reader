@@ -670,6 +670,7 @@ export default function App() {
   const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed">("");
   const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFollowerNoticeRef = useRef(0);
+  const directorStartFailedAlertShownRef = useRef(false);
   const reconnectPressesRef = useRef<number[]>([]);
   const reconnectCancelledRef = useRef(false);
   const appResettingRef = useRef(false);
@@ -1009,6 +1010,20 @@ export default function App() {
           return;
         }
         goToPage(event.page);
+      } else if (event.type === "error" && event.code === "DIRECTOR_START_FAILED" && syncRoleRef.current === "director") {
+        // Advertiser/browser failed to start — most common cause is Local Network permission denied.
+        // Swift will retry automatically; show a one-time alert so the director knows to check Settings.
+        if (!directorStartFailedAlertShownRef.current) {
+          directorStartFailedAlertShownRef.current = true;
+          Alert.alert(
+            "No se pudo activar el modo director",
+            "Abre Ajustes → Privacidad y seguridad → Red local y verifica que SignoVivo esté activado. Si no aparece en esa lista, cierra la app completamente y vuelve a abrirla.",
+            [
+              { text: "Abrir Ajustes", onPress: () => Linking.openURL("app-settings:").catch(() => {}) },
+              { text: "OK", style: "cancel" },
+            ]
+          );
+        }
       } else if (event.type === "error" && event.code === "DIRECTOR_CONFLICT") {
         // A newer director took over — Swift already cleaned up transport.
         setSyncRole("follower");
@@ -1108,6 +1123,7 @@ export default function App() {
     pendingSyncPageRef.current = null;
     recentSongsRef.current = [];
     lastFollowerNoticeRef.current = 0;
+    directorStartFailedAlertShownRef.current = false;
     longPressedRef.current = false;
     currentPageRef.current = STANDARD_START_PAGE;
     if (followerStatusTimerRef.current) {

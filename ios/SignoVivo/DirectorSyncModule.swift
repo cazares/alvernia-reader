@@ -504,6 +504,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
+    // Surface the failure to JS immediately so the director UI can warn the user.
+    // This fires when Local Network permission is denied or the radio is unavailable.
+    if currentRole == "director" {
+      emitError(code: "DIRECTOR_START_FAILED", message: error.localizedDescription)
+    }
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
       guard let self = self, advertiser === self.advertiser, self.currentRole != "off" else { return }
       self.advertiser?.stopAdvertisingPeer(); self.advertiser?.delegate = nil; self.advertiser = nil
