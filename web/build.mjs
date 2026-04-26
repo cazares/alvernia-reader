@@ -7,6 +7,7 @@ const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
 const srcDir = path.join(rootDir, "web", "src");
 const distDir = path.join(rootDir, "web", "dist");
 const pagesDir = path.join(distDir, "pages");
+const thumbsDir = path.join(distDir, "thumbs");
 const cacheVersion = (() => {
   const gitSha = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
     cwd: rootDir,
@@ -21,6 +22,7 @@ const cacheVersion = (() => {
 fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
 fs.mkdirSync(pagesDir, { recursive: true });
+fs.mkdirSync(thumbsDir, { recursive: true });
 
 fs.copyFileSync(path.join(srcDir, "styles.css"), path.join(distDir, "styles.css"));
 const appSource = fs
@@ -51,11 +53,27 @@ const generateIcon = (size, outputName) => {
 generateIcon(192, "icon-192.png");
 generateIcon(512, "icon-512.png");
 
+const parsePositiveInt = (value, fallback) => {
+  const n = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const parseJpegQuality = (value, fallback) => {
+  const n = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(100, n));
+};
+
+// Rendering pages from the PDF is the single biggest lever for sharpness.
+// Defaults are intentionally "high res" to match the original native-PDF clarity.
+const PDF_RENDER_DPI = parsePositiveInt(process.env.ALVERNIA_PDF_RENDER_DPI, 240);
+const PDF_RENDER_JPEG_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_RENDER_JPEG_QUALITY, 92);
+
 const pdfPath = path.join(rootDir, "assets", "alvernia_manual_2.pdf");
 const outputPrefix = path.join(pagesDir, "page");
 const convert = spawnSync(
   "pdftoppm",
-  ["-jpeg", "-jpegopt", "quality=80", "-r", "144", pdfPath, outputPrefix],
+  ["-jpeg", "-jpegopt", `quality=${PDF_RENDER_JPEG_QUALITY}`, "-r", String(PDF_RENDER_DPI), pdfPath, outputPrefix],
   { stdio: "inherit" },
 );
 
@@ -67,6 +85,51 @@ const pageFiles = fs
   .readdirSync(pagesDir)
   .filter((file) => /^page-\d+\.jpg$/.test(file))
   .sort((left, right) => left.localeCompare(right));
+
+const parseNonNegativeInt = (value, fallback) => {
+  const n = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+const THUMB_WIDTH = parsePositiveInt(process.env.ALVERNIA_THUMB_WIDTH, 320);
+const THUMB_JPEG_QUALITY = parseJpegQuality(process.env.ALVERNIA_THUMB_JPEG_QUALITY, 70);
+const THUMB_CONCURRENCY = Math.max(1, parseNonNegativeInt(process.env.ALVERNIA_THUMB_CONCURRENCY, 1) || 1);
+
+// Generate thumbnail strip used by the native grid/browse UI.
+// (The app depends on these existing in the offline-web bundle.)
+console.log(`Generating ${pageFiles.length} thumbs at width=${THUMB_WIDTH}, quality=${THUMB_JPEG_QUALITY}...`);
+const makeThumb = (file) => {
+  const match = file.match(/page-(\d+)\.jpg$/);
+  const num = match ? match[1] : null;
+  if (!num) return;
+  const src = path.join(pagesDir, file);
+  const out = path.join(thumbsDir, `thumb-${num}.jpg`);
+  const result = spawnSync(
+    "sips",
+    ["-Z", String(THUMB_WIDTH), "-s", "format", "jpeg", "-s", "formatOptions", String(THUMB_JPEG_QUALITY), src, "--out", out],
+    { stdio: "pipe" },
+  );
+  if (result.status !== 0 || !fs.existsSync(out)) {
+    throw new Error(`Failed generating thumb for ${file}`);
+  }
+};
+
+if (THUMB_CONCURRENCY <= 1) {
+  for (let i = 0; i < pageFiles.length; i++) {
+    makeThumb(pageFiles[i]);
+    if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pageFiles.length}\n`);
+  }
+} else {
+  // Simple chunked parallelism (still safe on laptops; avoid overwhelming).
+  let i = 0;
+  while (i < pageFiles.length) {
+    const chunk = pageFiles.slice(i, i + THUMB_CONCURRENCY);
+    for (const f of chunk) makeThumb(f);
+    i += chunk.length;
+    if (i % 50 === 0) process.stdout.write(`  ${i}/${pageFiles.length}\n`);
+  }
+}
+console.log("Thumb generation done.");
 
 const songIndexSource = fs.readFileSync(path.join(rootDir, "src", "alverniaManual2SongIndex.js"), "utf8");
 const songIndex = [];
