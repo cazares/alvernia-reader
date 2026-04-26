@@ -41,6 +41,8 @@ test("director mode is gated by the DIRECTOR_ACCESS_CODES allowlist", () => {
   const codes = directorCodesMatch[1];
   assert.match(codes, /"8303130470"/);
   assert.match(codes, /"8307197000"/);
+  assert.match(codes, /"123456"/);
+  assert.doesNotMatch(codes, /"1234"/);
   assert.match(SOURCE, /if \(!DIRECTOR_ACCESS_CODES\.has\(normalizeAccessCode\(codeInput\)\)\)/);
 });
 
