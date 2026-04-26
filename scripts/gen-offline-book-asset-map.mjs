@@ -37,7 +37,7 @@ const listFiles = (subdir) => {
   if (!fs.existsSync(abs)) return [];
   return fs
     .readdirSync(abs)
-    .filter((f) => f.endsWith(".jpg"))
+    .filter((f) => f.endsWith(".jpg") || f.endsWith(".webp"))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     .map((f) => `${subdir}/${f}`);
 };
@@ -45,7 +45,7 @@ const listFiles = (subdir) => {
 const pageFiles = listFiles("pages");
 const thumbFiles = listFiles("thumbs");
 if (!pageFiles.length) {
-  console.error(`No pages/*.jpg found in ${dirRel}`);
+  console.error(`No pages/*.jpg or pages/*.webp found in ${dirRel}`);
   process.exit(2);
 }
 

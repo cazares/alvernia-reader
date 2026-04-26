@@ -10,16 +10,8 @@ import STANDARD_SEARCH_JSON from "../assets/offline-web/song-search-index.json";
 
 // Generated static Metro asset maps for alternate books
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const H1 = require("./offlineBookAssets.hymns-1.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const H2 = require("./offlineBookAssets.hymns-2.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const H4 = require("./offlineBookAssets.hymns-4.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
 
-// @ts-ignore
-import H1_PAGES_JSON from "../assets/offline-books/hymns-1/pages.json";
-// @ts-ignore
-import H2_PAGES_JSON from "../assets/offline-books/hymns-2/pages.json";
 // @ts-ignore
 import H4_PAGES_JSON from "../assets/offline-books/hymns-4/pages.json";
 // @ts-ignore
@@ -28,7 +20,7 @@ import H4_TITLES_JSON from "../assets/offline-books/hymns-4/song-titles.json";
 import H4_SEARCH_JSON from "../assets/offline-books/hymns-4/song-search-index.json";
 
 export type AppMode = "standard" | "nonStandard";
-export type BookId = "standard" | "hymns-1" | "hymns-2" | "hymns-4";
+export type BookId = "standard" | "hymns-4";
 
 export type OfflineBook = {
   id: BookId;
@@ -48,22 +40,6 @@ export const BOOKS: OfflineBook[] = [
     totalPages: Number((STANDARD_PAGES_JSON as any).totalPages ?? 368),
     songTitles: (STANDARD_TITLES_JSON as any) ?? {},
     songSearchIndex: (STANDARD_SEARCH_JSON as any) ?? [],
-  },
-  {
-    id: "hymns-1",
-    title: "Himnos Evangélicos",
-    assets: H1.ASSETS,
-    totalPages: Number((H1_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: {},
-    songSearchIndex: [],
-  },
-  {
-    id: "hymns-2",
-    title: "El Nuevo Himnario Evangélico",
-    assets: H2.ASSETS,
-    totalPages: Number((H2_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: {},
-    songSearchIndex: [],
   },
   {
     id: "hymns-4",
