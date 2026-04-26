@@ -675,6 +675,19 @@ export default function App() {
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
   const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed" | "self-directed">("");
   const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setFollowerStatus = useCallback((label: typeof followerStatusLabel, autoClearMs = 0) => {
+    if (followerStatusTimerRef.current) {
+      clearTimeout(followerStatusTimerRef.current);
+      followerStatusTimerRef.current = null;
+    }
+    setFollowerStatusLabel(label);
+    if (autoClearMs > 0 && label !== "") {
+      followerStatusTimerRef.current = setTimeout(() => {
+        setFollowerStatusLabel("");
+        followerStatusTimerRef.current = null;
+      }, autoClearMs);
+    }
+  }, []);
   const lastFollowerNoticeRef = useRef(0);
   const directorStartFailedAlertShownRef = useRef(false);
   const followerStartFailedAlertShownRef = useRef(false);
@@ -690,7 +703,7 @@ export default function App() {
   // Refs for values needed inside bootstrapNearbySyncRole without adding them as deps.
   const modeRef = useRef<AppMode>(mode);
   const activeBookIdRef = useRef<BookId>(activeBookId);
-  const totalPagesRef = useRef<number>(totalPages);
+  const totalPagesRef = useRef<number>(1);
   const searchAccessoryId = "director-search-accessory";
   const syncAvailable = isNearbyDirectorSyncAvailable();
   const [, forceRerender] = useState(0);
@@ -1177,20 +1190,6 @@ export default function App() {
       setTimeout(() => inputRef.current?.focus(), 80);
     }
   }, [songModal]);
-
-  const setFollowerStatus = useCallback((label: typeof followerStatusLabel, autoClearMs = 0) => {
-    if (followerStatusTimerRef.current) {
-      clearTimeout(followerStatusTimerRef.current);
-      followerStatusTimerRef.current = null;
-    }
-    setFollowerStatusLabel(label);
-    if (autoClearMs > 0 && label !== "") {
-      followerStatusTimerRef.current = setTimeout(() => {
-        setFollowerStatusLabel("");
-        followerStatusTimerRef.current = null;
-      }, autoClearMs);
-    }
-  }, []);
 
   const clearVolatileRuntimeState = useCallback(() => {
     Keyboard.dismiss();

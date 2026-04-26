@@ -21,6 +21,15 @@ const nativeAssetsTypesPath = path.join(rootDir, "src", "offlineWebBundle.d.ts")
 const versionFile = JSON.parse(fs.readFileSync(path.join(rootDir, "version.json"), "utf8"));
 const bundleVersion = String(versionFile.buildNumber || Date.now());
 
+const parseJpegQuality = (value, fallback) => {
+  if (value === undefined || value === null) return fallback;
+  const raw = String(value).trim().toLowerCase();
+  if (raw === "skip" || raw === "none" || raw === "0" || raw === "false") return null;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(100, n));
+};
+
 const copyDir = (sourceDir, targetDir) => {
   fs.mkdirSync(targetDir, { recursive: true });
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
@@ -46,7 +55,14 @@ const pageFiles = fs
   .filter((f) => /^page-\d+\.jpg$/.test(f))
   .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-console.log(`Re-compressing ${pageFiles.length} pages at quality=40...`);
+// Historically we recompressed pages again for smaller bundles, but that can
+// noticeably soften text. Default to keeping page JPGs as-is.
+const OFFLINE_PAGE_RECOMPRESS_QUALITY = parseJpegQuality(process.env.ALVERNIA_OFFLINE_PAGE_RECOMPRESS_QUALITY, null);
+if (OFFLINE_PAGE_RECOMPRESS_QUALITY !== null) {
+  console.log(`Re-compressing ${pageFiles.length} pages at quality=${OFFLINE_PAGE_RECOMPRESS_QUALITY}...`);
+} else {
+  console.log(`Embedding ${pageFiles.length} pages without recompressing...`);
+}
 
 const pagesData = {};
 for (let i = 0; i < pageFiles.length; i++) {
@@ -55,26 +71,31 @@ for (let i = 0; i < pageFiles.length; i++) {
   const src = path.join(pagesDir, file);
   const tmp = path.join(tmpDir, file);
 
-  const result = spawnSync(
-    "sips",
-    ["-s", "format", "jpeg", "-s", "formatOptions", "40", src, "--out", tmp],
-    { stdio: "pipe" },
-  );
-  const recompressedExists = fs.existsSync(tmp);
-  if (result.status !== 0 || !recompressedExists) {
-    const fallback = fs.readFileSync(src);
-    pagesData[num] = `data:image/jpeg;base64,${fallback.toString("base64")}`;
-    continue;
-  }
+  if (OFFLINE_PAGE_RECOMPRESS_QUALITY === null) {
+    const data = fs.readFileSync(src);
+    pagesData[num] = `data:image/jpeg;base64,${data.toString("base64")}`;
+  } else {
+    const result = spawnSync(
+      "sips",
+      ["-s", "format", "jpeg", "-s", "formatOptions", String(OFFLINE_PAGE_RECOMPRESS_QUALITY), src, "--out", tmp],
+      { stdio: "pipe" },
+    );
+    const recompressedExists = fs.existsSync(tmp);
+    if (result.status !== 0 || !recompressedExists) {
+      const fallback = fs.readFileSync(src);
+      pagesData[num] = `data:image/jpeg;base64,${fallback.toString("base64")}`;
+      continue;
+    }
 
-  const data = fs.readFileSync(tmp);
-  pagesData[num] = `data:image/jpeg;base64,${data.toString("base64")}`;
+    const data = fs.readFileSync(tmp);
+    pagesData[num] = `data:image/jpeg;base64,${data.toString("base64")}`;
+  }
 
   if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pageFiles.length}\n`);
 }
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
-console.log("Re-compression done.");
+console.log("Page embedding done.");
 
 // Read built dist files (index.html already has inlined pages.json + search-index.json)
 let html = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
