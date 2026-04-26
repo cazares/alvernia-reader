@@ -946,10 +946,53 @@ export default function App() {
     return () => { s1.remove(); s2.remove(); s3.remove(); s4.remove(); };
   }, []);
 
+  const pendingScrollRetryRef = useRef<{ page: number; tries: number } | null>(null);
+  const pendingScrollRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pendingScrollRetryTimerRef.current) {
+        clearTimeout(pendingScrollRetryTimerRef.current);
+        pendingScrollRetryTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const goToPage = useCallback((page: number) => {
     const clamped = Math.max(1, Math.min(page, totalPages));
     currentPageRef.current = clamped;
-    listRef.current?.scrollToIndex({ index: clamped - 1, animated: false });
+    try {
+      listRef.current?.scrollToIndex({ index: clamped - 1, animated: false });
+      pendingScrollRetryRef.current = null;
+    } catch {
+      // FlatList isn't always ready (especially right after boot or right after a mode/book swap).
+      // If we drop the director's initial snapshot, the follower can appear "connected" but never
+      // jump pages until the director changes pages again. Retry briefly.
+      pendingScrollRetryRef.current = { page: clamped, tries: 0 };
+      if (pendingScrollRetryTimerRef.current) {
+        clearTimeout(pendingScrollRetryTimerRef.current);
+        pendingScrollRetryTimerRef.current = null;
+      }
+      const retry = () => {
+        const pending = pendingScrollRetryRef.current;
+        if (!pending) return;
+        if (pending.tries >= 20) {
+          pendingScrollRetryRef.current = null;
+          return;
+        }
+        pending.tries += 1;
+        pendingScrollRetryRef.current = pending;
+        try {
+          listRef.current?.scrollToIndex({ index: pending.page - 1, animated: false });
+          pendingScrollRetryRef.current = null;
+          return;
+        } catch {
+          // keep retrying
+        }
+        pendingScrollRetryTimerRef.current = setTimeout(retry, 75);
+      };
+      pendingScrollRetryTimerRef.current = setTimeout(retry, 75);
+    }
   }, [totalPages]);
 
   useEffect(() => {
