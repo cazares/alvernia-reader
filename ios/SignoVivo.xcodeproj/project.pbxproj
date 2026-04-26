@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		4AA18D770A0B4B4B82A0C001 /* DirectorSyncModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */; };
+		4AA18D790A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		45463C08756F2E76177D217C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CF20DDFF80796950EA7C43A0 /* PrivacyInfo.xcprivacy */; };
 		930F66FC3CC80477827E2A2D /* libPods-SignoVivo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7026E80779919AA5EB73F6DA /* libPods-SignoVivo.a */; };
@@ -20,6 +22,8 @@
 		13B07F961A680F5B00A75B9A /* SignoVivo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SignoVivo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = SignoVivo/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = SignoVivo/Info.plist; sourceTree = "<group>"; };
+		4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectorSyncModule.swift; path = SignoVivo/DirectorSyncModule.swift; sourceTree = "<group>"; };
+		4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DirectorSyncModuleBridge.m; path = SignoVivo/DirectorSyncModuleBridge.m; sourceTree = "<group>"; };
 		7026E80779919AA5EB73F6DA /* libPods-SignoVivo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-SignoVivo.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = SignoVivo/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -48,6 +52,8 @@
 			isa = PBXGroup;
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
+				4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */,
+				4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */,
 				F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -325,6 +331,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
+				4AA18D790A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m in Sources */,
+				4AA18D770A0B4B4B82A0C001 /* DirectorSyncModule.swift in Sources */,
 				EF15FA55DE47839821C64C02 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
