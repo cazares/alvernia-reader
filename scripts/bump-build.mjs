@@ -35,6 +35,17 @@ if (fs.existsSync(pbxprojPath)) {
   if (out !== src) fs.writeFileSync(pbxprojPath, out);
 }
 
+// Keep Info.plist CFBundleVersion in sync (tests + App Store metadata).
+const infoPlistPath = path.join(root, "ios", "SignoVivo", "Info.plist");
+if (fs.existsSync(infoPlistPath)) {
+  const src = fs.readFileSync(infoPlistPath, "utf8");
+  const out = src.replace(
+    /(<key>CFBundleVersion<\/key>\s*<string>)\d+(<\/string>)/m,
+    `$1${nextBuild}$2`,
+  );
+  if (out !== src) fs.writeFileSync(infoPlistPath, out);
+}
+
 // Best-effort sync for app.json (some setups still read it in places).
 const appJsonPath = path.join(root, "app.json");
 if (fs.existsSync(appJsonPath)) {
@@ -45,4 +56,3 @@ if (fs.existsSync(appJsonPath)) {
 }
 
 console.log(`Bumped build -> ${baseVersion}.${nextBuild}`);
-
