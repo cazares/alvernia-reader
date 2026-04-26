@@ -88,7 +88,7 @@ const CHOIR_STANDARD_ACCESS = new Map<string, string>([
   ["83078840", "Hector y Adrian"],
 ]);
 
-const DIRECTOR_ACCESS_CODES = new Set(["8303130470", "8307197000", "8771178844", "1234"]);
+const DIRECTOR_ACCESS_CODES = new Set(["8303130470", "8307197000", "8771178844", "123456"]);
 
 const normalizeAccessCode = (value: string): string => String(value || "").replace(/[^0-9]/g, "");
 
@@ -2209,7 +2209,11 @@ export default function App() {
         {/* Nav trigger — tap: song modal, long press: sync modal */}
         {(!searchVisible || syncRole !== "director") && (
           <TouchableOpacity
-            style={[styles.clusterBtn, syncRole === "follower" && styles.clusterBtnFollower]}
+            style={[
+              styles.clusterBtn,
+              syncRole === "follower" && styles.clusterBtnFollower,
+              syncRole === "director" && styles.clusterBtnDirector,
+            ]}
             onPress={openSongModal}
             onLongPress={openSyncModal}
             delayLongPress={500}
@@ -2224,7 +2228,7 @@ export default function App() {
         )}
         {syncRole === "director" && !searchVisible && (
           <TouchableOpacity
-            style={styles.clusterBtn}
+            style={[styles.clusterBtn, styles.clusterBtnDirector]}
             onPress={openSearch}
             activeOpacity={0.75}
             hitSlop={{ top: 16, bottom: 16, left: 3, right: 16 }}
@@ -2414,6 +2418,11 @@ const styles = StyleSheet.create({
     elevation: 7,
     gap: 4,
   },
+  clusterBtnDirector: {
+    width: 82,
+    height: 82,
+    borderRadius: 12,
+  },
   clusterBtnFollower: {
     width: 82,
     height: 82,
@@ -2508,12 +2517,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(26,26,46,0.38)",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     gap: 3,
   },
-  dirBtnIcon: { fontSize: 26, color: "#fff", lineHeight: 30 },
+  dirBtnIcon: { fontSize: 22, color: "#fff", lineHeight: 26 },
   syncDot: {
     position: "absolute",
     top: 7,
