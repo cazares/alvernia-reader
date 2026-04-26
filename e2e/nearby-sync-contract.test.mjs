@@ -114,15 +114,13 @@ test("UX Fix C: director permission error uses force-close not reinstall guidanc
   assert.doesNotMatch(appSource, /desinstala y reinstala/);
 });
 
-// UX Fix E: follower status label appears below the reconnect button with colour variants.
-test("UX Fix E: follower status label with connected/searching/failed variants is rendered", () => {
-  assert.match(appSource, /followerStatusLabel/);
-  assert.match(appSource, /followerStatusConnected/);
-  assert.match(appSource, /followerStatusSearching/);
-  assert.match(appSource, /followerStatusFailed/);
-  assert.match(appSource, /Conectado ✓/);
-  assert.match(appSource, /Buscando\.\.\./);
-  assert.match(appSource, /Sin conexión/);
+// UX Fix E: follower status is shown as an inline icon on the refresh button (not text),
+// with green/orange pulse and a red X for no connection.
+test("UX Fix E: follower refresh shows green/orange pulse and red X status indicator", () => {
+  assert.match(appSource, /reconnectStatusX/);
+  assert.match(appSource, /PulsingDot color=\"#4cff91\"/);
+  assert.match(appSource, /PulsingDot color=\"#f0c040\"/);
+  assert.match(appSource, /✕/);
 });
 
 // Follower-first scenario: browser failure (permission denied) must surface to JS so the
