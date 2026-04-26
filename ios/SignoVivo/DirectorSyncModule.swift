@@ -37,6 +37,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var discoveredDirectors: [MCPeerID: String] = [:]
   private var discoveredFollowers: Set<MCPeerID> = []
   private var pendingInvitePeer: MCPeerID?
+  private var pendingInviteTimestamp: TimeInterval = 0
   private var connectedDirectorPeer: MCPeerID?
   private var discoveryRefreshTimer: Timer?
   private var earlyRefreshCyclesRemaining: Int = 0
@@ -493,7 +494,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     mcSessions = []
     localPeerID = nil
     discoveredDirectors = [:]; discoveredFollowers = []
-    pendingInvitePeer = nil; connectedDirectorPeer = nil
+    pendingInvitePeer = nil; pendingInviteTimestamp = 0; connectedDirectorPeer = nil
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
     lastFollowerHelloAt = 0
     lastFollowerPageReceivedAt = 0
@@ -548,20 +549,29 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // Don't issue parallel invites while we already have one in flight.
     if let pending = pendingInvitePeer {
       if pending == target {
+        // If the invite is still within its timeout window, wait for it.
+        // After the window the director may have refreshed its advertiser and silently
+        // rejected the invite without firing notConnected — force a fresh attempt.
+        let elapsed = Date().timeIntervalSince1970 - pendingInviteTimestamp
+        if elapsed < Self.inviteTimeout {
+          emitState(status: "connecting")
+          return
+        }
+        // Invite likely stale; fall through to retry below.
+        pendingInvitePeer = nil
+      } else if discoveredDirectors[pending] != nil {
+        // Different pending target is still visible — finish that handshake first.
         emitState(status: "connecting")
         return
+      } else {
+        // Pending peer disappeared; clear stale state and proceed with a fresh invite.
+        pendingInvitePeer = nil
       }
-      // If the pending peer is still visible, finish that handshake before switching targets.
-      if discoveredDirectors[pending] != nil {
-        emitState(status: "connecting")
-        return
-      }
-      // Pending peer disappeared; clear stale state and proceed with a fresh invite.
-      pendingInvitePeer = nil
     }
     // A director was found — cancel the self-directed fallback; we're about to connect.
     cancelSelfDirectedTimer()
     pendingInvitePeer = target
+    pendingInviteTimestamp = Date().timeIntervalSince1970
     browser?.invitePeer(target, to: session, withContext: nil, timeout: Self.inviteTimeout)
     emitState(status: "connecting")
   }
@@ -591,9 +601,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     invitationHandler: @escaping (Bool, MCSession?) -> Void
   ) {
     DispatchQueue.main.async {
-      guard advertiser === self.advertiser else {
-        invitationHandler(false, nil); return
-      }
+      // Note: do NOT guard advertiser === self.advertiser here.
+      // refreshDiscovery replaces self.advertiser every few seconds; any in-flight
+      // invitation that arrives on the old advertiser would be silently rejected,
+      // leaving the follower's pendingInvitePeer stuck indefinitely.
+      // The role guard below is sufficient to reject invites during/after reset.
       guard self.currentRole == "director" || self.currentRole == "follower" else {
         invitationHandler(false, nil); return
       }
