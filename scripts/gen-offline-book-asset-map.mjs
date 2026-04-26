@@ -37,7 +37,7 @@ const listFiles = (subdir) => {
   if (!fs.existsSync(abs)) return [];
   return fs
     .readdirSync(abs)
-    .filter((f) => f.endsWith(".jpg") || f.endsWith(".webp"))
+    .filter((f) => f.endsWith(".jpg"))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     .map((f) => `${subdir}/${f}`);
 };

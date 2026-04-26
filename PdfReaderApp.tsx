@@ -2190,9 +2190,6 @@ export default function App() {
 
       {/* Version label */}
       <Text style={styles.versionLabel} pointerEvents="none">{VISIBLE_BUILD_LABEL}</Text>
-      <Text style={styles.modeDebugLabel} pointerEvents="none">
-        {isStandardMode ? "Modo: Principal" : "Modo: Himnarios"} · {getBook(activeBookId).title}
-      </Text>
 
       {/* ── Song navigation modal ── */}
       <Modal visible={songModal} transparent animationType="fade" onRequestClose={closeSongModal} statusBarTranslucent>
