@@ -64,6 +64,30 @@ export const refreshNearbyDiscovery = async () => {
   return null;
 };
 
+export const requestDirectorTakeover = async () => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.requestDirectorTakeover === "function") {
+    return nativeModule.requestDirectorTakeover();
+  }
+  throw new Error("Director takeover no soportado en esta versión.");
+};
+
+export const approveDirectorTakeover = async (requestId) => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.approveDirectorTakeover === "function") {
+    return nativeModule.approveDirectorTakeover(String(requestId || ""));
+  }
+  return null;
+};
+
+export const denyDirectorTakeover = async (requestId) => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.denyDirectorTakeover === "function") {
+    return nativeModule.denyDirectorTakeover(String(requestId || ""));
+  }
+  return null;
+};
+
 export const addNearbyDirectorSyncListener = (listener) => {
   if (!nearbyEventEmitter) {
     return { remove() {} };

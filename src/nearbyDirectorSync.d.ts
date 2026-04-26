@@ -5,6 +5,9 @@ export function stopNearbyDirectorSync(): Promise<Record<string, unknown> | null
 export function resetNearbyDirectorSync(): Promise<Record<string, unknown> | null>;
 export function primeNearbyPermissions(): Promise<Record<string, unknown> | null>;
 export function refreshNearbyDiscovery(): Promise<Record<string, unknown> | null>;
+export function requestDirectorTakeover(): Promise<{ requestId?: string } | null>;
+export function approveDirectorTakeover(requestId: string): Promise<Record<string, unknown> | null>;
+export function denyDirectorTakeover(requestId: string): Promise<Record<string, unknown> | null>;
 export function sendNearbyDirectorPageUpdate(
   page: number,
   totalPages?: number,
@@ -19,6 +22,8 @@ export function addNearbyDirectorSyncListener(listener: (event: {
   directorCount?: number;
   message?: string;
   code?: string;
+  requestId?: string;
+  requesterName?: string;
   page?: number;
   totalPages?: number;
   mode?: "standard" | "nonStandard";

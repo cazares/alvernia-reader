@@ -50,6 +50,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var currentMode = ""
   private var currentBookId = ""
   private var resetGeneration = UUID()
+  private var pendingTakeoverRequests: [String: MCPeerID] = [:]
 
   // MARK: - Convenience
 
@@ -97,6 +98,16 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     return obj as? [String: Any]
   }
 
+  private func sendControlPayload(_ obj: [String: Any], to peerID: MCPeerID) {
+    guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
+    for session in mcSessions {
+      if session.connectedPeers.contains(peerID) {
+        try? session.send(data, toPeers: [peerID], with: .reliable)
+        return
+      }
+    }
+  }
+
   private func sendCurrentPageSnapshot(to peerID: MCPeerID, via session: MCSession) {
     guard currentRole == "director", let page = currentPageNumber, let data = pagePayload(page: page, totalPages: currentTotalPages) else {
       return
@@ -126,6 +137,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       return
     }
     DispatchQueue.main.async {
+      if self.currentRole == "follower", self.connectedDirectorPeer != nil {
+        reject("DIRECTOR_TAKEOVER_REQUIRED", "Ya hay un director conectado. Solicita permiso para tomar control.", nil)
+        return
+      }
       self.resetTransport(emitState: false)
       self.currentRole = "director"
       self.currentSessionCode = normalizedSessionCode
@@ -183,6 +198,91 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     DispatchQueue.main.async {
       self.resetTransport(emitState: true)
       resolve(["reset": true])
+    }
+  }
+
+  @objc(requestDirectorTakeover:rejecter:)
+  func requestDirectorTakeover(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole == "follower", let director = self.connectedDirectorPeer else {
+        reject("DIRECTOR_TAKEOVER_NO_DIRECTOR", "No hay director conectado.", nil)
+        return
+      }
+      let requestId = Self.randomToken()
+      let payload: [String: Any] = [
+        "v": Self.protocolVersion,
+        "type": "takeover_request",
+        "requestId": requestId,
+        "requesterName": self.localPeerID?.displayName ?? "seguidor",
+      ]
+      self.sendControlPayload(payload, to: director)
+      resolve(["requestId": requestId])
+    }
+  }
+
+  @objc(approveDirectorTakeover:resolver:rejecter:)
+  func approveDirectorTakeover(
+    _ requestId: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole == "director" else {
+        reject("DIRECTOR_TAKEOVER_ROLE_INVALID", "Solo el director puede aprobar.", nil)
+        return
+      }
+      guard let requester = self.pendingTakeoverRequests[requestId] else {
+        reject("DIRECTOR_TAKEOVER_NOT_FOUND", "Solicitud no encontrada.", nil)
+        return
+      }
+      self.pendingTakeoverRequests[requestId] = nil
+      let payload: [String: Any] = [
+        "v": Self.protocolVersion,
+        "type": "takeover_approved",
+        "requestId": requestId,
+      ]
+      self.sendControlPayload(payload, to: requester)
+
+      let sessionCode = self.currentSessionCode
+      self.resetTransport(emitState: false)
+      self.currentRole = "follower"
+      self.currentSessionCode = sessionCode
+      self.configureTransport()
+      self.startAdvertising()
+      self.startBrowsing()
+      self.startDiscoveryRefreshTimer()
+      self.startSelfDirectedTimer()
+      self.emitState(status: "searching", message: "Cediendo el control al nuevo director...")
+      resolve(nil)
+    }
+  }
+
+  @objc(denyDirectorTakeover:resolver:rejecter:)
+  func denyDirectorTakeover(
+    _ requestId: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole == "director" else {
+        reject("DIRECTOR_TAKEOVER_ROLE_INVALID", "Solo el director puede rechazar.", nil)
+        return
+      }
+      guard let requester = self.pendingTakeoverRequests[requestId] else {
+        resolve(nil)
+        return
+      }
+      self.pendingTakeoverRequests[requestId] = nil
+      let payload: [String: Any] = [
+        "v": Self.protocolVersion,
+        "type": "takeover_denied",
+        "requestId": requestId,
+      ]
+      self.sendControlPayload(payload, to: requester)
+      resolve(nil)
     }
   }
 
@@ -495,6 +595,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     localPeerID = nil
     discoveredDirectors = [:]; discoveredFollowers = []
     pendingInvitePeer = nil; pendingInviteTimestamp = 0; connectedDirectorPeer = nil
+    pendingTakeoverRequests = [:]
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
     lastFollowerHelloAt = 0
     lastFollowerPageReceivedAt = 0
@@ -528,6 +629,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     sendEvent(withName: Self.eventName, body: [
       "type": "page", "page": page, "totalPages": totalPages,
       "mode": mode, "bookId": bookId, "sessionCode": currentSessionCode,
+    ] as [String: Any])
+  }
+
+  private func emitTakeoverRequest(requestId: String, requesterName: String) {
+    sendEvent(withName: Self.eventName, body: [
+      "type": "takeover-request",
+      "requestId": requestId,
+      "requesterName": requesterName,
+      "role": currentRole,
+      "sessionCode": currentSessionCode,
+    ] as [String: Any])
+  }
+
+  private func emitTakeoverDecision(type: String, requestId: String) {
+    sendEvent(withName: Self.eventName, body: [
+      "type": type,
+      "requestId": requestId,
+      "role": currentRole,
+      "sessionCode": currentSessionCode,
     ] as [String: Any])
   }
 
@@ -741,6 +861,30 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         if self.currentRole == "director" {
           self.sendCurrentPageSnapshot(to: peerID, via: session)
         }
+        return
+      }
+
+      if type == "takeover_request" {
+        guard self.currentRole == "director" else { return }
+        guard let requestId = payload["requestId"] as? String, !requestId.isEmpty else { return }
+        let requesterName = (payload["requesterName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = (requesterName?.isEmpty == false) ? requesterName! : peerID.displayName
+        self.pendingTakeoverRequests[requestId] = peerID
+        self.emitTakeoverRequest(requestId: requestId, requesterName: displayName)
+        return
+      }
+
+      if type == "takeover_approved" {
+        guard self.currentRole == "follower" else { return }
+        guard let requestId = payload["requestId"] as? String, !requestId.isEmpty else { return }
+        self.emitTakeoverDecision(type: "takeover-approved", requestId: requestId)
+        return
+      }
+
+      if type == "takeover_denied" {
+        guard self.currentRole == "follower" else { return }
+        guard let requestId = payload["requestId"] as? String, !requestId.isEmpty else { return }
+        self.emitTakeoverDecision(type: "takeover-denied", requestId: requestId)
         return
       }
 

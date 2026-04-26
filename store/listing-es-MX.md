@@ -91,9 +91,7 @@ https://miguelengineer.com/signovivo/privacy-policy.html
 ## Notas para el revisor de App Store (App Review Notes)
 
 ACCESO INICIAL
-Al primer lanzamiento, la app solicita un código del coro.
-→ Dejar vacío y tocar "Continuar como himnario" para probar el modo himnario.
-→ Ingresar un código autorizado del coro para probar el modo principal.
+Al primer lanzamiento, la app abre directamente el himnario (sin cuenta / sin login).
 
 PROBAR EL MODO DIRECTOR (en un solo dispositivo)
 1. Mantener presionado el botón musical en la esquina superior derecha.
@@ -104,7 +102,14 @@ PROBAR EL MODO DIRECTOR (en un solo dispositivo)
 PROBAR EL MODO SEGUIDOR
 1. Abrir la app en otro dispositivo.
 2. Se conecta automáticamente como Seguidor en la red local.
-3. El punto verde pulsante confirma la conexión. El botón superior izquierdo fuerza un intento de reconexión local.
+3. El botón superior izquierdo muestra el estado:
+   - Verde: conectado
+   - Naranja: conectando/buscando
+   - X roja: sin conexión
+   (tocar una vez para reintentar)
+
+EVITAR “SECUESTRO” DEL DIRECTOR
+Si un Seguidor intenta “Tomar control” mientras ya hay un Director activo, el Director verá una confirmación en pantalla para ceder el control al dispositivo solicitante.
 
 NOTAS TÉCNICAS
 - La app no requiere cuenta de usuario ni inicio de sesión.

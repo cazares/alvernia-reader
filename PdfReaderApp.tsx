@@ -35,8 +35,11 @@ import { useKeepAwake } from "expo-keep-awake";
 import { ALVERNIA_MANUAL_2_SONG_INDEX } from "./src/alverniaManual2SongIndex";
 import {
   addNearbyDirectorSyncListener,
+  approveDirectorTakeover,
+  denyDirectorTakeover,
   isNearbyDirectorSyncAvailable,
   primeNearbyPermissions,
+  requestDirectorTakeover,
   refreshNearbyDiscovery,
   resetNearbyDirectorSync,
   sendNearbyDirectorPageUpdate,
@@ -441,19 +444,21 @@ function ZoomablePage({ source, width, height }: { source: number | undefined; w
 }
 
 // ── Pulsing dot for director mode ─────────────────────────────────────────────
-function PulsingDot({ color }: { color: string }) {
+function PulsingDot({ color, speed = 1 }: { color: string; speed?: number }) {
   const opacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    const base = 900;
+    const duration = Math.max(120, Math.round(base * speed));
     const anim = Animated.loop(
       Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.25, duration: 900, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.25, duration, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration, useNativeDriver: true }),
       ]),
     );
     anim.start();
     return () => anim.stop();
-  }, [opacity]);
+  }, [opacity, speed]);
 
   return <Animated.View style={[styles.syncDot, { backgroundColor: color, opacity }]} />;
 }
@@ -673,6 +678,7 @@ export default function App() {
   const lastFollowerNoticeRef = useRef(0);
   const directorStartFailedAlertShownRef = useRef(false);
   const followerStartFailedAlertShownRef = useRef(false);
+  const takeoverRequestIdRef = useRef<string | null>(null);
   const reconnectPressesRef = useRef<number[]>([]);
   const reconnectCancelledRef = useRef(false);
   const appResettingRef = useRef(false);
@@ -1050,6 +1056,44 @@ export default function App() {
         // A newer director took over — Swift already cleaned up transport.
         setSyncRole("follower");
         startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+      } else if (event.type === "takeover-request" && syncRoleRef.current === "director") {
+        const requestId = String(event.requestId || "");
+        const requesterName = String(event.requesterName || "otro dispositivo");
+        if (!requestId) return;
+        Alert.alert(
+          "Solicitud de control",
+          `“${requesterName}” quiere tomar control. ¿Quieres ceder el control?`,
+          [
+            { text: "No", style: "cancel", onPress: () => { denyDirectorTakeover(requestId).catch(() => {}); } },
+            { text: "Sí, ceder", onPress: () => { approveDirectorTakeover(requestId).catch(() => {}); } },
+          ],
+        );
+      } else if (event.type === "takeover-approved" && syncRoleRef.current === "follower") {
+        const requestId = String(event.requestId || "");
+        if (!requestId || takeoverRequestIdRef.current !== requestId) return;
+        takeoverRequestIdRef.current = null;
+        setReconnectMessage("Listo. Tomando control...");
+        stopNearbyDirectorSync().catch(() => {});
+        setTimeout(() => {
+          startNearbyDirector(DIRECTOR_SESSION).then(() => {
+            setSyncRole("director");
+            setReconnectBusy(false);
+            sendNearbyDirectorPageUpdate(
+              currentPageRef.current,
+              totalPagesRef.current,
+              { mode: modeRef.current, bookId: activeBookIdRef.current },
+            ).catch(() => {});
+          }).catch(() => {
+            setReconnectBusy(false);
+            Alert.alert("No se pudo tomar control", "Intenta de nuevo cerca del director.");
+          });
+        }, 250);
+      } else if (event.type === "takeover-denied" && syncRoleRef.current === "follower") {
+        const requestId = String(event.requestId || "");
+        if (!requestId || takeoverRequestIdRef.current !== requestId) return;
+        takeoverRequestIdRef.current = null;
+        setReconnectBusy(false);
+        Alert.alert("Solicitud rechazada", "El director actual no cedió el control.");
       } else if (event.type === "state" && syncRoleRef.current === "follower") {
         if (event.status === "connected") {
           // Show satellite emoji with 30s cooldown between notices.
@@ -1117,6 +1161,7 @@ export default function App() {
 
   // Song modal
   const longPressedRef = useRef(false);
+  const shouldFocusCodeRef = useRef(false);
   const openSongModal = useCallback(() => {
     if (longPressedRef.current) { longPressedRef.current = false; return; }
     setSongModal(true);
@@ -1274,16 +1319,21 @@ export default function App() {
   // Sync modal
   const openSyncModal = useCallback(() => {
     longPressedRef.current = true;
+    shouldFocusCodeRef.current = true;
     setCodeInput("");
     setSyncModal(true);
-    // Do not auto-focus — hidden focus summons the keyboard immediately on iPad,
-    // which breaks layout and surprises non-technical users. Let them tap to type.
   }, []);
   const closeSyncModal = useCallback(() => {
     Keyboard.dismiss();
     setSyncModal(false);
     setCodeInput("");
   }, []);
+  useEffect(() => {
+    if (!syncModal) return;
+    if (!shouldFocusCodeRef.current) return;
+    shouldFocusCodeRef.current = false;
+    setTimeout(() => codeInputRef.current?.focus(), 80);
+  }, [syncModal]);
 
   const handleBecomeDirector = useCallback(async () => {
     if (!DIRECTOR_ACCESS_CODES.has(normalizeAccessCode(codeInput))) {
@@ -1292,6 +1342,20 @@ export default function App() {
     }
     closeSyncModal();
     try {
+      // If we're already connected to a director, request permission before taking over.
+      if (syncRoleRef.current === "follower" && followerStatusLabel === "connected") {
+        setReconnectMessage("Pidiendo permiso al director...");
+        setReconnectBusy(true);
+        const resp: any = await requestDirectorTakeover();
+        const requestId = String(resp?.requestId || "");
+        takeoverRequestIdRef.current = requestId || null;
+        if (!requestId) {
+          setReconnectBusy(false);
+          throw new Error("missing takeover requestId");
+        }
+        return;
+      }
+
       // startNearbyDirector resets any existing session internally (no stopSync needed).
       // Skipping stopSync avoids a state:idle event that would race with setSyncRole("director").
       await startNearbyDirector(DIRECTOR_SESSION);
@@ -1313,7 +1377,7 @@ export default function App() {
         ]
       );
     }
-  }, [codeInput, closeSyncModal]);
+  }, [codeInput, closeSyncModal, followerStatusLabel]);
 
   const handleStopSync = useCallback(async () => {
     closeSyncModal();
@@ -1340,8 +1404,8 @@ export default function App() {
     reconnectPressesRef.current.push(now);
     const pressCount = reconnectPressesRef.current.length;
 
-    // Tap 3+: full soft reset (most drastic — only if lighter attempts failed)
-    if (pressCount >= 3) {
+    // Tap 2+: show reset modal (avoid surprise on first tap)
+    if (pressCount >= 2) {
       reconnectPressesRef.current = [];
       confirmResetApp("reconnect");
       return;
@@ -1356,18 +1420,9 @@ export default function App() {
     setReconnectMessage("Reconectando con el director...");
     setReconnectBusy(true);
     try {
-      if (pressCount === 1) {
-        // Tap 1: lightweight — restart browser+advertiser without dropping the session.
-        // Resets to fast-burst discovery (5 s cycles for 30 s). Preserves existing connections.
-        await refreshNearbyDiscovery().catch(() => {});
-      } else {
-        // Tap 2: full stop → start follower (session teardown + fresh session).
-        await stopNearbyDirectorSync().catch(() => {});
-        if (reconnectCancelledRef.current) return;
-        await startNearbyFollower(DIRECTOR_SESSION);
-        if (reconnectCancelledRef.current) return;
-        setSyncRole("follower");
-      }
+      // Tap 1: lightweight — restart browser+advertiser without dropping the session.
+      // Resets to fast-burst discovery (5 s cycles for 30 s). Preserves existing connections.
+      await refreshNearbyDiscovery().catch(() => {});
       setReconnectMessage("Listo.");
       setTimeout(() => {
         if (!reconnectCancelledRef.current) setReconnectBusy(false);
@@ -2133,28 +2188,20 @@ export default function App() {
       {syncRole === "follower" && !searchVisible && !onboardingVisible && (
         <View style={styles.reconnectCluster}>
           <TouchableOpacity
-            style={styles.reconnectButton}
+            style={[styles.reconnectButton, styles.reconnectButtonFollower]}
             onPress={() => { handleReconnectPress().catch(() => {}); }}
             activeOpacity={0.75}
             hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
           >
-            <Text style={styles.reconnectIcon}>↻</Text>
-            <PulsingDot color="#4cff91" />
+            <Text style={[styles.reconnectIcon, styles.reconnectIconFollower]}>↻</Text>
+            {followerStatusLabel === "connected" ? (
+              <PulsingDot color="#4cff91" speed={1.5} />
+            ) : followerStatusLabel === "searching" ? (
+              <PulsingDot color="#f0c040" speed={1.5} />
+            ) : (
+              <Text style={styles.reconnectStatusX}>✕</Text>
+            )}
           </TouchableOpacity>
-          {followerStatusLabel !== "" && (
-            <Text style={[
-              styles.followerStatusLabel,
-              followerStatusLabel === "connected" && styles.followerStatusConnected,
-              followerStatusLabel === "searching" && styles.followerStatusSearching,
-              followerStatusLabel === "failed" && styles.followerStatusFailed,
-              followerStatusLabel === "self-directed" && styles.followerStatusSelfDirected,
-            ]}>
-              {followerStatusLabel === "connected" ? "Conectado ✓" :
-               followerStatusLabel === "searching" ? "Buscando..." :
-               followerStatusLabel === "self-directed" ? "Modo libre" :
-               "Sin conexión"}
-            </Text>
-          )}
         </View>
       )}
 
@@ -2162,7 +2209,7 @@ export default function App() {
         {/* Nav trigger — tap: song modal, long press: sync modal */}
         {(!searchVisible || syncRole !== "director") && (
           <TouchableOpacity
-            style={styles.clusterBtn}
+            style={[styles.clusterBtn, syncRole === "follower" && styles.clusterBtnFollower]}
             onPress={openSongModal}
             onLongPress={openSyncModal}
             delayLongPress={500}
@@ -2172,7 +2219,6 @@ export default function App() {
             <Text style={styles.navTriggerIcon}>♪</Text>
             <Text style={styles.navTriggerArrow}>›</Text>
             {syncRole === "director" && <PulsingDot color="#4a90e2" />}
-            {syncRole === "follower" && <PulsingDot color="#4cff91" />}
             {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
           </TouchableOpacity>
         )}
@@ -2368,6 +2414,11 @@ const styles = StyleSheet.create({
     elevation: 7,
     gap: 4,
   },
+  clusterBtnFollower: {
+    width: 82,
+    height: 82,
+    borderRadius: 12,
+  },
   cornerButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -2410,22 +2461,29 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 7,
   },
-  followerStatusLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#ccc",
-    textAlign: "center",
-    paddingHorizontal: 4,
+  reconnectButtonFollower: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
   },
-  followerStatusConnected: { color: "#4cff91" },
-  followerStatusSearching: { color: "#f0c040" },
-  followerStatusFailed: { color: "#ff6b6b" },
-  followerStatusSelfDirected: { color: "#a0a8c0" },
   reconnectIcon: {
     fontSize: 58,
     color: "#fff",
     lineHeight: 76,
     fontWeight: "700",
+  },
+  reconnectIconFollower: {
+    fontSize: 44,
+    lineHeight: 56,
+  },
+  reconnectStatusX: {
+    position: "absolute",
+    top: 4,
+    right: 6,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "900",
+    color: "#ff6b6b",
   },
   navTriggerIcon: { fontSize: 54, color: "#fff", lineHeight: 76 },
   navTriggerArrow: { fontSize: 54, color: "#7ec8f7", lineHeight: 76, fontWeight: "700" },

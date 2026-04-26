@@ -35,6 +35,21 @@ test("primePermissions exists in JS, bridge, and Swift layers", () => {
   assert.match(swiftSource, /func primePermissions\(/);
 });
 
+test("director takeover flow is wired through JS, bridge, and Swift layers", () => {
+  assert.match(jsSyncSource, /export const requestDirectorTakeover/);
+  assert.match(jsSyncSource, /nativeModule\.requestDirectorTakeover/);
+  assert.match(bridgeSource, /RCT_EXTERN_METHOD\(requestDirectorTakeover:/);
+  assert.match(swiftSource, /@objc\(requestDirectorTakeover:rejecter:\)/);
+
+  assert.match(jsSyncSource, /export const approveDirectorTakeover/);
+  assert.match(bridgeSource, /RCT_EXTERN_METHOD\(approveDirectorTakeover:/);
+  assert.match(swiftSource, /@objc\(approveDirectorTakeover:resolver:rejecter:\)/);
+
+  assert.match(jsSyncSource, /export const denyDirectorTakeover/);
+  assert.match(bridgeSource, /RCT_EXTERN_METHOD\(denyDirectorTakeover:/);
+  assert.match(swiftSource, /@objc\(denyDirectorTakeover:resolver:rejecter:\)/);
+});
+
 test("Swift primePermissions sets delegates and retains browser/advertiser", () => {
   // Find the body of the primePermissions function.
   const match = swiftSource.match(/func primePermissions\([\s\S]*?\n  \}\n/);
