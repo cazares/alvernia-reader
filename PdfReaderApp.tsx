@@ -964,12 +964,11 @@ export default function App() {
         await startNearbyDirector(DIRECTOR_SESSION);
         if (!isCancelled()) {
           setSyncRole("director");
-          // Pre-populate Swift's snapshot state so late-joining followers get the correct page.
-          sendNearbyDirectorPageUpdate(
-            currentPageRef.current,
-            totalPagesRef.current,
-            { mode: modeRef.current, bookId: activeBookIdRef.current },
-          ).catch(() => {});
+          // Swift's snapshot state is seeded by a separate useEffect (below) that waits
+          // for the app to be fully booted so mode/bookId refs carry the persisted values.
+          // Do NOT call sendNearbyDirectorPageUpdate here — modeRef may still hold the
+          // default "standard" value if loadPersistedLaunchState hasn't finished yet,
+          // which would corrupt every follower's mode/book via their page-event handler.
         }
       } catch {
         await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
@@ -982,6 +981,14 @@ export default function App() {
 
     if (!isCancelled()) setIsSyncBootstrapped(true);
   }, [syncAvailable]);
+
+  // Seed Swift's snapshot state once the director is active AND the app is fully booted
+  // (so mode/bookId carry the persisted values, not the "standard" initial defaults).
+  // This runs instead of the inline call that was removed from bootstrapNearbySyncRole.
+  useEffect(() => {
+    if (syncRole !== "director" || !booted) return;
+    sendNearbyDirectorPageUpdate(currentPageRef.current, totalPages, { mode, bookId: activeBookId }).catch(() => {});
+  }, [syncRole, booted, mode, activeBookId, totalPages]);
 
   // Sync listener
   useEffect(() => {
