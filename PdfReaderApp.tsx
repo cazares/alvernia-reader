@@ -631,6 +631,12 @@ const numpadStyles = StyleSheet.create({
 
 // ── Main app ──────────────────────────────────────────────────────────────────
 type SyncRole = "off" | "director" | "follower";
+type DirectorSnapshot = {
+  page: number;
+  mode: AppMode | null;
+  bookId: BookId | null;
+  receivedAt: number;
+};
 
 export default function App() {
   useKeepAwake("signovivo-reader");
@@ -700,6 +706,7 @@ export default function App() {
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
   const pendingSyncPageRef = useRef<number | null>(null);
+  const latestDirectorSnapshotRef = useRef<DirectorSnapshot | null>(null);
   // Refs for values needed inside bootstrapNearbySyncRole without adding them as deps.
   const modeRef = useRef<AppMode>(mode);
   const activeBookIdRef = useRef<BookId>(activeBookId);
@@ -1002,6 +1009,35 @@ export default function App() {
     setTimeout(() => goToPage(page), 60);
   }, [activeBookId, goToPage, mode, totalPages]);
 
+  useEffect(() => {
+    if (!booted || syncRole !== "follower") return;
+    const snapshot = latestDirectorSnapshotRef.current;
+    if (!snapshot) return;
+    if (Date.now() - snapshot.receivedAt > 30_000) {
+      latestDirectorSnapshotRef.current = null;
+      return;
+    }
+
+    if (standardLockedRef.current && (snapshot.mode !== "standard" || snapshot.bookId !== "standard")) {
+      latestDirectorSnapshotRef.current = null;
+      return;
+    }
+
+    if (snapshot.mode && snapshot.bookId && (snapshot.mode !== mode || snapshot.bookId !== activeBookId)) {
+      pendingSyncPageRef.current = snapshot.page;
+      setMode(snapshot.mode);
+      setActiveBookId(snapshot.bookId);
+      AsyncStorage.multiSet([
+        [STORAGE_KEYS.mode, snapshot.mode],
+        [STORAGE_KEYS.activeBookId, snapshot.bookId],
+      ]).catch(() => {});
+      return;
+    }
+
+    latestDirectorSnapshotRef.current = null;
+    goToPage(snapshot.page);
+  }, [activeBookId, booted, goToPage, mode, syncRole]);
+
   // Keep refs in sync for use inside callbacks that can't list state as deps.
   useEffect(() => { syncRoleRef.current = syncRole; }, [syncRole]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -1069,6 +1105,13 @@ export default function App() {
         if (standardLockedRef.current && (incomingMode !== "standard" || incomingBookId !== "standard")) {
           return;
         }
+
+        latestDirectorSnapshotRef.current = {
+          page: event.page,
+          mode: incomingMode,
+          bookId: incomingBookId,
+          receivedAt: Date.now(),
+        };
 
         if (incomingMode && incomingBookId && (incomingMode !== mode || incomingBookId !== activeBookId)) {
           pendingSyncPageRef.current = event.page;
@@ -1208,6 +1251,8 @@ export default function App() {
     const restore = async () => {
       const last = await AsyncStorage.getItem(`${STORAGE_KEYS.lastPagePrefix}${activeBookId}`).catch(() => null);
       if (cancelled) return;
+      const snapshot = latestDirectorSnapshotRef.current;
+      if (snapshot && Date.now() - snapshot.receivedAt <= 30_000) return;
       const p = Math.max(1, Math.min(parseInt(last || "1", 10) || 1, totalPages));
       setTimeout(() => goToPage(p), 60);
     };
@@ -1239,6 +1284,7 @@ export default function App() {
     reconnectCancelledRef.current = true;
     reconnectPressesRef.current = [];
     pendingSyncPageRef.current = null;
+    latestDirectorSnapshotRef.current = null;
     recentSongsRef.current = [];
     lastFollowerNoticeRef.current = 0;
     directorStartFailedAlertShownRef.current = false;
@@ -2097,13 +2143,6 @@ export default function App() {
         return (
           <TouchableWithoutFeedback onPress={closeSearch}>
             <View style={[styles.searchOverlay, { bottom: keyboardHeight }]}>
-              <TouchableOpacity
-                style={styles.searchOverlayTrigger}
-                onPress={closeSearch}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.searchOverlayTriggerIcon}>⌕</Text>
-              </TouchableOpacity>
               <TouchableWithoutFeedback>
                 <View style={styles.searchContainer}>
 
@@ -2263,7 +2302,6 @@ export default function App() {
             hitSlop={{ top: 16, bottom: 16, left: 16, right: 3 }}
           >
             <Text style={styles.navTriggerIcon}>♪</Text>
-            <Text style={styles.navTriggerArrow}>›</Text>
             {syncRole === "director" && <PulsingDot color="#4a90e2" />}
             {syncRole === "follower" && showSatellite && <Text style={styles.satelliteEmoji}>🛰️</Text>}
           </TouchableOpacity>
@@ -2537,7 +2575,6 @@ const styles = StyleSheet.create({
     color: "#ff6b6b",
   },
   navTriggerIcon: { fontSize: 54, color: "#fff", lineHeight: 76 },
-  navTriggerArrow: { fontSize: 54, color: "#7ec8f7", lineHeight: 76, fontWeight: "700" },
   searchTriggerSmall: { paddingHorizontal: 16, paddingVertical: 12 },
   searchTriggerIcon: { fontSize: 64, color: "#7ec8f7", lineHeight: 76 },
   satelliteEmoji: {
@@ -2824,22 +2861,6 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingHorizontal: 24,
     paddingBottom: 12,
-  },
-  searchOverlayTrigger: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    width: 120,
-    height: 60,
-    backgroundColor: "rgba(26,26,46,0.92)",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 20,
-  },
-  searchOverlayTriggerIcon: {
-    fontSize: 44,
-    color: "#7ec8f7",
-    lineHeight: 48,
   },
   searchBar: {
     flexDirection: "row",

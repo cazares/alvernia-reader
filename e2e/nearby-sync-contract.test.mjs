@@ -23,11 +23,34 @@ test("nearby sync page updates include mode and book identity", () => {
 
 test("followers switch to the director book before applying synced pages", () => {
   assert.match(appSource, /pendingSyncPageRef/);
+  assert.match(appSource, /latestDirectorSnapshotRef/);
   assert.match(appSource, /event\.mode === "standard" \|\| event\.mode === "nonStandard"/);
   assert.match(appSource, /NON_STANDARD_BOOK_IDS\.includes\(event\.bookId\)/);
   assert.match(appSource, /setMode\(incomingMode\)/);
   assert.match(appSource, /setActiveBookId\(incomingBookId\)/);
   assert.match(appSource, /sendNearbyDirectorPageUpdate\(page, totalPages, \{ mode, bookId: activeBookId \}\)/);
+});
+
+test("follower startup replays director snapshot after persisted launch state boots", () => {
+  const replayBlock = appSource.match(
+    /useEffect\(\(\) => \{[\s\S]*?latestDirectorSnapshotRef\.current[\s\S]*?goToPage\(snapshot\.page\);[\s\S]*?\}, \[activeBookId, booted, goToPage, mode, syncRole\]\);/
+  )?.[0] ?? "";
+  assert.ok(replayBlock.length > 0, "director snapshot replay effect must exist");
+  assert.match(replayBlock, /if \(!booted \|\| syncRole !== "follower"\) return/);
+  assert.match(replayBlock, /Date\.now\(\) - snapshot\.receivedAt > 30_000/);
+  assert.match(replayBlock, /setMode\(snapshot\.mode\)/);
+  assert.match(replayBlock, /setActiveBookId\(snapshot\.bookId\)/);
+  assert.match(replayBlock, /pendingSyncPageRef\.current = snapshot\.page/);
+});
+
+test("saved page restore cannot override a fresh director startup snapshot", () => {
+  const restoreBlock = appSource.match(
+    /\/\/ Restore last page when entering a non-standard book[\s\S]*?restore\(\);/
+  )?.[0] ?? "";
+  assert.ok(restoreBlock.length > 0, "saved-page restore effect must exist");
+  assert.match(restoreBlock, /latestDirectorSnapshotRef\.current/);
+  assert.match(restoreBlock, /Date\.now\(\) - snapshot\.receivedAt <= 30_000/);
+  assert.match(restoreBlock, /return/);
 });
 
 test("soft app reset clears native sync transport and guards stale callbacks", () => {
@@ -178,4 +201,9 @@ test("follower reconnect and bootstrap paths emit explicit searching/failed stat
   assert.match(appSource, /setFollowerStatus\("failed", 6000\)/);
   assert.match(appSource, /setFollowerStatus\("failed", 5000\)/);
   assert.match(appSource, /setFollowerStatus\("searching"\)/);
+});
+
+test("director view does not render the old upper-right tab affordances", () => {
+  assert.doesNotMatch(appSource, /searchOverlayTrigger/);
+  assert.doesNotMatch(appSource, /navTriggerArrow/);
 });

@@ -3,7 +3,7 @@
     "name": "SignoVivo",
     "description": "Single-purpose PDF reader for the Alvernia manual.",
     "slug": "alvernia-reader",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "newArchEnabled": false,
     "platforms": [
       "ios",
@@ -18,14 +18,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cazares.alvernia",
-      "buildNumber": "276",
+      "buildNumber": "277",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.cazares.alvernia",
-      "versionCode": 276
+      "versionCode": 277
     },
     "extra": {
       "eas": {
