@@ -713,6 +713,7 @@ export default function App() {
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
   const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed" | "self-directed">("");
   const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followerFailureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setFollowerStatus = useCallback((label: typeof followerStatusLabel, autoClearMs = 0) => {
     if (followerStatusTimerRef.current) {
       clearTimeout(followerStatusTimerRef.current);
@@ -726,6 +727,20 @@ export default function App() {
       }, autoClearMs);
     }
   }, []);
+  const cancelFollowerFailure = useCallback(() => {
+    if (followerFailureTimerRef.current) {
+      clearTimeout(followerFailureTimerRef.current);
+      followerFailureTimerRef.current = null;
+    }
+  }, []);
+  const scheduleFollowerFailure = useCallback((autoClearMs = 5000) => {
+    cancelFollowerFailure();
+    // Avoid brief "idle" blips showing a scary red X while the transport is reconnecting.
+    followerFailureTimerRef.current = setTimeout(() => {
+      followerFailureTimerRef.current = null;
+      setFollowerStatus("failed", autoClearMs);
+    }, 1500);
+  }, [cancelFollowerFailure, setFollowerStatus]);
   const lastFollowerNoticeRef = useRef(0);
   const directorStartFailedAlertShownRef = useRef(false);
   const followerStartFailedAlertShownRef = useRef(false);
@@ -1204,12 +1219,16 @@ export default function App() {
         takeoverRequestIdRef.current = null;
         setReconnectBusy(false);
         Alert.alert("Solicitud rechazada", "El director actual no cedió el control.");
-      } else if (event.type === "state" && syncRoleRef.current === "follower") {
-        if (event.status === "connected") {
-          // Show satellite emoji with 30s cooldown between notices.
-          const now = Date.now();
-          if (now - lastFollowerNoticeRef.current > 30_000) {
-            lastFollowerNoticeRef.current = now;
+	      } else if (event.type === "state" && syncRoleRef.current === "follower") {
+	        // Any non-idle state means we shouldn't show the red X from a stale idle blip.
+	        if (event.status !== "waiting-followers" && event.status !== "idle") {
+	          cancelFollowerFailure();
+	        }
+	        if (event.status === "connected") {
+	          // Show satellite emoji with 30s cooldown between notices.
+	          const now = Date.now();
+	          if (now - lastFollowerNoticeRef.current > 30_000) {
+	            lastFollowerNoticeRef.current = now;
             setShowSatellite(true);
             setTimeout(() => setShowSatellite(false), 3000);
           }
@@ -1221,15 +1240,15 @@ export default function App() {
           event.status === "searching" ||
           event.status === "connecting" ||
           event.status === "resolving-conflict"
-        ) {
-          setFollowerStatus("searching");
-        } else if (event.status === "waiting-followers" || event.status === "idle") {
-          setFollowerStatus("failed", 5000);
-        }
-      }
-    });
-    return () => sub.remove();
-  }, [activeBookId, goToPage, mode, setFollowerStatus, syncAvailable]);
+	        ) {
+	          setFollowerStatus("searching");
+	        } else if (event.status === "waiting-followers" || event.status === "idle") {
+	          scheduleFollowerFailure(5000);
+	        }
+	      }
+	    });
+	    return () => sub.remove();
+	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable]);
 
   // Fire immediately on mount to trigger the iOS Local Network permission dialog
   // before any other state is ready — works regardless of mode or onboarding state.
@@ -1507,12 +1526,12 @@ export default function App() {
     );
   }, []);
 
-  const handleReconnectPress = useCallback(async () => {
-    if (syncRoleRef.current === "director") return;
-    const now = Date.now();
-    reconnectPressesRef.current = reconnectPressesRef.current.filter((t) => now - t <= 25_000);
-    reconnectPressesRef.current.push(now);
-    const pressCount = reconnectPressesRef.current.length;
+	  const handleReconnectPress = useCallback(async () => {
+	    if (syncRoleRef.current === "director") return;
+	    const now = Date.now();
+	    reconnectPressesRef.current = reconnectPressesRef.current.filter((t) => now - t <= 25_000);
+	    reconnectPressesRef.current.push(now);
+	    const pressCount = reconnectPressesRef.current.length;
 
     // Tap 2+: show reset modal (avoid surprise on first tap)
     if (pressCount >= 2) {
@@ -1521,30 +1540,35 @@ export default function App() {
       return;
     }
 
-    if (!syncAvailable) {
-      showConnectivityHelp();
-      return;
-    }
+	    if (!syncAvailable) {
+	      showConnectivityHelp();
+	      return;
+	    }
 
-    reconnectCancelledRef.current = false;
-    setReconnectMessage("Reconectando con el director...");
-    setReconnectBusy(true);
-    try {
-      // Tap 1: lightweight — restart browser+advertiser without dropping the session.
-      // Resets to fast-burst discovery (5 s cycles for 30 s). Preserves existing connections.
-      await refreshNearbyDiscovery().catch(() => {});
-      setReconnectMessage("Listo.");
-      setTimeout(() => {
-        if (!reconnectCancelledRef.current) setReconnectBusy(false);
-      }, 350);
-    } catch {
-      if (!reconnectCancelledRef.current) {
-        setReconnectBusy(false);
-        setFollowerStatus("failed", 5000);
-        showConnectivityHelp();
-      }
-    }
-  }, [confirmResetApp, showConnectivityHelp, syncAvailable]);
+	    reconnectCancelledRef.current = false;
+	    setReconnectMessage("Reconectando con el director...");
+	    setReconnectBusy(true);
+	    cancelFollowerFailure();
+	    setFollowerStatus("searching");
+	    try {
+	      // Tap 1: reconnect + resync.
+	      // Restart follower transport so the director will re-send its current snapshot (song/page)
+	      // even if the director hasn't changed pages.
+	      await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+	      // Resets to fast-burst discovery (5 s cycles for 30 s). Preserves existing connections.
+	      await refreshNearbyDiscovery().catch(() => {});
+	      setReconnectMessage("Listo.");
+	      setTimeout(() => {
+	        if (!reconnectCancelledRef.current) setReconnectBusy(false);
+	      }, 350);
+	    } catch {
+	      if (!reconnectCancelledRef.current) {
+	        setReconnectBusy(false);
+	        setFollowerStatus("failed", 5000);
+	        showConnectivityHelp();
+	      }
+	    }
+	  }, [cancelFollowerFailure, confirmResetApp, setFollowerStatus, showConnectivityHelp, syncAvailable]);
 
   const cancelReconnect = useCallback(() => {
     reconnectCancelledRef.current = true;
