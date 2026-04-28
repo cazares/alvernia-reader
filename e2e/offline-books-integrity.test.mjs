@@ -62,3 +62,14 @@ test("offline hymns-4 has OCR-derived song titles for Todas", () => {
   const anyTitle = Object.values(titles).find((v) => typeof v === "string" && v.trim().length >= 5);
   assert.ok(anyTitle, "hymns-4 should have at least one non-empty title");
 });
+
+test("native offline-web index points at bundled app asset", () => {
+  const indexHtml = fs.readFileSync(path.join(ROOT, "assets", "offline-web", "index.html"), "utf8");
+  const appBundlePath = path.join(ROOT, "assets", "offline-web", "app.bundle");
+  const assetMap = fs.readFileSync(path.join(ROOT, "src", "offlineWebBundle.js"), "utf8");
+
+  assert.match(indexHtml, /src="app\.bundle"/);
+  assert.doesNotMatch(indexHtml, /src="app\.js"/);
+  assert.ok(fs.existsSync(appBundlePath), "assets/offline-web/app.bundle must exist");
+  assert.match(assetMap, /"app\.bundle"/);
+});

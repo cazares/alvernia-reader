@@ -30,6 +30,55 @@ test("native reader uses FlatList paging over bundled page assets — no WebView
   assert.doesNotMatch(source, /stageOfflinePages/);
 });
 
+test("offline asset recovery return does not appear before later hooks", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
+  const appStart = source.indexOf("export default function App()");
+  assert.ok(appStart >= 0, "App component not found");
+
+  const appSource = source.slice(appStart);
+  const recoveryIdx = appSource.indexOf("if (offlineAssetsError)");
+  assert.ok(recoveryIdx >= 0, "offlineAssetsError recovery branch not found");
+
+  const afterRecovery = appSource.slice(recoveryIdx);
+  assert.doesNotMatch(
+    afterRecovery,
+    /\buse(State|Effect|Memo|Callback|Ref)\s*\(/,
+    "No React hooks may appear after the offlineAssetsError early return",
+  );
+});
+
+test("approving takeover updates JS role to follower before calling native approval", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
+  const handler =
+    source.match(/handleApproveDirectorTakeover[\s\S]*?\}, \[[\s\S]*?\]\);/)?.[0] ??
+    "";
+  assert.ok(handler, "handleApproveDirectorTakeover must exist");
+  assert.match(handler, /setSyncRole\("follower"\)/);
+  assert.match(handler, /approveDirectorTakeover\(requestId\)/);
+  assert.match(handler, /setSearchVisible\(false\)/);
+  assert.match(handler, /setBrowseVisible\(false\)/);
+  assert.match(handler, /setGridVisible\(false\)/);
+
+  const alertBlock = source.match(/Solicitud de control[\s\S]*?\]\s*,\s*\);/)?.[0] ?? "";
+  assert.match(alertBlock, /handleApproveDirectorTakeover\(requestId\)/);
+  assert.doesNotMatch(alertBlock, /approveDirectorTakeover\(requestId\)\.catch/);
+});
+
+test("becoming director from follower does not depend on transient connected label", () => {
+  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
+  const block =
+    source.match(/const handleBecomeDirector = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ??
+    "";
+  assert.ok(block, "handleBecomeDirector block not found");
+  assert.doesNotMatch(block, /followerStatusLabel\s*===\s*"connected"/);
+  assert.match(block, /syncRoleRef\.current === "follower"/);
+  assert.match(block, /requestDirectorTakeover\(\)/);
+
+  const requestIdx = block.indexOf("requestDirectorTakeover()");
+  const startIdx = block.indexOf("startNearbyDirector(DIRECTOR_SESSION)");
+  assert.ok(requestIdx >= 0 && startIdx >= 0 && requestIdx < startIdx);
+});
+
 test("song index resolves correctly — song 55 → page 55, out-of-range clamps", () => {
   const source = fs.readFileSync(path.join(APP_ROOT, "src", "alverniaManual2SongIndex.js"), "utf8");
   assert.match(source, /\[55,\s*55\]/);
