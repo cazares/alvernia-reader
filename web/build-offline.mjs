@@ -147,6 +147,13 @@ nativeHtml = nativeHtml
   .replaceAll('href="/', 'href="')
   .replaceAll('src="/', 'src="')
   .replace('<link rel="stylesheet" href="styles.css" />', `<style>\n${nativeCss}\n</style>`);
+
+const nativeScriptTag = '<script defer src="app.js"></script>';
+const nativeBundleScriptTag = '<script defer src="app.bundle"></script>';
+if (!nativeHtml.includes(nativeScriptTag)) {
+  throw new Error("Expected native index script tag for app.js was not found.");
+}
+nativeHtml = nativeHtml.replace(nativeScriptTag, nativeBundleScriptTag);
 fs.writeFileSync(nativeIndexPath, nativeHtml);
 fs.unlinkSync(nativeCssPath);
 

@@ -629,6 +629,38 @@ const numpadStyles = StyleSheet.create({
   },
 });
 
+function OfflineAssetsRecoveryScreen({
+  message,
+  visibleBuildLabel,
+  onReset,
+}: {
+  message: string;
+  visibleBuildLabel: string;
+  onReset: () => void;
+}) {
+  return (
+    <View style={[styles.screen, { padding: 24, justifyContent: "center" }]}>
+      <Text style={{ color: "#fff", fontSize: 22, fontWeight: "700", marginBottom: 12 }}>
+        Error de archivos offline
+      </Text>
+      <Text style={{ color: "#ddd", fontSize: 16, lineHeight: 22, marginBottom: 18 }}>
+        {message}
+      </Text>
+      <Text style={{ color: "#bbb", fontSize: 14, lineHeight: 20, marginBottom: 18 }}>
+        Esto normalmente significa que la instalación está incompleta. Vuelve a instalar la app desde TestFlight/App
+        Store o vuelve a compilar e instalar el build.
+      </Text>
+      <TouchableOpacity
+        style={[styles.recoveryButton, { alignSelf: "flex-start" }]}
+        onPress={onReset}
+      >
+        <Text style={styles.recoveryButtonText}>Restablecer ajustes</Text>
+      </TouchableOpacity>
+      <Text style={{ color: "#666", marginTop: 18, fontSize: 12 }}>{visibleBuildLabel}</Text>
+    </View>
+  );
+}
+
 // ── Main app ──────────────────────────────────────────────────────────────────
 type SyncRole = "off" | "director" | "follower";
 type DirectorSnapshot = {
@@ -714,6 +746,26 @@ export default function App() {
   const searchAccessoryId = "director-search-accessory";
   const syncAvailable = isNearbyDirectorSyncAvailable();
   const [, forceRerender] = useState(0);
+
+  const handleApproveDirectorTakeover = useCallback(async (requestId: string) => {
+    if (!requestId) return;
+
+    setSyncRole("follower");
+    syncRoleRef.current = "follower";
+    setSearchVisible(false);
+    setBrowseVisible(false);
+    setGridVisible(false);
+    setFollowerStatus("searching");
+
+    try {
+      await approveDirectorTakeover(requestId);
+    } catch {
+      setSyncRole("director");
+      syncRoleRef.current = "director";
+      setFollowerStatus("");
+      Alert.alert("No se pudo ceder control", "Intenta de nuevo cerca del otro dispositivo.");
+    }
+  }, [setFollowerStatus]);
 
   const activeBook = useMemo(() => getBook(activeBookId), [activeBookId]);
   const totalPages = activeBook.totalPages || 1;
@@ -826,47 +878,6 @@ export default function App() {
     loadPersistedLaunchState(() => cancelled);
     return () => { cancelled = true; };
   }, [loadPersistedLaunchState]);
-
-  if (offlineAssetsError) {
-    return (
-      <View style={[styles.screen, { padding: 24, justifyContent: "center" }]}>
-        <Text style={{ color: "#fff", fontSize: 22, fontWeight: "700", marginBottom: 12 }}>
-          Error de archivos offline
-        </Text>
-        <Text style={{ color: "#ddd", fontSize: 16, lineHeight: 22, marginBottom: 18 }}>
-          {offlineAssetsError}
-        </Text>
-        <Text style={{ color: "#bbb", fontSize: 14, lineHeight: 20, marginBottom: 18 }}>
-          Esto normalmente significa que la instalación está incompleta. Vuelve a instalar la app desde TestFlight/App
-          Store o vuelve a compilar e instalar el build.
-        </Text>
-        <TouchableOpacity
-          style={[styles.recoveryButton, { alignSelf: "flex-start" }]}
-          onPress={() => {
-            clearAllBookState()
-              .catch(() => {})
-              .finally(() => {
-                const book: BookId = "hymns-4";
-                AsyncStorage.multiSet([
-                  [STORAGE_KEYS.onboardingComplete, "1"],
-                  [STORAGE_KEYS.mode, "nonStandard"],
-                  [STORAGE_KEYS.activeBookId, book],
-                ]).catch(() => {});
-                AsyncStorage.removeItem(STORAGE_KEYS.standardAccessName).catch(() => {});
-                setAppResetKey((v) => v + 1);
-                setActiveBookId(book);
-                setMode("nonStandard");
-                setOnboardingVisible(false);
-                forceRerender((x) => x + 1);
-              });
-          }}
-        >
-          <Text style={styles.recoveryButtonText}>Restablecer ajustes</Text>
-        </TouchableOpacity>
-        <Text style={{ color: "#666", marginTop: 18, fontSize: 12 }}>{VISIBLE_BUILD_LABEL}</Text>
-      </View>
-    );
-  }
 
   const enableStandardMode = useCallback(async (name: string) => {
     standardLockedRef.current = true;
@@ -1164,7 +1175,7 @@ export default function App() {
           `“${requesterName}” quiere tomar control. ¿Quieres ceder el control?`,
           [
             { text: "No", style: "cancel", onPress: () => { denyDirectorTakeover(requestId).catch(() => {}); } },
-            { text: "Sí, ceder", onPress: () => { approveDirectorTakeover(requestId).catch(() => {}); } },
+            { text: "Sí, ceder", onPress: () => { handleApproveDirectorTakeover(requestId).catch(() => {}); } },
           ],
         );
       } else if (event.type === "takeover-approved" && syncRoleRef.current === "follower") {
@@ -1430,18 +1441,29 @@ export default function App() {
     }
     closeSyncModal();
     try {
-      // If we're already connected to a director, request permission before taking over.
-      if (syncRoleRef.current === "follower" && followerStatusLabel === "connected") {
-        setReconnectMessage("Pidiendo permiso al director...");
-        setReconnectBusy(true);
-        const resp: any = await requestDirectorTakeover();
-        const requestId = String(resp?.requestId || "");
-        takeoverRequestIdRef.current = requestId || null;
-        if (!requestId) {
+      if (syncRoleRef.current === "follower") {
+        try {
+          setReconnectMessage("Pidiendo permiso al director...");
+          setReconnectBusy(true);
+
+          const resp: any = await requestDirectorTakeover();
+          const requestId = String(resp?.requestId || "");
+          takeoverRequestIdRef.current = requestId || null;
+
+          if (requestId) {
+            return;
+          }
+
+          takeoverRequestIdRef.current = null;
           setReconnectBusy(false);
-          throw new Error("missing takeover requestId");
+          setReconnectMessage("");
+        } catch {
+          takeoverRequestIdRef.current = null;
+          setReconnectBusy(false);
+          setReconnectMessage("");
+          // No connected director or takeover unsupported on this path.
+          // Continue to direct director startup below.
         }
-        return;
       }
 
       // startNearbyDirector resets any existing session internally (no stopSync needed).
@@ -1465,7 +1487,7 @@ export default function App() {
         ]
       );
     }
-  }, [codeInput, closeSyncModal, followerStatusLabel]);
+  }, [codeInput, closeSyncModal]);
 
   const handleStopSync = useCallback(async () => {
     closeSyncModal();
@@ -1860,8 +1882,37 @@ export default function App() {
     length: width, offset: width * index, index,
   }), [width]);
 
+  const handleOfflineAssetsReset = useCallback(() => {
+    clearAllBookState()
+      .catch(() => {})
+      .finally(() => {
+        const book: BookId = "hymns-4";
+        AsyncStorage.multiSet([
+          [STORAGE_KEYS.onboardingComplete, "1"],
+          [STORAGE_KEYS.mode, "nonStandard"],
+          [STORAGE_KEYS.activeBookId, book],
+        ]).catch(() => {});
+        AsyncStorage.removeItem(STORAGE_KEYS.standardAccessName).catch(() => {});
+        setAppResetKey((v) => v + 1);
+        setActiveBookId(book);
+        setMode("nonStandard");
+        setOnboardingVisible(false);
+        forceRerender((x) => x + 1);
+      });
+  }, []);
+
   const availableHeight = height - keyboardHeight;
   const cardTop = Math.max(8, availableHeight / 2 - (songModal ? 340 : mode === "nonStandard" ? 260 : 80));
+
+  if (offlineAssetsError) {
+    return (
+      <OfflineAssetsRecoveryScreen
+        message={offlineAssetsError}
+        visibleBuildLabel={VISIBLE_BUILD_LABEL}
+        onReset={handleOfflineAssetsReset}
+      />
+    );
+  }
 
   if (!booted) {
     return <View style={styles.screen} />;
