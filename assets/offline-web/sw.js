@@ -1,4 +1,4 @@
-const CACHE_VERSION = "015426b";
+const CACHE_VERSION = "bc84840";
 const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
 const CORE_ASSETS = [
