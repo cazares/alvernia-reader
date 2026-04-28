@@ -170,6 +170,30 @@ test("UX Fix E: follower status label uses auto-clear timer via ref", () => {
   assert.match(appSource, /clearTimeout\(followerStatusTimerRef\.current\)/);
 });
 
+test("refresh button restarts follower transport so refresh re-syncs to the director's current page", () => {
+  const reconnectBlock = appSource.match(/const handleReconnectPress = useCallback\([\s\S]*?\n\s*\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(reconnectBlock.length > 0, "handleReconnectPress block must exist");
+  assert.match(reconnectBlock, /startNearbyFollower\(DIRECTOR_SESSION\)/);
+  assert.match(reconnectBlock, /refreshNearbyDiscovery\(\)/);
+  assert.ok(
+    reconnectBlock.indexOf("startNearbyFollower") < reconnectBlock.indexOf("refreshNearbyDiscovery"),
+    "refresh must restart follower transport before refreshing discovery"
+  );
+});
+
+test("idle/waiting-followers state is debounced before showing the red X", () => {
+  assert.match(appSource, /scheduleFollowerFailure/);
+  // Avoid immediate red X from brief native idle blips.
+  assert.doesNotMatch(
+    appSource,
+    /event\.status === "waiting-followers"[\s\S]{0,200}setFollowerStatus\("failed"/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /event\.status === "idle"[\s\S]{0,200}setFollowerStatus\("failed"/,
+  );
+});
+
 test("late joiners receive immediate snapshots from the director", () => {
   assert.match(swiftSource, /sendCurrentPageSnapshot\(to: peerID, via: session\)/);
   assert.match(swiftSource, /if type == "hello"[\s\S]*sendCurrentPageSnapshot\(to: peerID, via: session\)/);
