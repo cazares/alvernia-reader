@@ -761,6 +761,7 @@ export default function App() {
   const directorStartFailedAlertShownRef = useRef(false);
   const followerStartFailedAlertShownRef = useRef(false);
   const takeoverRequestIdRef = useRef<string | null>(null);
+  const takeoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectPressesRef = useRef<number[]>([]);
   const reconnectCancelledRef = useRef(false);
   const appResettingRef = useRef(false);
@@ -800,6 +801,14 @@ export default function App() {
   const reconnectCooldownRef = useRef(0); // guards against rapid-fire reconnect taps
   const [imageCacheKey, setImageCacheKey] = useState(0); // bump to bust decoded image cache on memory shed
   const [selfDirectedSince, setSelfDirectedSince] = useState<number | null>(null); // lastSyncedAt when entering self-directed mode
+
+  const clearPendingTakeover = useCallback(() => {
+    takeoverRequestIdRef.current = null;
+    if (takeoverTimeoutRef.current) {
+      clearTimeout(takeoverTimeoutRef.current);
+      takeoverTimeoutRef.current = null;
+    }
+  }, []);
 
   const handleApproveDirectorTakeover = useCallback(async (requestId: string) => {
     if (!requestId) return;
@@ -1236,7 +1245,7 @@ export default function App() {
       } else if (event.type === "takeover-approved" && syncRoleRef.current === "follower") {
         const requestId = String(event.requestId || "");
         if (!requestId || takeoverRequestIdRef.current !== requestId) return;
-        takeoverRequestIdRef.current = null;
+        clearPendingTakeover();
         setReconnectMessage("Listo. Tomando control...");
         stopNearbyDirectorSync().catch(() => {});
         setTimeout(() => {
@@ -1256,7 +1265,7 @@ export default function App() {
       } else if (event.type === "takeover-denied" && syncRoleRef.current === "follower") {
         const requestId = String(event.requestId || "");
         if (!requestId || takeoverRequestIdRef.current !== requestId) return;
-        takeoverRequestIdRef.current = null;
+        clearPendingTakeover();
         setReconnectBusy(false);
         Alert.alert("Solicitud rechazada", "El director actual no cedió el control.");
 	      } else if (event.type === "memoryWarning") {
@@ -1299,7 +1308,7 @@ export default function App() {
       }
 	    });
 	    return () => sub.remove();
-	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable, writeBreadcrumb, setImageCacheKey]);
+	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable, writeBreadcrumb, setImageCacheKey, clearPendingTakeover]);
 
   // Fire immediately on mount to trigger the iOS Local Network permission dialog
   // before any other state is ready — works regardless of mode or onboarding state.
@@ -1570,14 +1579,25 @@ export default function App() {
           takeoverRequestIdRef.current = requestId || null;
 
           if (requestId) {
+            if (takeoverTimeoutRef.current) clearTimeout(takeoverTimeoutRef.current);
+            takeoverTimeoutRef.current = setTimeout(() => {
+              if (takeoverRequestIdRef.current !== requestId) return;
+              clearPendingTakeover();
+              setReconnectBusy(false);
+              setReconnectMessage("");
+              Alert.alert(
+                "Sin respuesta del director",
+                "No llegó confirmación para tomar control. Intenta de nuevo cerca del director actual.",
+              );
+            }, 20_000);
             return;
           }
 
-          takeoverRequestIdRef.current = null;
+          clearPendingTakeover();
           setReconnectBusy(false);
           setReconnectMessage("");
         } catch {
-          takeoverRequestIdRef.current = null;
+          clearPendingTakeover();
           setReconnectBusy(false);
           setReconnectMessage("");
           // No connected director or takeover unsupported on this path.
@@ -1606,7 +1626,7 @@ export default function App() {
         ]
       );
     }
-  }, [codeInput, closeSyncModal]);
+  }, [codeInput, closeSyncModal, clearPendingTakeover]);
 
   const handleStopSync = useCallback(async () => {
     closeSyncModal();
@@ -1675,10 +1695,11 @@ export default function App() {
 
   const cancelReconnect = useCallback(() => {
     reconnectCancelledRef.current = true;
+    clearPendingTakeover();
     setReconnectBusy(false);
     setReconnectMessage("");
     startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-  }, []);
+  }, [clearPendingTakeover]);
 
   // Spotlight-style keyword search
   const openSearch = useCallback(() => {
@@ -2637,16 +2658,20 @@ export default function App() {
 
       {/* ── Reconnect blocking overlay ── */}
       <Modal visible={reconnectBusy} transparent animationType="fade" onRequestClose={cancelReconnect} statusBarTranslucent>
-        <View style={styles.reconnectBackdrop}>
-          <View style={styles.reconnectCard}>
-            <ActivityIndicator size="large" color="#1a1a2e" />
-            <Text style={styles.reconnectTitle}>{reconnectMessage || "Reconectando..."}</Text>
-            <Text style={styles.reconnectBody}>Verificando Bluetooth, Wi-Fi local y la conexión con el director.</Text>
-            <TouchableOpacity style={styles.reconnectCancelBtn} onPress={cancelReconnect} activeOpacity={0.75}>
-              <Text style={styles.reconnectCancelText}>Cancelar</Text>
-            </TouchableOpacity>
+        <TouchableWithoutFeedback onPress={cancelReconnect}>
+          <View style={styles.reconnectBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={styles.reconnectCard}>
+                <ActivityIndicator size="large" color="#1a1a2e" />
+                <Text style={styles.reconnectTitle}>{reconnectMessage || "Reconectando..."}</Text>
+                <Text style={styles.reconnectBody}>Verificando Bluetooth, Wi-Fi local y la conexión con el director.</Text>
+                <TouchableOpacity style={styles.reconnectCancelBtn} onPress={cancelReconnect} activeOpacity={0.75}>
+                  <Text style={styles.reconnectCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       {/* ── Soft reset blocking overlay ── */}
