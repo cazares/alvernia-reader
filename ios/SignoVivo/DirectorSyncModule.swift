@@ -52,9 +52,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var currentBookId = ""
   private var resetGeneration = UUID()
   private var pendingTakeoverRequests: [String: MCPeerID] = [:]
+  private var pendingTakeoverTimers: [String: Timer] = [:]
   /// Dedup guard: skip emitting state events whose status and peerCount haven't changed.
   private var lastEmittedStatus: String = ""
   private var lastEmittedPeerCount: Int = -1
+  /// Exponential back-off counters for repeated advertiser/browser launch failures.
+  private var advertiserFailureCount: Int = 0
+  private var browserFailureCount: Int = 0
+  /// Current device thermal state — used to back off discovery refresh rate when hot.
+  private var thermalState: ProcessInfo.ThermalState = .nominal
 
   // MARK: - Convenience
 
@@ -125,10 +131,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   override init() {
     super.init()
+    thermalState = ProcessInfo.processInfo.thermalState
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleMemoryWarning),
       name: UIApplication.didReceiveMemoryWarningNotification,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleThermalStateChange),
+      name: ProcessInfo.thermalStateDidChangeNotification,
       object: nil
     )
   }
@@ -140,6 +153,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         "role": self.currentRole,
       ] as [String: Any])
     }
+  }
+
+  @objc private func handleThermalStateChange() {
+    thermalState = ProcessInfo.processInfo.thermalState
   }
 
   deinit {
@@ -266,6 +283,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         return
       }
       self.pendingTakeoverRequests[requestId] = nil
+      self.pendingTakeoverTimers[requestId]?.invalidate(); self.pendingTakeoverTimers.removeValue(forKey: requestId)
       let payload: [String: Any] = [
         "v": Self.protocolVersion,
         "type": "takeover_approved",
@@ -303,6 +321,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         return
       }
       self.pendingTakeoverRequests[requestId] = nil
+      self.pendingTakeoverTimers[requestId]?.invalidate(); self.pendingTakeoverTimers.removeValue(forKey: requestId)
       let payload: [String: Any] = [
         "v": Self.protocolVersion,
         "type": "takeover_denied",
@@ -503,6 +522,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     adv.delegate = self
     adv.startAdvertisingPeer()
     advertiser = adv
+    advertiserFailureCount = 0
   }
 
   private func startBrowsing() {
@@ -511,6 +531,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     b.delegate = self
     b.startBrowsingForPeers()
     browser = b
+    browserFailureCount = 0
   }
 
   // Adaptive discovery refresh: fast burst for the first earlyRefreshCycleCount cycles,
@@ -524,9 +545,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func scheduleNextDiscoveryRefresh() {
     let generation = resetGeneration
-    let interval: TimeInterval = earlyRefreshCyclesRemaining > 0
-      ? Self.earlyRefreshInterval
-      : Self.discoveryRefreshInterval
+    let interval: TimeInterval
+    if earlyRefreshCyclesRemaining > 0 {
+      interval = Self.earlyRefreshInterval
+    } else if thermalState == .serious || thermalState == .critical {
+      // Device is hot — slow discovery churn to 60 s to reduce CPU/radio pressure.
+      interval = 60
+    } else {
+      interval = Self.discoveryRefreshInterval
+    }
     discoveryRefreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
       DispatchQueue.main.async {
         autoreleasepool {
@@ -656,7 +683,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     localPeerID = nil
     discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredFollowers = []
     pendingInvitePeer = nil; pendingInviteTimestamp = 0; connectedDirectorPeer = nil
-    pendingTakeoverRequests = [:]
+    pendingTakeoverTimers.values.forEach { $0.invalidate() }
+    pendingTakeoverRequests = [:]; pendingTakeoverTimers = [:]
+    advertiserFailureCount = 0; browserFailureCount = 0
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
     lastFollowerHelloAt = 0
     lastFollowerPageReceivedAt = 0
@@ -820,7 +849,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     if currentRole == "director" {
       emitError(code: "DIRECTOR_START_FAILED", message: error.localizedDescription)
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+    advertiserFailureCount += 1
+    // Stop retrying after 5 consecutive failures — permission is likely permanently denied
+    // for this session. The user must toggle it in Settings and restart.
+    guard advertiserFailureCount <= 5 else { return }
+    let delay = min(3.0 * pow(2.0, Double(advertiserFailureCount - 1)), 30.0)
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self = self, advertiser === self.advertiser, self.currentRole != "off" else { return }
       self.advertiser?.stopAdvertisingPeer(); self.advertiser?.delegate = nil; self.advertiser = nil
       self.startAdvertising()
@@ -875,7 +909,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     if browser === self.browser, currentRole == "follower" {
       emitError(code: "FOLLOWER_START_FAILED", message: error.localizedDescription)
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+    browserFailureCount += 1
+    guard browserFailureCount <= 5 else { return }
+    let delay = min(3.0 * pow(2.0, Double(browserFailureCount - 1)), 30.0)
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self = self, browser === self.browser, self.currentRole != "off" else { return }
       self.browser?.stopBrowsingForPeers(); self.browser?.delegate = nil; self.browser = nil
       self.startBrowsing()
@@ -946,6 +983,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         let displayName = (requesterName?.isEmpty == false) ? requesterName! : peerID.displayName
         self.pendingTakeoverRequests[requestId] = peerID
         self.emitTakeoverRequest(requestId: requestId, requesterName: displayName)
+        // Auto-expire stale requests after 30 s so pendingTakeoverRequests can't grow unbounded.
+        let ttlTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
+          DispatchQueue.main.async {
+            guard let self = self else { return }
+            self.pendingTakeoverRequests.removeValue(forKey: requestId)
+            self.pendingTakeoverTimers.removeValue(forKey: requestId)
+          }
+        }
+        self.pendingTakeoverTimers[requestId] = ttlTimer
         return
       }
 

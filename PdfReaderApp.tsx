@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Animated,
   Dimensions,
   FlatList,
@@ -405,7 +406,7 @@ const buildThumbAssets = (assets: Record<string, number>, totalPages: number) =>
   });
 
 // ── Zoomable page ─────────────────────────────────────────────────────────────
-function ZoomablePage({ source, width, height }: { source: number | undefined; width: number; height: number }) {
+function ZoomablePage({ source, width, height, cacheKey }: { source: number | undefined; width: number; height: number; cacheKey?: number }) {
   const scale = useRef(new Animated.Value(1)).current;
   const currentScale = useRef(1);
   const lastDist = useRef<number | null>(null);
@@ -449,7 +450,7 @@ function ZoomablePage({ source, width, height }: { source: number | undefined; w
       {...panResponder.panHandlers}
     >
       {source ? (
-        <Image source={source} style={{ width, height }} resizeMode="contain" />
+        <Image key={cacheKey} source={source} style={{ width, height }} resizeMode="contain" />
       ) : (
         <Text style={styles.missingText}>—</Text>
       )}
@@ -794,6 +795,11 @@ export default function App() {
       await AsyncStorage.setItem("sv_bc", str);
     } catch { /* best-effort */ }
   }, []);
+
+  const lastSyncedAtRef = useRef(0); // timestamp of last page received from director
+  const reconnectCooldownRef = useRef(0); // guards against rapid-fire reconnect taps
+  const [imageCacheKey, setImageCacheKey] = useState(0); // bump to bust decoded image cache on memory shed
+  const [selfDirectedSince, setSelfDirectedSince] = useState<number | null>(null); // lastSyncedAt when entering self-directed mode
 
   const handleApproveDirectorTakeover = useCallback(async (requestId: string) => {
     if (!requestId) return;
@@ -1165,11 +1171,12 @@ export default function App() {
           return;
         }
 
+        lastSyncedAtRef.current = Date.now();
         latestDirectorSnapshotRef.current = {
           page: event.page,
           mode: incomingMode,
           bookId: incomingBookId,
-          receivedAt: Date.now(),
+          receivedAt: lastSyncedAtRef.current,
         };
 
         if (incomingMode && incomingBookId && (incomingMode !== mode || incomingBookId !== activeBookId)) {
@@ -1253,8 +1260,9 @@ export default function App() {
         setReconnectBusy(false);
         Alert.alert("Solicitud rechazada", "El director actual no cedió el control.");
 	      } else if (event.type === "memoryWarning") {
-        // Shed heavyweight overlays, tighten the page render window, and leave a breadcrumb.
+        // Shed heavyweight overlays, bust image decode cache, tighten render window, leave breadcrumb.
         setMemoryPressure(true);
+        setImageCacheKey((k) => k + 1);
         setGridVisible(false);
         setSearchVisible(false);
         setBrowseVisible(false);
@@ -1265,6 +1273,7 @@ export default function App() {
 	          cancelFollowerFailure();
 	        }
 	        if (event.status === "connected") {
+	          setSelfDirectedSince(null);
 	          // Show satellite emoji with 30s cooldown between notices.
 	          const now = Date.now();
 	          if (now - lastFollowerNoticeRef.current > 30_000) {
@@ -1274,13 +1283,15 @@ export default function App() {
           }
           setFollowerStatus("connected", 4000);
         } else if (event.status === "self-directed") {
-          // No director found yet — let the user navigate freely, show a subtle indicator.
+          // Capture when we last received a page so the UI can show "last synced X ago".
+          setSelfDirectedSince(lastSyncedAtRef.current);
           setFollowerStatus("self-directed");
         } else if (
           event.status === "searching" ||
           event.status === "connecting" ||
           event.status === "resolving-conflict"
 	        ) {
+	          setSelfDirectedSince(null);
 	          setFollowerStatus("searching");
 	        } else if (event.status === "waiting-followers" || event.status === "idle") {
 	          scheduleFollowerFailure(5000);
@@ -1288,7 +1299,7 @@ export default function App() {
       }
 	    });
 	    return () => sub.remove();
-	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable, writeBreadcrumb]);
+	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable, writeBreadcrumb, setImageCacheKey]);
 
   // Fire immediately on mount to trigger the iOS Local Network permission dialog
   // before any other state is ready — works regardless of mode or onboarding state.
@@ -1328,6 +1339,18 @@ export default function App() {
       if (searchDebounceRef.current) { clearTimeout(searchDebounceRef.current); searchDebounceRef.current = null; }
     };
   }, [searchText]);
+
+  // D1: Record breadcrumbs on app lifecycle transitions so Jetsam leaves a traceable trail.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "background" || nextState === "inactive") {
+        writeBreadcrumb("app-background", { page: currentPageRef.current }).catch(() => {});
+      } else if (nextState === "active") {
+        writeBreadcrumb("app-foreground").catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, [writeBreadcrumb]);
 
   // Bootstrap sync role once nearby sync is available.
   // Brau MASTER should become director automatically; everyone else starts as follower.
@@ -1605,7 +1628,10 @@ export default function App() {
 
 	  const handleReconnectPress = useCallback(async () => {
 	    if (syncRoleRef.current === "director") return;
+	    if (appResettingRef.current) return;
 	    const now = Date.now();
+	    if (now - reconnectCooldownRef.current < 2000) return;
+	    reconnectCooldownRef.current = now;
 	    reconnectPressesRef.current = reconnectPressesRef.current.filter((t) => now - t <= 25_000);
 	    reconnectPressesRef.current.push(now);
 	    const pressCount = reconnectPressesRef.current.length;
@@ -1977,10 +2003,10 @@ export default function App() {
 
   const renderItem = useCallback(({ item }: ListRenderItemInfo<typeof pageAssets[0]>) => (
     <View style={{ width, height, backgroundColor: "#000" }}>
-      <ZoomablePage source={item.source} width={width} height={height} />
+      <ZoomablePage source={item.source} width={width} height={height} cacheKey={imageCacheKey} />
     </View>
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [width, height]);
+  ), [width, height, imageCacheKey]);
 
   const keyExtractor = useCallback((item: typeof pageAssets[0]) => String(item.page), []);
   const getItemLayout = useCallback((_: unknown, index: number) => ({
@@ -2439,6 +2465,16 @@ export default function App() {
               <Text style={styles.reconnectStatusX}>✕</Text>
             )}
           </TouchableOpacity>
+          {followerStatusLabel === "self-directed" && (
+            <Text style={styles.selfDirectedAgoLabel}>
+              {selfDirectedSince
+                ? (() => {
+                    const s = Math.floor((Date.now() - selfDirectedSince) / 1000);
+                    return s < 60 ? `sincr. hace ${s}s` : `sincr. hace ${Math.floor(s / 60)}m`;
+                  })()
+                : "sin sincr."}
+            </Text>
+          )}
         </View>
       )}
 
@@ -2475,7 +2511,17 @@ export default function App() {
       </View>
 
       {/* Version label */}
-      <Text style={styles.versionLabel} pointerEvents="none">{VISIBLE_BUILD_LABEL}</Text>
+      <Pressable
+        onLongPress={async () => {
+          const bc = await AsyncStorage.getItem("sv_bc").catch(() => null);
+          Alert.alert("Diagnóstico", bc ?? "Sin datos de sesión anterior.");
+        }}
+        delayLongPress={800}
+        hitSlop={12}
+        style={{ position: "absolute", bottom: 10, right: 12 }}
+      >
+        <Text style={styles.versionLabel}>{VISIBLE_BUILD_LABEL}</Text>
+      </Pressable>
 
       {/* ── Song navigation modal ── */}
       <Modal visible={songModal} transparent animationType="fade" onRequestClose={closeSongModal} statusBarTranslucent>
@@ -2693,6 +2739,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
+  selfDirectedAgoLabel: {
+    fontSize: 9,
+    color: "rgba(255,255,255,0.45)",
+    fontVariant: ["tabular-nums"],
+    maxWidth: 80,
+    textAlign: "center",
+  },
   reconnectButton: {
     width: 96,
     height: 96,
@@ -2768,9 +2821,6 @@ const styles = StyleSheet.create({
   },
 
   versionLabel: {
-    position: "absolute",
-    bottom: 10,
-    right: 12,
     fontSize: 10,
     color: "#aaa",
     fontVariant: ["tabular-nums"],
