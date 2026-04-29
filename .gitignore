@@ -19,3 +19,5 @@ coverage/
 web/dist/
 .wrangler/
 assets-and-web.zip
+
+build/
