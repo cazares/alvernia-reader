@@ -1154,41 +1154,61 @@ export default function App() {
   useEffect(() => { activeBookIdRef.current = activeBookId; }, [activeBookId]);
   useEffect(() => { totalPagesRef.current = totalPages; }, [totalPages]);
 
-  const bootstrapNearbySyncRole = useCallback(async (isCancelled: () => boolean = () => false) => {
-    if (!syncAvailable) {
-      setSyncRole("off");
-      setIsSyncBootstrapped(false);
-      return;
-    }
+	  const bootstrapNearbySyncRole = useCallback(async (isCancelled: () => boolean = () => false) => {
+	    if (!syncAvailable) {
+	      setSyncRole("off");
+	      setIsSyncBootstrapped(false);
+	      return;
+	    }
 
-    const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
-    if (isCancelled()) return;
+	    const nowMs = Date.now();
+	    const storedRole = await AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole).catch(() => null);
+	    const storedDirectorAtRaw = await AsyncStorage.getItem(STORAGE_KEYS.lastDirectorAt).catch(() => null);
+	    const storedDirectorAt = storedDirectorAtRaw ? parseInt(storedDirectorAtRaw, 10) : 0;
+	    const wasDirectorRecently =
+	      storedRole === "director" &&
+	      Number.isFinite(storedDirectorAt) &&
+	      storedDirectorAt > 0 &&
+	      nowMs - storedDirectorAt <= 24 * 60 * 60 * 1000;
 
-    const normalizedName = normalizeDirectorDeviceName(rawName || "");
-    const isBrauMaster = normalizedName === "braumaster";
+	    const rawName = await NativeModules.DirectorSyncModule?.getDeviceName?.().catch(() => "");
+	    if (isCancelled()) return;
 
-    if (isBrauMaster) {
-      try {
-        await startNearbyDirector(DIRECTOR_SESSION);
-        if (!isCancelled()) {
-          setSyncRole("director");
-          // Swift's snapshot state is seeded by a separate useEffect (below) that waits
-          // for the app to be fully booted so mode/bookId refs carry the persisted values.
-          // Do NOT call sendNearbyDirectorPageUpdate here — modeRef may still hold the
-          // default "standard" value if loadPersistedLaunchState hasn't finished yet,
+	    const normalizedName = normalizeDirectorDeviceName(rawName || "");
+	    const isBrauMaster = normalizedName === "braumaster";
+
+	    if (wasDirectorRecently || isBrauMaster) {
+	      try {
+	        await startNearbyDirector(DIRECTOR_SESSION);
+	        if (!isCancelled()) {
+	          setSyncRole("director");
+	          AsyncStorage.multiSet([
+	            [STORAGE_KEYS.lastSyncRole, "director"],
+	            [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
+	          ]).catch(() => {});
+	          // Swift's snapshot state is seeded by a separate useEffect (below) that waits
+	          // for the app to be fully booted so mode/bookId refs carry the persisted values.
+	          // Do NOT call sendNearbyDirectorPageUpdate here — modeRef may still hold the
+	          // default "standard" value if loadPersistedLaunchState hasn't finished yet,
           // which would corrupt every follower's mode/book via their page-event handler.
         }
-      } catch {
-        await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-        if (!isCancelled()) setSyncRole("follower");
-      }
-    } else {
-      await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-      if (!isCancelled()) setSyncRole("follower");
-    }
+	      } catch {
+	        await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+	        if (!isCancelled()) {
+	          setSyncRole("follower");
+	          AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
+	        }
+	      }
+	    } else {
+	      await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+	      if (!isCancelled()) {
+	        setSyncRole("follower");
+	        AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
+	      }
+	    }
 
-    if (!isCancelled()) setIsSyncBootstrapped(true);
-  }, [syncAvailable]);
+	    if (!isCancelled()) setIsSyncBootstrapped(true);
+	  }, [syncAvailable]);
 
   // Seed Swift's snapshot state once the director is active AND the app is fully booted
   // (so mode/bookId carry the persisted values, not the "standard" initial defaults).
@@ -1651,13 +1671,17 @@ export default function App() {
 
       // startNearbyDirector resets any existing session internally (no stopSync needed).
       // Skipping stopSync avoids a state:idle event that would race with setSyncRole("director").
-      await startNearbyDirector(DIRECTOR_SESSION);
-      setSyncRole("director");
-      sendNearbyDirectorPageUpdate(
-        currentPageRef.current,
-        totalPagesRef.current,
-        { mode: modeRef.current, bookId: activeBookIdRef.current },
-      ).catch(() => {});
+	      await startNearbyDirector(DIRECTOR_SESSION);
+	      setSyncRole("director");
+	      AsyncStorage.multiSet([
+	        [STORAGE_KEYS.lastSyncRole, "director"],
+	        [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
+	      ]).catch(() => {});
+	      sendNearbyDirectorPageUpdate(
+	        currentPageRef.current,
+	        totalPagesRef.current,
+	        { mode: modeRef.current, bookId: activeBookIdRef.current },
+	      ).catch(() => {});
     } catch {
       startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
       setSyncRole("follower");
@@ -1672,16 +1696,18 @@ export default function App() {
     }
   }, [codeInput, closeSyncModal, clearPendingTakeover]);
 
-  const handleStopSync = useCallback(async () => {
-    closeSyncModal();
-    try {
-      // startNearbyFollower resets internally — no stopSync needed.
-      await startNearbyFollower(DIRECTOR_SESSION);
-      setSyncRole("follower");
-    } catch {
-      setSyncRole("follower");
-    }
-  }, [closeSyncModal]);
+	  const handleStopSync = useCallback(async () => {
+	    closeSyncModal();
+	    try {
+	      // startNearbyFollower resets internally — no stopSync needed.
+	      await startNearbyFollower(DIRECTOR_SESSION);
+	      setSyncRole("follower");
+	      AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
+	    } catch {
+	      setSyncRole("follower");
+	      AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
+	    }
+	  }, [closeSyncModal]);
 
   const showConnectivityHelp = useCallback(() => {
     Alert.alert(
