@@ -762,6 +762,22 @@ export default function App() {
   const syncAvailable = isNearbyDirectorSyncAvailable();
   const [, forceRerender] = useState(0);
 
+  // Persistent breadcrumb: survives Jetsam (AsyncStorage-backed). Overwrites a single bounded key.
+  const writeBreadcrumb = useCallback(async (event: string, extra?: Record<string, unknown>) => {
+    try {
+      const record: Record<string, unknown> = {
+        ts: Date.now(),
+        build: VISIBLE_BUILD_LABEL,
+        role: syncRoleRef.current,
+        event,
+        ...extra,
+      };
+      const str = JSON.stringify(record);
+      if (str.length > 2000) return;
+      await AsyncStorage.setItem("sv_bc", str);
+    } catch { /* best-effort */ }
+  }, []);
+
   const handleApproveDirectorTakeover = useCallback(async (requestId: string) => {
     if (!requestId) return;
 
@@ -1245,15 +1261,41 @@ export default function App() {
 	        } else if (event.status === "waiting-followers" || event.status === "idle") {
 	          scheduleFollowerFailure(5000);
 	        }
-	      }
+	      } else if (event.type === "memory-warning") {
+        setSearchVisible(false);
+        setBrowseVisible(false);
+        setGridVisible(false);
+        writeBreadcrumb("memory-warning").catch(() => {});
+      }
 	    });
 	    return () => sub.remove();
-	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable]);
+	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable, writeBreadcrumb]);
 
   // Fire immediately on mount to trigger the iOS Local Network permission dialog
   // before any other state is ready — works regardless of mode or onboarding state.
   useEffect(() => {
     primeNearbyPermissions().catch(() => {});
+  }, []);
+
+  // Heartbeat: write a breadcrumb every 60 s so Jetsam leaves a "last seen" trace.
+  useEffect(() => {
+    const id = setInterval(() => { writeBreadcrumb("heartbeat").catch(() => {}); }, 60_000);
+    return () => clearInterval(id);
+  }, [writeBreadcrumb]);
+
+  // Global JS error trap: record fatal errors as breadcrumbs without crashing.
+  useEffect(() => {
+    const prev = ErrorUtils.getGlobalHandler();
+    ErrorUtils.setGlobalHandler((error, isFatal) => {
+      if (isFatal) {
+        AsyncStorage.setItem("sv_bc", JSON.stringify({
+          ts: Date.now(), build: VISIBLE_BUILD_LABEL, event: "fatal-js-error",
+          msg: String(error?.message ?? error).slice(0, 300),
+        })).catch(() => {});
+      }
+      prev?.(error, isFatal);
+    });
+    return () => { ErrorUtils.setGlobalHandler(prev); };
   }, []);
 
   // Bootstrap sync role once nearby sync is available.
@@ -1324,6 +1366,10 @@ export default function App() {
     if (followerStatusTimerRef.current) {
       clearTimeout(followerStatusTimerRef.current);
       followerStatusTimerRef.current = null;
+    }
+    if (followerFailureTimerRef.current) {
+      clearTimeout(followerFailureTimerRef.current);
+      followerFailureTimerRef.current = null;
     }
     setFollowerStatusLabel("");
     setSongInput("");
@@ -1989,9 +2035,9 @@ export default function App() {
         viewabilityConfig={viewabilityConfig}
         onViewableItemsChanged={onViewableItemsChanged}
         removeClippedSubviews
-        maxToRenderPerBatch={3}
-        windowSize={5}
-        initialNumToRender={3}
+        maxToRenderPerBatch={1}
+        windowSize={2}
+        initialNumToRender={1}
       />
 
       {/* ── Song grid (thumbnails) — full-screen overlay ── */}
