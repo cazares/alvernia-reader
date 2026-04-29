@@ -2,6 +2,7 @@ import Foundation
 import MultipeerConnectivity
 import Network
 import React
+import UIKit
 
 @objc(DirectorSyncModule)
 final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelegate, MCNearbyServiceBrowserDelegate, MCSessionDelegate {
@@ -61,6 +62,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var browserFailureCount: Int = 0
   /// Current device thermal state — used to back off discovery refresh rate when hot.
   private var thermalState: ProcessInfo.ThermalState = .nominal
+  /// When backgrounded, avoid churny discovery timers (which can exacerbate memory/CPU pressure).
+  private var appIsActive: Bool = true
 
   // MARK: - Convenience
 
@@ -132,10 +135,23 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   override init() {
     super.init()
     thermalState = ProcessInfo.processInfo.thermalState
+    appIsActive = UIApplication.shared.applicationState != .background
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleMemoryWarning),
       name: UIApplication.didReceiveMemoryWarningNotification,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAppDidEnterBackground),
+      name: UIApplication.didEnterBackgroundNotification,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAppDidBecomeActive),
+      name: UIApplication.didBecomeActiveNotification,
       object: nil
     )
     NotificationCenter.default.addObserver(
@@ -157,6 +173,33 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   @objc private func handleThermalStateChange() {
     thermalState = ProcessInfo.processInfo.thermalState
+  }
+
+  @objc private func handleAppDidEnterBackground() {
+    appIsActive = false
+    // Keep existing MCSession connections as-is, but stop any periodic churn.
+    discoveryRefreshTimer?.invalidate()
+    discoveryRefreshTimer = nil
+    cancelSelfDirectedTimer()
+    stopFollowerHelloTimer()
+  }
+
+  @objc private func handleAppDidBecomeActive() {
+    appIsActive = true
+    guard currentRole != "off" else { return }
+
+    if currentRole == "follower" {
+      if connectedDirectorPeer != nil {
+        pauseDiscoveryRefreshWhileConnected()
+        startFollowerHelloTimer()
+        sendFollowerHelloIfNeeded()
+      } else {
+        startDiscoveryRefreshTimer()
+        startSelfDirectedTimer()
+      }
+    } else if currentRole == "director" {
+      startDiscoveryRefreshTimer()
+    }
   }
 
   deinit {
@@ -558,6 +601,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       DispatchQueue.main.async {
         autoreleasepool {
           guard let self = self, self.currentRole != "off", self.resetGeneration == generation else { return }
+          if !self.appIsActive {
+            self.scheduleNextDiscoveryRefresh()
+            return
+          }
           if self.earlyRefreshCyclesRemaining > 0 { self.earlyRefreshCyclesRemaining -= 1 }
           // Don't restart advertiser/browser while a follower is stably connected —
           // the churn disrupts MPC without any benefit since we already have a director.
