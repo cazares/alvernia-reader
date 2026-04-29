@@ -15,18 +15,18 @@
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.cazares.alvernia",
-      "buildNumber": "288",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
-    },
-    "android": {
-      "package": "com.cazares.alvernia",
-      "versionCode": 288
-    },
+	    "ios": {
+	      "supportsTablet": true,
+	      "bundleIdentifier": "com.cazares.alvernia",
+	      "buildNumber": "289",
+	      "infoPlist": {
+	        "ITSAppUsesNonExemptEncryption": false
+	      }
+	    },
+	    "android": {
+	      "package": "com.cazares.alvernia",
+	      "versionCode": 289
+	    },
     "extra": {
       "eas": {
         "projectId": "8973a6b2-a2e5-4268-97ab-4a1b2c4cb555"

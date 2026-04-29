@@ -199,6 +199,13 @@ test("late joiners receive immediate snapshots from the director", () => {
   assert.match(swiftSource, /if type == "hello"[\s\S]*sendCurrentPageSnapshot\(to: peerID, via: session\)/);
 });
 
+test("director takeover request cannot leave reconnect modal stuck forever", () => {
+  assert.match(appSource, /takeoverTimeoutRef/);
+  assert.match(appSource, /setTimeout\([\s\S]*20_000/);
+  assert.match(appSource, /Sin respuesta del director/);
+  assert.match(appSource, /const cancelReconnect = useCallback\([\s\S]*clearPendingTakeover\(\)/);
+});
+
 test("discovery cadence keeps early burst then steady 25-second refreshes", () => {
   assert.match(swiftSource, /private static let discoveryRefreshInterval: TimeInterval = 25/);
   assert.match(swiftSource, /private static let earlyRefreshInterval: TimeInterval = 5/);
