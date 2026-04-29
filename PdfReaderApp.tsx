@@ -727,6 +727,7 @@ export default function App() {
   const [appResetKey, setAppResetKey] = useState(0);
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
   const [memoryPressure, setMemoryPressure] = useState(false);
+  const memoryPressureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed" | "self-directed">("");
   const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const followerFailureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -801,6 +802,33 @@ export default function App() {
   const reconnectCooldownRef = useRef(0); // guards against rapid-fire reconnect taps
   const [imageCacheKey, setImageCacheKey] = useState(0); // bump to bust decoded image cache on memory shed
   const [selfDirectedSince, setSelfDirectedSince] = useState<number | null>(null); // lastSyncedAt when entering self-directed mode
+
+  const noteMemoryPressure = useCallback((source: "native" | "js") => {
+    setMemoryPressure(true);
+    if (memoryPressureTimerRef.current) {
+      clearTimeout(memoryPressureTimerRef.current);
+      memoryPressureTimerRef.current = null;
+    }
+    memoryPressureTimerRef.current = setTimeout(() => {
+      memoryPressureTimerRef.current = null;
+      setMemoryPressure(false);
+    }, 45_000);
+    writeBreadcrumb("memory-pressure", {
+      source,
+      page: currentPageRef.current,
+      mode: modeRef.current,
+      bookId: activeBookIdRef.current,
+    }).catch(() => {});
+  }, [writeBreadcrumb]);
+
+  useEffect(() => {
+    return () => {
+      if (memoryPressureTimerRef.current) {
+        clearTimeout(memoryPressureTimerRef.current);
+        memoryPressureTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const clearPendingTakeover = useCallback(() => {
     takeoverRequestIdRef.current = null;
@@ -1268,15 +1296,15 @@ export default function App() {
         clearPendingTakeover();
         setReconnectBusy(false);
         Alert.alert("Solicitud rechazada", "El director actual no cedió el control.");
-	      } else if (event.type === "memoryWarning") {
-        // Shed heavyweight overlays, bust image decode cache, tighten render window, leave breadcrumb.
-        setMemoryPressure(true);
-        setImageCacheKey((k) => k + 1);
-        setGridVisible(false);
-        setSearchVisible(false);
-        setBrowseVisible(false);
-        writeBreadcrumb("memory-warning").catch(() => {});
-      } else if (event.type === "state" && syncRoleRef.current === "follower") {
+		      } else if (event.type === "memoryWarning") {
+	        // Shed heavyweight overlays, bust image decode cache, tighten render window, leave breadcrumb.
+	        noteMemoryPressure("native");
+	        writeBreadcrumb("memory-warning", { page: currentPageRef.current, mode: modeRef.current, bookId: activeBookIdRef.current }).catch(() => {});
+	        setImageCacheKey((k) => k + 1);
+	        setGridVisible(false);
+	        setSearchVisible(false);
+	        setBrowseVisible(false);
+	      } else if (event.type === "state" && syncRoleRef.current === "follower") {
 	        // Any non-idle state means we shouldn't show the red X from a stale idle blip.
 	        if (event.status !== "waiting-followers" && event.status !== "idle") {
 	          cancelFollowerFailure();
@@ -1308,7 +1336,7 @@ export default function App() {
       }
 	    });
 	    return () => sub.remove();
-	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable, writeBreadcrumb, setImageCacheKey, clearPendingTakeover]);
+	  }, [activeBookId, cancelFollowerFailure, goToPage, mode, scheduleFollowerFailure, setFollowerStatus, syncAvailable, writeBreadcrumb, setImageCacheKey, clearPendingTakeover, noteMemoryPressure]);
 
   // Fire immediately on mount to trigger the iOS Local Network permission dialog
   // before any other state is ready — works regardless of mode or onboarding state.
@@ -1430,13 +1458,18 @@ export default function App() {
       clearTimeout(followerStatusTimerRef.current);
       followerStatusTimerRef.current = null;
     }
-    if (followerFailureTimerRef.current) {
-      clearTimeout(followerFailureTimerRef.current);
-      followerFailureTimerRef.current = null;
-    }
-    setFollowerStatusLabel("");
-    setSongInput("");
-    setCodeInput("");
+	    if (followerFailureTimerRef.current) {
+	      clearTimeout(followerFailureTimerRef.current);
+	      followerFailureTimerRef.current = null;
+	    }
+	    if (memoryPressureTimerRef.current) {
+	      clearTimeout(memoryPressureTimerRef.current);
+	      memoryPressureTimerRef.current = null;
+	    }
+	    setMemoryPressure(false);
+	    setFollowerStatusLabel("");
+	    setSongInput("");
+	    setCodeInput("");
     setKeyboardHeight(0);
     setSearchVisible(false);
     setSearchText("");
