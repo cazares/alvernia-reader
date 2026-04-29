@@ -32,7 +32,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>280</string>
+	<string>285</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSMinimumSystemVersion</key>
@@ -46,8 +46,6 @@
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>SignoVivo usa Bluetooth para encontrar dispositivos del coro cercanos y sincronizar páginas.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>SignoVivo necesita acceso a la red local para sincronizar páginas con el director del coro.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_signovivo._tcp</string>
@@ -56,6 +54,8 @@
 	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>SignoVivo necesita acceso a la red local para sincronizar páginas con el director del coro.</string>
 	<key>RCTNewArchEnabled</key>
 	<false/>
 	<key>UILaunchStoryboardName</key>
