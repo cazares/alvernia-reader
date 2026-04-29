@@ -763,6 +763,7 @@ export default function App() {
   const followerStartFailedAlertShownRef = useRef(false);
   const takeoverRequestIdRef = useRef<string | null>(null);
   const takeoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectOverlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectPressesRef = useRef<number[]>([]);
   const reconnectCancelledRef = useRef(false);
   const appResettingRef = useRef(false);
@@ -835,6 +836,13 @@ export default function App() {
     if (takeoverTimeoutRef.current) {
       clearTimeout(takeoverTimeoutRef.current);
       takeoverTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearReconnectOverlayTimeout = useCallback(() => {
+    if (reconnectOverlayTimeoutRef.current) {
+      clearTimeout(reconnectOverlayTimeoutRef.current);
+      reconnectOverlayTimeoutRef.current = null;
     }
   }, []);
 
@@ -1458,15 +1466,16 @@ export default function App() {
       clearTimeout(followerStatusTimerRef.current);
       followerStatusTimerRef.current = null;
     }
-	    if (followerFailureTimerRef.current) {
-	      clearTimeout(followerFailureTimerRef.current);
-	      followerFailureTimerRef.current = null;
-	    }
-	    if (memoryPressureTimerRef.current) {
-	      clearTimeout(memoryPressureTimerRef.current);
-	      memoryPressureTimerRef.current = null;
-	    }
-	    setMemoryPressure(false);
+    if (followerFailureTimerRef.current) {
+      clearTimeout(followerFailureTimerRef.current);
+      followerFailureTimerRef.current = null;
+    }
+    clearReconnectOverlayTimeout();
+    if (memoryPressureTimerRef.current) {
+      clearTimeout(memoryPressureTimerRef.current);
+      memoryPressureTimerRef.current = null;
+    }
+    setMemoryPressure(false);
 	    setFollowerStatusLabel("");
 	    setSongInput("");
 	    setCodeInput("");
@@ -1482,6 +1491,8 @@ export default function App() {
     setGridDensityIdx(0);
     setSongModal(false);
     setSyncModal(false);
+    setReconnectBusy(false);
+    setReconnectMessage("");
   }, []);
 
   const performSoftAppReset = useCallback(async () => {
@@ -1679,9 +1690,9 @@ export default function App() {
     );
   }, []);
 
-	  const handleReconnectPress = useCallback(async () => {
-	    if (syncRoleRef.current === "director") return;
-	    if (appResettingRef.current) return;
+		  const handleReconnectPress = useCallback(async () => {
+		    if (syncRoleRef.current === "director") return;
+		    if (appResettingRef.current) return;
 	    const now = Date.now();
 	    if (now - reconnectCooldownRef.current < 2000) return;
 	    reconnectCooldownRef.current = now;
@@ -1701,38 +1712,49 @@ export default function App() {
 	      return;
 	    }
 
-	    reconnectCancelledRef.current = false;
-	    setReconnectMessage("Reconectando con el director...");
-	    setReconnectBusy(true);
-	    cancelFollowerFailure();
-	    setFollowerStatus("searching");
-	    try {
+		    reconnectCancelledRef.current = false;
+		    setReconnectMessage("Reconectando con el director...");
+		    setReconnectBusy(true);
+		    clearReconnectOverlayTimeout();
+		    reconnectOverlayTimeoutRef.current = setTimeout(() => {
+		      reconnectOverlayTimeoutRef.current = null;
+		      if (reconnectCancelledRef.current) return;
+		      setReconnectBusy(false);
+		      setFollowerStatus("failed", 5000);
+		      showConnectivityHelp();
+		    }, 20_000);
+		    cancelFollowerFailure();
+		    setFollowerStatus("searching");
+		    try {
 	      // Tap 1: reconnect + resync.
 	      // Restart follower transport so the director will re-send its current snapshot (song/page)
 	      // even if the director hasn't changed pages.
 	      await startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
 	      // Resets to fast-burst discovery (5 s cycles for 30 s). Preserves existing connections.
-	      await refreshNearbyDiscovery().catch(() => {});
-	      setReconnectMessage("Listo.");
-	      setTimeout(() => {
-	        if (!reconnectCancelledRef.current) setReconnectBusy(false);
-	      }, 350);
-	    } catch {
-	      if (!reconnectCancelledRef.current) {
-	        setReconnectBusy(false);
-	        setFollowerStatus("failed", 5000);
-	        showConnectivityHelp();
-	      }
-	    }
-	  }, [cancelFollowerFailure, confirmResetApp, setFollowerStatus, showConnectivityHelp, syncAvailable]);
+		      await refreshNearbyDiscovery().catch(() => {});
+		      setReconnectMessage("Listo.");
+		      clearReconnectOverlayTimeout();
+		      setTimeout(() => {
+		        if (!reconnectCancelledRef.current) setReconnectBusy(false);
+		      }, 350);
+		    } catch {
+		      clearReconnectOverlayTimeout();
+		      if (!reconnectCancelledRef.current) {
+		        setReconnectBusy(false);
+		        setFollowerStatus("failed", 5000);
+		        showConnectivityHelp();
+		      }
+		    }
+		  }, [cancelFollowerFailure, clearReconnectOverlayTimeout, confirmResetApp, setFollowerStatus, showConnectivityHelp, syncAvailable]);
 
   const cancelReconnect = useCallback(() => {
     reconnectCancelledRef.current = true;
+    clearReconnectOverlayTimeout();
     clearPendingTakeover();
     setReconnectBusy(false);
     setReconnectMessage("");
     startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-  }, [clearPendingTakeover]);
+  }, [clearPendingTakeover, clearReconnectOverlayTimeout]);
 
   // Spotlight-style keyword search
   const openSearch = useCallback(() => {
@@ -2691,20 +2713,16 @@ export default function App() {
 
       {/* ── Reconnect blocking overlay ── */}
       <Modal visible={reconnectBusy} transparent animationType="fade" onRequestClose={cancelReconnect} statusBarTranslucent>
-        <TouchableWithoutFeedback onPress={cancelReconnect}>
-          <View style={styles.reconnectBackdrop}>
-            <TouchableWithoutFeedback>
-              <View style={styles.reconnectCard}>
-                <ActivityIndicator size="large" color="#1a1a2e" />
-                <Text style={styles.reconnectTitle}>{reconnectMessage || "Reconectando..."}</Text>
-                <Text style={styles.reconnectBody}>Verificando Bluetooth, Wi-Fi local y la conexión con el director.</Text>
-                <TouchableOpacity style={styles.reconnectCancelBtn} onPress={cancelReconnect} activeOpacity={0.75}>
-                  <Text style={styles.reconnectCancelText}>Cancelar</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
+        <View style={styles.reconnectBackdrop}>
+          <View style={styles.reconnectCard}>
+            <ActivityIndicator size="large" color="#1a1a2e" />
+            <Text style={styles.reconnectTitle}>{reconnectMessage || "Reconectando..."}</Text>
+            <Text style={styles.reconnectBody}>Verificando Bluetooth, Wi-Fi local y la conexión con el director.</Text>
+            <TouchableOpacity style={styles.reconnectCancelBtn} onPress={cancelReconnect} activeOpacity={0.75}>
+              <Text style={styles.reconnectCancelText}>Cancelar</Text>
+            </TouchableOpacity>
           </View>
-        </TouchableWithoutFeedback>
+        </View>
       </Modal>
 
       {/* ── Soft reset blocking overlay ── */}
