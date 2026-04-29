@@ -307,6 +307,27 @@ test("JS listener handles memoryWarning by shedding heavy overlays and writing b
   assert.ok(listenerBlock.includes("writeBreadcrumb"), "must write breadcrumb on memory warning");
 });
 
+test("reconnect overlay cannot auto-cancel via backdrop tap, and has a hard timeout", () => {
+  // Prevent accidental infinite cancel/reopen loops from backdrop taps.
+  assert.doesNotMatch(appSource, /TouchableWithoutFeedback\s+onPress=\{cancelReconnect\}/);
+
+  // Ensure a hard timeout exists so the overlay cannot remain stuck forever.
+  const reconnectFn = appSource.match(
+    /const handleReconnectPress = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/
+  )?.[0] ?? "";
+  assert.ok(reconnectFn.length > 0, "handleReconnectPress must exist");
+  assert.match(reconnectFn, /setTimeout\([\s\S]*?,\s*20_000\)/);
+  assert.match(reconnectFn, /clearReconnectOverlayTimeout/);
+});
+
+test("app remembers last sync role and restores director on restart", () => {
+  assert.match(appSource, /STORAGE_KEYS\.lastSyncRole/);
+  assert.match(appSource, /STORAGE_KEYS\.lastDirectorAt/);
+  assert.match(appSource, /wasDirectorRecently/);
+  assert.match(appSource, /startNearbyDirector\(DIRECTOR_SESSION\)/);
+  assert.match(appSource, /AsyncStorage\.multiSet\(\[\s*\[STORAGE_KEYS\.lastSyncRole,\s*"director"\]/);
+});
+
 test("breadcrumb heartbeat writes bounded data to a single AsyncStorage key", () => {
   assert.match(appSource, /sv_bc/);
   assert.match(appSource, /writeBreadcrumb/);

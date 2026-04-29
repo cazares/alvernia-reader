@@ -88,6 +88,10 @@ export const STORAGE_KEYS = {
   standardAccessName: "sv.standard.accessName",
   mode: "sv.mode",
   activeBookId: "sv.book.active",
+  // last known sync role (director/follower) for restart restore
+  lastSyncRole: "sv.sync.lastRole",
+  // timestamp (ms) of last time this device was director
+  lastDirectorAt: "sv.sync.lastDirectorAt",
   // per-book saved position
   lastPagePrefix: "sv.book.lastPage.",
 } as const;
@@ -101,6 +105,8 @@ export const clearAllBookState = async () => {
     k === STORAGE_KEYS.standardAccessName ||
     k === STORAGE_KEYS.mode ||
     k === STORAGE_KEYS.activeBookId ||
+    k === STORAGE_KEYS.lastSyncRole ||
+    k === STORAGE_KEYS.lastDirectorAt ||
     k.startsWith(STORAGE_KEYS.lastPagePrefix),
   );
   if (toClear.length) await AsyncStorage.multiRemove(toClear);
