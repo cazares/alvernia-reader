@@ -35,6 +35,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var currentSessionCode = ""
   private var currentDirectorToken = ""
   private var discoveredDirectors: [MCPeerID: String] = [:]
+  private var discoveredDirectorSeenAt: [MCPeerID: TimeInterval] = [:]
   private var discoveredFollowers: Set<MCPeerID> = []
   private var pendingInvitePeer: MCPeerID?
   private var pendingInviteTimestamp: TimeInterval = 0
@@ -116,6 +117,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       try session.send(data, toPeers: [peerID], with: .reliable)
     } catch {
       try? session.send(data, toPeers: [peerID], with: .unreliable)
+    }
+  }
+
+  override init() {
+    super.init()
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleMemoryWarning),
+      name: UIApplication.didReceiveMemoryWarningNotification,
+      object: nil
+    )
+  }
+
+  @objc private func handleMemoryWarning() {
+    DispatchQueue.main.async {
+      self.sendEvent(withName: Self.eventName, body: [
+        "type": "memoryWarning",
+        "role": self.currentRole,
+      ] as [String: Any])
     }
   }
 
@@ -502,10 +522,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       : Self.discoveryRefreshInterval
     discoveryRefreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
       DispatchQueue.main.async {
-        guard let self = self, self.currentRole != "off", self.resetGeneration == generation else { return }
-        if self.earlyRefreshCyclesRemaining > 0 { self.earlyRefreshCyclesRemaining -= 1 }
-        self.refreshDiscovery()
-        self.scheduleNextDiscoveryRefresh()
+        autoreleasepool {
+          guard let self = self, self.currentRole != "off", self.resetGeneration == generation else { return }
+          if self.earlyRefreshCyclesRemaining > 0 { self.earlyRefreshCyclesRemaining -= 1 }
+          // Don't restart advertiser/browser while a follower is stably connected —
+          // the churn disrupts MPC without any benefit since we already have a director.
+          if self.currentRole == "follower", self.connectedDirectorPeer != nil {
+            self.scheduleNextDiscoveryRefresh()
+            return
+          }
+          self.refreshDiscovery()
+          self.scheduleNextDiscoveryRefresh()
+        }
       }
     }
   }
@@ -515,17 +543,19 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     let generation = resetGeneration
     selfDirectedTimer = Timer.scheduledTimer(withTimeInterval: Self.selfDirectedTimeoutSeconds, repeats: false) { [weak self] _ in
       DispatchQueue.main.async {
-        // Also guard pendingInvitePeer: don't fire while mid-handshake with a director.
-        guard let self = self,
-              self.resetGeneration == generation,
-              self.currentRole == "follower",
-              self.connectedDirectorPeer == nil,
-              self.pendingInvitePeer == nil else { return }
-        // Restart fast burst so a director who comes online right now is found within 5 s.
-        self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
-        self.refreshDiscovery()
-        self.scheduleNextDiscoveryRefresh()
-        self.emitState(status: "self-directed")
+        autoreleasepool {
+          // Also guard pendingInvitePeer: don't fire while mid-handshake with a director.
+          guard let self = self,
+                self.resetGeneration == generation,
+                self.currentRole == "follower",
+                self.connectedDirectorPeer == nil,
+                self.pendingInvitePeer == nil else { return }
+          // Restart fast burst so a director who comes online right now is found within 5 s.
+          self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+          self.refreshDiscovery()
+          self.scheduleNextDiscoveryRefresh()
+          self.emitState(status: "self-directed")
+        }
       }
     }
   }
@@ -542,8 +572,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     lastFollowerPageReceivedAt = 0
     followerHelloTimer = Timer.scheduledTimer(withTimeInterval: Self.followerHelloInterval, repeats: true) { [weak self] _ in
       DispatchQueue.main.async {
-        guard let self = self, self.resetGeneration == generation else { return }
-        self.sendFollowerHelloIfNeeded()
+        autoreleasepool {
+          guard let self = self, self.resetGeneration == generation else { return }
+          self.sendFollowerHelloIfNeeded()
+        }
       }
     }
   }
@@ -577,6 +609,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func refreshDiscovery() {
     guard currentRole != "off" else { return }
+    // Prune directors that haven't been seen by the browser in over 90 s (stale MPC state).
+    let now = Date().timeIntervalSince1970
+    let stale = discoveredDirectorSeenAt.filter { now - $0.value > 90 }.map { $0.key }
+    for key in stale {
+      discoveredDirectors.removeValue(forKey: key)
+      discoveredDirectorSeenAt.removeValue(forKey: key)
+      discoveredFollowers.remove(key)
+    }
     advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
     browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
     startAdvertising()
@@ -593,7 +633,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     for s in mcSessions { s.disconnect(); s.delegate = nil }
     mcSessions = []
     localPeerID = nil
-    discoveredDirectors = [:]; discoveredFollowers = []
+    discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredFollowers = []
     pendingInvitePeer = nil; pendingInviteTimestamp = 0; connectedDirectorPeer = nil
     pendingTakeoverRequests = [:]
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
@@ -767,6 +807,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       if role == "director" {
         let token = info?["token"] ?? peerID.displayName
         self.discoveredDirectors[peerID] = token
+        self.discoveredDirectorSeenAt[peerID] = Date().timeIntervalSince1970
         if self.currentRole == "director" {
           self.handleDirectorConflict(with: token)
         } else if self.currentRole == "follower" {
@@ -785,6 +826,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     DispatchQueue.main.async {
       guard browser === self.browser else { return }
       self.discoveredDirectors.removeValue(forKey: peerID)
+      self.discoveredDirectorSeenAt.removeValue(forKey: peerID)
       self.discoveredFollowers.remove(peerID)
       if self.currentRole == "follower" {
         if self.connectedDirectorPeer == peerID {
