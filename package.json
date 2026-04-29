@@ -15,7 +15,7 @@
     "build:web:offline": "node ./web/build-offline.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "node --test ./e2e/*.test.mjs",
-    "postinstall": "node scripts/patch-rn-webview.js"
+    "postinstall": "node scripts/patch-rn-webview.js && node scripts/patch-hermes-thread.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
