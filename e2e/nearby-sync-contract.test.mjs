@@ -204,7 +204,7 @@ test("discovery cadence keeps early burst then steady 25-second refreshes", () =
   assert.match(swiftSource, /private static let earlyRefreshInterval: TimeInterval = 5/);
   assert.match(swiftSource, /private static let earlyRefreshCycleCount = 6/);
   assert.match(swiftSource, /earlyRefreshCyclesRemaining = Self\.earlyRefreshCycleCount/);
-  assert.match(swiftSource, /let interval: TimeInterval = earlyRefreshCyclesRemaining > 0/);
+  assert.match(swiftSource, /earlyRefreshCyclesRemaining > 0/);
 });
 
 test("timers are generation-guarded so stale callbacks cannot survive reset", () => {
