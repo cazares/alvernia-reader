@@ -772,6 +772,7 @@ export default function App() {
   const [debouncedSearchText, setDebouncedSearchText] = useState("");
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncRoleRef = useRef<SyncRole>("off");
+  const followerStatusLabelRef = useRef<typeof followerStatusLabel>("");
   const recentSongsRef = useRef<number[]>([]);
   const pendingSyncPageRef = useRef<number | null>(null);
   const latestDirectorSnapshotRef = useRef<DirectorSnapshot | null>(null);
@@ -1150,6 +1151,7 @@ export default function App() {
 
   // Keep refs in sync for use inside callbacks that can't list state as deps.
   useEffect(() => { syncRoleRef.current = syncRole; }, [syncRole]);
+  useEffect(() => { followerStatusLabelRef.current = followerStatusLabel; }, [followerStatusLabel]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { activeBookIdRef.current = activeBookId; }, [activeBookId]);
   useEffect(() => { totalPagesRef.current = totalPages; }, [totalPages]);
@@ -1378,6 +1380,21 @@ export default function App() {
     return () => clearInterval(id);
   }, [writeBreadcrumb]);
 
+  // Follower auto-retry: when stuck in self-directed or searching, restart discovery every 15 s.
+  // Covers the case where the director restarted (new Nearby session) and followers lost the connection.
+  useEffect(() => {
+    if (!syncAvailable) return;
+    const id = setInterval(() => {
+      if (syncRoleRef.current !== "follower") return;
+      const label = followerStatusLabelRef.current;
+      if (label === "self-directed" || label === "searching" || label === "failed") {
+        startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+        refreshNearbyDiscovery().catch(() => {});
+      }
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [syncAvailable]);
+
   // Global JS error trap: record fatal errors as breadcrumbs without crashing.
   useEffect(() => {
     const prev = ErrorUtils.getGlobalHandler();
@@ -1414,6 +1431,9 @@ export default function App() {
         writeBreadcrumb("app-foreground").catch(() => {});
         if (syncRoleRef.current === "director") {
           sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, { mode: modeRef.current, bookId: activeBookIdRef.current }).catch(() => {});
+        } else if (syncRoleRef.current === "follower") {
+          startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+          refreshNearbyDiscovery().catch(() => {});
         }
       }
     });
