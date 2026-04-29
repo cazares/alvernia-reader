@@ -1412,6 +1412,9 @@ export default function App() {
         writeBreadcrumb("app-background", { page: currentPageRef.current }).catch(() => {});
       } else if (nextState === "active") {
         writeBreadcrumb("app-foreground").catch(() => {});
+        if (syncRoleRef.current === "director") {
+          sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, { mode: modeRef.current, bookId: activeBookIdRef.current }).catch(() => {});
+        }
       }
     });
     return () => sub.remove();
