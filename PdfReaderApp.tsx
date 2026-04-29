@@ -106,6 +106,20 @@ const normalizeText = (s: string): string => {
   }
 };
 
+// Alternate-spelling map for common liturgical variant spellings and OCR drift.
+// When a query word has alternates, any ONE of them matching is enough.
+const SEARCH_ALTERNATES: Record<string, string[]> = {
+  alleluia:  ["aleluya", "aleluia"],
+  aleluya:   ["alleluia", "aleluia"],
+  aleluia:   ["aleluya", "alleluia"],
+  kyrie:     ["kirie"],
+  kirie:     ["kyrie"],
+  hosanna:   ["osana"],
+  osana:     ["hosanna"],
+  comunion:  ["communion"],
+  communion: ["comunion"],
+};
+
 // Build song→themes lookup from pages.json (all 312 songs are tagged)
 const SONG_THEMES: Record<number, string[]> = {};
 for (const entry of (PAGES_JSON as any).songIndex ?? []) {
@@ -711,6 +725,7 @@ export default function App() {
   const [resetCompleteVisible, setResetCompleteVisible] = useState(false);
   const [appResetKey, setAppResetKey] = useState(0);
   const [offlineAssetsError, setOfflineAssetsError] = useState<string | null>(null);
+  const [memoryPressure, setMemoryPressure] = useState(false);
   const [followerStatusLabel, setFollowerStatusLabel] = useState<"" | "searching" | "connected" | "failed" | "self-directed">("");
   const followerStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const followerFailureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -750,6 +765,8 @@ export default function App() {
   const appResettingRef = useRef(false);
   const resetCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<TextInput>(null);
+  const [debouncedSearchText, setDebouncedSearchText] = useState("");
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncRoleRef = useRef<SyncRole>("off");
   const recentSongsRef = useRef<number[]>([]);
   const pendingSyncPageRef = useRef<number | null>(null);
@@ -1235,7 +1252,14 @@ export default function App() {
         takeoverRequestIdRef.current = null;
         setReconnectBusy(false);
         Alert.alert("Solicitud rechazada", "El director actual no cedió el control.");
-	      } else if (event.type === "state" && syncRoleRef.current === "follower") {
+	      } else if (event.type === "memoryWarning") {
+        // Shed heavyweight overlays, tighten the page render window, and leave a breadcrumb.
+        setMemoryPressure(true);
+        setGridVisible(false);
+        setSearchVisible(false);
+        setBrowseVisible(false);
+        writeBreadcrumb("memory-warning").catch(() => {});
+      } else if (event.type === "state" && syncRoleRef.current === "follower") {
 	        // Any non-idle state means we shouldn't show the red X from a stale idle blip.
 	        if (event.status !== "waiting-followers" && event.status !== "idle") {
 	          cancelFollowerFailure();
@@ -1261,11 +1285,6 @@ export default function App() {
 	        } else if (event.status === "waiting-followers" || event.status === "idle") {
 	          scheduleFollowerFailure(5000);
 	        }
-	      } else if (event.type === "memory-warning") {
-        setSearchVisible(false);
-        setBrowseVisible(false);
-        setGridVisible(false);
-        writeBreadcrumb("memory-warning").catch(() => {});
       }
 	    });
 	    return () => sub.remove();
@@ -1297,6 +1316,18 @@ export default function App() {
     });
     return () => { ErrorUtils.setGlobalHandler(prev); };
   }, []);
+
+  // Debounce search text so searchSections memo doesn't run on every keystroke.
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      searchDebounceRef.current = null;
+      setDebouncedSearchText(searchText);
+    }, 80);
+    return () => {
+      if (searchDebounceRef.current) { clearTimeout(searchDebounceRef.current); searchDebounceRef.current = null; }
+    };
+  }, [searchText]);
 
   // Bootstrap sync role once nearby sync is available.
   // Brau MASTER should become director automatically; everyone else starts as follower.
@@ -1678,9 +1709,9 @@ export default function App() {
     return m;
   }, [activeSearchables]);
 
-  // Compute grouped search results on every keystroke
+  // Compute grouped search results on debounced input (80 ms behind typing)
   const searchSections = useMemo(() => {
-    const q = searchText.trim();
+    const q = debouncedSearchText.trim();
     if (!q) return [];
     const normalizedQ = normalizeText(q);
     const words = normalizedQ.split(/\s+/).filter(Boolean);
@@ -1707,7 +1738,11 @@ export default function App() {
     }
 
     const titleNorm = (s: typeof SEARCHABLE_SONGS[0]) => normalizeText(s.title);
-    const matchesWords = (text: string) => words.every((w) => text.includes(w));
+    // Alternate-aware match: each query word matches if the text contains it OR any of its known alternates.
+    const matchesWords = (text: string) => words.every((w) => {
+      if (text.includes(w)) return true;
+      return (SEARCH_ALTERNATES[w] ?? []).some((alt) => text.includes(alt));
+    });
 
     // 2) Recents matching query (title or lyrics)
     const recentMatches = recentSongsRef.current
@@ -1759,7 +1794,7 @@ export default function App() {
     }
 
     return sections;
-  }, [searchText, sortMode, activeSearchables, activeSearchablesBySong, isStandardMode]);
+  }, [debouncedSearchText, sortMode, activeSearchables, activeSearchablesBySong, isStandardMode]);
 
   // Sorted song list for the "Todas" tab
   const sortedTodas = useMemo(() => {
@@ -2036,7 +2071,7 @@ export default function App() {
         onViewableItemsChanged={onViewableItemsChanged}
         removeClippedSubviews
         maxToRenderPerBatch={1}
-        windowSize={2}
+        windowSize={memoryPressure ? 1 : 2}
         initialNumToRender={1}
       />
 

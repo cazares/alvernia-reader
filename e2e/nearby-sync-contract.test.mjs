@@ -236,7 +236,7 @@ test("director view does not render the old upper-right tab affordances", () => 
 
 test("FlatList render window is minimized to limit decoded image memory", () => {
   assert.match(appSource, /maxToRenderPerBatch=\{1\}/);
-  assert.match(appSource, /windowSize=\{2\}/);
+  assert.match(appSource, /windowSize=\{memoryPressure \? 1 : 2\}/);
   assert.match(appSource, /initialNumToRender=\{1\}/);
 });
 
@@ -288,15 +288,16 @@ test("refreshDiscovery wraps MPC object churn in autoreleasepool", () => {
 
 test("native emits memory-warning event to JS on iOS memory pressure", () => {
   assert.match(swiftSource, /UIApplication\.didReceiveMemoryWarningNotification/);
-  assert.match(swiftSource, /"type": "memory-warning"/);
+  assert.match(swiftSource, /"type": "memoryWarning"/);
 });
 
-test("JS listener handles memory-warning by shedding heavy overlays", () => {
+test("JS listener handles memoryWarning by shedding heavy overlays and writing breadcrumb", () => {
   const listenerBlock = appSource.match(
     /addNearbyDirectorSyncListener\(\(event: any\) => \{[\s\S]*?\}, \[/
   )?.[0] ?? "";
-  assert.ok(listenerBlock.includes('"memory-warning"'), "listener must handle memory-warning event type");
-  assert.ok(listenerBlock.includes("setSearchVisible(false)") || appSource.includes("setSearchVisible(false)"), "must shed search overlay");
+  assert.ok(listenerBlock.includes('event.type === "memoryWarning"'), "listener must handle memoryWarning event type");
+  assert.ok(listenerBlock.includes("setSearchVisible(false)"), "must shed search overlay on memory warning");
+  assert.ok(listenerBlock.includes("writeBreadcrumb"), "must write breadcrumb on memory warning");
 });
 
 test("breadcrumb heartbeat writes bounded data to a single AsyncStorage key", () => {
