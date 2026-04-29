@@ -231,3 +231,80 @@ test("director view does not render the old upper-right tab affordances", () => 
   assert.doesNotMatch(appSource, /searchOverlayTrigger/);
   assert.doesNotMatch(appSource, /navTriggerArrow/);
 });
+
+// ── Long-session crash prevention (A1, A2, A3, A4, B1, B2) ──────────────────
+
+test("FlatList render window is minimized to limit decoded image memory", () => {
+  assert.match(appSource, /maxToRenderPerBatch=\{1\}/);
+  assert.match(appSource, /windowSize=\{memoryPressure \? 1 : 2\}/);
+  assert.match(appSource, /initialNumToRender=\{1\}/);
+});
+
+test("clearVolatileRuntimeState clears followerFailureTimerRef to prevent stale red-X", () => {
+  const clearFn = appSource.match(
+    /const clearVolatileRuntimeState = useCallback\(\(\) => \{[\s\S]*?\}, \[\]\);/
+  )?.[0] ?? "";
+  assert.ok(clearFn.length > 0, "clearVolatileRuntimeState must exist");
+  assert.match(clearFn, /followerFailureTimerRef\.current/);
+  assert.match(clearFn, /clearTimeout\(followerFailureTimerRef\.current\)/);
+});
+
+test("follower pauses discovery refresh timer when connected to director", () => {
+  assert.match(swiftSource, /pauseDiscoveryRefreshWhileConnected\(\)/);
+  assert.match(swiftSource, /private func pauseDiscoveryRefreshWhileConnected\(\)/);
+  // Pause must be called on the .connected path before startFollowerHelloTimer
+  const connectedBlock = swiftSource.match(
+    /case \.connected:[\s\S]*?self\.startFollowerHelloTimer\(\)/
+  )?.[0] ?? "";
+  assert.ok(connectedBlock.includes("pauseDiscoveryRefreshWhileConnected"), "pause must be called on connect");
+});
+
+test("follower resumes discovery fast-burst on disconnect so late director is found quickly", () => {
+  assert.match(swiftSource, /resumeDiscoveryRefreshAfterDisconnect\(\)/);
+  assert.match(swiftSource, /private func resumeDiscoveryRefreshAfterDisconnect\(\)/);
+  // Resume must fire before startSelfDirectedTimer on .notConnected path
+  const disconnBlock = swiftSource.match(
+    /case \.notConnected:[\s\S]*?self\.startSelfDirectedTimer\(\)/
+  )?.[0] ?? "";
+  assert.ok(disconnBlock.includes("resumeDiscoveryRefreshAfterDisconnect"), "resume must be called on disconnect");
+});
+
+test("native state emissions are deduplicated to cut JS bridge churn", () => {
+  assert.match(swiftSource, /lastEmittedStatus/);
+  assert.match(swiftSource, /lastEmittedPeerCount/);
+  // Dedup guard must appear inside emitState, not just as a property declaration
+  const emitFn = swiftSource.match(
+    /private func emitState\(status: String[\s\S]*?\n  \}/
+  )?.[0] ?? "";
+  assert.ok(emitFn.includes("lastEmittedStatus"), "dedup guard must be inside emitState");
+});
+
+test("refreshDiscovery wraps MPC object churn in autoreleasepool", () => {
+  const refreshFn = swiftSource.match(
+    /private func refreshDiscovery\(\)[\s\S]*?\n  \}/
+  )?.[0] ?? "";
+  assert.ok(refreshFn.includes("autoreleasepool"), "refreshDiscovery must use autoreleasepool");
+});
+
+test("native emits memory-warning event to JS on iOS memory pressure", () => {
+  assert.match(swiftSource, /UIApplication\.didReceiveMemoryWarningNotification/);
+  assert.match(swiftSource, /"type": "memoryWarning"/);
+});
+
+test("JS listener handles memoryWarning by shedding heavy overlays and writing breadcrumb", () => {
+  const listenerBlock = appSource.match(
+    /addNearbyDirectorSyncListener\(\(event: any\) => \{[\s\S]*?\}, \[/
+  )?.[0] ?? "";
+  assert.ok(listenerBlock.includes('event.type === "memoryWarning"'), "listener must handle memoryWarning event type");
+  assert.ok(listenerBlock.includes("setSearchVisible(false)"), "must shed search overlay on memory warning");
+  assert.ok(listenerBlock.includes("writeBreadcrumb"), "must write breadcrumb on memory warning");
+});
+
+test("breadcrumb heartbeat writes bounded data to a single AsyncStorage key", () => {
+  assert.match(appSource, /sv_bc/);
+  assert.match(appSource, /writeBreadcrumb/);
+  // Heartbeat interval must be 60_000 ms
+  assert.match(appSource, /60_000/);
+  // Size cap must be present
+  assert.match(appSource, /2000/);
+});

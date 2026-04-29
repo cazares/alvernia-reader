@@ -52,6 +52,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var currentBookId = ""
   private var resetGeneration = UUID()
   private var pendingTakeoverRequests: [String: MCPeerID] = [:]
+  /// Dedup guard: skip emitting state events whose status and peerCount haven't changed.
+  private var lastEmittedStatus: String = ""
+  private var lastEmittedPeerCount: Int = -1
 
   // MARK: - Convenience
 
@@ -137,6 +140,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         "role": self.currentRole,
       ] as [String: Any])
     }
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 
   override static func requiresMainQueueSetup() -> Bool { false }
@@ -609,18 +616,32 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func refreshDiscovery() {
     guard currentRole != "off" else { return }
-    // Prune directors that haven't been seen by the browser in over 90 s (stale MPC state).
-    let now = Date().timeIntervalSince1970
-    let stale = discoveredDirectorSeenAt.filter { now - $0.value > 90 }.map { $0.key }
-    for key in stale {
-      discoveredDirectors.removeValue(forKey: key)
-      discoveredDirectorSeenAt.removeValue(forKey: key)
-      discoveredFollowers.remove(key)
+    autoreleasepool {
+      // Prune directors that haven't been seen by the browser in over 90 s (stale MPC state).
+      let now = Date().timeIntervalSince1970
+      let stale = discoveredDirectorSeenAt.filter { now - $0.value > 90 }.map { $0.key }
+      for key in stale {
+        discoveredDirectors.removeValue(forKey: key)
+        discoveredDirectorSeenAt.removeValue(forKey: key)
+        discoveredFollowers.remove(key)
+      }
+      advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
+      browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
+      startAdvertising()
+      startBrowsing()
     }
-    advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
-    browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
-    startAdvertising()
-    startBrowsing()
+  }
+
+  /// Stop the discovery refresh timer while a follower is stably connected to a director.
+  /// Restarts automatically (with a fast burst) when the connection drops.
+  private func pauseDiscoveryRefreshWhileConnected() {
+    discoveryRefreshTimer?.invalidate()
+    discoveryRefreshTimer = nil
+  }
+
+  private func resumeDiscoveryRefreshAfterDisconnect() {
+    earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+    scheduleNextDiscoveryRefresh()
   }
 
   private func resetTransport(emitState shouldEmitState: Bool) {
@@ -641,18 +662,28 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     lastFollowerPageReceivedAt = 0
     currentPageNumber = nil; currentTotalPages = 0
     currentMode = ""; currentBookId = ""
+    lastEmittedStatus = ""; lastEmittedPeerCount = -1
     if shouldEmitState { emitState(status: "idle") }
   }
 
   // MARK: - Event emission
 
   private func emitState(status: String, message: String? = nil) {
+    let peerCount = allConnectedPeers.count
+    // Skip redundant emissions when nothing meaningful changed (no message, same status/peerCount).
+    if (message == nil || message!.isEmpty),
+       status == lastEmittedStatus,
+       peerCount == lastEmittedPeerCount {
+      return
+    }
+    lastEmittedStatus = status
+    lastEmittedPeerCount = peerCount
     sendEvent(withName: Self.eventName, body: [
       "type": "state",
       "role": currentRole,
       "sessionCode": currentSessionCode,
       "status": status,
-      "peerCount": allConnectedPeers.count,
+      "peerCount": peerCount,
       "directorCount": discoveredDirectors.count,
       "message": message ?? "",
     ] as [String: Any])
@@ -861,6 +892,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         if self.currentRole == "follower" {
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
           self.cancelSelfDirectedTimer()
+          self.pauseDiscoveryRefreshWhileConnected()
           self.startFollowerHelloTimer()
           self.sendFollowerHelloIfNeeded()
         } else if self.currentRole == "director" {
@@ -874,6 +906,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
            (self.connectedDirectorPeer == peerID || self.pendingInvitePeer == peerID) {
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
+          self.resumeDiscoveryRefreshAfterDisconnect()
           // Give the director a grace window to reconnect before going self-directed.
           self.startSelfDirectedTimer()
           self.emitState(status: "searching", message: "Reconectando con el director...")
