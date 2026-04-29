@@ -1302,12 +1302,12 @@ export default function App() {
         const requestId = String(event.requestId || "");
         if (!requestId || takeoverRequestIdRef.current !== requestId) return;
         clearPendingTakeover();
-        setReconnectMessage("Listo. Tomando control...");
+        setReconnectBusy(false);
+        setReconnectMessage("");
         stopNearbyDirectorSync().catch(() => {});
         setTimeout(() => {
           startNearbyDirector(DIRECTOR_SESSION).then(() => {
             setSyncRole("director");
-            setReconnectBusy(false);
             sendNearbyDirectorPageUpdate(
               currentPageRef.current,
               totalPagesRef.current,
