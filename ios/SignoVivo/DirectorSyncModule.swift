@@ -926,10 +926,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.reconsiderFollowerTarget()
         }
       } else if role == "follower", self.currentRole == "director" {
-        // Followers initiate the connection — director accepts via advertiser delegate.
-        // Recording discovery only; never call invitePeer from the director side to
-        // avoid the duplicate-session race that breaks MPC reliability.
         self.discoveredFollowers.insert(peerID)
+        // Modern followers initiate the connection themselves. For legacy followers
+        // (build ≤226) that wait to be invited, the director falls back after 1 s.
+        guard !self.allConnectedPeers.contains(peerID) else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+          guard let self = self, self.currentRole == "director" else { return }
+          guard !self.allConnectedPeers.contains(peerID),
+                self.discoveredFollowers.contains(peerID),
+                let session = self.availableSessionForNewFollower() else { return }
+          self.browser?.invitePeer(peerID, to: session, withContext: nil, timeout: Self.inviteTimeout)
+        }
       }
     }
   }
