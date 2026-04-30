@@ -1,12 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { OFFLINE_WEB_BUNDLE_ASSETS } from "./offlineWebBundle";
 // @ts-ignore
-import STANDARD_PAGES_JSON from "../assets/offline-web/pages.json";
+import STANDARD_PAGES_JSON from "../assets/standard/pages.json";
 // @ts-ignore
-import STANDARD_TITLES_JSON from "../assets/offline-web/song-titles.json";
+import STANDARD_TITLES_JSON from "../assets/standard/song-titles.json";
 // @ts-ignore
-import STANDARD_SEARCH_JSON from "../assets/offline-web/song-search-index.json";
+import STANDARD_SEARCH_JSON from "../assets/standard/song-search-index.json";
 
 // Generated static Metro asset maps for alternate books
 // eslint-disable-next-line @typescript-eslint/no-var-requires
