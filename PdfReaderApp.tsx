@@ -49,15 +49,14 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
-import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
 import { BOOKS, NON_STANDARD_BOOK_IDS, STORAGE_KEYS, clearAllBookState, getBook, validateOfflineBookAssets, type AppMode, type BookId } from "./src/offlineBooks";
 import { renderPdfPage, prefetchPdfPages } from "./src/pdfPageRenderer";
 // @ts-ignore — Metro resolves JSON fine
-import SONG_TITLES from "./assets/offline-web/song-titles.json";
+import SONG_TITLES from "./assets/standard/song-titles.json";
 // @ts-ignore
-import SONG_SEARCH_INDEX from "./assets/offline-web/song-search-index.json";
+import SONG_SEARCH_INDEX from "./assets/standard/song-search-index.json";
 // @ts-ignore
-import PAGES_JSON from "./assets/offline-web/pages.json";
+import PAGES_JSON from "./assets/standard/pages.json";
 // @ts-ignore — Metro resolves JSON fine
 import VERSION_INFO from "./version.json";
 
