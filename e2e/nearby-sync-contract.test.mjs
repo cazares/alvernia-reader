@@ -374,3 +374,71 @@ test("breadcrumb heartbeat writes bounded data to a single AsyncStorage key", ()
   // Size cap must be present
   assert.match(appSource, /2000/);
 });
+
+test("reconnect overlay is driven only by reconnectBusy state (no other modal blocks follower)", () => {
+  assert.match(appSource, /<Modal visible=\{reconnectBusy\}/);
+  assert.match(appSource, /const \[reconnectBusy, setReconnectBusy\] = useState\(false\)/);
+});
+
+test("cancelReconnect clears busy state, clears takeover, and restarts follower transport", () => {
+  const cancelBlock = appSource.match(/const cancelReconnect = useCallback\([\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(cancelBlock.length > 0, "cancelReconnect must exist");
+  assert.match(cancelBlock, /reconnectCancelledRef\.current = true/);
+  assert.match(cancelBlock, /clearReconnectOverlayTimeout\(\)/);
+  assert.match(cancelBlock, /clearPendingTakeover\(\)/);
+  assert.match(cancelBlock, /setReconnectBusy\(false\)/);
+  assert.match(cancelBlock, /startNearbyFollower\(DIRECTOR_SESSION\)/);
+});
+
+test("handleReconnectPress is follower-only and rate-limited to avoid transport churn", () => {
+  const block = appSource.match(/const handleReconnectPress = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(block.length > 0, "handleReconnectPress must exist");
+  assert.match(block, /if \(syncRoleRef\.current === "director"\) return/);
+  assert.match(block, /if \(now - reconnectCooldownRef\.current < 2000\) return/);
+  assert.match(block, /reconnectCooldownRef\.current = now/);
+});
+
+test("first reconnect tap restarts follower transport then refreshes discovery (order matters)", () => {
+  const block = appSource.match(/const handleReconnectPress = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(block.length > 0, "handleReconnectPress must exist");
+  const startIdx = block.indexOf("startNearbyFollower(DIRECTOR_SESSION)");
+  const refreshIdx = block.indexOf("refreshNearbyDiscovery()");
+  assert.ok(startIdx >= 0, "must restart follower transport on reconnect tap");
+  assert.ok(refreshIdx >= 0, "must refresh discovery on reconnect tap");
+  assert.ok(startIdx < refreshIdx, "must restart follower before refreshing discovery");
+});
+
+test("reconnect overlay hard-timeouts after 20s and marks follower failed", () => {
+  const reconnectFn = appSource.match(
+    /const handleReconnectPress = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/
+  )?.[0] ?? "";
+  assert.ok(reconnectFn.length > 0, "handleReconnectPress must exist");
+  assert.match(reconnectFn, /,\s*20_000\)/);
+  assert.match(reconnectFn, /setReconnectBusy\(false\)/);
+  assert.match(reconnectFn, /setFollowerStatus\("failed", 5000\)/);
+});
+
+test("reconnect press escalates to soft reset on second tap (no surprise reset on first tap)", () => {
+  const block = appSource.match(/const handleReconnectPress = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(block.length > 0, "handleReconnectPress must exist");
+  assert.match(block, /if \(pressCount >= 2\)/);
+  assert.match(block, /confirmResetApp\("reconnect"\)/);
+});
+
+test("foreground nudge does not depend on syncRole state closure (uses syncRoleRef)", () => {
+  const lifecycleBlock = appSource.match(/AppState\.addEventListener\([\s\S]*?return \(\) => sub\.remove\(\);\n\s*\}, \[writeBreadcrumb\]\);/)?.[0] ?? "";
+  assert.ok(lifecycleBlock.length > 0, "AppState lifecycle effect must exist");
+  assert.match(lifecycleBlock, /syncRoleRef\.current/);
+  assert.doesNotMatch(lifecycleBlock, /syncRole\s*===\s*\"director\"/);
+});
+
+test("director broadcasts page updates via sendNearbyDirectorPageUpdate from onViewableItemsChanged", () => {
+  // Keep this robust against formatting/line breaks: just ensure the callback contains the director broadcast.
+  assert.match(appSource, /const onViewableItemsChanged = useCallback\([\s\S]*?sendNearbyDirectorPageUpdate\(page, totalPages, \{ mode, bookId: activeBookId \}\)/);
+});
+
+test("clearVolatileRuntimeState marks reconnect as cancelled to prevent stuck overlay after reset", () => {
+  const resetBlock = appSource.match(/const clearVolatileRuntimeState = useCallback\([\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(resetBlock.length > 0, "clearVolatileRuntimeState must exist");
+  assert.match(resetBlock, /reconnectCancelledRef\.current = true/);
+});
