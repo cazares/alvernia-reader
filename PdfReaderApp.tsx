@@ -411,12 +411,25 @@ const buildThumbAssets = (assets: Record<string, number>, totalPages: number, pd
 // ── Zoomable page ─────────────────────────────────────────────────────────────
 function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { source: number | undefined; pdfSource?: string; page?: number; width: number; height: number; cacheKey?: number }) {
   const [pdfUri, setPdfUri] = useState<string | undefined>(undefined);
+  const [renderFailed, setRenderFailed] = useState(false);
 
   useEffect(() => {
     if (!pdfSource || !page) return;
+    let cancelled = false;
     setPdfUri(undefined);
-    renderPdfPage(pdfSource, page).then(setPdfUri).catch(() => {});
-  }, [pdfSource, page, cacheKey]);
+    setRenderFailed(false);
+    renderPdfPage(pdfSource, page)
+      .then((uri) => { if (!cancelled) setPdfUri(uri); })
+      .catch((e) => {
+        if (!cancelled) {
+          setRenderFailed(true);
+          if (__DEV__) console.warn(`[ZoomablePage] render failed p${page}:`, e?.message ?? e);
+        }
+      });
+    return () => { cancelled = true; };
+  // cacheKey intentionally excluded — it's only for static Image cache-busting, not PDF re-render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfSource, page]);
 
   const scale = useRef(new Animated.Value(1)).current;
   const translateX = useRef(new Animated.Value(0)).current;
@@ -500,10 +513,12 @@ function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { so
       style={{ width, height, justifyContent: "center", alignItems: "center", transform: [{ scale }, { translateX }, { translateY }] }}
       {...panResponder.panHandlers}
     >
-      {pdfUri ? (
+      {pdfUri && pdfUri.length > 0 ? (
         <Image key={`${cacheKey}_${pdfUri}`} source={{ uri: `file://${pdfUri}` }} style={{ width, height }} resizeMode="contain" />
       ) : source ? (
         <Image key={cacheKey} source={source} style={{ width, height }} resizeMode="contain" />
+      ) : renderFailed ? (
+        <Text style={styles.missingText}>—</Text>
       ) : (
         <ActivityIndicator color="#fff" />
       )}
@@ -516,9 +531,13 @@ function ThumbCell({ source, pdfSource, page, width, height }: { source: number 
   const [uri, setUri] = useState<string | undefined>(undefined);
   useEffect(() => {
     if (!pdfSource || !page) return;
-    renderPdfPage(pdfSource, page).then(setUri).catch(() => {});
+    let cancelled = false;
+    renderPdfPage(pdfSource, page)
+      .then((u) => { if (!cancelled) setUri(u); })
+      .catch(() => { /* thumb failure is silent — gray box is fine */ });
+    return () => { cancelled = true; };
   }, [pdfSource, page]);
-  if (uri) return <Image source={{ uri: `file://${uri}` }} style={{ width, height }} resizeMode="cover" />;
+  if (uri && uri.length > 0) return <Image source={{ uri: `file://${uri}` }} style={{ width, height }} resizeMode="cover" />;
   if (source) return <Image source={source} style={{ width, height }} resizeMode="cover" />;
   return <View style={{ width, height, backgroundColor: "#222" }} />;
 }
@@ -2185,10 +2204,11 @@ export default function App() {
       if (syncRole === "director") {
         sendNearbyDirectorPageUpdate(page, totalPages, { mode, bookId: activeBookId }).catch(() => {});
       }
-      // Pre-warm nearby PDF pages
-      if (activeBook.pdfSource) {
-        const nearby = [page - 2, page - 1, page + 1, page + 2].filter((p) => p >= 1 && p <= totalPages);
-        prefetchPdfPages(activeBook.pdfSource, nearby);
+      // Pre-warm nearby PDF pages — filter to valid range, fire-and-forget
+      if (activeBook.pdfSource && totalPages > 0) {
+        const nearby = [page - 2, page - 1, page + 1, page + 2]
+          .filter((p) => p >= 1 && p <= totalPages && p !== page);
+        if (nearby.length > 0) prefetchPdfPages(activeBook.pdfSource, nearby);
       }
     },
     [syncRole, mode, activeBookId, totalPages, activeBook],
