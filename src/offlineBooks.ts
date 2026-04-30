@@ -10,16 +10,8 @@ import STANDARD_SEARCH_JSON from "../assets/offline-web/song-search-index.json";
 
 // Generated static Metro asset maps for alternate books
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const H1 = require("./offlineBookAssets.hymns-1.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const H4 = require("./offlineBookAssets.hymns-4.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
 
-// @ts-ignore
-import H1_PAGES_JSON from "../assets/offline-books/hymns-1/pages.json";
-// @ts-ignore
-import H1_TITLES_JSON from "../assets/offline-books/hymns-1/song-titles.json";
-// @ts-ignore
-import H1_SEARCH_JSON from "../assets/offline-books/hymns-1/song-search-index.json";
 // @ts-ignore
 import H4_PAGES_JSON from "../assets/offline-books/hymns-4/pages.json";
 // @ts-ignore
@@ -28,7 +20,7 @@ import H4_TITLES_JSON from "../assets/offline-books/hymns-4/song-titles.json";
 import H4_SEARCH_JSON from "../assets/offline-books/hymns-4/song-search-index.json";
 
 export type AppMode = "standard" | "nonStandard";
-export type BookId = "standard" | "hymns-1" | "hymns-4";
+export type BookId = "standard" | "hymns-4";
 
 export type OfflineBook = {
   id: BookId;
@@ -50,14 +42,6 @@ export const BOOKS: OfflineBook[] = [
     totalPages: Number((STANDARD_PAGES_JSON as any).totalPages ?? 368),
     songTitles: (STANDARD_TITLES_JSON as any) ?? {},
     songSearchIndex: (STANDARD_SEARCH_JSON as any) ?? [],
-  },
-  {
-    id: "hymns-1",
-    title: "Himnario",
-    assets: H1.ASSETS,
-    totalPages: Number((H1_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: (H1_TITLES_JSON as any) ?? {},
-    songSearchIndex: (H1_SEARCH_JSON as any) ?? [],
   },
   {
     id: "hymns-4",
@@ -99,7 +83,7 @@ export const validateOfflineBookAssets = (book: OfflineBook): OfflineBookAssetsV
 };
 
 // App Store submission hardening: keep non-standard mode to the single high-res book we ship.
-export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-1", "hymns-4"];
+export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-4"];
 
 export const STORAGE_KEYS = {
   onboardingComplete: "sv.onboarding.complete",
