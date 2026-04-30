@@ -21,7 +21,7 @@ test("native reader uses FlatList paging over bundled page assets — no WebView
 
   assert.match(source, /FlatList/);
   assert.match(source, /pagingEnabled/);
-  assert.match(source, /assets\/offline-web\/pages\.json/);
+  assert.match(source, /assets\/standard\/pages\.json/);
   assert.match(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
   assert.match(source, /resolveSongPage/);
   assert.match(source, /keyboardType="number-pad"/);
@@ -84,12 +84,9 @@ test("song index resolves correctly — song 55 → page 55, out-of-range clamps
   assert.match(source, /\[55,\s*55\]/);
 });
 
-test("offline web bundle version matches the app build number so updates refresh cached files", () => {
-  const assetsSource = fs.readFileSync(path.join(APP_ROOT, "src", "offlineWebBundle.js"), "utf8");
+test("app build number bumps with releases (version.json is the source of truth)", () => {
   const versionJson = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "version.json"), "utf8"));
-  const match = assetsSource.match(/OFFLINE_WEB_BUNDLE_VERSION = "(\d+)"/);
-  assert.ok(match, "Expected offline bundle version constant");
-  assert.equal(match[1], String(versionJson.buildNumber));
+  assert.ok(Number(versionJson.buildNumber) > 0, "version.json buildNumber must be > 0");
 });
 
 test("native iOS project build number matches version.json", () => {

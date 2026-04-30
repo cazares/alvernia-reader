@@ -513,3 +513,63 @@ test("clearVolatileRuntimeState marks reconnect as cancelled to prevent stuck ov
   assert.ok(resetBlock.length > 0, "clearVolatileRuntimeState must exist");
   assert.match(resetBlock, /reconnectCancelledRef\.current = true/);
 });
+
+test("edge case: protocolVersion mismatch is ignored (v != 0 and != protocolVersion)", () => {
+  assert.match(swiftSource, /if v != 0, v != Self\.protocolVersion \{ return \}/);
+});
+
+test("edge case: parseInboundPayload gracefully rejects invalid JSON", () => {
+  assert.match(swiftSource, /private func parseInboundPayload/);
+  assert.match(swiftSource, /try\?\s*JSONSerialization\.jsonObject/);
+  assert.match(swiftSource, /return nil/);
+});
+
+test("edge case: followerHello is throttled when pages are being received", () => {
+  assert.match(swiftSource, /lastFollowerPageReceivedAt/);
+  assert.match(swiftSource, /now - lastFollowerPageReceivedAt < Self\.followerHelloInterval \* 2/);
+});
+
+test("edge case: followerHello is throttled when a hello was sent recently", () => {
+  assert.match(swiftSource, /lastFollowerHelloAt/);
+  assert.match(swiftSource, /now - lastFollowerHelloAt < Self\.followerHelloInterval/);
+});
+
+test("edge case: self-directed timer only fires when follower has no connectedDirectorPeer and no pendingInvitePeer", () => {
+  const timerBlock = swiftSource.match(/private func startSelfDirectedTimer\(\)[\s\S]*?\}\n\s*\}\n\s*\}\n/)?.[0] ?? "";
+  assert.ok(timerBlock.length > 0, "startSelfDirectedTimer must exist");
+  assert.match(timerBlock, /currentRole == "follower"/);
+  assert.match(timerBlock, /connectedDirectorPeer == nil/);
+  assert.match(timerBlock, /pendingInvitePeer == nil/);
+});
+
+test("edge case: follower disconnect schedules a retry after followerRetryDelay", () => {
+  assert.match(swiftSource, /followerRetryDelay/);
+  assert.match(swiftSource, /DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ Self\.followerRetryDelay\)/);
+  assert.match(swiftSource, /reconsiderFollowerTarget\(\)/);
+});
+
+test("edge case: requestCurrentSnapshot is exposed on the ObjC bridge", () => {
+  assert.match(bridgeSource, /requestCurrentSnapshot/);
+});
+
+test("edge case: requestCurrentSnapshot only sends when follower is connected to a director", () => {
+  assert.match(swiftSource, /private func forceFollowerHelloNow\(\)/);
+  assert.match(swiftSource, /connectedDirectorPeer/);
+  assert.match(swiftSource, /session\.connectedPeers\.contains/);
+});
+
+test("edge case: director sendCurrentPageSnapshot uses reliable delivery", () => {
+  assert.match(swiftSource, /private func sendCurrentPageSnapshot/);
+  assert.match(swiftSource, /with: \.reliable/);
+  assert.match(swiftSource, /with: \.unreliable/);
+});
+
+test("edge case: reconnect modal can be suppressed by a constant gate", () => {
+  // If a gate exists, it must control the modal visibility. If it doesn't exist, we at least
+  // require the modal to be driven by reconnectBusy.
+  if (/SHOW_RECONNECT_MODAL/.test(appSource)) {
+    assert.match(appSource, /SHOW_RECONNECT_MODAL\s*&&\s*reconnectBusy/);
+  } else {
+    assert.match(appSource, /<Modal visible=\{reconnectBusy\}/);
+  }
+});

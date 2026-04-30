@@ -65,13 +65,12 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "web/src/index.html",
     "web/src/app.js",
     "web/src/styles.css",
-    "web/dist/signo-vino-offline.html",
-    "assets/offline-web/index.html",
-    "assets/offline-web/pages.json",
-    "assets/offline-web/thumbs/thumb-001.jpg",
-    "src/offlineWebBundle.js",
-    "src/offlineWebBundle.d.ts",
-  ]) {
+	    "web/dist/signo-vino-offline.html",
+	    "assets/standard/pages.json",
+	    "assets/standard/song-titles.json",
+	    "assets/standard/song-search-index.json",
+	    "src/offlineWebBundle.d.ts",
+	  ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected web path missing: ${relativePath}`);
   }
 
