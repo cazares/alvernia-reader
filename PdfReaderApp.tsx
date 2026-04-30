@@ -400,11 +400,12 @@ const buildPageAssets = (assets: Record<string, number>, totalPages: number, pdf
     return { page: pageNum, source: assets[key] as number | undefined, pdfSource: undefined as string | undefined };
   });
 
-const buildThumbAssets = (assets: Record<string, number>, totalPages: number) =>
+const buildThumbAssets = (assets: Record<string, number>, totalPages: number, pdfSource?: string) =>
   Array.from({ length: totalPages }, (_, i) => {
     const pageNum = i + 1;
+    if (pdfSource) return { page: pageNum, source: undefined as number | undefined, pdfSource };
     const key = `thumbs/thumb-${String(pageNum).padStart(3, "0")}.jpg`;
-    return { page: pageNum, source: assets[key] };
+    return { page: pageNum, source: assets[key] as number | undefined, pdfSource: undefined as string | undefined };
   });
 
 // ── Zoomable page ─────────────────────────────────────────────────────────────
@@ -508,6 +509,18 @@ function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { so
       )}
     </Animated.View>
   );
+}
+
+// ── Thumbnail cell (song grid) ────────────────────────────────────────────────
+function ThumbCell({ source, pdfSource, page, width, height }: { source: number | undefined; pdfSource?: string; page?: number; width: number; height: number }) {
+  const [uri, setUri] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!pdfSource || !page) return;
+    renderPdfPage(pdfSource, page).then(setUri).catch(() => {});
+  }, [pdfSource, page]);
+  if (uri) return <Image source={{ uri: `file://${uri}` }} style={{ width, height }} resizeMode="cover" />;
+  if (source) return <Image source={source} style={{ width, height }} resizeMode="cover" />;
+  return <View style={{ width, height, backgroundColor: "#222" }} />;
 }
 
 // ── Pulsing dot for director mode ─────────────────────────────────────────────
@@ -923,7 +936,7 @@ export default function App() {
   const totalPages = activeBook.totalPages || 1;
   const startPage = mode === "standard" ? STANDARD_START_PAGE : 1;
   const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages, activeBook.pdfSource), [activeBook.assets, totalPages, activeBook.pdfSource]);
-  const thumbAssets = useMemo(() => buildThumbAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
+  const thumbAssets = useMemo(() => buildThumbAssets(activeBook.assets, totalPages, activeBook.pdfSource), [activeBook.assets, totalPages, activeBook.pdfSource]);
   const isStandardMode = mode === "standard";
 
   // Safety: if bundled offline assets are missing/corrupt, fail closed with a recovery UI
@@ -2317,11 +2330,7 @@ export default function App() {
                     onPress={() => handleGridSongTap(item.song)}
                     activeOpacity={0.7}
                   >
-                    {thumb?.source ? (
-                      <Image source={thumb.source} style={{ width: cellW, height: imgH }} resizeMode="cover" />
-                    ) : (
-                      <View style={{ width: cellW, height: imgH, backgroundColor: "#222" }} />
-                    )}
+                    <ThumbCell source={thumb?.source} pdfSource={thumb?.pdfSource} page={thumb?.page} width={cellW} height={imgH} />
                     <View style={{ height: labelH, backgroundColor: "#111", justifyContent: "center", alignItems: "center" }}>
                       <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{item.song}</Text>
                     </View>
