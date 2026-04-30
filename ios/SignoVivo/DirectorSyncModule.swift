@@ -867,8 +867,19 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     cancelSelfDirectedTimer()
     pendingInvitePeer = target
     pendingInviteTimestamp = Date().timeIntervalSince1970
-    browser?.invitePeer(target, to: session, withContext: nil, timeout: Self.inviteTimeout)
     emitState(status: "connecting")
+    // Delay our outbound invite by 600 ms so a legacy director (build ≤226) that
+    // immediately calls invitePeer on us has time to arrive first.  If it does,
+    // didReceiveInvitation accepts it and the notConnected guard above keeps us
+    // connected when our (now-redundant) outbound invite is rejected by MPC.
+    let capturedTarget = target
+    let capturedSession = session
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+      guard let self = self, self.currentRole == "follower",
+            self.pendingInvitePeer == capturedTarget,
+            !self.allConnectedPeers.contains(capturedTarget) else { return }
+      self.browser?.invitePeer(capturedTarget, to: capturedSession, withContext: nil, timeout: Self.inviteTimeout)
+    }
   }
 
   private func handleDirectorConflict(with otherToken: String) {
@@ -1023,6 +1034,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       case .notConnected:
         if self.currentRole == "follower",
            (self.connectedDirectorPeer == peerID || self.pendingInvitePeer == peerID) {
+          // Guard: if the peer is still connected via a parallel MPC path (e.g. a
+          // legacy director invited us at the same moment we invited it, causing a
+          // double-invite race), don't treat the failed outbound invite as a
+          // disconnection — just clear the pending state and stay connected.
+          if self.allConnectedPeers.contains(peerID) {
+            self.pendingInvitePeer = nil
+            return
+          }
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
           self.resumeDiscoveryRefreshAfterDisconnect()
