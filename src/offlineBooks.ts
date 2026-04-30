@@ -7,16 +7,12 @@ import STANDARD_TITLES_JSON from "../assets/standard/song-titles.json";
 // @ts-ignore
 import STANDARD_SEARCH_JSON from "../assets/standard/song-search-index.json";
 
-// Generated static Metro asset maps for alternate books
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const H4 = require("./offlineBookAssets.hymns-4.js") as { BOOK_ID: string; ASSETS: Record<string, number> };
-
 // @ts-ignore
-import H4_PAGES_JSON from "../assets/offline-books/hymns-4/pages.json";
+import H4_PAGES_JSON from "../assets/standard/hymns-4-pages.json";
 // @ts-ignore
-import H4_TITLES_JSON from "../assets/offline-books/hymns-4/song-titles.json";
+import H4_TITLES_JSON from "../assets/standard/hymns-4-song-titles.json";
 // @ts-ignore
-import H4_SEARCH_JSON from "../assets/offline-books/hymns-4/song-search-index.json";
+import H4_SEARCH_JSON from "../assets/standard/hymns-4-song-search-index.json";
 
 export type AppMode = "standard" | "nonStandard";
 export type BookId = "standard" | "hymns-4";
@@ -45,7 +41,8 @@ export const BOOKS: OfflineBook[] = [
   {
     id: "hymns-4",
     title: "Himnos de Sión",
-    assets: H4.ASSETS,
+    assets: {},
+    pdfSource: "hymns-4",
     totalPages: Number((H4_PAGES_JSON as any).totalPages ?? 0),
     songTitles: (H4_TITLES_JSON as any) ?? {},
     songSearchIndex: (H4_SEARCH_JSON as any) ?? [],
