@@ -21,7 +21,7 @@ test("native reader uses FlatList paging over bundled page assets — no WebView
 
   assert.match(source, /FlatList/);
   assert.match(source, /pagingEnabled/);
-  assert.match(source, /OFFLINE_WEB_BUNDLE_ASSETS/);
+  assert.match(source, /assets\/offline-web\/pages\.json/);
   assert.match(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
   assert.match(source, /resolveSongPage/);
   assert.match(source, /keyboardType="number-pad"/);

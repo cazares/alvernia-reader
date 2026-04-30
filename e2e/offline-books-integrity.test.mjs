@@ -12,18 +12,18 @@ const require = createRequire(import.meta.url);
 
 const readJson = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 
-test("offline standard book bundle has sentinel page assets", () => {
+test("offline standard book bundle has sentinel metadata and thumbs", () => {
   const pagesJson = readJson(path.join(ROOT, "assets", "offline-web", "pages.json"));
   const total = Number(pagesJson.totalPages || 0);
   assert.ok(total > 0, `standard totalPages must be > 0`);
 
-  const pagesDir = path.join(ROOT, "assets", "offline-web", "pages");
-  const file1 = path.join(pagesDir, "page-001.jpg");
-  const file2 = path.join(pagesDir, `page-${String(Math.min(total, 2)).padStart(3, "0")}.jpg`);
-  const fileLast = path.join(pagesDir, `page-${String(total).padStart(3, "0")}.jpg`);
-  assert.ok(fs.existsSync(file1), `Missing standard page asset: ${file1}`);
-  assert.ok(fs.existsSync(file2), `Missing standard page asset: ${file2}`);
-  assert.ok(fs.existsSync(fileLast), `Missing standard page asset: ${fileLast}`);
+  const thumbsDir = path.join(ROOT, "assets", "offline-web", "thumbs");
+  const file1 = path.join(thumbsDir, "thumb-001.jpg");
+  const file2 = path.join(thumbsDir, `thumb-${String(Math.min(total, 2)).padStart(3, "0")}.jpg`);
+  const fileLast = path.join(thumbsDir, `thumb-${String(total).padStart(3, "0")}.jpg`);
+  assert.ok(fs.existsSync(file1), `Missing standard thumb asset: ${file1}`);
+  assert.ok(fs.existsSync(file2), `Missing standard thumb asset: ${file2}`);
+  assert.ok(fs.existsSync(fileLast), `Missing standard thumb asset: ${fileLast}`);
 });
 
 test("offline non-standard book bundles exist and page counts match", () => {

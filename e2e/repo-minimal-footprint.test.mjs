@@ -67,7 +67,8 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "web/src/styles.css",
     "web/dist/signo-vino-offline.html",
     "assets/offline-web/index.html",
-    "assets/offline-web/pages/page-001.jpg",
+    "assets/offline-web/pages.json",
+    "assets/offline-web/thumbs/thumb-001.jpg",
     "src/offlineWebBundle.js",
     "src/offlineWebBundle.d.ts",
   ]) {
