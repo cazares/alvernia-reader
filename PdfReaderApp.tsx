@@ -48,7 +48,7 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
-import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
+import { renderPdfPage } from "./src/pdfPageRenderer";
 import { BOOKS, NON_STANDARD_BOOK_IDS, STORAGE_KEYS, clearAllBookState, getBook, validateOfflineBookAssets, type AppMode, type BookId } from "./src/offlineBooks";
 // @ts-ignore — Metro resolves JSON fine
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
@@ -391,11 +391,12 @@ const resolveSongPage = (input: string, totalPages: number, songToPage: Map<numb
   return next ? next.page : totalPages;
 };
 
-const buildPageAssets = (assets: Record<string, number>, totalPages: number) =>
+const buildPageAssets = (assets: Record<string, number>, totalPages: number, pdfSource?: string) =>
   Array.from({ length: totalPages }, (_, i) => {
     const pageNum = i + 1;
+    if (pdfSource) return { page: pageNum, source: undefined as number | undefined, pdfSource };
     const key = `pages/page-${String(pageNum).padStart(3, "0")}.jpg`;
-    return { page: pageNum, source: assets[key] };
+    return { page: pageNum, source: assets[key], pdfSource: undefined as string | undefined };
   });
 
 const buildThumbAssets = (assets: Record<string, number>, totalPages: number) =>
@@ -406,7 +407,13 @@ const buildThumbAssets = (assets: Record<string, number>, totalPages: number) =>
   });
 
 // ── Zoomable page ─────────────────────────────────────────────────────────────
-function ZoomablePage({ source, width, height, cacheKey }: { source: number | undefined; width: number; height: number; cacheKey?: number }) {
+function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { source: number | undefined; pdfSource?: string; page?: number; width: number; height: number; cacheKey?: number }) {
+  const [pdfUri, setPdfUri] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pdfSource || !page) return;
+    setPdfUri(null);
+    renderPdfPage(pdfSource, page).then(setPdfUri).catch(() => {});
+  }, [pdfSource, page, cacheKey]);
   const scale = useRef(new Animated.Value(1)).current;
   const currentScale = useRef(1);
   const lastDist = useRef<number | null>(null);
@@ -449,7 +456,11 @@ function ZoomablePage({ source, width, height, cacheKey }: { source: number | un
       style={{ width, height, justifyContent: "center", alignItems: "center", transform: [{ scale }] }}
       {...panResponder.panHandlers}
     >
-      {source ? (
+      {pdfSource ? (
+        pdfUri
+          ? <Image key={pdfUri} source={{ uri: pdfUri }} style={{ width, height }} resizeMode="contain" />
+          : <ActivityIndicator color="#555" style={{ flex: 1 }} />
+      ) : source ? (
         <Image key={cacheKey} source={source} style={{ width, height }} resizeMode="contain" />
       ) : (
         <Text style={styles.missingText}>—</Text>
@@ -870,7 +881,7 @@ export default function App() {
   const activeBook = useMemo(() => getBook(activeBookId), [activeBookId]);
   const totalPages = activeBook.totalPages || 1;
   const startPage = mode === "standard" ? STANDARD_START_PAGE : 1;
-  const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
+  const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages, activeBook.pdfSource), [activeBook.assets, activeBook.pdfSource, totalPages]);
   const thumbAssets = useMemo(() => buildThumbAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
   const isStandardMode = mode === "standard";
 
@@ -2128,7 +2139,7 @@ export default function App() {
 
   const renderItem = useCallback(({ item }: ListRenderItemInfo<typeof pageAssets[0]>) => (
     <View style={{ width, height, backgroundColor: "#000" }}>
-      <ZoomablePage source={item.source} width={width} height={height} cacheKey={imageCacheKey} />
+      <ZoomablePage source={item.source} pdfSource={item.pdfSource} page={item.page} width={width} height={height} cacheKey={imageCacheKey} />
     </View>
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [width, height, imageCacheKey]);
