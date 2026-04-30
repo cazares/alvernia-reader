@@ -459,6 +459,19 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  @objc(requestCurrentSnapshot:rejecter:)
+  func requestCurrentSnapshot(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      autoreleasepool {
+        self.forceFollowerHelloNow()
+        resolve(nil)
+      }
+    }
+  }
+
   // Prevents iOS from auto-locking the screen during active sync sessions. MPC is throttled
   // when the screen locks, which silently breaks director-follower connectivity mid-rehearsal.
   @objc(setIdleTimerDisabled:resolver:rejecter:)
@@ -685,6 +698,21 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       lastFollowerHelloAt = now
     } catch {
       // Best-effort: don't emit an error for transient MPC send failures.
+    }
+  }
+
+  /// Force an immediate "hello" from follower to director to request a fresh snapshot.
+  /// Used on app foreground to recover quickly from background-induced desync.
+  private func forceFollowerHelloNow() {
+    guard currentRole == "follower", let session = mcSessions.first else { return }
+    guard let directorPeer = connectedDirectorPeer else { return }
+    guard session.connectedPeers.contains(directorPeer) else { return }
+    guard let data = helloPayload() else { return }
+    do {
+      try session.send(data, toPeers: [directorPeer], with: .reliable)
+      lastFollowerHelloAt = Date().timeIntervalSince1970
+    } catch {
+      // Best-effort.
     }
   }
 

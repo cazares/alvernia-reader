@@ -1486,6 +1486,7 @@ export default function App() {
           sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, { mode: modeRef.current, bookId: activeBookIdRef.current }).catch(() => {});
         } else if (syncRoleRef.current === "follower") {
           startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
+          requestCurrentSnapshot().catch(() => {});
           refreshNearbyDiscovery().catch(() => {});
         }
       }

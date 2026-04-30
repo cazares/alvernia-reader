@@ -64,6 +64,14 @@ export const refreshNearbyDiscovery = async () => {
   return null;
 };
 
+export const requestCurrentSnapshot = async () => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.requestCurrentSnapshot === "function") {
+    return nativeModule.requestCurrentSnapshot();
+  }
+  return null;
+};
+
 export const requestDirectorTakeover = async () => {
   if (!isNearbyDirectorSyncAvailable()) return null;
   if (typeof nativeModule.requestDirectorTakeover === "function") {

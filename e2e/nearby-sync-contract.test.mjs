@@ -21,6 +21,16 @@ test("nearby sync page updates include mode and book identity", () => {
   assert.match(swiftSource, /"bookId": bookId/);
 });
 
+test("JS can force-request a current snapshot from the director", () => {
+  assert.match(jsSyncSource, /requestCurrentSnapshot/);
+  assert.match(dtsSyncSource, /requestCurrentSnapshot/);
+  assert.match(bridgeSource, /requestCurrentSnapshot/);
+  assert.match(swiftSource, /func requestCurrentSnapshot/);
+  // Implementation must send a follower hello (director responds with snapshot).
+  assert.match(swiftSource, /forceFollowerHelloNow/);
+  assert.match(swiftSource, /"type": "hello"/);
+});
+
 test("followers switch to the director book before applying synced pages", () => {
   assert.match(appSource, /pendingSyncPageRef/);
   assert.match(appSource, /latestDirectorSnapshotRef/);
