@@ -166,6 +166,24 @@ test("foregrounding the app triggers a sync nudge (director re-broadcasts, follo
   assert.match(lifecycleBlock, /refreshNearbyDiscovery\(\)/);
 });
 
+test("follower status indicator uses a pulsing dot in the failure/idle state (no text fallback)", () => {
+  const clusterBlock = appSource.match(/\{\/\* Top-right button cluster \*\/\}[\s\S]*?<\/View>\n\s*\)\}/)?.[0] ?? "";
+  assert.ok(clusterBlock.length > 0, "reconnect cluster render block must exist");
+  // Status must be dots (connected/searching/fallback), not a text glyph.
+  assert.match(clusterBlock, /followerStatusLabel === "connected"[\s\S]*<PulsingDot/);
+  assert.match(clusterBlock, /followerStatusLabel === "searching"[\s\S]*<PulsingDot/);
+  assert.match(clusterBlock, /<PulsingDot color="#f0c040" speed={0\.65} \/>/);
+  assert.doesNotMatch(clusterBlock, /reconnectStatusX\}\s*>✕</);
+});
+
+test("follower failure is debounced (no immediate failed status on idle blip)", () => {
+  const scheduleBlock = appSource.match(/const scheduleFollowerFailure = useCallback\([\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(scheduleBlock.length > 0, "scheduleFollowerFailure must exist");
+  assert.match(scheduleBlock, /setTimeout\(\(\) => \{/);
+  assert.match(scheduleBlock, /setFollowerStatus\("failed"/);
+  assert.match(scheduleBlock, /,\s*1500\)\s*;?/);
+});
+
 // Follower-first scenario: browser failure (permission denied) must surface to JS so the
 // follower is told to check Settings rather than waiting forever on "searching".
 test("FOLLOWER_START_FAILED: browser failure emits error to JS and shows Settings alert", () => {
