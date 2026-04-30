@@ -34,6 +34,8 @@ export type OfflineBook = {
   id: BookId;
   title: string;
   assets: Record<string, number>;
+  /** PDF bundle resource name (no extension) — if set, pages are rendered on-demand */
+  pdfSource?: string;
   totalPages: number;
   songTitles: Record<string, string>;
   songSearchIndex: Array<{ song: number; page: number; title?: string; normalized?: string; lyrics?: string }>;
@@ -43,7 +45,8 @@ export const BOOKS: OfflineBook[] = [
   {
     id: "standard",
     title: "Manual Alvernia",
-    assets: OFFLINE_WEB_BUNDLE_ASSETS,
+    assets: {},
+    pdfSource: "alvernia_manual_2",
     totalPages: Number((STANDARD_PAGES_JSON as any).totalPages ?? 368),
     songTitles: (STANDARD_TITLES_JSON as any) ?? {},
     songSearchIndex: (STANDARD_SEARCH_JSON as any) ?? [],
@@ -81,6 +84,9 @@ export const validateOfflineBookAssets = (book: OfflineBook): OfflineBookAssetsV
   const totalPages = Math.max(0, Number(book.totalPages || 0) || 0);
   if (!totalPages) {
     return { ok: false, missingCount: 1, sampleMissingKeys: ["pages.json.totalPages"] };
+  }
+  if (book.pdfSource) {
+    return { ok: true, missingCount: 0, sampleMissingKeys: [] };
   }
   const missing: string[] = [];
   const check = (key: string) => {
