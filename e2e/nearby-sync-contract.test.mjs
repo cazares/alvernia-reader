@@ -31,6 +31,67 @@ test("JS can force-request a current snapshot from the director", () => {
   assert.match(swiftSource, /"type": "hello"/);
 });
 
+test("happy path: follower foreground performs start + snapshot request + discovery refresh", () => {
+  const lifecycleBlock = appSource.match(/AppState\.addEventListener\([\s\S]*?else if \(nextState === "active"\)[\s\S]*?\}\);\n\s*return \(\) => sub\.remove\(\);\n\s*\}, \[writeBreadcrumb\]\);/)?.[0] ?? "";
+  assert.ok(lifecycleBlock.length > 0, "AppState lifecycle effect must exist");
+  assert.match(lifecycleBlock, /syncRoleRef\.current === "follower"/);
+  const startIdx = lifecycleBlock.indexOf("startNearbyFollower(DIRECTOR_SESSION)");
+  const snapIdx = lifecycleBlock.indexOf("requestCurrentSnapshot()");
+  const refreshIdx = lifecycleBlock.indexOf("refreshNearbyDiscovery()");
+  assert.ok(startIdx >= 0 && snapIdx >= 0 && refreshIdx >= 0, "expected start/snapshot/refresh calls");
+  assert.ok(startIdx < snapIdx && snapIdx < refreshIdx, "expected start -> snapshot -> refresh order");
+});
+
+test("happy path: director immediately snapshots on connect and on hello", () => {
+  assert.match(swiftSource, /case \.connected:[\s\S]*currentRole == "director"[\s\S]*sendCurrentPageSnapshot/);
+  assert.match(swiftSource, /if type == "hello"[\s\S]*currentRole == "director"[\s\S]*sendCurrentPageSnapshot/);
+});
+
+test("happy path: follower records lastSyncedAt and can show 'sincr. hace' label", () => {
+  assert.match(appSource, /lastSyncedAtRef/);
+  assert.match(appSource, /selfDirectedAgoLabel/);
+  assert.match(appSource, /sincr\. hace/);
+});
+
+test("happy path: follower refresh button is present only when follower and not searching UI overlays", () => {
+  const cluster = appSource.match(/\{\/\* Top-right button cluster \*\/\}[\s\S]*?syncRole === "follower"[\s\S]*?<\/View>\n\s*\)\}/)?.[0] ?? "";
+  assert.ok(cluster.length > 0, "expected reconnect cluster conditional render");
+  assert.match(cluster, /syncRole === "follower"/);
+  assert.match(cluster, /!searchVisible/);
+  assert.match(cluster, /!onboardingVisible/);
+});
+
+test("happy path: reconnect press shows searching status and sets reconnectBusy true", () => {
+  const reconnectFn = appSource.match(/const handleReconnectPress = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(reconnectFn.length > 0, "handleReconnectPress must exist");
+  assert.match(reconnectFn, /setFollowerStatus\("searching"\)/);
+  assert.match(reconnectFn, /setReconnectBusy\(true\)/);
+});
+
+test("happy path: reconnect press clears overlay quickly on success", () => {
+  const reconnectFn = appSource.match(/const handleReconnectPress = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ?? "";
+  assert.ok(reconnectFn.length > 0, "handleReconnectPress must exist");
+  assert.match(reconnectFn, /setReconnectMessage\("Listo\."\)/);
+  assert.match(reconnectFn, /setTimeout\([\s\S]*setReconnectBusy\(false\)[\s\S]*,\s*350\)/);
+});
+
+test("happy path: takeover approved/denied messages are handled only by follower", () => {
+  assert.match(swiftSource, /if type == "takeover_approved"[\s\S]*currentRole == "follower"/);
+  assert.match(swiftSource, /if type == "takeover_denied"[\s\S]*currentRole == "follower"/);
+});
+
+test("happy path: sendPageUpdate includes protocol version and mode/bookId fields", () => {
+  assert.match(swiftSource, /"v": Self\.protocolVersion/);
+  assert.match(swiftSource, /"mode": mode/);
+  assert.match(swiftSource, /"bookId": bookId/);
+});
+
+test("happy path: discovery refresh cadence uses early burst then steady refresh", () => {
+  assert.match(swiftSource, /earlyRefreshCycleCount/);
+  assert.match(swiftSource, /earlyRefreshInterval/);
+  assert.match(swiftSource, /discoveryRefreshInterval/);
+});
+
 test("followers switch to the director book before applying synced pages", () => {
   assert.match(appSource, /pendingSyncPageRef/);
   assert.match(appSource, /latestDirectorSnapshotRef/);

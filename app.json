@@ -25,7 +25,7 @@
 	    },
 	    "android": {
 	      "package": "com.cazares.alvernia",
-      "versionCode": 302
+      "versionCode": 303
 	    },
     "extra": {
       "eas": {
