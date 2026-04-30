@@ -75,13 +75,21 @@ test("soft app reset clears native sync transport and guards stale callbacks", (
 // Root cause of 1-director/10-follower failures: both sides calling invitePeer simultaneously
 // created duplicate MCSession objects per pair. Fix: director never invites — followers are
 // the sole inviters; director only accepts via advertiser delegate.
-test("director does not call invitePeer in browser:foundPeer — followers are sole inviters", () => {
+test("director does not eagerly call invitePeer in browser:foundPeer (legacy fallback allowed)", () => {
   const browserFoundPeerBlock = swiftSource.match(
     /func browser\(_ browser: MCNearbyServiceBrowser, foundPeer[\s\S]*?(?=\n  func )/
   )?.[0] ?? "";
   assert.ok(browserFoundPeerBlock.length > 0, "browser:foundPeer delegate must exist");
-  // Check for actual method call (not comments that mention invitePeer)
-  assert.doesNotMatch(browserFoundPeerBlock, /\.invitePeer\(/, "director must not call .invitePeer() in foundPeer");
+  // Modern followers initiate the connection themselves. Directors may keep a delayed fallback
+  // invite for legacy followers (build ≤226) that wait to be invited.
+  assert.match(browserFoundPeerBlock, /Modern followers initiate the connection themselves/);
+  assert.match(browserFoundPeerBlock, /legacy followers/);
+  assert.match(browserFoundPeerBlock, /DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ 1\.0\)/);
+  assert.match(browserFoundPeerBlock, /\.invitePeer\(/);
+  assert.ok(
+    browserFoundPeerBlock.indexOf("asyncAfter") < browserFoundPeerBlock.indexOf("invitePeer"),
+    "legacy fallback invite must only happen inside the delayed asyncAfter block",
+  );
 });
 
 test("follower invite ownership lives in reconsiderFollowerTarget", () => {
@@ -143,7 +151,19 @@ test("UX Fix E: follower refresh shows green/orange pulse and red X status indic
   assert.match(appSource, /reconnectStatusX/);
   assert.match(appSource, /PulsingDot color=\"#4cff91\"/);
   assert.match(appSource, /PulsingDot color=\"#f0c040\"/);
-  assert.match(appSource, /✕/);
+  // Other UI uses a ✕ (e.g. close buttons). We only care that the follower status
+  // indicator is no longer a red ✕.
+  assert.doesNotMatch(appSource, /<Text style=\{styles\.reconnectStatusX\}>✕<\/Text>/);
+});
+
+test("foregrounding the app triggers a sync nudge (director re-broadcasts, follower refreshes discovery)", () => {
+  const lifecycleBlock = appSource.match(/AppState\.addEventListener\([\s\S]*?\)\s*;\n\s*return \(\) => sub\.remove\(\);\n\s*\}, \[writeBreadcrumb\]\);/)?.[0] ?? "";
+  assert.ok(lifecycleBlock.length > 0, "AppState lifecycle effect must exist");
+  assert.match(lifecycleBlock, /else if \(nextState === "active"\)/);
+  assert.match(lifecycleBlock, /syncRoleRef\.current === "director"/);
+  assert.match(lifecycleBlock, /sendNearbyDirectorPageUpdate\(currentPageRef\.current/);
+  assert.match(lifecycleBlock, /syncRoleRef\.current === "follower"/);
+  assert.match(lifecycleBlock, /refreshNearbyDiscovery\(\)/);
 });
 
 // Follower-first scenario: browser failure (permission denied) must surface to JS so the

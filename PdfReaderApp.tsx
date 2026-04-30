@@ -2598,7 +2598,7 @@ export default function App() {
             ) : followerStatusLabel === "searching" ? (
               <PulsingDot color="#f0c040" speed={1.5} />
             ) : (
-              <Text style={styles.reconnectStatusX}>✕</Text>
+              <PulsingDot color="#f0c040" speed={0.65} />
             )}
           </TouchableOpacity>
           {followerStatusLabel === "self-directed" && (
