@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { OFFLINE_WEB_BUNDLE_ASSETS } from "./offlineWebBundle";
 // @ts-ignore
 import STANDARD_PAGES_JSON from "../assets/offline-web/pages.json";
 // @ts-ignore
@@ -32,8 +33,6 @@ export type BookId = "standard" | "hymns-1" | "hymns-4";
 export type OfflineBook = {
   id: BookId;
   title: string;
-  /** For PDF-backed books: the filename in the iOS bundle (e.g. "alvernia_manual_2.pdf"). No assets needed. */
-  pdfSource?: string;
   assets: Record<string, number>;
   totalPages: number;
   songTitles: Record<string, string>;
@@ -44,8 +43,7 @@ export const BOOKS: OfflineBook[] = [
   {
     id: "standard",
     title: "Manual Alvernia",
-    pdfSource: "alvernia_manual_2.pdf",
-    assets: {},
+    assets: OFFLINE_WEB_BUNDLE_ASSETS,
     totalPages: Number((STANDARD_PAGES_JSON as any).totalPages ?? 368),
     songTitles: (STANDARD_TITLES_JSON as any) ?? {},
     songSearchIndex: (STANDARD_SEARCH_JSON as any) ?? [],
@@ -84,8 +82,6 @@ export const validateOfflineBookAssets = (book: OfflineBook): OfflineBookAssetsV
   if (!totalPages) {
     return { ok: false, missingCount: 1, sampleMissingKeys: ["pages.json.totalPages"] };
   }
-  // PDF-backed books don't use pre-rasterized assets.
-  if (book.pdfSource) return { ok: true, missingCount: 0, sampleMissingKeys: [] };
   const missing: string[] = [];
   const check = (key: string) => {
     if (!book.assets || typeof book.assets[key] !== "number") missing.push(key);

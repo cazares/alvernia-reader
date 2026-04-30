@@ -48,7 +48,7 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
-import { renderPdfPage } from "./src/pdfPageRenderer";
+import { OFFLINE_WEB_BUNDLE_ASSETS } from "./src/offlineWebBundle";
 import { BOOKS, NON_STANDARD_BOOK_IDS, STORAGE_KEYS, clearAllBookState, getBook, validateOfflineBookAssets, type AppMode, type BookId } from "./src/offlineBooks";
 // @ts-ignore — Metro resolves JSON fine
 import SONG_TITLES from "./assets/offline-web/song-titles.json";
@@ -391,12 +391,11 @@ const resolveSongPage = (input: string, totalPages: number, songToPage: Map<numb
   return next ? next.page : totalPages;
 };
 
-const buildPageAssets = (assets: Record<string, number>, totalPages: number, pdfSource?: string) =>
+const buildPageAssets = (assets: Record<string, number>, totalPages: number) =>
   Array.from({ length: totalPages }, (_, i) => {
     const pageNum = i + 1;
-    if (pdfSource) return { page: pageNum, source: undefined as number | undefined, pdfSource };
     const key = `pages/page-${String(pageNum).padStart(3, "0")}.jpg`;
-    return { page: pageNum, source: assets[key], pdfSource: undefined as string | undefined };
+    return { page: pageNum, source: assets[key] };
   });
 
 const buildThumbAssets = (assets: Record<string, number>, totalPages: number) =>
@@ -407,39 +406,73 @@ const buildThumbAssets = (assets: Record<string, number>, totalPages: number) =>
   });
 
 // ── Zoomable page ─────────────────────────────────────────────────────────────
-function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { source: number | undefined; pdfSource?: string; page?: number; width: number; height: number; cacheKey?: number }) {
-  const [pdfUri, setPdfUri] = useState<string | null>(null);
-  useEffect(() => {
-    if (!pdfSource || !page) return;
-    setPdfUri(null);
-    renderPdfPage(pdfSource, page).then(setPdfUri).catch(() => {});
-  }, [pdfSource, page, cacheKey]);
+function ZoomablePage({ source, width, height, cacheKey }: { source: number | undefined; width: number; height: number; cacheKey?: number }) {
   const scale = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
   const currentScale = useRef(1);
+  const currentTx = useRef(0);
+  const currentTy = useRef(0);
   const lastDist = useRef<number | null>(null);
+  const lastMidX = useRef(0);
+  const lastMidY = useRef(0);
+
+  const clampTranslation = (tx: number, ty: number, s: number) => {
+    const maxX = Math.max(0, (width * (s - 1)) / 2);
+    const maxY = Math.max(0, (height * (s - 1)) / 2);
+    return { tx: Math.max(-maxX, Math.min(maxX, tx)), ty: Math.max(-maxY, Math.min(maxY, ty)) };
+  };
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: (_, gs) => gs.numberActiveTouches === 2,
-      onMoveShouldSetPanResponder: (_, gs) => gs.numberActiveTouches === 2,
+      onStartShouldSetPanResponder: (_, gs) => gs.numberActiveTouches >= 2 || currentScale.current > 1.05,
+      onMoveShouldSetPanResponder: (_, gs) => gs.numberActiveTouches >= 2 || currentScale.current > 1.05,
       onPanResponderGrant: () => { lastDist.current = null; },
       onPanResponderMove: (evt) => {
         const touches = evt.nativeEvent.touches;
-        if (touches.length < 2) return;
-        const dx = touches[0].pageX - touches[1].pageX;
-        const dy = touches[0].pageY - touches[1].pageY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (lastDist.current === null) { lastDist.current = dist; return; }
-        const delta = dist / lastDist.current;
-        lastDist.current = dist;
-        const next = Math.max(1, Math.min(6, currentScale.current * delta));
-        currentScale.current = next;
-        scale.setValue(next);
+        if (touches.length >= 2) {
+          const dx = touches[0].pageX - touches[1].pageX;
+          const dy = touches[0].pageY - touches[1].pageY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const midX = (touches[0].pageX + touches[1].pageX) / 2;
+          const midY = (touches[0].pageY + touches[1].pageY) / 2;
+          if (lastDist.current === null) { lastDist.current = dist; lastMidX.current = midX; lastMidY.current = midY; return; }
+          const delta = dist / lastDist.current;
+          lastDist.current = dist;
+          const next = Math.max(1, Math.min(6, currentScale.current * delta));
+          const panDx = midX - lastMidX.current;
+          const panDy = midY - lastMidY.current;
+          lastMidX.current = midX;
+          lastMidY.current = midY;
+          const { tx, ty } = clampTranslation(currentTx.current + panDx, currentTy.current + panDy, next);
+          currentScale.current = next;
+          currentTx.current = tx;
+          currentTy.current = ty;
+          scale.setValue(next);
+          translateX.setValue(tx);
+          translateY.setValue(ty);
+        } else if (touches.length === 1 && currentScale.current > 1.05) {
+          const panDx = evt.nativeEvent.touches[0].pageX - lastMidX.current;
+          const panDy = evt.nativeEvent.touches[0].pageY - lastMidY.current;
+          lastMidX.current = evt.nativeEvent.touches[0].pageX;
+          lastMidY.current = evt.nativeEvent.touches[0].pageY;
+          const { tx, ty } = clampTranslation(currentTx.current + panDx, currentTy.current + panDy, currentScale.current);
+          currentTx.current = tx;
+          currentTy.current = ty;
+          translateX.setValue(tx);
+          translateY.setValue(ty);
+        }
       },
       onPanResponderRelease: () => {
         if (currentScale.current < 1.05) {
-          Animated.spring(scale, { toValue: 1, useNativeDriver: true, bounciness: 4 }).start();
+          Animated.parallel([
+            Animated.spring(scale, { toValue: 1, useNativeDriver: true, bounciness: 4 }),
+            Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 4 }),
+            Animated.spring(translateY, { toValue: 0, useNativeDriver: true, bounciness: 4 }),
+          ]).start();
           currentScale.current = 1;
+          currentTx.current = 0;
+          currentTy.current = 0;
         }
         lastDist.current = null;
       },
@@ -447,20 +480,16 @@ function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { so
   ).current;
 
   useEffect(() => {
-    scale.setValue(1);
-    currentScale.current = 1;
-  }, [scale]);
+    scale.setValue(1); translateX.setValue(0); translateY.setValue(0);
+    currentScale.current = 1; currentTx.current = 0; currentTy.current = 0;
+  }, [scale, translateX, translateY]);
 
   return (
     <Animated.View
-      style={{ width, height, justifyContent: "center", alignItems: "center", transform: [{ scale }] }}
+      style={{ width, height, justifyContent: "center", alignItems: "center", transform: [{ scale }, { translateX }, { translateY }] }}
       {...panResponder.panHandlers}
     >
-      {pdfSource ? (
-        pdfUri
-          ? <Image key={pdfUri} source={{ uri: pdfUri }} style={{ width, height }} resizeMode="contain" />
-          : <ActivityIndicator color="#555" style={{ flex: 1 }} />
-      ) : source ? (
+      {source ? (
         <Image key={cacheKey} source={source} style={{ width, height }} resizeMode="contain" />
       ) : (
         <Text style={styles.missingText}>—</Text>
@@ -881,7 +910,7 @@ export default function App() {
   const activeBook = useMemo(() => getBook(activeBookId), [activeBookId]);
   const totalPages = activeBook.totalPages || 1;
   const startPage = mode === "standard" ? STANDARD_START_PAGE : 1;
-  const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages, activeBook.pdfSource), [activeBook.assets, activeBook.pdfSource, totalPages]);
+  const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
   const thumbAssets = useMemo(() => buildThumbAssets(activeBook.assets, totalPages), [activeBook.assets, totalPages]);
   const isStandardMode = mode === "standard";
 
@@ -2139,7 +2168,7 @@ export default function App() {
 
   const renderItem = useCallback(({ item }: ListRenderItemInfo<typeof pageAssets[0]>) => (
     <View style={{ width, height, backgroundColor: "#000" }}>
-      <ZoomablePage source={item.source} pdfSource={item.pdfSource} page={item.page} width={width} height={height} cacheKey={imageCacheKey} />
+      <ZoomablePage source={item.source} width={width} height={height} cacheKey={imageCacheKey} />
     </View>
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [width, height, imageCacheKey]);
