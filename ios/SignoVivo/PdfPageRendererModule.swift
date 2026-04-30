@@ -1,5 +1,7 @@
 import Foundation
 import PDFKit
+import React
+import UIKit
 
 @objc(PdfPageRenderer)
 class PdfPageRendererModule: NSObject {
