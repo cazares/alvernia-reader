@@ -116,10 +116,14 @@ class PdfPageRendererModule: NSObject {
 
     let renderer = UIGraphicsImageRenderer(size: size)
     let image = renderer.image { ctx in
+      let cgCtx = ctx.cgContext
       UIColor.white.setFill()
       ctx.fill(CGRect(origin: .zero, size: size))
-      ctx.cgContext.scaleBy(x: scale, y: scale)
-      page.draw(with: .mediaBox, to: ctx.cgContext)
+      // PDF coordinate origin is bottom-left (y-up); UIKit is top-left (y-down).
+      // Translate to bottom of canvas then flip y so the page renders right-side up.
+      cgCtx.translateBy(x: 0, y: size.height)
+      cgCtx.scaleBy(x: scale, y: -scale)
+      page.draw(with: .mediaBox, to: cgCtx)
     }
 
     // Try JPEG first; fall back to PNG so a page is never silently blank.
