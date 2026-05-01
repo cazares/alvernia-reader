@@ -9,6 +9,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let serviceType = "signovivo"
   private static let eventName = "DirectorSyncEvent"
   private static let protocolVersion = 1
+  // Handshake generation — incremented whenever the who-invites-whom rule changes.
+  // Advertised in discoveryInfo so peers can see it before connecting.
+  // Build ≤226: no "hgen" key → legacy (director initiates).
+  // Build ≥310: hgen=2 → modern (follower initiates; director only invites legacy peers).
+  private static let handshakeGeneration = "2"
   private static let maxSessionCodeLength = 12
   /// Normal (steady-state) discovery refresh interval.
   private static let discoveryRefreshInterval: TimeInterval = 25
@@ -37,7 +42,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var currentDirectorToken = ""
   private var discoveredDirectors: [MCPeerID: String] = [:]
   private var discoveredDirectorSeenAt: [MCPeerID: TimeInterval] = [:]
+  /// Full discoveryInfo keyed by peer — used to detect legacy directors (no "hgen" key).
+  private var discoveredDirectorInfo: [MCPeerID: [String: String]] = [:]
   private var discoveredFollowers: Set<MCPeerID> = []
+  /// Full discoveryInfo for discovered followers — used to detect legacy followers (no "hgen" key).
+  private var discoveredFollowerInfo: [MCPeerID: [String: String]] = [:]
   private var pendingInvitePeer: MCPeerID?
   private var pendingInviteTimestamp: TimeInterval = 0
   private var connectedDirectorPeer: MCPeerID?
@@ -565,14 +574,20 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     mcSessions = [firstSession]
 
     discoveredDirectors = [:]
+    discoveredDirectorInfo = [:]
     discoveredFollowers = []
+    discoveredFollowerInfo = [:]
     pendingInvitePeer = nil
     connectedDirectorPeer = nil
   }
 
   private func startAdvertising() {
     guard (currentRole == "director" || currentRole == "follower"), let peerID = localPeerID else { return }
-    var discoveryInfo: [String: String] = ["session": currentSessionCode, "role": currentRole]
+    var discoveryInfo: [String: String] = [
+      "session": currentSessionCode,
+      "role": currentRole,
+      "hgen": Self.handshakeGeneration,  // absent on build ≤226 → legacy peer
+    ]
     if currentRole == "director" { discoveryInfo["token"] = currentDirectorToken }
     let adv = MCNearbyServiceAdvertiser(peer: peerID, discoveryInfo: discoveryInfo, serviceType: Self.serviceType)
     adv.delegate = self
@@ -725,7 +740,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       for key in stale {
         discoveredDirectors.removeValue(forKey: key)
         discoveredDirectorSeenAt.removeValue(forKey: key)
+        discoveredDirectorInfo.removeValue(forKey: key)
         discoveredFollowers.remove(key)
+        discoveredFollowerInfo.removeValue(forKey: key)
       }
       advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
       browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
@@ -756,7 +773,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     for s in mcSessions { s.disconnect(); s.delegate = nil }
     mcSessions = []
     localPeerID = nil
-    discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredFollowers = []
+    discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredDirectorInfo = [:]
+    discoveredFollowers = []; discoveredFollowerInfo = [:]
     pendingInvitePeer = nil; pendingInviteTimestamp = 0; connectedDirectorPeer = nil
     pendingTakeoverTimers.values.forEach { $0.invalidate() }
     pendingTakeoverRequests = [:]; pendingTakeoverTimers = [:]
@@ -865,16 +883,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
     // A director was found — cancel the self-directed fallback; we're about to connect.
     cancelSelfDirectedTimer()
+
+    let isLegacyDirector = (discoveredDirectorInfo[target]?["hgen"] == nil)
+    if isLegacyDirector {
+      // Build ≤226 director: it will call invitePeer on us immediately upon foundPeer.
+      // Do NOT self-invite — that causes the double-invite race that breaks the connection.
+      // Just set pendingInvitePeer and wait for its incoming invitation.
+      pendingInvitePeer = target
+      pendingInviteTimestamp = Date().timeIntervalSince1970
+      emitState(status: "connecting")
+      return
+    }
+
+    // Modern director: we initiate. No race possible — it won't invite us.
     pendingInvitePeer = target
     pendingInviteTimestamp = Date().timeIntervalSince1970
     emitState(status: "connecting")
-    // Delay our outbound invite by 600 ms so a legacy director (build ≤226) that
-    // immediately calls invitePeer on us has time to arrive first.  If it does,
-    // didReceiveInvitation accepts it and the notConnected guard above keeps us
-    // connected when our (now-redundant) outbound invite is rejected by MPC.
     let capturedTarget = target
     let capturedSession = session
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+    DispatchQueue.main.async { [weak self] in
       guard let self = self, self.currentRole == "follower",
             self.pendingInvitePeer == capturedTarget,
             !self.allConnectedPeers.contains(capturedTarget) else { return }
@@ -959,6 +986,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         let token = info?["token"] ?? peerID.displayName
         self.discoveredDirectors[peerID] = token
         self.discoveredDirectorSeenAt[peerID] = Date().timeIntervalSince1970
+        self.discoveredDirectorInfo[peerID] = info ?? [:]
         if self.currentRole == "director" {
           self.handleDirectorConflict(with: token)
         } else if self.currentRole == "follower" {
@@ -966,16 +994,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         }
       } else if role == "follower", self.currentRole == "director" {
         self.discoveredFollowers.insert(peerID)
-        // Modern followers initiate the connection themselves. For legacy followers
-        // (build ≤226) that wait to be invited, the director falls back after 1 s.
+        self.discoveredFollowerInfo[peerID] = info ?? [:]
         guard !self.allConnectedPeers.contains(peerID) else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-          guard let self = self, self.currentRole == "director" else { return }
-          guard !self.allConnectedPeers.contains(peerID),
-                self.discoveredFollowers.contains(peerID),
-                let session = self.availableSessionForNewFollower() else { return }
+        let isLegacyFollower = info?["hgen"] == nil  // build ≤226: no hgen → director must invite
+        if isLegacyFollower {
+          // Legacy follower sits and waits — invite it immediately (it will never self-invite).
+          guard let session = self.availableSessionForNewFollower() else { return }
           self.browser?.invitePeer(peerID, to: session, withContext: nil, timeout: Self.inviteTimeout)
         }
+        // Modern follower: it will self-invite us; no action needed from director side.
       }
     }
   }
@@ -985,7 +1012,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       guard browser === self.browser else { return }
       self.discoveredDirectors.removeValue(forKey: peerID)
       self.discoveredDirectorSeenAt.removeValue(forKey: peerID)
+      self.discoveredDirectorInfo.removeValue(forKey: peerID)
       self.discoveredFollowers.remove(peerID)
+      self.discoveredFollowerInfo.removeValue(forKey: peerID)
       if self.currentRole == "follower" {
         if self.connectedDirectorPeer == peerID {
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
