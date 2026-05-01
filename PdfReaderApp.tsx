@@ -2838,7 +2838,7 @@ export default function App() {
       </Modal>
 
       {/* ── Reconnect blocking overlay ── */}
-      <Modal visible={reconnectBusy} transparent animationType="fade" onRequestClose={cancelReconnect} statusBarTranslucent>
+      <Modal visible={reconnectBusy && syncRole !== "director"} transparent animationType="fade" onRequestClose={cancelReconnect} statusBarTranslucent>
         <View style={styles.reconnectBackdrop}>
           <View style={styles.reconnectCard}>
             <ActivityIndicator size="large" color="#1a1a2e" />
