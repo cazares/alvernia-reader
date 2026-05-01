@@ -1743,9 +1743,6 @@ export default function App() {
     try {
       if (syncRoleRef.current === "follower") {
         try {
-          setReconnectMessage("Pidiendo permiso al director...");
-          setReconnectBusy(true);
-
           const resp: any = await requestDirectorTakeover();
           const requestId = String(resp?.requestId || "");
           takeoverRequestIdRef.current = requestId || null;
@@ -1755,8 +1752,6 @@ export default function App() {
             takeoverTimeoutRef.current = setTimeout(() => {
               if (takeoverRequestIdRef.current !== requestId) return;
               clearPendingTakeover();
-              setReconnectBusy(false);
-              setReconnectMessage("");
               Alert.alert(
                 "Sin respuesta del director",
                 "No llegó confirmación para tomar control. Intenta de nuevo cerca del director actual.",
@@ -1766,14 +1761,9 @@ export default function App() {
           }
 
           clearPendingTakeover();
-          setReconnectBusy(false);
-          setReconnectMessage("");
         } catch {
           clearPendingTakeover();
-          setReconnectBusy(false);
-          setReconnectMessage("");
-          // No connected director or takeover unsupported on this path.
-          // Continue to direct director startup below.
+          // No connected director or takeover unsupported — proceed to start director directly.
         }
       }
 
