@@ -119,8 +119,12 @@ class PdfPageRendererModule: NSObject {
       let cgCtx = ctx.cgContext
       UIColor.white.setFill()
       ctx.fill(CGRect(origin: .zero, size: size))
-      // PDF coordinate origin is bottom-left (y-up); UIKit is top-left (y-down).
-      // Translate to bottom of canvas then flip y so the page renders right-side up.
+      // ⚠️ DO NOT SIMPLIFY THIS TRANSFORM — pages will render upside-down if you do.
+      // PDF coordinate system: origin bottom-left, y increases upward.
+      // UIKit/CGContext coordinate system: origin top-left, y increases downward.
+      // Fix: translate origin to bottom of canvas, then flip y axis.
+      // Removing either line, changing the sign of scale, or using a plain scaleBy(x:scale,y:scale)
+      // will cause every page to render inverted. This has been broken and re-broken multiple times.
       cgCtx.translateBy(x: 0, y: size.height)
       cgCtx.scaleBy(x: scale, y: -scale)
       page.draw(with: .mediaBox, to: cgCtx)
