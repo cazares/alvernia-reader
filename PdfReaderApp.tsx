@@ -845,6 +845,7 @@ export default function App() {
   const lastFollowerNoticeRef = useRef(0);
   const directorStartFailedAlertShownRef = useRef(false);
   const followerStartFailedAlertShownRef = useRef(false);
+  const isBrauMasterRef = useRef(false);
   const takeoverRequestIdRef = useRef<string | null>(null);
   const takeoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectOverlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -884,6 +885,15 @@ export default function App() {
     } catch { /* best-effort */ }
   }, []);
 
+  const ignoreAsync = useCallback((label: string, promise: Promise<unknown>) => {
+    promise.catch((error) => {
+      void writeBreadcrumb("async-failure", {
+        label,
+        message: String((error as any)?.message ?? error ?? ""),
+      });
+    });
+  }, [writeBreadcrumb]);
+
   const lastSyncedAtRef = useRef(0); // timestamp of last page received from director
   const reconnectCooldownRef = useRef(0); // guards against rapid-fire reconnect taps
   const [imageCacheKey, setImageCacheKey] = useState(0); // bump to bust decoded image cache on memory shed
@@ -899,13 +909,13 @@ export default function App() {
       memoryPressureTimerRef.current = null;
       setMemoryPressure(false);
     }, 45_000);
-    writeBreadcrumb("memory-pressure", {
+    ignoreAsync("memory-pressure", writeBreadcrumb("memory-pressure", {
       source,
       page: currentPageRef.current,
       mode: modeRef.current,
       bookId: activeBookIdRef.current,
-    }).catch(() => {});
-  }, [writeBreadcrumb]);
+    }));
+  }, [ignoreAsync, writeBreadcrumb]);
 
   useEffect(() => {
     return () => {
@@ -1262,6 +1272,7 @@ export default function App() {
 
 	    const normalizedName = normalizeDirectorDeviceName(rawName || "");
 	    const isBrauMaster = normalizedName === "braumaster";
+	    isBrauMasterRef.current = isBrauMaster;
 
 	    if (wasDirectorRecently || isBrauMaster) {
 	      try {
@@ -1373,43 +1384,7 @@ export default function App() {
         setSyncRole("follower");
         startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
       } else if (event.type === "takeover-request" && syncRoleRef.current === "director") {
-        const requestId = String(event.requestId || "");
-        const requesterName = String(event.requesterName || "otro dispositivo");
-        if (!requestId) return;
-        Alert.alert(
-          "Solicitud de control",
-          `“${requesterName}” quiere tomar control. ¿Quieres ceder el control?`,
-          [
-            { text: "No", style: "cancel", onPress: () => { denyDirectorTakeover(requestId).catch(() => {}); } },
-            { text: "Sí, ceder", onPress: () => { handleApproveDirectorTakeover(requestId).catch(() => {}); } },
-          ],
-        );
-      } else if (event.type === "takeover-approved" && syncRoleRef.current === "follower") {
-        const requestId = String(event.requestId || "");
-        if (!requestId || takeoverRequestIdRef.current !== requestId) return;
-        clearPendingTakeover();
-        setReconnectBusy(false);
-        setReconnectMessage("");
-        stopNearbyDirectorSync().catch(() => {});
-        setTimeout(() => {
-          startNearbyDirector(DIRECTOR_SESSION).then(() => {
-            setSyncRole("director");
-            sendNearbyDirectorPageUpdate(
-              currentPageRef.current,
-              totalPagesRef.current,
-              { mode: modeRef.current, bookId: activeBookIdRef.current },
-            ).catch(() => {});
-          }).catch(() => {
-            setReconnectBusy(false);
-            Alert.alert("No se pudo tomar control", "Intenta de nuevo cerca del director.");
-          });
-        }, 250);
-      } else if (event.type === "takeover-denied" && syncRoleRef.current === "follower") {
-        const requestId = String(event.requestId || "");
-        if (!requestId || takeoverRequestIdRef.current !== requestId) return;
-        clearPendingTakeover();
-        setReconnectBusy(false);
-        Alert.alert("Solicitud rechazada", "El director actual no cedió el control.");
+        denyDirectorTakeover(String(event.requestId || "")).catch(() => {});
 		      } else if (event.type === "memoryWarning") {
 	        // Shed heavyweight overlays, bust image decode cache, tighten render window, leave breadcrumb.
 	        noteMemoryPressure("native");
@@ -1455,14 +1430,14 @@ export default function App() {
   // Fire immediately on mount to trigger the iOS Local Network permission dialog
   // before any other state is ready — works regardless of mode or onboarding state.
   useEffect(() => {
-    primeNearbyPermissions().catch(() => {});
+    ignoreAsync("primeNearbyPermissions", primeNearbyPermissions());
   }, []);
 
   // Heartbeat: write a breadcrumb every 60 s so Jetsam leaves a "last seen" trace.
   useEffect(() => {
-    const id = setInterval(() => { writeBreadcrumb("heartbeat").catch(() => {}); }, 60_000);
+    const id = setInterval(() => { ignoreAsync("heartbeat", writeBreadcrumb("heartbeat")); }, 60_000);
     return () => clearInterval(id);
-  }, [writeBreadcrumb]);
+  }, [ignoreAsync, writeBreadcrumb]);
 
   // Follower auto-retry: when stuck in self-directed or searching, restart discovery every 15 s.
   // Covers the case where the director restarted (new Nearby session) and followers lost the connection.
@@ -1484,10 +1459,10 @@ export default function App() {
     const prev = ErrorUtils.getGlobalHandler();
     ErrorUtils.setGlobalHandler((error, isFatal) => {
       if (isFatal) {
-        AsyncStorage.setItem("sv_bc", JSON.stringify({
+        ignoreAsync("fatal-js-error", AsyncStorage.setItem("sv_bc", JSON.stringify({
           ts: Date.now(), build: VISIBLE_BUILD_LABEL, event: "fatal-js-error",
           msg: String(error?.message ?? error).slice(0, 300),
-        })).catch(() => {});
+        })));
       }
       prev?.(error, isFatal);
     });
@@ -1510,15 +1485,15 @@ export default function App() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "background" || nextState === "inactive") {
-        writeBreadcrumb("app-background", { page: currentPageRef.current }).catch(() => {});
+        ignoreAsync("app-background", writeBreadcrumb("app-background", { page: currentPageRef.current }));
       } else if (nextState === "active") {
-        writeBreadcrumb("app-foreground").catch(() => {});
+        ignoreAsync("app-foreground", writeBreadcrumb("app-foreground"));
         if (syncRoleRef.current === "director") {
-          sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, { mode: modeRef.current, bookId: activeBookIdRef.current }).catch(() => {});
+          ignoreAsync("sendNearbyDirectorPageUpdate", sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, { mode: modeRef.current, bookId: activeBookIdRef.current }));
         } else if (syncRoleRef.current === "follower") {
-          startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-          requestCurrentSnapshot().catch(() => {});
-          refreshNearbyDiscovery().catch(() => {});
+          ignoreAsync("startNearbyFollower", startNearbyFollower(DIRECTOR_SESSION));
+          ignoreAsync("requestCurrentSnapshot", requestCurrentSnapshot());
+          ignoreAsync("refreshNearbyDiscovery", refreshNearbyDiscovery());
         }
       }
     });
@@ -1684,12 +1659,50 @@ export default function App() {
     );
   }, [isResettingApp, performSoftAppReset]);
 
+  const forceDirector = useCallback(async () => {
+    try {
+      await startNearbyDirector(DIRECTOR_SESSION);
+      setSyncRole("director");
+      AsyncStorage.multiSet([
+        [STORAGE_KEYS.lastSyncRole, "director"],
+        [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
+      ]).catch(() => {});
+      ignoreAsync("sendNearbyDirectorPageUpdate", sendNearbyDirectorPageUpdate(
+        currentPageRef.current,
+        totalPagesRef.current,
+        { mode: modeRef.current, bookId: activeBookIdRef.current },
+      ));
+    } catch {
+      ignoreAsync("startNearbyFollower", startNearbyFollower(DIRECTOR_SESSION));
+      setSyncRole("follower");
+      Alert.alert(
+        "No se pudo activar el modo director",
+        "Abre Ajustes → Privacidad y seguridad → Red local y verifica que SignoVivo esté activado. Si no aparece en esa lista, cierra la app completamente y vuelve a abrirla.",
+        [
+          { text: "Abrir Ajustes", onPress: () => { ignoreAsync("openSettings", Linking.openURL("app-settings:")); } },
+          { text: "OK", style: "cancel" },
+        ]
+      );
+    }
+  }, []);
+
   const handleSongSubmit = useCallback(async () => {
     const trimmed = songInput.trim();
     closeSongModal();
     if (!trimmed) return;
     if (trimmed === "744668486") {
       await performSoftAppReset();
+      return;
+    }
+    if (trimmed === "50711") {
+      Alert.alert(
+        "Override director",
+        "¿Tomar control como director?",
+        [
+          { text: "Cancelar", style: "cancel" },
+          { text: "Tomar control", onPress: () => { forceDirector().catch(() => {}); } },
+        ]
+      );
       return;
     }
     const standardAccessName = CHOIR_STANDARD_ACCESS.get(normalizeAccessCode(trimmed));
@@ -1701,7 +1714,7 @@ export default function App() {
     if (n > 0) recentSongsRef.current = [n, ...recentSongsRef.current.filter(s => s !== n)].slice(0, 20);
     const page = resolveSongPage(trimmed, totalPages, bookSongToPage, bookSortedSongs as any);
     goToPage(page);
-  }, [songInput, goToPage, closeSongModal, totalPages, bookSongToPage, bookSortedSongs, performSoftAppReset, enableStandardMode]);
+  }, [songInput, goToPage, closeSongModal, totalPages, bookSongToPage, bookSortedSongs, performSoftAppReset, enableStandardMode, forceDirector]);
 
   const switchBook = useCallback(async (nextId: BookId) => {
     if (mode !== "nonStandard") return;
@@ -1740,71 +1753,21 @@ export default function App() {
       return;
     }
     closeSyncModal();
-    try {
-      if (syncRoleRef.current === "follower") {
-        try {
-          const resp: any = await requestDirectorTakeover();
-          const requestId = String(resp?.requestId || "");
-          takeoverRequestIdRef.current = requestId || null;
-
-          if (requestId) {
-            if (takeoverTimeoutRef.current) clearTimeout(takeoverTimeoutRef.current);
-            takeoverTimeoutRef.current = setTimeout(() => {
-              if (takeoverRequestIdRef.current !== requestId) return;
-              clearPendingTakeover();
-              Alert.alert(
-                "Sin respuesta del director",
-                "No llegó confirmación para tomar control. Intenta de nuevo cerca del director actual.",
-              );
-            }, 20_000);
-            return;
-          }
-
-          clearPendingTakeover();
-        } catch {
-          clearPendingTakeover();
-          // No connected director or takeover unsupported — proceed to start director directly.
-        }
-      }
-
-      // startNearbyDirector resets any existing session internally (no stopSync needed).
-      // Skipping stopSync avoids a state:idle event that would race with setSyncRole("director").
-	      await startNearbyDirector(DIRECTOR_SESSION);
-	      setSyncRole("director");
-	      AsyncStorage.multiSet([
-	        [STORAGE_KEYS.lastSyncRole, "director"],
-	        [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
-	      ]).catch(() => {});
-	      sendNearbyDirectorPageUpdate(
-	        currentPageRef.current,
-	        totalPagesRef.current,
-	        { mode: modeRef.current, bookId: activeBookIdRef.current },
-	      ).catch(() => {});
-    } catch {
-      startNearbyFollower(DIRECTOR_SESSION).catch(() => {});
-      setSyncRole("follower");
-      Alert.alert(
-        "No se pudo activar el modo director",
-        "Abre Ajustes → Privacidad y seguridad → Red local y verifica que SignoVivo esté activado. Si no aparece en esa lista, cierra la app completamente y vuelve a abrirla.",
-        [
-          { text: "Abrir Ajustes", onPress: () => Linking.openURL("app-settings:").catch(() => {}) },
-          { text: "OK", style: "cancel" },
-        ]
-      );
-    }
-  }, [codeInput, closeSyncModal, clearPendingTakeover]);
+    await forceDirector();
+  }, [codeInput, closeSyncModal, forceDirector]);
 
 	  const handleStopSync = useCallback(async () => {
+	    if (isBrauMasterRef.current) { closeSyncModal(); return; }
 	    closeSyncModal();
 	    try {
 	      // startNearbyFollower resets internally — no stopSync needed.
 	      await startNearbyFollower(DIRECTOR_SESSION);
 	      setSyncRole("follower");
-	      AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
-	    } catch {
-	      setSyncRole("follower");
-	      AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
-	    }
+      ignoreAsync("lastSyncRole", AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower"));
+    } catch {
+      setSyncRole("follower");
+      ignoreAsync("lastSyncRole", AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower"));
+    }
 	  }, [closeSyncModal]);
 
   const showConnectivityHelp = useCallback(() => {
