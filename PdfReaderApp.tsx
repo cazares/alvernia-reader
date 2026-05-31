@@ -1271,7 +1271,7 @@ export default function App() {
 	    if (isCancelled()) return;
 
 	    const normalizedName = normalizeDirectorDeviceName(rawName || "");
-	    const screenDims = Dimensions.get("screen"); const isBrauMaster = normalizedName === "braumaster" || Math.max(screenDims.width, screenDims.height) >= 1300; // hack (tomorrow Mass): 12.9" iPad Pro (~1366pt) = director's only big iPad; iOS16+ returns generic "iPad" so the name match alone fails
+	    const screenDims = Dimensions.get("screen"); const isBrauMaster = normalizedName === "braumaster" || Math.max(screenDims.width, screenDims.height) >= 1250; // hack (tomorrow Mass): only the 12.9"/13" iPad (~1366pt) is the director's; 1250 sits in the empty gap above the 11" iPad (1194pt). iOS16+ hides device name so name match alone fails
 	    isBrauMasterRef.current = isBrauMaster;
 
 	    if (wasDirectorRecently || isBrauMaster) {
