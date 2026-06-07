@@ -2712,7 +2712,11 @@ export default function App() {
         )}
       </View>
 
-      {/* Version label */}
+      {/* Version label. Font size stays constant (styles.versionLabel); only the
+          POSITION is device-conditional. On iPhone (isSmallScreen) we lift the
+          label clear of the home-indicator safe area (~34pt) and the rounded
+          screen corner so the build number isn't clipped by the curve. iPad
+          corners are square enough to keep the original tight placement. */}
       <Pressable
         onLongPress={async () => {
           const bc = await AsyncStorage.getItem("sv_bc").catch(() => null);
@@ -2720,7 +2724,11 @@ export default function App() {
         }}
         delayLongPress={800}
         hitSlop={12}
-        style={{ position: "absolute", bottom: 10, right: 12 }}
+        style={{
+          position: "absolute",
+          bottom: isSmallScreen ? 34 : 10,
+          right: isSmallScreen ? 16 : 12,
+        }}
       >
         <Text style={styles.versionLabel}>{VISIBLE_BUILD_LABEL}</Text>
       </Pressable>
