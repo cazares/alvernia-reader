@@ -1917,3 +1917,199 @@ button:disabled {
   text-align: center;
   letter-spacing: 0.03em;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Jump-to-song modal — mirrors the iOS "IR A CANTO" modal exactly (no more).
+   Contains only: heading, display, numpad (1-9 / blank / 0 / ⌫),
+   "♪ Abrir Canto ♪", "Cancelar". The drawer Teclado tab is retired.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Floating ♪ trigger (equivalent to native's nav-cluster ♪ button) */
+.song-jump-fab {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right, 0px));
+  top: max(1rem, env(safe-area-inset-top, 0px));
+  z-index: 45;
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  border: 0;
+  background: #0A84FF;
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.song-jump-fab:active { background: #0066CC; transform: scale(0.96); }
+
+/* Modal shell + backdrop */
+.song-jump-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.song-jump-modal.is-hidden { display: none; }
+.song-jump-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* White card */
+.song-jump-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.song-jump-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  color: #1a1a2e;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 34px;
+  letter-spacing: 0.02em;
+}
+
+/* Display — light theme (override the dark drawer styles) */
+.song-jump-card .numberpad-display-wrap { margin: 0; }
+.song-jump-card .numberpad-display {
+  width: 100%;
+  min-height: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #f4f4f4;
+  color: #111;
+  font-size: 30px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: normal;
+  text-align: center;
+  box-shadow: none;
+}
+.song-jump-card .numberpad-display:empty::before {
+  content: "Número de canto";
+  color: rgba(0, 0, 0, 0.35);
+  font-size: 0.62em;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+/* Numpad grid */
+.song-jump-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* Keys — native light-gray (override dark glass) */
+.song-jump-card .numberpad-key,
+.song-jump-card .numberpad-key[data-digit] {
+  min-height: 0;
+  height: 78px;
+  border: 0;
+  border-radius: 12px;
+  background: #D1D5DB;
+  color: #111827;
+  font-size: 33px;
+  font-weight: 500;
+  text-shadow: none;
+  box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.song-jump-card .numberpad-key:active,
+.song-jump-card .numberpad-key[data-digit]:active {
+  background: #9CA3AF;
+  transform: translateY(1px);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+}
+/* Backspace (⌫) — subtly distinct, no bright color */
+.song-jump-card .numberpad-key-back {
+  background: #E5E7EB;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 28px;
+}
+.song-jump-card .numberpad-key-back:active { background: #D1D5DB; }
+/* Empty bottom-left cell */
+.song-jump-card .numberpad-key-blank { height: 78px; }
+
+/* Action buttons */
+.song-jump-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.song-jump-go {
+  padding: 24px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #0A84FF;
+  color: #fff;
+  font-size: 26px;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.song-jump-go:active { background: #0066CC; }
+.song-jump-go:disabled { background: #9CA3AF; cursor: default; }
+.song-jump-cancel {
+  padding: 22px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #f0f0f0;
+  color: #555;
+  font-size: 24px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.song-jump-cancel:active { background: #e2e2e2; }
+
+/* Retire the drawer's Teclado/Explorar mode switch — jump-to-song is the modal now */
+.drawer-mode-switch { display: none; }
+
+/* Native parity: no left side-bar. The ♪ (upper-right) is the song navigator. */
+.drawer-handle { display: none !important; }
+
+/* Initial-download spinner — replaces the old (misleading) progress bar */
+.offline-spinner {
+  width: 52px;
+  height: 52px;
+  margin: 10px auto 6px;
+  border: 4px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #93e4ff;
+  border-radius: 50%;
+  animation: offline-spin 0.9s linear infinite;
+}
+.offline-spinner.is-hidden { display: none; }
+@keyframes offline-spin { to { transform: rotate(360deg); } }

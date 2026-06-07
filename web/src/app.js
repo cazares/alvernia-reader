@@ -5,7 +5,7 @@ const loading = document.getElementById("loading");
 const offlineGate = document.getElementById("offline-gate");
 const offlineGateTitle = document.getElementById("offline-gate-title");
 const offlineGateBody = document.getElementById("offline-gate-body");
-const offlineProgressBar = document.getElementById("offline-progress-bar");
+const offlineSpinner = document.getElementById("offline-spinner");
 const offlineProgressValue = document.getElementById("offline-progress-value");
 const offlineAdminNote = document.getElementById("offline-admin-note");
 const offlineReadyNote = document.getElementById("offline-ready-note");
@@ -59,6 +59,10 @@ const searchBackButton = document.getElementById("search-back");
 const modeBtnNumpad    = document.getElementById("mode-btn-numpad");
 const modeBtnBrowse    = document.getElementById("mode-btn-browse");
 const appVersionLabel  = document.getElementById("app-version-label");
+const songJumpModal    = document.getElementById("song-jump-modal");
+const songJumpBackdrop = document.getElementById("song-jump-backdrop");
+const songJumpTrigger  = document.getElementById("song-jump-trigger");
+const songCancelButton = document.getElementById("song-cancel");
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const PREFS_KEY = "nc-sort-prefs";
@@ -83,6 +87,7 @@ const state = {
   pageHistory: [],
   searchIndexPages: [],
   drawerOpen: false,
+  songJumpOpen: false,
   indexDrillDown: false,
   loadingTimer: 0,
   pageLoadRequest: 0,
@@ -101,7 +106,7 @@ const state = {
   },
   activeTab: "todas",
   prevTab: "todas",     // where to return when exiting search fullscreen
-  drawerMode: "numpad", // "numpad" | "browse"
+  drawerMode: "browse", // browse-only — jump-to-song is now a centered modal
   nativeSyncUnlocked: false,
   nativeSyncAvailable: false,
   nativeSyncRole: "off",
@@ -171,7 +176,7 @@ const pageFileName = (pageNumber) => {
   const padded = String(pageNumber).padStart(3, "0");
   // In native file mode pages are staged flat (no pages/ subdir) so WKWebView
   // can reach them via loadRequest:'s parent-directory sandbox.
-  return NATIVE_FILE_MODE ? `page-${padded}.jpg` : `/pages/page-${padded}.jpg`;
+  return NATIVE_FILE_MODE ? `page-${padded}.webp` : `/pages/page-${padded}.webp`;
 };
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
@@ -384,6 +389,45 @@ const hideLoadingIndicator = () => {
   pageImage.classList.remove("is-loading");
 };
 
+// Rotating loading phrases shown under the spinner during the initial download.
+// (A spinner replaces the old progress bar — page-count % was misleading.)
+const LOADING_PHRASES = [
+  "Preparando todo…",
+  "Afinando las voces…",
+  "Guardando los cantos…",
+  "Descargando el manual…",
+  "Organizando las páginas…",
+  "Cargando los himnos…",
+  "Repasando las letras…",
+  "Buscando el tono…",
+  "Acomodando los acordes…",
+  "Sincronizando el coro…",
+  "Puliendo los detalles…",
+  "Reuniendo al coro…",
+  "Preparando la alabanza…",
+  "Guardando para uso sin internet…",
+  "Casi listo…",
+  "Ya merito…",
+  "Tantito más…",
+  "Un momento…",
+  "Listo en un instante…",
+  "Gracias por tu paciencia…",
+];
+
+let loadingPhraseTimer = null;
+const showRandomLoadingPhrase = () => {
+  offlineProgressValue.textContent =
+    LOADING_PHRASES[Math.floor(Math.random() * LOADING_PHRASES.length)];
+};
+const startLoadingPhrases = () => {
+  if (loadingPhraseTimer) return;
+  showRandomLoadingPhrase();
+  loadingPhraseTimer = setInterval(showRandomLoadingPhrase, 1700);
+};
+const stopLoadingPhrases = () => {
+  if (loadingPhraseTimer) { clearInterval(loadingPhraseTimer); loadingPhraseTimer = null; }
+};
+
 const setOfflineGateState = ({
   visible,
   title = "Preparando Signo Vino",
@@ -399,11 +443,14 @@ const setOfflineGateState = ({
   offlineGate.classList.toggle("is-hidden", !visible);
   offlineGateTitle.textContent = title;
   offlineGateBody.textContent = body;
-  const percent = total > 0 ? Math.max(0, Math.min(100, (progress / total) * 100)) : 0;
-  offlineProgressBar.style.width = `${percent}%`;
-  offlineProgressValue.textContent = total > 0
-    ? `${progress} / ${total} páginas`
-    : "Esperando conexión";
+  const downloading = visible && !ready && !canRetry;
+  offlineSpinner.classList.toggle("is-hidden", !downloading);
+  if (downloading) {
+    startLoadingPhrases();
+  } else {
+    stopLoadingPhrases();
+    offlineProgressValue.textContent = "";
+  }
   offlineAdminNote.classList.toggle("is-hidden", !(showAdminNote && isAdminSetupMode));
   offlineReadyNote.classList.toggle("is-hidden", !ready);
   offlineMetaNote.textContent = metadataText;
@@ -415,7 +462,7 @@ const setOfflineGateState = ({
 
 const extractCachedPageNumber = (request) => {
   const pathname = new URL(request.url).pathname;
-  const match = pathname.match(/^\/pages\/page-(\d+)\.jpg$/);
+  const match = pathname.match(/^\/pages\/page-(\d+)\.webp$/);
   return match ? Number.parseInt(match[1], 10) : null;
 };
 
@@ -677,6 +724,7 @@ const renderStatus = () => {
 const renderDraft = () => {
   songDisplay.textContent = state.songDraft;
   displayClearButton.classList.toggle("is-hidden", !state.songDraft);
+  goButton.disabled = !state.songDraft;
 };
 
 const persistNativeSyncSessionCode = () => {
@@ -929,6 +977,8 @@ const openDrawer = () => {
   state.drawerOpen = true;
   overlayControls.classList.add("drawer-open");
   drawerHandle.classList.add("is-hidden");
+  // Drawer is browse-only now (jump-to-song lives in the modal); always open to it.
+  switchDrawerMode("browse");
 };
 
 const closeDrawer = () => {
@@ -963,17 +1013,25 @@ const backspaceDraft = () => {
   renderDraft();
 };
 
+// ── Jump-to-song modal (native-style) ──────────────────────────────────────────
+const openSongJump = () => {
+  clearDraft();
+  songJumpModal.classList.remove("is-hidden");
+  state.songJumpOpen = true;
+};
+
+const closeSongJump = () => {
+  songJumpModal.classList.add("is-hidden");
+  state.songJumpOpen = false;
+  clearDraft();
+};
+
 const goToDraftSong = () => {
-  if (state.songDraft === SECRET_DIRECTOR_DRAFT) {
-    activateDirectorShortcut();
-    return;
-  }
   const songNumber = normalizeSongDraftNumber(state.songDraft);
-  if (songNumber === null) return;
+  if (songNumber === null) { closeSongJump(); return; }
   renderPage(findSongPage(songNumber));
   addToRecientes(songNumber);
-  clearDraft();
-  closeDrawer();
+  closeSongJump();
 };
 
 const goBackInHistory = () => {
@@ -2111,12 +2169,35 @@ const bindReaderEvents = () => {
     appendDigit(button.dataset.digit);
   });
 
-  backspaceButton.addEventListener("click", () => { haptic(); backspaceDraft(); });
-  displayClearButton.addEventListener("click", () => { haptic(); clearDraft(); });
+  // Backspace: tap deletes one digit; press-and-hold repeats (matches native).
+  let backspaceRepeatTimer = null;
+  let backspaceRepeatInterval = null;
+  const stopBackspaceRepeat = () => {
+    if (backspaceRepeatTimer) { clearTimeout(backspaceRepeatTimer); backspaceRepeatTimer = null; }
+    if (backspaceRepeatInterval) { clearInterval(backspaceRepeatInterval); backspaceRepeatInterval = null; }
+  };
+  backspaceButton.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    haptic();
+    backspaceDraft();
+    stopBackspaceRepeat();
+    backspaceRepeatTimer = setTimeout(() => {
+      backspaceRepeatInterval = setInterval(() => backspaceDraft(), 100);
+    }, 500);
+  });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((evt) => {
+    backspaceButton.addEventListener(evt, stopBackspaceRepeat);
+  });
+
   goButton.addEventListener("click", () => {
     haptic(12);
     goToDraftSong();
   });
+
+  // ── Jump-to-song modal: trigger / cancel / backdrop ──
+  songJumpTrigger.addEventListener("click", () => { haptic(); openSongJump(); });
+  songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
+  songJumpBackdrop.addEventListener("click", () => { closeSongJump(); });
 
   // Drawer nav prev/next (stay in drawer so keepOverlay=true)
   prevPageButton.addEventListener("click", () => {
@@ -2252,8 +2333,8 @@ const bindReaderEvents = () => {
         // Find song for this page and track it
         const songForPage = state.songIndex.find((s) => s.page === pageNum);
         if (songForPage) addToRecientes(songForPage.song);
-        // Return to numpad mode so the user can see song context + navigate
-        switchDrawerMode("numpad");
+        // Stay in browse mode (jump-to-song is now a separate modal)
+        switchDrawerMode("browse");
       }
       return;
     }
@@ -2379,41 +2460,46 @@ const bindReaderEvents = () => {
     helpSettingsLabel.addEventListener(eventName, clearHiddenSyncPressTimer, { passive: true });
   });
 
-  directorSyncCodeInput.addEventListener("input", () => {
-    const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
-    state.nativeSyncSessionCode = normalized;
-    directorSyncCodeInput.value = normalized;
-    persistNativeSyncSessionCode();
-    state.nativeSyncError = "";
-    renderNativeSyncPanel();
-  });
-
-  directorSyncStartDirectorButton.addEventListener("click", () => {
-    haptic(12);
-    activateDirectorShortcut();
-  });
-
-  directorSyncStartFollowerButton.addEventListener("click", () => {
-    // Follower mode is automatic — button is hidden but kept for compat
-    haptic(12);
-    state.nativeSyncAutoStartSuppressed = false;
-    requestAutoFollowerMode();
-  });
-
-  directorSyncStopButton.addEventListener("click", () => {
-    haptic();
-    state.nativeSyncAutoStartSuppressed = true;
-    state.nativeSyncAutoStartRequested = false;
-    state.nativeSyncError = "";
-    state.nativeSyncStatus = "";
-    renderNativeSyncPanel();
-    if (!postNativeBridge({ type: "sync-stop" })) {
-      state.nativeSyncRole = "off";
-      state.nativeSyncStatus = "";
-      state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+  // The director-sync panel was removed from the markup (takeover killed),
+  // so only wire its controls when they actually exist — otherwise this whole
+  // function throws on a null ref and init never runs.
+  if (directorSyncPanel) {
+    directorSyncCodeInput.addEventListener("input", () => {
+      const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
+      state.nativeSyncSessionCode = normalized;
+      directorSyncCodeInput.value = normalized;
+      persistNativeSyncSessionCode();
+      state.nativeSyncError = "";
       renderNativeSyncPanel();
-    }
-  });
+    });
+
+    directorSyncStartDirectorButton.addEventListener("click", () => {
+      haptic(12);
+      activateDirectorShortcut();
+    });
+
+    directorSyncStartFollowerButton.addEventListener("click", () => {
+      // Follower mode is automatic — button is hidden but kept for compat
+      haptic(12);
+      state.nativeSyncAutoStartSuppressed = false;
+      requestAutoFollowerMode();
+    });
+
+    directorSyncStopButton.addEventListener("click", () => {
+      haptic();
+      state.nativeSyncAutoStartSuppressed = true;
+      state.nativeSyncAutoStartRequested = false;
+      state.nativeSyncError = "";
+      state.nativeSyncStatus = "";
+      renderNativeSyncPanel();
+      if (!postNativeBridge({ type: "sync-stop" })) {
+        state.nativeSyncRole = "off";
+        state.nativeSyncStatus = "";
+        state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+        renderNativeSyncPanel();
+      }
+    });
+  }
 
   // Fullscreen
   fullscreenButton.addEventListener("click", () => {
@@ -2538,14 +2624,15 @@ const bindReaderEvents = () => {
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   window.addEventListener("keydown", (event) => {
-    if (/^[0-9]$/.test(event.key)) { appendDigit(event.key); return; }
-    if (event.key === "Backspace") { backspaceDraft(); return; }
-    if (event.key === "Escape") {
-      if (state.drawerOpen) { closeDrawer(); return; }
-      clearDraft();
+    // Number entry only applies while the jump-to-song modal is open (matches native).
+    if (state.songJumpOpen) {
+      if (/^[0-9]$/.test(event.key)) { appendDigit(event.key); return; }
+      if (event.key === "Backspace") { backspaceDraft(); return; }
+      if (event.key === "Enter") { goToDraftSong(); return; }
+      if (event.key === "Escape") { closeSongJump(); return; }
       return;
     }
-    if (event.key === "Enter") { goToDraftSong(); return; }
+    if (event.key === "Escape" && state.drawerOpen) { closeDrawer(); return; }
     if (event.key === "ArrowRight") turnSong(1);
     if (event.key === "ArrowLeft") turnSong(-1);
   });
@@ -2699,13 +2786,22 @@ const initReader = async () => {
   state.totalSongs = state.songIndex.length;
   state.themeIndex = manifest.themeIndex || [];
   state.currentPage = DEFAULT_START_PAGE;
+  // Build the song→page lookup up front so jump-to-song works immediately,
+  // independent of the (optional, slow) offline pre-cache below.
+  state.songPageLookup = buildSongPageLookup(state.songIndex);
   renderDraft();
   renderStatus();
   renderNativeSyncPanel();
   updateFullscreenButton();
   hideLoadingIndicator();
-  await requireOfflineBundle(state.totalPages);
-  state.songPageLookup = buildSongPageLookup(state.songIndex);
+  // Offline pre-cache shows the spinner gate during the first big download.
+  // It must NEVER block or break navigation — a failure here is non-fatal.
+  try {
+    await requireOfflineBundle(state.totalPages);
+  } catch (error) {
+    console.warn("Pre-cache offline incompleto:", error);
+  }
+  setOfflineGateState({ visible: false });
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   startRelayFollow();
   loadSearchIndex();
