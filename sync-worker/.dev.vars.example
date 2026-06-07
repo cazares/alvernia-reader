@@ -1,0 +1,6 @@
+# Copy this file to `.dev.vars` (gitignored) for local `npm run dev`.
+# In production this is set with: npx wrangler secret put RELAY_DIRECTOR_TOKEN
+#
+# This is the shared secret the DIRECTOR app sends as:  Authorization: Bearer <token>
+# Followers (signovivo.com) never need it. Use a long random string.
+RELAY_DIRECTOR_TOKEN=change-me-to-a-long-random-string

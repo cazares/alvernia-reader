@@ -1,0 +1,25 @@
+{
+  // SignoVivo Sync relay — Cloudflare Worker + Durable Object.
+  // Deploy: `npx wrangler deploy` (after `npm install` + auth). See README.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "signovivo-sync",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "observability": { "enabled": true },
+
+  "durable_objects": {
+    "bindings": [{ "name": "SYNC_ROOM", "class_name": "SyncRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SyncRoom"] }],
+
+  // Non-secret vars. RELAY_DIRECTOR_TOKEN is a SECRET — set via `wrangler secret put`
+  // (or .dev.vars locally), never here.
+  "vars": {
+    // Skeleton: allow all so the test page works from file://. Tighten in prod to:
+    // "ALLOWED_ORIGINS": "https://signovivo.com"
+    "ALLOWED_ORIGINS": "*"
+  }
+
+  // Later, to serve from sync.signovivo.com instead of *.workers.dev, add:
+  // "routes": [{ "pattern": "sync.signovivo.com", "custom_domain": true }]
+}
