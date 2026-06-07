@@ -49,6 +49,7 @@ import {
   startNearbyFollower,
   stopNearbyDirectorSync,
 } from "./src/nearbyDirectorSync";
+import { publishPageToRelay, TRANSMITTER_ACCESS_CODE } from "./src/directorRelaySync";
 import { BOOKS, NON_STANDARD_BOOK_IDS, STORAGE_KEYS, clearAllBookState, getBook, validateOfflineBookAssets, type AppMode, type BookId } from "./src/offlineBooks";
 import { renderPdfPage, prefetchPdfPages } from "./src/pdfPageRenderer";
 // @ts-ignore — Metro resolves JSON fine
@@ -857,6 +858,11 @@ export default function App() {
   const [debouncedSearchText, setDebouncedSearchText] = useState("");
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncRoleRef = useRef<SyncRole>("off");
+  // Transmitter = the internet-connected device that relays the director's page to
+  // signovivo.com. True for the director by default; also set when a device enters
+  // TRANSMITTER_ACCESS_CODE, letting an internet phone bridge the local Multipeer
+  // mesh -> the web even if the director iPad itself has no signal.
+  const explicitTransmitterRef = useRef(false);
   const followerStatusLabelRef = useRef<typeof followerStatusLabel>("");
   const recentSongsRef = useRef<number[]>([]);
   const pendingSyncPageRef = useRef<number | null>(null);
@@ -1313,6 +1319,8 @@ export default function App() {
   useEffect(() => {
     if (syncRole !== "director" || !booted) return;
     sendNearbyDirectorPageUpdate(currentPageRef.current, totalPages, { mode, bookId: activeBookId }).catch(() => {});
+    // Director is the transmitter by default -> mirror the page to the web relay.
+    publishPageToRelay(currentPageRef.current, totalPages, { mode, bookId: activeBookId });
   }, [syncRole, booted, mode, activeBookId, totalPages]);
 
   // Sync listener
@@ -1748,7 +1756,31 @@ export default function App() {
   }, [syncModal]);
 
   const handleBecomeDirector = useCallback(async () => {
-    if (!DIRECTOR_ACCESS_CODES.has(normalizeAccessCode(codeInput))) {
+    const enteredCode = normalizeAccessCode(codeInput);
+    // Transmitter code: become the internet bridge to signovivo.com WITHOUT taking
+    // over as Multipeer director. Stay/become a follower so we receive the
+    // director's page, then relay it to the web.
+    if (enteredCode === TRANSMITTER_ACCESS_CODE) {
+      explicitTransmitterRef.current = true;
+      closeSyncModal();
+      if (syncRoleRef.current === "off") {
+        try {
+          await startNearbyFollower(DIRECTOR_SESSION);
+          setSyncRole("follower");
+          ignoreAsync("lastSyncRole", AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower"));
+        } catch {}
+      }
+      publishPageToRelay(currentPageRef.current, totalPagesRef.current, {
+        mode: modeRef.current,
+        bookId: activeBookIdRef.current,
+      });
+      Alert.alert(
+        "Transmisor activado",
+        "Este dispositivo ahora retransmite la página del director a signovivo.com (la congregación en la web).",
+      );
+      return;
+    }
+    if (!DIRECTOR_ACCESS_CODES.has(enteredCode)) {
       Alert.alert("Código incorrecto", "El código ingresado no es válido.");
       return;
     }
@@ -2156,6 +2188,12 @@ export default function App() {
       // Director broadcasts page changes to all followers
       if (syncRole === "director") {
         sendNearbyDirectorPageUpdate(page, totalPages, { mode, bookId: activeBookId }).catch(() => {});
+      }
+      // Transmitter (director by default, or a code-activated bridge) relays the
+      // page to signovivo.com web followers. For a follower-bridge this fires when
+      // the director's page is applied (goToPage -> scroll -> here).
+      if (syncRole === "director" || explicitTransmitterRef.current) {
+        publishPageToRelay(page, totalPages, { mode, bookId: activeBookId });
       }
       // Pre-warm nearby PDF pages — filter to valid range, fire-and-forget
       if (activeBook.pdfSource && totalPages > 0) {
