@@ -2556,6 +2556,139 @@ const bindReaderEvents = () => {
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+// ── Live follow via the relay (signovivo.com → director) ───────────────────────
+// Standalone web only. Inside the native app, Multipeer already syncs; the offline
+// file bundle has no network. Mirrors the proven test-rig logic: WebSocket push
+// (seq-guarded) with reconnect + poll fallback, applied through renderPage().
+const RELAY_BASE_RAW = "__RELAY_BASE__";
+const RELAY_BASE = RELAY_BASE_RAW.startsWith("__RELAY")
+  ? "https://signovivo-sync.4j4982y8jp.workers.dev"
+  : RELAY_BASE_RAW.replace(/\/+$/, "");
+const RELAY_ROOM = "alvernia-main";
+const RELAY_LIVE_MAX_AGE_S = 90; // a director counts as "live" if its last update is this recent
+
+const relay = {
+  backoff: 500,
+  manualClose: false,
+  pollTimer: 0,
+  lastSeq: -1,
+  following: true,   // apply pushes until the user browses away
+  appliedPage: null, // last page WE applied from the relay
+  livePage: null,    // latest page the director is on (tracked even while browsing)
+  hasDirector: false,
+};
+
+let relayPill = null;
+const ensureRelayPill = () => {
+  if (relayPill) return relayPill;
+  const style = document.createElement("style");
+  style.textContent =
+    "#sv-live-pill{position:fixed;left:50%;transform:translateX(-50%);" +
+    "bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:9999;border:0;" +
+    "font:600 14px/1 -apple-system,system-ui,sans-serif;color:#fff;padding:9px 15px;" +
+    "border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none;" +
+    "align-items:center;gap:7px;user-select:none;-webkit-tap-highlight-color:transparent}" +
+    "#sv-live-pill.is-live{background:#1f7a4d}" +
+    "#sv-live-pill.is-resync{background:#9a6a12;cursor:pointer}" +
+    "#sv-live-pill .dot{width:8px;height:8px;border-radius:50%;background:#fff}" +
+    "#sv-live-pill.is-live .dot{animation:sv-pulse 1.6s ease-in-out infinite}" +
+    "@keyframes sv-pulse{0%,100%{opacity:1}50%{opacity:.3}}";
+  document.head.appendChild(style);
+  relayPill = document.createElement("button");
+  relayPill.id = "sv-live-pill";
+  relayPill.type = "button";
+  relayPill.addEventListener("click", () => {
+    if (!relayPill.classList.contains("is-resync") || relay.livePage == null) return;
+    relay.following = true;
+    relay.appliedPage = relay.livePage;
+    renderPage(relay.livePage, { pushToHistory: false });
+    renderRelayPill();
+    haptic(12);
+  });
+  document.body.appendChild(relayPill);
+  return relayPill;
+};
+
+const renderRelayPill = () => {
+  const pill = ensureRelayPill();
+  if (!relay.hasDirector) { pill.style.display = "none"; return; }
+  pill.style.display = "inline-flex";
+  if (relay.following) {
+    pill.className = "is-live";
+    pill.innerHTML = '<span class="dot"></span>EN VIVO';
+  } else {
+    pill.className = "is-resync";
+    pill.textContent = "▶ Volver a en vivo";
+  }
+};
+
+const relayIsFreshLive = (snap) =>
+  snap && typeof snap.seq === "number" && snap.seq > 0 &&
+  (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
+
+const applyRelaySnapshot = (snap) => {
+  if (!snap || typeof snap.page !== "number") return;
+  if (typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return; // stale / out-of-order
+  if (typeof snap.seq === "number") relay.lastSeq = snap.seq;
+
+  if (!relayIsFreshLive(snap)) {        // no director live (seq 0 / stale) → behave like a normal songbook
+    relay.hasDirector = false;
+    renderRelayPill();
+    return;
+  }
+  relay.hasDirector = true;
+  relay.livePage = snap.page;
+
+  // If the user has browsed away since our last applied page, don't yank them —
+  // offer "Volver a en vivo" instead.
+  const userMovedAway = relay.appliedPage != null && state.currentPage !== relay.appliedPage;
+  if (relay.following && !userMovedAway) {
+    relay.appliedPage = snap.page;
+    if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
+  } else {
+    relay.following = false;
+  }
+  renderRelayPill();
+};
+
+const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) + "/state";
+const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
+
+const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
+const relayPollOnce = async () => {
+  try {
+    const r = await fetch(relayStateUrl(), { cache: "no-store" });
+    if (r.ok) applyRelaySnapshot(await r.json());
+  } catch {}
+};
+const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(relayPollOnce, 4000); relayPollOnce(); };
+
+const connectRelay = () => {
+  relay.manualClose = false;
+  stopRelayPolling();
+  let ws;
+  try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
+  ws.addEventListener("open", () => { relay.backoff = 500; });
+  ws.addEventListener("message", (ev) => { try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
+  ws.addEventListener("error", () => {});
+  ws.addEventListener("close", () => {
+    if (relay.manualClose) return;
+    setTimeout(connectRelay, relay.backoff);
+    relay.backoff = Math.min(relay.backoff * 2, 8000);
+    if (relay.backoff >= 8000) startRelayPolling();   // WS won't hold → fall back to polling
+  });
+};
+
+const startRelayFollow = () => {
+  if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") relayPollOnce();
+  });
+  window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
+  relayPollOnce();   // instant first paint at the director's current page
+  if ("WebSocket" in window) connectRelay(); else startRelayPolling();
+};
+
 const initReader = async () => {
   const inlinedPages = document.getElementById("pages-data");
   const manifest = inlinedPages
@@ -2574,6 +2707,7 @@ const initReader = async () => {
   await requireOfflineBundle(state.totalPages);
   state.songPageLookup = buildSongPageLookup(state.songIndex);
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
+  startRelayFollow();
   loadSearchIndex();
   renderActiveTab();
   postNativeBridge({

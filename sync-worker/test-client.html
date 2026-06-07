@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SignoVivo Sync — test</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background:#111; color:#eee; }
+  h1 { font-size: 18px; margin:0 0 8px; } h2 { font-size: 13px; color:#9cf; margin:22px 0 6px; text-transform:uppercase; letter-spacing:.5px;}
+  input, button { font-size:16px; padding:8px 10px; border-radius:8px; border:1px solid #444; background:#222; color:#eee; }
+  button { background:#2a7a55; border:none; cursor:pointer; font-weight:600; }
+  button:active { transform: translateY(1px); }
+  .big { font-size:72px; font-weight:800; text-align:center; padding:18px; line-height:1; }
+  .pill { display:inline-block; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:700; }
+  .live { background:#2a7a55; } .off { background:#7a2a2a; } .warn{ background:#8a6a1a; }
+  #log { white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:11px; background:#000; padding:8px; border-radius:8px; height:190px; overflow:auto; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;}
+  label{font-size:12px;color:#aaa;}
+  input{min-width:0;}
+</style>
+</head>
+<body>
+<h1>SignoVivo Sync — test rig</h1>
+
+<div class="row">
+  <label>Relay</label>
+  <input id="base" style="flex:1" placeholder="https://signovivo-sync.&lt;acct&gt;.workers.dev" />
+  <label>Sala</label>
+  <input id="room" value="alvernia-main" size="12" />
+</div>
+
+<h2>Seguidor (lo que ve “José”)</h2>
+<div class="row">
+  <button id="connect">Conectar / seguir</button>
+  <button id="disconnect">Desconectar</button>
+  <span id="status" class="pill off">desconectado</span>
+  <span id="latency" style="font-size:12px;color:#aaa"></span>
+</div>
+<div class="big" id="page">—</div>
+
+<h2>Director (simular publicación)</h2>
+<div class="row">
+  <label>Token</label><input id="token" size="20" placeholder="RELAY_DIRECTOR_TOKEN" />
+  <label>Página</label><input id="pubpage" type="number" value="1" size="5" />
+  <button id="publish">Publicar</button>
+  <button id="next">▶ Siguiente</button>
+</div>
+
+<h2>Registro</h2>
+<div id="log"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (m) => { const t = new Date().toISOString().slice(11,23); $("log").textContent = `[${t}] ${m}\n` + $("log").textContent; };
+const base = () => $("base").value.replace(/\/+$/,"");
+const room = () => encodeURIComponent(($("room").value || "alvernia-main").trim());
+let ws = null, backoff = 500, manualClose = false, pollTimer = null, lastSeq = -1;
+
+const wsUrl = () => base().replace(/^http/, "ws") + "/r/" + room() + "/subscribe";
+const setStatus = (cls, text) => { const e=$("status"); e.className="pill "+cls; e.textContent=text; };
+
+function applySnapshot(s){
+  if(!s || typeof s.page !== "number") return;
+  if(typeof s.seq === "number" && s.seq > 0 && s.seq <= lastSeq) return; // stale guard
+  if(typeof s.seq === "number") lastSeq = s.seq;
+  if(s.seq === 0){ $("page").textContent = "(sin director)"; setStatus("warn","sin director en vivo"); return; }
+  const ageS = s.ts ? Math.max(0, Math.floor(Date.now()/1000 - s.ts)) : null;
+  $("page").textContent = s.page;
+  setStatus("live","● EN VIVO");
+  $("latency").textContent = ageS != null ? `actualizado hace ${ageS}s` : "";
+  log(`page=${s.page} seq=${s.seq} edad=${ageS}s`);
+}
+
+async function pollOnce(){
+  try{ const r = await fetch(base()+"/r/"+room()+"/state", {cache:"no-store"}); if(r.ok) applySnapshot(await r.json()); }
+  catch(e){ log("poll error: "+e.message); }
+}
+const startPolling = () => { stopPolling(); log("→ fallback a polling (4s)"); pollTimer=setInterval(pollOnce,4000); pollOnce(); };
+const stopPolling = () => { if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } };
+
+function connect(){
+  manualClose=false; stopPolling();
+  if(!base()){ log("Falta la URL del relay."); return; }
+  try { ws = new WebSocket(wsUrl()); } catch(e){ log("WS error: "+e.message); startPolling(); return; }
+  setStatus("warn","conectando…"); log("WS → "+wsUrl());
+  ws.onopen = () => { backoff=500; setStatus("live","conectado"); log("WS abierto"); };
+  ws.onmessage = (ev) => { try { applySnapshot(JSON.parse(ev.data)); } catch { log("msg ilegible"); } };
+  ws.onerror = () => log("WS error");
+  ws.onclose = () => {
+    setStatus("off","desconectado");
+    if(manualClose) return;
+    log(`WS cerrado; reintento en ${backoff}ms`);
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff*2, 8000);
+    if(backoff >= 8000) startPolling(); // give up on WS, fall back to polling
+  };
+}
+function disconnect(){ manualClose=true; stopPolling(); if(ws){ ws.close(); ws=null; } setStatus("off","desconectado"); }
+
+async function publish(page){
+  try{
+    const r = await fetch(base()+"/r/"+room()+"/publish", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+$("token").value.trim() },
+      body: JSON.stringify({ page:Number(page), totalPages:370, mode:"standard", bookId:"standard", seq:Date.now() })
+    });
+    log(`publicar pág ${page} → ${r.status} ${await r.text()}`);
+  } catch(e){ log("publish error: "+e.message); }
+}
+
+$("connect").onclick = connect;
+$("disconnect").onclick = disconnect;
+$("publish").onclick = () => publish($("pubpage").value);
+$("next").onclick = () => { $("pubpage").value = Number($("pubpage").value)+1; publish($("pubpage").value); };
+
+// Remember inputs across reloads.
+["base","token","room"].forEach((id) => {
+  const k = "sv_"+id;
+  if(localStorage[k]) $(id).value = localStorage[k];
+  $(id).addEventListener("input", () => localStorage[k] = $(id).value);
+});
+</script>
+</body>
+</html>

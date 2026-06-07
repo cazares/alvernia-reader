@@ -25,9 +25,11 @@ fs.mkdirSync(pagesDir, { recursive: true });
 fs.mkdirSync(thumbsDir, { recursive: true });
 
 fs.copyFileSync(path.join(srcDir, "styles.css"), path.join(distDir, "styles.css"));
+const relayBase = (process.env.ALVERNIA_RELAY_BASE || "https://signovivo-sync.4j4982y8jp.workers.dev").replace(/\/+$/, "");
 const appSource = fs
   .readFileSync(path.join(srcDir, "app.js"), "utf8")
-  .replaceAll("__CACHE_VERSION__", cacheVersion);
+  .replaceAll("__CACHE_VERSION__", cacheVersion)
+  .replaceAll("__RELAY_BASE__", relayBase);
 fs.writeFileSync(path.join(distDir, "app.js"), appSource);
 fs.copyFileSync(path.join(srcDir, "manifest.webmanifest"), path.join(distDir, "manifest.webmanifest"));
 // index.html is written later with inlined JSON data
