@@ -47,37 +47,10 @@ test("offline asset recovery return does not appear before later hooks", () => {
   );
 });
 
-test("approving takeover updates JS role to follower before calling native approval", () => {
-  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
-  const handler =
-    source.match(/handleApproveDirectorTakeover[\s\S]*?\}, \[[\s\S]*?\]\);/)?.[0] ??
-    "";
-  assert.ok(handler, "handleApproveDirectorTakeover must exist");
-  assert.match(handler, /setSyncRole\("follower"\)/);
-  assert.match(handler, /approveDirectorTakeover\(requestId\)/);
-  assert.match(handler, /setSearchVisible\(false\)/);
-  assert.match(handler, /setBrowseVisible\(false\)/);
-  assert.match(handler, /setGridVisible\(false\)/);
-
-  const alertBlock = source.match(/Solicitud de control[\s\S]*?\]\s*,\s*\);/)?.[0] ?? "";
-  assert.match(alertBlock, /handleApproveDirectorTakeover\(requestId\)/);
-  assert.doesNotMatch(alertBlock, /approveDirectorTakeover\(requestId\)\.catch/);
-});
-
-test("becoming director from follower does not depend on transient connected label", () => {
-  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
-  const block =
-    source.match(/const handleBecomeDirector = useCallback\(async \(\) => \{[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] ??
-    "";
-  assert.ok(block, "handleBecomeDirector block not found");
-  assert.doesNotMatch(block, /followerStatusLabel\s*===\s*"connected"/);
-  assert.match(block, /syncRoleRef\.current === "follower"/);
-  assert.match(block, /requestDirectorTakeover\(\)/);
-
-  const requestIdx = block.indexOf("requestDirectorTakeover()");
-  const startIdx = block.indexOf("startNearbyDirector(DIRECTOR_SESSION)");
-  assert.ok(requestIdx >= 0 && startIdx >= 0 && requestIdx < startIdx);
-});
+// Removed: "approving takeover…" and "becoming director from follower…".
+// These pinned the director-takeover UI flow that the "kill takeover / lock to
+// director forever" refactor dismantled (the asserted alert strings are gone from
+// PdfReaderApp.tsx). Dead-behavior tests — restore from git history if takeover returns.
 
 test("song index resolves correctly — song 55 → page 55, out-of-range clamps", () => {
   const source = fs.readFileSync(path.join(APP_ROOT, "src", "alverniaManual2SongIndex.js"), "utf8");

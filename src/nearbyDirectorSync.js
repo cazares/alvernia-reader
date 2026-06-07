@@ -7,14 +7,14 @@ export const isNearbyDirectorSyncAvailable = () => Platform.OS === "ios" && Bool
 
 export const startNearbyDirector = async (sessionCode) => {
   if (!isNearbyDirectorSyncAvailable()) {
-    throw new Error("La sincronización offline solo está disponible en iPad.");
+    return Promise.reject(new Error("La sincronización offline solo está disponible en iPad."));
   }
   return nativeModule.startDirector(sessionCode);
 };
 
 export const startNearbyFollower = async (sessionCode) => {
   if (!isNearbyDirectorSyncAvailable()) {
-    throw new Error("La sincronización offline solo está disponible en iPad.");
+    return Promise.reject(new Error("La sincronización offline solo está disponible en iPad."));
   }
   return nativeModule.startFollower(sessionCode);
 };

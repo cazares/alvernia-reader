@@ -76,7 +76,7 @@ test("primeNearbyPermissions fires from a top-level useEffect with empty deps", 
   assert.match(appSource, /import \{[\s\S]*?primeNearbyPermissions[\s\S]*?\} from "\.\/src\/nearbyDirectorSync"/);
   assert.match(
     appSource,
-    /useEffect\(\(\) => \{\s*primeNearbyPermissions\(\)\.catch\(\(\) => \{\}\);\s*\},\s*\[\]\);/,
+    /useEffect\(\(\) => \{\s*ignoreAsync\("primeNearbyPermissions", primeNearbyPermissions\(\)\);\s*\},\s*\[\]\);/,
   );
 });
 
