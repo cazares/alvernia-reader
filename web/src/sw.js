@@ -28,7 +28,7 @@ const backgroundCacheAllPages = async () => {
     const manifest = await fetch("/pages.json", { cache: "no-store" }).then((r) => r.json());
     const cache = await caches.open(PAGE_CACHE);
     for (let i = 1; i <= manifest.totalPages; i++) {
-      const url = `/pages/page-${String(i).padStart(3, "0")}.jpg`;
+      const url = `/pages/page-${String(i).padStart(3, "0")}.webp`;
       if (!(await cache.match(url))) {
         try {
           const res = await fetch(url);
