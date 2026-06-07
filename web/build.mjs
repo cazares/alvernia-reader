@@ -64,72 +64,65 @@ const parseJpegQuality = (value, fallback) => {
   return Math.max(1, Math.min(100, n));
 };
 
-// Rendering pages from the PDF is the single biggest lever for sharpness.
-// Defaults are intentionally "high res" to match the original native-PDF clarity.
-const PDF_RENDER_DPI = parsePositiveInt(process.env.ALVERNIA_PDF_RENDER_DPI, 240);
-const PDF_RENDER_JPEG_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_RENDER_JPEG_QUALITY, 92);
+// Rendering pages from the PDF is the single biggest lever for size vs sharpness.
+// Phone-readable target: render lossless PNG, then encode compact WebP
+// (pdftoppm can't emit WebP directly). ~115 DPI + q60 ≈ ~28MB for the full manual.
+const PDF_RENDER_DPI = parsePositiveInt(process.env.ALVERNIA_PDF_RENDER_DPI, 115);
+const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60);
 
 const pdfPath = path.join(rootDir, "assets", "alvernia_manual_2.pdf");
-const outputPrefix = path.join(pagesDir, "page");
-const convert = spawnSync(
+const pngPrefix = path.join(pagesDir, "render");
+const render = spawnSync(
   "pdftoppm",
-  ["-jpeg", "-jpegopt", `quality=${PDF_RENDER_JPEG_QUALITY}`, "-r", String(PDF_RENDER_DPI), pdfPath, outputPrefix],
+  ["-png", "-r", String(PDF_RENDER_DPI), pdfPath, pngPrefix],
   { stdio: "inherit" },
 );
 
-if (convert.status !== 0) {
-  throw new Error(`pdftoppm failed with exit code ${convert.status ?? 1}`);
+if (render.status !== 0) {
+  throw new Error(`pdftoppm failed with exit code ${render.status ?? 1}`);
 }
 
-const pageFiles = fs
+const pngFiles = fs
   .readdirSync(pagesDir)
-  .filter((file) => /^page-\d+\.jpg$/.test(file))
+  .filter((file) => /^render-\d+\.png$/.test(file))
   .sort((left, right) => left.localeCompare(right));
-
-const parseNonNegativeInt = (value, fallback) => {
-  const n = Number.parseInt(String(value ?? "").trim(), 10);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-};
 
 const THUMB_WIDTH = parsePositiveInt(process.env.ALVERNIA_THUMB_WIDTH, 320);
 const THUMB_JPEG_QUALITY = parseJpegQuality(process.env.ALVERNIA_THUMB_JPEG_QUALITY, 70);
-const THUMB_CONCURRENCY = Math.max(1, parseNonNegativeInt(process.env.ALVERNIA_THUMB_CONCURRENCY, 1) || 1);
 
-// Generate thumbnail strip used by the native grid/browse UI.
-// (The app depends on these existing in the offline-web bundle.)
-console.log(`Generating ${pageFiles.length} thumbs at width=${THUMB_WIDTH}, quality=${THUMB_JPEG_QUALITY}...`);
-const makeThumb = (file) => {
-  const match = file.match(/page-(\d+)\.jpg$/);
-  const num = match ? match[1] : null;
-  if (!num) return;
-  const src = path.join(pagesDir, file);
-  const out = path.join(thumbsDir, `thumb-${num}.jpg`);
-  const result = spawnSync(
-    "sips",
-    ["-Z", String(THUMB_WIDTH), "-s", "format", "jpeg", "-s", "formatOptions", String(THUMB_JPEG_QUALITY), src, "--out", out],
+// Encode each rendered page to WebP (page-NNN.webp) + a JPEG thumb (thumb-NNN.jpg),
+// then drop the intermediate PNG.
+console.log(`Encoding ${pngFiles.length} pages to WebP q${WEBP_QUALITY} @ ${PDF_RENDER_DPI} DPI + thumbs...`);
+for (let i = 0; i < pngFiles.length; i++) {
+  const num = pngFiles[i].match(/render-(\d+)\.png$/)[1];
+  const pngPath = path.join(pagesDir, pngFiles[i]);
+  const webpOut = path.join(pagesDir, `page-${num}.webp`);
+  const webp = spawnSync(
+    "cwebp",
+    ["-quiet", "-q", String(WEBP_QUALITY), pngPath, "-o", webpOut],
     { stdio: "pipe" },
   );
-  if (result.status !== 0 || !fs.existsSync(out)) {
-    throw new Error(`Failed generating thumb for ${file}`);
+  if (webp.status !== 0 || !fs.existsSync(webpOut)) {
+    throw new Error(`cwebp failed for ${pngFiles[i]} (status ${webp.status ?? "?"})`);
   }
-};
-
-if (THUMB_CONCURRENCY <= 1) {
-  for (let i = 0; i < pageFiles.length; i++) {
-    makeThumb(pageFiles[i]);
-    if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pageFiles.length}\n`);
+  const thumbOut = path.join(thumbsDir, `thumb-${num}.jpg`);
+  const thumb = spawnSync(
+    "sips",
+    ["-Z", String(THUMB_WIDTH), "-s", "format", "jpeg", "-s", "formatOptions", String(THUMB_JPEG_QUALITY), pngPath, "--out", thumbOut],
+    { stdio: "pipe" },
+  );
+  if (thumb.status !== 0 || !fs.existsSync(thumbOut)) {
+    throw new Error(`Failed generating thumb for ${pngFiles[i]}`);
   }
-} else {
-  // Simple chunked parallelism (still safe on laptops; avoid overwhelming).
-  let i = 0;
-  while (i < pageFiles.length) {
-    const chunk = pageFiles.slice(i, i + THUMB_CONCURRENCY);
-    for (const f of chunk) makeThumb(f);
-    i += chunk.length;
-    if (i % 50 === 0) process.stdout.write(`  ${i}/${pageFiles.length}\n`);
-  }
+  fs.unlinkSync(pngPath);
+  if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pngFiles.length}\n`);
 }
-console.log("Thumb generation done.");
+console.log("WebP + thumb generation done.");
+
+const pageFiles = fs
+  .readdirSync(pagesDir)
+  .filter((file) => /^page-\d+\.webp$/.test(file))
+  .sort((left, right) => left.localeCompare(right));
 
 const songIndexSource = fs.readFileSync(path.join(rootDir, "src", "alverniaManual2SongIndex.js"), "utf8");
 const songIndex = [];

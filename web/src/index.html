@@ -20,7 +20,7 @@
   <body>
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
-        <img id="page-image" src="/pages/page-002.jpg" alt="Pagina actual del manual" />
+        <img id="page-image" src="/pages/page-002.webp" alt="Pagina actual del manual" />
         <div class="director-mode-badge is-hidden" id="director-mode-badge" aria-live="polite">
           <span class="director-mode-badge-eyebrow">Modo activo</span>
           <strong class="director-mode-badge-title">DIRECTOR</strong>
@@ -32,10 +32,8 @@
             <p class="offline-gate-eyebrow">Modo sin internet</p>
             <h1 class="offline-gate-title" id="offline-gate-title">Preparando Signo Vino</h1>
             <p class="offline-gate-body" id="offline-gate-body">Descargando todo el manual para que funcione 100% offline.</p>
-            <div class="offline-progress" aria-hidden="true">
-              <div class="offline-progress-bar" id="offline-progress-bar"></div>
-            </div>
-            <p class="offline-progress-value" id="offline-progress-value">0 / 0 páginas</p>
+            <div class="offline-spinner" id="offline-spinner" aria-hidden="true"></div>
+            <p class="offline-progress-value" id="offline-progress-value" aria-live="polite">Preparando…</p>
             <p class="offline-admin-note is-hidden" id="offline-admin-note">No entregues este iPad hasta ver “Offline listo”.</p>
             <p class="offline-ready-note is-hidden" id="offline-ready-note">Ya puedes usar Signo Vino sin internet en este iPad.</p>
             <p class="offline-meta-note is-hidden" id="offline-meta-note"></p>
@@ -51,13 +49,54 @@
         <span class="drawer-handle-lines" aria-hidden="true">›</span>
       </button>
 
+      <!-- ♪ Jump-to-song trigger (opens the centered modal) -->
+      <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto">♪</button>
+
+      <!-- ── Jump-to-song modal (native-style) ── -->
+      <div class="song-jump-modal is-hidden" id="song-jump-modal" role="dialog" aria-modal="true" aria-label="Ir a canto">
+        <div class="song-jump-backdrop" id="song-jump-backdrop"></div>
+        <div class="song-jump-card" role="document">
+          <h2 class="song-jump-title">IR A CANTO</h2>
+
+          <div class="numberpad-display-wrap">
+            <div
+              class="numberpad-display"
+              id="song-display"
+              role="status"
+              aria-live="polite"
+              aria-label="Número de canto"
+            ></div>
+          </div>
+
+          <div class="numberpad-grid song-jump-grid" id="numberpad-grid" aria-label="Teclado numérico">
+            <button class="numberpad-key" type="button" data-digit="1">1</button>
+            <button class="numberpad-key" type="button" data-digit="2">2</button>
+            <button class="numberpad-key" type="button" data-digit="3">3</button>
+            <button class="numberpad-key" type="button" data-digit="4">4</button>
+            <button class="numberpad-key" type="button" data-digit="5">5</button>
+            <button class="numberpad-key" type="button" data-digit="6">6</button>
+            <button class="numberpad-key" type="button" data-digit="7">7</button>
+            <button class="numberpad-key" type="button" data-digit="8">8</button>
+            <button class="numberpad-key" type="button" data-digit="9">9</button>
+            <span class="numberpad-key-blank" aria-hidden="true"></span>
+            <button class="numberpad-key" type="button" data-digit="0">0</button>
+            <button class="numberpad-key numberpad-key-back" id="backspace-button" type="button" aria-label="Borrar último dígito">⌫</button>
+          </div>
+
+          <div class="song-jump-actions">
+            <button class="song-jump-go" id="go-button" type="button" aria-label="Abrir canto">♪ Abrir Canto ♪</button>
+            <button class="song-jump-cancel" id="song-cancel" type="button">Cancelar</button>
+          </div>
+        </div>
+      </div>
+
       <section class="overlay-controls" id="overlay-controls">
 
         <!-- Tap-outside backdrop -->
         <div class="drawer-backdrop" id="drawer-backdrop" role="button" tabindex="-1" aria-label="Cerrar"></div>
 
         <!-- ── Left-side navigation drawer ─────────────────────────────── -->
-        <div class="navigation-drawer" id="navigation-drawer">
+        <div class="navigation-drawer mode-browse" id="navigation-drawer">
 
           <!-- ★ Always visible: close + song navigation ★ -->
           <div class="drawer-top-bar">
@@ -107,39 +146,14 @@
           <!-- ════════════════════════════════════════════════════ -->
           <div class="drawer-panel drawer-numpad-panel" id="numpad-panel">
 
+            <!-- Numpad moved to the centered modal (#song-jump-modal). These controls
+                 are kept hidden only so existing JS references stay valid; the web reader
+                 no longer surfaces them (matching native's minimal reader). -->
             <div class="numpad-section" id="numpad-section">
-              <div class="numberpad-display-wrap">
-                <div
-                  class="numberpad-display"
-                  id="song-display"
-                  role="status"
-                  aria-live="polite"
-                  aria-label="Número de canción"
-                ></div>
-                <button class="display-clear-btn is-hidden" id="display-clear" type="button" aria-label="Borrar número">✕</button>
-              </div>
-
-              <div class="numberpad-grid" id="numberpad-grid" aria-label="Teclado numérico">
-                <button class="numberpad-key" type="button" data-digit="1">1</button>
-                <button class="numberpad-key" type="button" data-digit="2">2</button>
-                <button class="numberpad-key" type="button" data-digit="3">3</button>
-                <button class="numberpad-key" type="button" data-digit="4">4</button>
-                <button class="numberpad-key" type="button" data-digit="5">5</button>
-                <button class="numberpad-key" type="button" data-digit="6">6</button>
-                <button class="numberpad-key" type="button" data-digit="7">7</button>
-                <button class="numberpad-key" type="button" data-digit="8">8</button>
-                <button class="numberpad-key" type="button" data-digit="9">9</button>
-                <button class="numberpad-key numberpad-key-muted" id="backspace-button" type="button" aria-label="Borrar último dígito">← Borrar</button>
-                <button class="numberpad-key" type="button" data-digit="0">0</button>
-                <button class="numberpad-key go-button" id="go-button" type="button" aria-label="Ir a canción">↵ Ir</button>
-              </div>
-
-              <div class="numpad-util-row">
-                <button class="numberpad-key numberpad-key-muted" id="prev-corner" type="button" aria-label="Volver atrás en historial">← Volver</button>
-                <button class="numberpad-key numberpad-key-muted help-key" id="help-button" type="button" aria-label="Ayuda">?</button>
-              </div>
-
               <button id="fullscreen-button" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
+              <button id="prev-corner" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
+              <button id="help-button" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
+              <button id="display-clear" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
             </div>
 
             <div class="numpad-tip-wrap" id="numpad-tip-wrap">
