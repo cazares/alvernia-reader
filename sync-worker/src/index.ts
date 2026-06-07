@@ -17,6 +17,9 @@ export interface Env {
   RELAY_DIRECTOR_TOKEN: string;
   /** Comma-separated allow-list for CORS on /state. "*" allows all (fine — no credentials). */
   ALLOWED_ORIGINS?: string;
+  /** Comma-separated transmitter access codes accepted via the `X-Director-Code` header.
+   *  Defaults to "12345678840" if unset. Gates who may publish (page numbers only). */
+  TRANSMITTER_CODES?: string;
 }
 
 const PROTOCOL_VERSION = 1;
@@ -202,9 +205,18 @@ export default {
       if (request.method !== "POST") {
         return json({ ok: false, error: "method_not_allowed" }, 405, cors);
       }
+      // Authorized by EITHER the bearer token (scripts/testing) OR a valid
+      // transmitter access code in X-Director-Code (the native app — matches the
+      // memorable director codes already used in-app).
       const auth = request.headers.get("Authorization") || "";
       const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-      if (!env.RELAY_DIRECTOR_TOKEN || token !== env.RELAY_DIRECTOR_TOKEN) {
+      const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
+      const validCodes = new Set(
+        (env.TRANSMITTER_CODES || "12345678840").split(",").map((c) => c.trim()).filter(Boolean),
+      );
+      const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && token === env.RELAY_DIRECTOR_TOKEN;
+      const codeOk = code.length > 0 && validCodes.has(code);
+      if (!tokenOk && !codeOk) {
         return json({ ok: false, error: "unauthorized" }, 401, cors);
       }
       let body: Partial<Snapshot>;
