@@ -1756,11 +1756,10 @@ export default function App() {
   }, [syncModal]);
 
   const handleBecomeDirector = useCallback(async () => {
-    const enteredCode = normalizeAccessCode(codeInput);
     // Transmitter code: become the internet bridge to signovivo.com WITHOUT taking
     // over as Multipeer director. Stay/become a follower so we receive the
     // director's page, then relay it to the web.
-    if (enteredCode === TRANSMITTER_ACCESS_CODE) {
+    if (normalizeAccessCode(codeInput) === TRANSMITTER_ACCESS_CODE) {
       explicitTransmitterRef.current = true;
       closeSyncModal();
       if (syncRoleRef.current === "off") {
@@ -1780,7 +1779,7 @@ export default function App() {
       );
       return;
     }
-    if (!DIRECTOR_ACCESS_CODES.has(enteredCode)) {
+    if (!DIRECTOR_ACCESS_CODES.has(normalizeAccessCode(codeInput))) {
       Alert.alert("Código incorrecto", "El código ingresado no es válido.");
       return;
     }
