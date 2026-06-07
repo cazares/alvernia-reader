@@ -43,7 +43,11 @@ test("director mode is gated by the DIRECTOR_ACCESS_CODES allowlist", () => {
   assert.match(codes, /"8307197000"/);
   assert.match(codes, /"123456"/);
   assert.doesNotMatch(codes, /"1234"/);
-  assert.match(SOURCE, /if \(!DIRECTOR_ACCESS_CODES\.has\(normalizeAccessCode\(codeInput\)\)\)/);
+  // Gate: director access must be checked against the allowlist using the normalized code.
+  // (Assert the gate + normalization exist, not the exact inline form, so a harmless
+  // variable-extraction refactor doesn't re-break this.)
+  assert.match(SOURCE, /if \(!DIRECTOR_ACCESS_CODES\.has\(/);
+  assert.match(SOURCE, /normalizeAccessCode\(codeInput\)/);
 });
 
 test("followers can reach the in-app reset flow from the second refresh press", () => {

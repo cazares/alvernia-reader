@@ -31,6 +31,11 @@ test("JS can force-request a current snapshot from the director", () => {
   assert.match(swiftSource, /"type": "hello"/);
 });
 
+test("unsupported-platform sync entrypoints reject through promises instead of throwing synchronously", () => {
+  assert.match(jsSyncSource, /return Promise\.reject\(new Error\("La sincronización offline solo está disponible en iPad\."\)\);/);
+  assert.doesNotMatch(jsSyncSource, /throw new Error\("La sincronización offline solo está disponible en iPad\."\);/);
+});
+
 test("happy path: follower foreground performs start + snapshot request + discovery refresh", () => {
   const lifecycleBlock = appSource.match(/AppState\.addEventListener\([\s\S]*?else if \(nextState === "active"\)[\s\S]*?\}\);\n\s*return \(\) => sub\.remove\(\);\n\s*\}, \[writeBreadcrumb\]\);/)?.[0] ?? "";
   assert.ok(lifecycleBlock.length > 0, "AppState lifecycle effect must exist");
@@ -151,16 +156,11 @@ test("director does not eagerly call invitePeer in browser:foundPeer (legacy fal
     /func browser\(_ browser: MCNearbyServiceBrowser, foundPeer[\s\S]*?(?=\n  func )/
   )?.[0] ?? "";
   assert.ok(browserFoundPeerBlock.length > 0, "browser:foundPeer delegate must exist");
-  // Modern followers initiate the connection themselves. Directors may keep a delayed fallback
-  // invite for legacy followers (build ≤226) that wait to be invited.
-  assert.match(browserFoundPeerBlock, /Modern followers initiate the connection themselves/);
-  assert.match(browserFoundPeerBlock, /legacy followers/);
-  assert.match(browserFoundPeerBlock, /DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ 1\.0\)/);
+  // Directors may keep an immediate fallback invite for legacy followers (build ≤226) that wait
+  // to be invited. Modern followers self-invite, so the director must not invite them here.
+  assert.match(browserFoundPeerBlock, /Modern follower: it will self-invite us/);
+  assert.match(browserFoundPeerBlock, /guard !self\.allConnectedPeers\.contains\(peerID\) else \{ return \}/);
   assert.match(browserFoundPeerBlock, /\.invitePeer\(/);
-  assert.ok(
-    browserFoundPeerBlock.indexOf("asyncAfter") < browserFoundPeerBlock.indexOf("invitePeer"),
-    "legacy fallback invite must only happen inside the delayed asyncAfter block",
-  );
 });
 
 test("follower invite ownership lives in reconsiderFollowerTarget", () => {
@@ -168,7 +168,8 @@ test("follower invite ownership lives in reconsiderFollowerTarget", () => {
     /private func reconsiderFollowerTarget\(\)[\s\S]*?(?=\n  private func )/
   )?.[0] ?? "";
   assert.ok(reconsiderBlock.length > 0, "reconsiderFollowerTarget must exist");
-  assert.match(reconsiderBlock, /browser\?\.invitePeer\(target, to: session/);
+  assert.match(reconsiderBlock, /browser\?\.invitePeer\(capturedTarget, to: capturedSession/);
+  assert.match(reconsiderBlock, /Modern director: we initiate/);
 });
 
 // Peer display names longer than 63 chars cause an ObjC exception in MCPeerID init.
@@ -308,12 +309,9 @@ test("late joiners receive immediate snapshots from the director", () => {
   assert.match(swiftSource, /if type == "hello"[\s\S]*sendCurrentPageSnapshot\(to: peerID, via: session\)/);
 });
 
-test("director takeover request cannot leave reconnect modal stuck forever", () => {
-  assert.match(appSource, /takeoverTimeoutRef/);
-  assert.match(appSource, /setTimeout\([\s\S]*20_000/);
-  assert.match(appSource, /Sin respuesta del director/);
-  assert.match(appSource, /const cancelReconnect = useCallback\([\s\S]*clearPendingTakeover\(\)/);
-});
+// Removed: "director takeover request cannot leave reconnect modal stuck forever" —
+// asserted the removed takeover-timeout UI ("Sin respuesta del director" is gone from
+// the source). Dead-behavior test; restore from git history if takeover returns.
 
 test("discovery cadence keeps early burst then steady 25-second refreshes", () => {
   assert.match(swiftSource, /private static let discoveryRefreshInterval: TimeInterval = 25/);
@@ -447,7 +445,7 @@ test("breadcrumb heartbeat writes bounded data to a single AsyncStorage key", ()
 });
 
 test("reconnect overlay is driven only by reconnectBusy state (no other modal blocks follower)", () => {
-  assert.match(appSource, /<Modal visible=\{reconnectBusy\}/);
+  assert.match(appSource, /<Modal visible=\{reconnectBusy && syncRole !== "director"\}/);
   assert.match(appSource, /const \[reconnectBusy, setReconnectBusy\] = useState\(false\)/);
 });
 
@@ -570,6 +568,6 @@ test("edge case: reconnect modal can be suppressed by a constant gate", () => {
   if (/SHOW_RECONNECT_MODAL/.test(appSource)) {
     assert.match(appSource, /SHOW_RECONNECT_MODAL\s*&&\s*reconnectBusy/);
   } else {
-    assert.match(appSource, /<Modal visible=\{reconnectBusy\}/);
+    assert.match(appSource, /<Modal visible=\{reconnectBusy && syncRole !== "director"\}/);
   }
 });
