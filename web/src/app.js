@@ -2379,41 +2379,46 @@ const bindReaderEvents = () => {
     helpSettingsLabel.addEventListener(eventName, clearHiddenSyncPressTimer, { passive: true });
   });
 
-  directorSyncCodeInput.addEventListener("input", () => {
-    const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
-    state.nativeSyncSessionCode = normalized;
-    directorSyncCodeInput.value = normalized;
-    persistNativeSyncSessionCode();
-    state.nativeSyncError = "";
-    renderNativeSyncPanel();
-  });
-
-  directorSyncStartDirectorButton.addEventListener("click", () => {
-    haptic(12);
-    activateDirectorShortcut();
-  });
-
-  directorSyncStartFollowerButton.addEventListener("click", () => {
-    // Follower mode is automatic — button is hidden but kept for compat
-    haptic(12);
-    state.nativeSyncAutoStartSuppressed = false;
-    requestAutoFollowerMode();
-  });
-
-  directorSyncStopButton.addEventListener("click", () => {
-    haptic();
-    state.nativeSyncAutoStartSuppressed = true;
-    state.nativeSyncAutoStartRequested = false;
-    state.nativeSyncError = "";
-    state.nativeSyncStatus = "";
-    renderNativeSyncPanel();
-    if (!postNativeBridge({ type: "sync-stop" })) {
-      state.nativeSyncRole = "off";
-      state.nativeSyncStatus = "";
-      state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+  // The director-sync panel was removed from the markup (takeover killed),
+  // so only wire its controls when they exist — otherwise this whole function
+  // throws on a null ref and initReader never runs (the entire reader is dead).
+  if (directorSyncPanel) {
+    directorSyncCodeInput.addEventListener("input", () => {
+      const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
+      state.nativeSyncSessionCode = normalized;
+      directorSyncCodeInput.value = normalized;
+      persistNativeSyncSessionCode();
+      state.nativeSyncError = "";
       renderNativeSyncPanel();
-    }
-  });
+    });
+
+    directorSyncStartDirectorButton.addEventListener("click", () => {
+      haptic(12);
+      activateDirectorShortcut();
+    });
+
+    directorSyncStartFollowerButton.addEventListener("click", () => {
+      // Follower mode is automatic — button is hidden but kept for compat
+      haptic(12);
+      state.nativeSyncAutoStartSuppressed = false;
+      requestAutoFollowerMode();
+    });
+
+    directorSyncStopButton.addEventListener("click", () => {
+      haptic();
+      state.nativeSyncAutoStartSuppressed = true;
+      state.nativeSyncAutoStartRequested = false;
+      state.nativeSyncError = "";
+      state.nativeSyncStatus = "";
+      renderNativeSyncPanel();
+      if (!postNativeBridge({ type: "sync-stop" })) {
+        state.nativeSyncRole = "off";
+        state.nativeSyncStatus = "";
+        state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
+        renderNativeSyncPanel();
+      }
+    });
+  }
 
   // Fullscreen
   fullscreenButton.addEventListener("click", () => {
