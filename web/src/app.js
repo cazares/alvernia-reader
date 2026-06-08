@@ -2678,8 +2678,8 @@ const ensureRelayPill = () => {
   style.textContent =
     "#sv-live-pill{position:fixed;top:max(0.6rem,env(safe-area-inset-top,0px));" +
     "right:max(0.7rem,env(safe-area-inset-right,0px));z-index:46;border:0;padding:0;" +
-    "width:15px;height:15px;border-radius:50%;display:none;cursor:pointer;" +
-    "box-shadow:0 0 0 3px rgba(255,255,255,0.55),0 1px 3px rgba(0,0,0,.35);" +
+    "width:8px;height:8px;border-radius:50%;display:none;cursor:pointer;" +
+    "box-shadow:0 0 0 2px rgba(255,255,255,0.55),0 1px 3px rgba(0,0,0,.35);" +
     "user-select:none;-webkit-tap-highlight-color:transparent}" +
     "#sv-live-pill.is-live{background:#22c55e;animation:sv-pulse 1.7s ease-in-out infinite}" +
     "#sv-live-pill.is-resync{background:#f0c040}" +
