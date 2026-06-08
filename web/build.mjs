@@ -609,12 +609,14 @@ for (const entry of songIndex) {
 fs.writeFileSync(path.join(distDir, "song-titles.json"), JSON.stringify(songTitles));
 fs.writeFileSync(path.join(distDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
 
-// Inline ONLY the page manifest — it's needed for the very first render. The
-// search index (~45 KB) is fetched lazily from /search-index.json the first time
-// a follower opens search, so we keep it out of the critical first-paint HTML.
-const pagesJson = JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex });
+// Inline ONLY { totalPages } — the bare minimum to paint the director's page
+// instantly. The full song index (~50 KB: titles, themes, intro chords) and the
+// search index are both fetched lazily from /pages.json and /search-index.json,
+// so the follower's first-paint HTML stays tiny (~5 KB on the wire). The full
+// manifest is still written to /pages.json (above) for that lazy hydrate.
+const pagesMeta = JSON.stringify({ totalPages: pageFiles.length });
 const inlineScripts =
-  `  <script id="pages-data" type="application/json">${pagesJson}</script>\n`;
+  `  <script id="pages-data" type="application/json">${pagesMeta}</script>\n`;
 const htmlSrc = fs.readFileSync(path.join(srcDir, "index.html"), "utf8");
 fs.writeFileSync(
   path.join(distDir, "index.html"),

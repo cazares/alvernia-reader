@@ -99,21 +99,28 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Stale-while-revalidate: serve the cached copy INSTANTLY (critical on weak cell —
+  // never wait on the network for assets we already have), then refresh the cache in
+  // the background so the next load is current. A deploy is thus picked up one load
+  // later, which is safe: the director's live page arrives over the relay WebSocket,
+  // not these cached files. Cold cache falls back to network; dead network to cache.
   if (NETWORK_FIRST_PATHS.has(requestUrl.pathname)) {
-    event.respondWith(
-      caches.open(STATIC_CACHE).then(async (cache) => {
-        try {
-          const response = await fetch(event.request);
-          if (response.ok && shouldCacheResponse(response)) {
-            cache.put(event.request, response.clone());
-          }
-          return response;
-        } catch (error) {
-          const cached = await cache.match(event.request);
-          if (cached) return cached;
-          throw error;
+    const revalidate = caches.open(STATIC_CACHE).then(async (cache) => {
+      try {
+        const response = await fetch(event.request);
+        if (response.ok && shouldCacheResponse(response)) {
+          await cache.put(event.request, response.clone());
         }
-      }),
+        return response;
+      } catch (error) {
+        return null;
+      }
+    });
+    event.waitUntil(revalidate);
+    event.respondWith(
+      caches.match(event.request).then(
+        (cached) => cached || revalidate.then((response) => response || fetch(event.request)),
+      ),
     );
     return;
   }
