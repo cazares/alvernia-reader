@@ -2675,7 +2675,7 @@ const ensureRelayPill = () => {
     "#sv-live-pill{position:fixed;left:max(0.55rem,env(safe-area-inset-left,0px));" +
     "top:max(0.55rem,env(safe-area-inset-top,0px));z-index:46;border:0;width:4rem;height:4rem;" +
     "border-radius:14px;background:rgba(26,26,46,0.38);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);" +
-    "color:#fff;font-size:1.8rem;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.4);display:none;" +
+    "color:#fff;font-size:2.7rem;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.4);display:none;" +
     "align-items:center;justify-content:center;user-select:none;cursor:pointer;-webkit-tap-highlight-color:transparent}" +
     "#sv-live-pill .fab-dot{position:absolute;top:7px;right:7px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.25)}" +
     "#sv-live-pill.is-live .fab-dot{background:#4cff91;animation:sv-pulse 1.6s ease-in-out infinite}" +
