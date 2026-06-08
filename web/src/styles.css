@@ -1952,6 +1952,9 @@ button:disabled {
 .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
 .song-jump-fab:active,
 .search-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
+/* Web reader is a pure follower display — no floating buttons, just the status dot. */
+.song-jump-fab,
+.search-fab { display: none !important; }
 
 /* Modal shell + backdrop */
 .song-jump-modal {

@@ -2094,6 +2094,10 @@ const activateTab = (tabId) => {
   }
   state.activeTab = tabId;
 
+  // Lazy-load the search index the first time search opens — keeps ~45 KB out of
+  // first paint, since web followers almost never search.
+  if (isBuscar && !state.searchIndexPages.length) loadSearchIndex();
+
   // Update rail highlight
   drawerTabRail.querySelectorAll(".rail-tab").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.tab === tabId);
@@ -2672,15 +2676,14 @@ const ensureRelayPill = () => {
   if (relayPill) return relayPill;
   const style = document.createElement("style");
   style.textContent =
-    "#sv-live-pill{position:fixed;left:max(0.55rem,env(safe-area-inset-left,0px));" +
-    "top:max(0.55rem,env(safe-area-inset-top,0px));z-index:46;border:0;width:4rem;height:4rem;" +
-    "border-radius:14px;background:rgba(26,26,46,0.38);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);" +
-    "color:#fff;font-size:2.7rem;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.4);display:none;" +
-    "align-items:center;justify-content:center;user-select:none;cursor:pointer;-webkit-tap-highlight-color:transparent}" +
-    "#sv-live-pill .fab-dot{position:absolute;top:7px;right:7px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.25)}" +
-    "#sv-live-pill.is-live .fab-dot{background:#4cff91;animation:sv-pulse 1.6s ease-in-out infinite}" +
-    "#sv-live-pill.is-resync .fab-dot{background:#f0c040}" +
-    "@keyframes sv-pulse{0%,100%{opacity:1}50%{opacity:.3}}";
+    "#sv-live-pill{position:fixed;top:max(0.6rem,env(safe-area-inset-top,0px));" +
+    "right:max(0.7rem,env(safe-area-inset-right,0px));z-index:46;border:0;padding:0;" +
+    "width:15px;height:15px;border-radius:50%;display:none;cursor:pointer;" +
+    "box-shadow:0 0 0 3px rgba(255,255,255,0.55),0 1px 3px rgba(0,0,0,.35);" +
+    "user-select:none;-webkit-tap-highlight-color:transparent}" +
+    "#sv-live-pill.is-live{background:#22c55e;animation:sv-pulse 1.7s ease-in-out infinite}" +
+    "#sv-live-pill.is-resync{background:#f0c040}" +
+    "@keyframes sv-pulse{0%,100%{opacity:1}50%{opacity:.35}}";
   document.head.appendChild(style);
   relayPill = document.createElement("button");
   relayPill.id = "sv-live-pill";
@@ -2700,16 +2703,9 @@ const ensureRelayPill = () => {
 const renderRelayPill = () => {
   const pill = ensureRelayPill();
   if (!relay.hasDirector) { pill.style.display = "none"; return; }
-  pill.style.display = "inline-flex";
-  if (relay.following) {
-    pill.className = "is-live";
-    pill.innerHTML = '↻<span class="fab-dot"></span>';
-    pill.setAttribute("aria-label", "En vivo con el director");
-  } else {
-    pill.className = "is-resync";
-    pill.innerHTML = '↻<span class="fab-dot"></span>';
-    pill.setAttribute("aria-label", "Volver a en vivo");
-  }
+  pill.style.display = "block";
+  pill.className = relay.following ? "is-live" : "is-resync";
+  pill.setAttribute("aria-label", relay.following ? "En vivo con el director" : "Volver a en vivo");
 };
 
 const relayIsFreshLive = (snap) =>
@@ -2802,7 +2798,8 @@ const initReader = async () => {
   setOfflineGateState({ visible: false });
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   startRelayFollow();
-  loadSearchIndex();
+  // Search index is loaded lazily on first search-open (see activateTab) so it
+  // never weighs down the follower's first paint.
   renderActiveTab();
   postNativeBridge({
     type: "bridge-ready",
