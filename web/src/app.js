@@ -1835,11 +1835,29 @@ const wireServiceWorkerRegistration = (registration) => {
 
   const refreshRegistration = () => registration.update().catch(() => {});
   window.addEventListener("online", refreshRegistration);
+  // Adaptive new-deploy check: fast (3s) right after the tab is foregrounded — so a
+  // follower picks up a fresh deploy within seconds during active use/testing — then
+  // back off ×1.5 toward 60s while it sits idle, sparing weak-cell data + battery over
+  // a long Mass. Foregrounding snaps it back to 3s. On a new version the SW chain
+  // auto-reloads the tab (controllerchange handler).
+  let swUpdateTimer = 0;
+  let swUpdateDelay = 3000;
+  const scheduleUpdateCheck = () => {
+    clearTimeout(swUpdateTimer);
+    swUpdateTimer = setTimeout(() => {
+      if (document.visibilityState === "visible") refreshRegistration();
+      swUpdateDelay = Math.min(Math.round(swUpdateDelay * 1.5), 60000);
+      scheduleUpdateCheck();
+    }, swUpdateDelay);
+  };
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       refreshRegistration();
+      swUpdateDelay = 3000;
+      scheduleUpdateCheck();
     }
   });
+  scheduleUpdateCheck();
 };
 
 const registerServiceWorker = async () => {
