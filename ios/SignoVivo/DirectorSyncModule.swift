@@ -24,6 +24,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let inviteTimeout: TimeInterval = 30
   private static let followerRetryDelay: TimeInterval = 2
   private static let followerHelloInterval: TimeInterval = 8
+  /// One-shot snapshot-recovery probe delay. MPC can drop the first reliable send right at
+  /// .connected, so if the director's proactive snapshot AND the follower's first hello both
+  /// land in that fragile window, the follower would otherwise wait a full followerHelloInterval
+  /// (8 s) for the next hello. This probe re-requests the snapshot ~1.5 s after connect when no
+  /// page has arrived yet, so a joining/reconnecting follower snaps to the director's page fast.
+  private static let followerSnapshotProbeDelay: TimeInterval = 1.5
   /// Seconds a follower waits for a director before entering self-directed mode.
   private static let selfDirectedTimeoutSeconds: TimeInterval = 10
   private static let maxInboundPayloadBytes = 8 * 1024
@@ -731,6 +737,21 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  /// Schedule a one-shot snapshot re-request shortly after connecting. If the director's proactive
+  /// snapshot AND the follower's first hello were both dropped in the fragile just-connected window,
+  /// this recovers the director's current page in ~followerSnapshotProbeDelay seconds instead of
+  /// waiting for the next followerHello tick. Generation-guarded so a reset cancels it.
+  private func scheduleFollowerSnapshotProbe() {
+    let generation = resetGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.followerSnapshotProbeDelay) { [weak self] in
+      guard let self = self, self.resetGeneration == generation else { return }
+      guard self.currentRole == "follower" else { return }
+      // Only probe if no page has arrived since we connected — otherwise the snapshot already landed.
+      guard self.lastFollowerPageReceivedAt == 0 else { return }
+      self.forceFollowerHelloNow()
+    }
+  }
+
   private func refreshDiscovery() {
     guard currentRole != "off" else { return }
     autoreleasepool {
@@ -1054,6 +1075,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.pauseDiscoveryRefreshWhileConnected()
           self.startFollowerHelloTimer()
           self.sendFollowerHelloIfNeeded()
+          self.scheduleFollowerSnapshotProbe()
         } else if self.currentRole == "director" {
           self.sendCurrentPageSnapshot(to: peerID, via: session)
         }
