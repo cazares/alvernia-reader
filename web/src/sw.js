@@ -51,14 +51,16 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  // Clean up old-version caches. We deliberately do NOT pre-fetch all 370 pages
+  // anymore — that ~34 MB background download froze first loads. Followers cache
+  // pages on demand (cache-first handler below); the offline iPad still preloads
+  // the whole manual via signovivo.com?admin=1.
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(
-        keys
-          .filter((key) => ![STATIC_CACHE, PAGE_CACHE].includes(key))
-          .map((key) => caches.delete(key)),
-      ))
-      .then(() => backgroundCacheAllPages()),
+    caches.keys().then((keys) => Promise.all(
+      keys
+        .filter((key) => ![STATIC_CACHE, PAGE_CACHE].includes(key))
+        .map((key) => caches.delete(key)),
+    )),
   );
   self.clients.claim();
 });
