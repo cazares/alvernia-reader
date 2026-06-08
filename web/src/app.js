@@ -2762,18 +2762,16 @@ const applyRelaySnapshot = (snap, { force = false } = {}) => {
   relay.hasDirector = true;
   relay.livePage = snap.page;
 
-  // First time we ever see the director (e.g. initial load) → adopt and follow.
-  if (relay.appliedPage == null) relay.following = true;
-
-  // If the user has browsed away since our last applied page, don't yank them —
-  // offer "Volver a en vivo" instead.
-  const userMovedAway = relay.appliedPage != null && state.currentPage !== relay.appliedPage;
-  if (relay.following && !userMovedAway) {
-    relay.appliedPage = snap.page;
-    if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
-  } else {
-    relay.following = false;
-  }
+  // A congregation follower should ALWAYS track the director. We only reach here for a
+  // NEW director position (same-seq heartbeat pings are seq-guarded above), so the director
+  // just moved — snap to it and (re-)engage following, EVEN IF a stray Safari swipe/scroll
+  // had nudged the page off and "browsed away". The old behavior stranded followers on the
+  // amber "tap to resync" dot, permanently out of sync (seen on video: director on 367,
+  // follower frozen on 365). You can still peek between the director's moves — the next
+  // move pulls you home; tap the dot to resync immediately.
+  relay.following = true;
+  relay.appliedPage = snap.page;
+  if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
   renderRelayPill();
 };
 
