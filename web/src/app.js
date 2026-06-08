@@ -2196,6 +2196,8 @@ const bindReaderEvents = () => {
 
   // ── Jump-to-song modal: trigger / cancel / backdrop ──
   songJumpTrigger.addEventListener("click", () => { haptic(); openSongJump(); });
+  const searchFab = document.getElementById("search-fab");
+  if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
   songJumpBackdrop.addEventListener("click", () => { closeSongJump(); });
 
@@ -2670,15 +2672,14 @@ const ensureRelayPill = () => {
   if (relayPill) return relayPill;
   const style = document.createElement("style");
   style.textContent =
-    "#sv-live-pill{position:fixed;left:50%;transform:translateX(-50%);" +
-    "bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:9999;border:0;" +
-    "font:600 14px/1 -apple-system,system-ui,sans-serif;color:#fff;padding:9px 15px;" +
-    "border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none;" +
-    "align-items:center;gap:7px;user-select:none;-webkit-tap-highlight-color:transparent}" +
-    "#sv-live-pill.is-live{background:#1f7a4d}" +
-    "#sv-live-pill.is-resync{background:#9a6a12;cursor:pointer}" +
-    "#sv-live-pill .dot{width:8px;height:8px;border-radius:50%;background:#fff}" +
-    "#sv-live-pill.is-live .dot{animation:sv-pulse 1.6s ease-in-out infinite}" +
+    "#sv-live-pill{position:fixed;left:max(0.55rem,env(safe-area-inset-left,0px));" +
+    "top:max(0.55rem,env(safe-area-inset-top,0px));z-index:46;border:0;width:4rem;height:4rem;" +
+    "border-radius:14px;background:rgba(26,26,46,0.38);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);" +
+    "color:#fff;font-size:1.8rem;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.4);display:none;" +
+    "align-items:center;justify-content:center;user-select:none;cursor:pointer;-webkit-tap-highlight-color:transparent}" +
+    "#sv-live-pill .fab-dot{position:absolute;top:7px;right:7px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.25)}" +
+    "#sv-live-pill.is-live .fab-dot{background:#4cff91;animation:sv-pulse 1.6s ease-in-out infinite}" +
+    "#sv-live-pill.is-resync .fab-dot{background:#f0c040}" +
     "@keyframes sv-pulse{0%,100%{opacity:1}50%{opacity:.3}}";
   document.head.appendChild(style);
   relayPill = document.createElement("button");
@@ -2702,10 +2703,12 @@ const renderRelayPill = () => {
   pill.style.display = "inline-flex";
   if (relay.following) {
     pill.className = "is-live";
-    pill.innerHTML = '<span class="dot"></span>EN VIVO';
+    pill.innerHTML = '↻<span class="fab-dot"></span>';
+    pill.setAttribute("aria-label", "En vivo con el director");
   } else {
     pill.className = "is-resync";
-    pill.textContent = "▶ Volver a en vivo";
+    pill.innerHTML = '↻<span class="fab-dot"></span>';
+    pill.setAttribute("aria-label", "Volver a en vivo");
   }
 };
 

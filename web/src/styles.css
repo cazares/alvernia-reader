@@ -1924,29 +1924,34 @@ button:disabled {
    "♪ Abrir Canto ♪", "Cancelar". The drawer Teclado tab is retired.
    ════════════════════════════════════════════════════════════════════════════ */
 
-/* Floating ♪ trigger (equivalent to native's nav-cluster ♪ button) */
-.song-jump-fab {
+/* Floating ♪ trigger — matches the native translucent-navy rounded-square clusterBtn */
+.song-jump-fab,
+.search-fab {
   position: fixed;
-  right: max(1rem, env(safe-area-inset-right, 0px));
-  top: max(1rem, env(safe-area-inset-top, 0px));
+  top: max(0.55rem, env(safe-area-inset-top, 0px));
   z-index: 45;
   width: 4rem;
   height: 4rem;
-  border-radius: 50%;
+  border-radius: 14px;
   border: 0;
-  background: #0A84FF;
+  background: rgba(26, 26, 46, 0.38);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
   color: #fff;
-  font-size: 2rem;
+  font-size: 1.9rem;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.song-jump-fab:active { background: #0066CC; transform: scale(0.96); }
+.search-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
+.song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
+.song-jump-fab:active,
+.search-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
 
 /* Modal shell + backdrop */
 .song-jump-modal {
