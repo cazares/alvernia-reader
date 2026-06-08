@@ -688,6 +688,17 @@ const prefetchSongPage = (pageNumber) => {
 
 // ── Status rendering ──────────────────────────────────────────────────────────
 const renderStatus = () => {
+  // The song index hydrates lazily, off the critical first paint. Until it lands,
+  // show a neutral "Página N" instead of a bogus "Canción 0", and park song-nav.
+  if (!state.songIndex.length) {
+    songStatus.textContent = `Página ${state.currentPage}`;
+    songIntroEl.classList.add("is-hidden");
+    prevPageButton.disabled = true;
+    nextPageButton.disabled = true;
+    prevCornerButton.disabled = state.pageHistory.length === 0;
+    prevCornerButton.classList.toggle("is-unavailable", state.pageHistory.length === 0);
+    return;
+  }
   const index = findSongIndexAtOrBeforePage(state.currentPage);
   const entry = index >= 0 ? state.songIndex[index] : null;
 
@@ -2776,18 +2787,30 @@ const startRelayFollow = () => {
 };
 
 const initReader = async () => {
+  // The inlined manifest now carries ONLY { totalPages } — just enough to paint
+  // the director's page instantly. The song index (~50 KB: titles, themes, intro
+  // chords, jump-to-song) hydrates separately so it never blocks first paint.
   const inlinedPages = document.getElementById("pages-data");
   const manifest = inlinedPages
     ? JSON.parse(inlinedPages.textContent)
     : await fetch(resolveAppPath("/pages.json"), { cache: "no-store" }).then((r) => r.json());
   state.totalPages = manifest.totalPages;
-  state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
-  state.totalSongs = state.songIndex.length;
-  state.themeIndex = manifest.themeIndex || [];
   state.currentPage = DEFAULT_START_PAGE;
-  // Build the song→page lookup up front so jump-to-song works immediately,
-  // independent of the (optional, slow) offline pre-cache below.
-  state.songPageLookup = buildSongPageLookup(state.songIndex);
+
+  // Fold the full song index into state and refresh everything that depends on it.
+  // Runs immediately if the index was inlined (offline / ?admin build), otherwise
+  // in the background once /pages.json lands (see below).
+  const hydrateSongIndex = (data) => {
+    if (!data || !data.songIndex) return;
+    state.songIndex = [...data.songIndex].sort((left, right) => left.song - right.song);
+    state.totalSongs = state.songIndex.length;
+    state.themeIndex = data.themeIndex || [];
+    state.songPageLookup = buildSongPageLookup(state.songIndex);
+    renderStatus();
+    renderNativeSyncPanel();
+    renderActiveTab();
+  };
+  if (manifest.songIndex) hydrateSongIndex(manifest);
   renderDraft();
   renderStatus();
   renderNativeSyncPanel();
@@ -2806,6 +2829,14 @@ const initReader = async () => {
     page: DEFAULT_START_PAGE,
     totalPages: state.totalPages,
   });
+  // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
+  // off the critical first paint without losing titles, themes, or jump-to-song.
+  if (!manifest.songIndex) {
+    fetch(resolveAppPath("/pages.json"), { cache: "no-store" })
+      .then((response) => response.json())
+      .then(hydrateSongIndex)
+      .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
+  }
   // Full offline pre-cache (downloads the whole manual). Only show the blocking
   // spinner gate when an admin is explicitly provisioning a dedicated offline iPad
   // via signovivo.com?admin=1 — everyone else gets an instant reader.
