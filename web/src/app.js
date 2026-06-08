@@ -2797,13 +2797,8 @@ const initReader = async () => {
   renderNativeSyncPanel();
   updateFullscreenButton();
   hideLoadingIndicator();
-  // Offline pre-cache shows the spinner gate during the first big download.
-  // It must NEVER block or break navigation — a failure here is non-fatal.
-  try {
-    await requireOfflineBundle(state.totalPages);
-  } catch (error) {
-    console.warn("Pre-cache offline incompleto:", error);
-  }
+  // Show the reader IMMEDIATELY — never block the congregation behind the big
+  // offline pre-cache. The service worker caches every page in the background.
   setOfflineGateState({ visible: false });
   renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   startRelayFollow();
@@ -2814,6 +2809,17 @@ const initReader = async () => {
     page: DEFAULT_START_PAGE,
     totalPages: state.totalPages,
   });
+  // Full offline pre-cache (downloads the whole manual). Only show the blocking
+  // spinner gate when an admin is explicitly provisioning a dedicated offline iPad
+  // via signovivo.com?admin=1 — everyone else gets an instant reader.
+  if (isAdminSetupMode) {
+    try {
+      await requireOfflineBundle(state.totalPages);
+    } catch (error) {
+      console.warn("Pre-cache offline incompleto:", error);
+    }
+    setOfflineGateState({ visible: false });
+  }
 };
 
 if (appVersionLabel && window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION) {
