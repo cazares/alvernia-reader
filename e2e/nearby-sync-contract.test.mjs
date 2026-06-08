@@ -309,6 +309,26 @@ test("late joiners receive immediate snapshots from the director", () => {
   assert.match(swiftSource, /if type == "hello"[\s\S]*sendCurrentPageSnapshot\(to: peerID, via: session\)/);
 });
 
+// Belt-and-suspenders: MPC can drop the first reliable send right at .connected, so the
+// director's proactive snapshot AND the follower's first hello can both vanish. A one-shot
+// ~1.5s probe re-requests the snapshot if no page has arrived, so a joining/reconnecting
+// follower snaps to the director's current page fast instead of waiting a full hello tick (8s).
+test("late joiner: follower schedules a one-shot snapshot-recovery probe on connect", () => {
+  assert.match(swiftSource, /followerSnapshotProbeDelay/);
+  assert.match(swiftSource, /private func scheduleFollowerSnapshotProbe\(\)/);
+  const probeBlock = swiftSource.match(/private func scheduleFollowerSnapshotProbe\(\)[\s\S]*?\n  \}/)?.[0] ?? "";
+  assert.ok(probeBlock.length > 0, "scheduleFollowerSnapshotProbe must exist");
+  // Must be generation-guarded (a reset cancels it) and gated on "no page received yet".
+  assert.match(probeBlock, /self\.resetGeneration == generation/);
+  assert.match(probeBlock, /lastFollowerPageReceivedAt == 0/);
+  assert.match(probeBlock, /forceFollowerHelloNow\(\)/);
+  // Must be invoked on the .connected follower path, after the hello timer starts.
+  const connectedBlock = swiftSource.match(
+    /case \.connected:[\s\S]*?self\.startFollowerHelloTimer\(\)[\s\S]*?scheduleFollowerSnapshotProbe\(\)/
+  )?.[0] ?? "";
+  assert.ok(connectedBlock.length > 0, "probe must be scheduled on .connected after startFollowerHelloTimer");
+});
+
 // Removed: "director takeover request cannot leave reconnect modal stuck forever" —
 // asserted the removed takeover-timeout UI ("Sin respuesta del director" is gone from
 // the source). Dead-behavior test; restore from git history if takeover returns.
