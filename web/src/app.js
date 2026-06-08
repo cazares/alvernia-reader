@@ -141,10 +141,10 @@ const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
 const CACHE_VERSION = "__CACHE_VERSION__";
-const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
-const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
+const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
-const OFFLINE_DB_NAME = "signo-vino-offline";
+const OFFLINE_DB_NAME = "signo-vivo-offline";
 const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
 const OFFLINE_PAGES = window.OFFLINE_PAGES || null;
@@ -430,7 +430,7 @@ const stopLoadingPhrases = () => {
 
 const setOfflineGateState = ({
   visible,
-  title = "Preparando Signo Vino",
+  title = "Preparando Signo Vivo",
   body = "Descargando todo el manual para que funcione 100% offline.",
   progress = 0,
   total = 0,
@@ -574,7 +574,7 @@ const requireOfflineBundle = async (totalPages) => {
   setOfflineGateState({
     visible: true,
     title: "Descargando todo el manual",
-    body: "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+    body: "No cierres la app. Cuando termine, Signo Vivo quedará listo para usarse sin internet.",
     progress: 0,
     total: totalPages,
     showAdminNote: true,
@@ -587,7 +587,7 @@ const requireOfflineBundle = async (totalPages) => {
       title: progress >= total ? "Verificando descarga" : "Descargando todo el manual",
       body: progress >= total
         ? "Comprobando que todas las páginas ya quedaron guardadas en este iPad."
-        : "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+        : "No cierres la app. Cuando termine, Signo Vivo quedará listo para usarse sin internet.",
       progress,
       total,
       showAdminNote: true,
@@ -601,7 +601,7 @@ const requireOfflineBundle = async (totalPages) => {
   setOfflineGateState({
     visible: true,
     title: "Offline listo",
-    body: "La descarga terminó. Este iPad ya puede abrir Signo Vino sin internet.",
+    body: "La descarga terminó. Este iPad ya puede abrir Signo Vivo sin internet.",
     progress: totalPages,
     total: totalPages,
     showAdminNote: true,
@@ -2723,34 +2723,29 @@ const relayIsFreshLive = (snap) =>
   snap && typeof snap.seq === "number" && snap.seq > 0 &&
   (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
 
-const applyRelaySnapshot = (snap, { initial = false } = {}) => {
+const applyRelaySnapshot = (snap, { force = false } = {}) => {
   if (!snap || typeof snap.page !== "number") return;
-  if (typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return; // stale / out-of-order
-  if (typeof snap.seq === "number") relay.lastSeq = snap.seq;
+  // Ongoing pushes are de-duped / ordered by seq. A FORCED resync (initial load,
+  // reconnect, foreground, or the safety poll) must re-apply the director's CURRENT
+  // page even when the seq isn't newer — the director may be sitting still — so it
+  // skips the seq guard.
+  if (!force && typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return;
+  if (typeof snap.seq === "number") relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
 
   const hasPublished = typeof snap.seq === "number" && snap.seq > 0;
-
-  // On first load, OPEN on the director's last-published page even if they've been
-  // lingering past the live-freshness window — a follower joining mid-Mass must land
-  // where the director is, not on the default page. (relayIsFreshLive only gates the
-  // ongoing auto-follow / "is the director still pushing" behavior below.)
-  if (initial && hasPublished) {
-    relay.hasDirector = true;
-    relay.livePage = snap.page;
-    relay.following = true;
-    relay.appliedPage = snap.page;
-    if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
-    renderRelayPill();
-    return;
-  }
-
-  if (!relayIsFreshLive(snap)) {        // no director live (seq 0 / stale) → behave like a normal songbook
+  // No director has ever published, OR (ongoing only) the director has gone stale →
+  // behave like a normal songbook. A forced resync ignores the freshness window: a
+  // director lingering on a page is still the page the follower should be on.
+  if (!hasPublished || (!force && !relayIsFreshLive(snap))) {
     relay.hasDirector = false;
     renderRelayPill();
     return;
   }
   relay.hasDirector = true;
   relay.livePage = snap.page;
+
+  // First time we ever see the director (e.g. initial load) → adopt and follow.
+  if (relay.appliedPage == null) relay.following = true;
 
   // If the user has browsed away since our last applied page, don't yank them —
   // offer "Volver a en vivo" instead.
@@ -2768,20 +2763,22 @@ const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) 
 const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
 
 const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
-const relayPollOnce = async (initial = false) => {
+const relayPollOnce = async (force = false) => {
   try {
     const r = await fetch(relayStateUrl(), { cache: "no-store" });
-    if (r.ok) applyRelaySnapshot(await r.json(), { initial });
+    if (r.ok) applyRelaySnapshot(await r.json(), { force });
   } catch {}
 };
-const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(relayPollOnce, 4000); relayPollOnce(); };
+// Fallback polling (when the WS won't hold): force every tick so a stationary director
+// still keeps the follower in sync.
+const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
 
 const connectRelay = () => {
   relay.manualClose = false;
   stopRelayPolling();
   let ws;
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
-  ws.addEventListener("open", () => { relay.backoff = 500; });
+  ws.addEventListener("open", () => { relay.backoff = 500; relayPollOnce(true); }); // resync to current page on (re)connect
   ws.addEventListener("message", (ev) => { try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
@@ -2795,9 +2792,15 @@ const connectRelay = () => {
 const startRelayFollow = () => {
   if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") relayPollOnce();
+    if (document.visibilityState === "visible") relayPollOnce(true);   // forced resync on foreground
   });
   window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
+  // Safety-net resync: flaky cell can leave the WS a "zombie" — open but silently no
+  // longer delivering, with NO close event — so pushes stop with no foreground or
+  // reconnect event to catch it. Re-sync to the director's current page every 4s while
+  // the tab is visible: cheap (tiny payload), a no-op when already in sync, and it
+  // respects browse-away. The WS still delivers instant updates whenever it's healthy.
+  setInterval(() => { if (document.visibilityState === "visible") relayPollOnce(true); }, 4000);
   relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
   if ("WebSocket" in window) connectRelay(); else startRelayPolling();
 };
@@ -2883,5 +2886,5 @@ bindViewportMetrics();
 bindReaderEvents();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
-  setLoading(true, "No se pudo cargar Signo Vino.");
+  setLoading(true, "No se pudo cargar Signo Vivo.");
 });
