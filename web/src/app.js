@@ -1040,9 +1040,19 @@ const closeSongJump = () => {
 const goToDraftSong = () => {
   const songNumber = normalizeSongDraftNumber(state.songDraft);
   if (songNumber === null) { closeSongJump(); return; }
-  renderPage(findSongPage(songNumber));
+  const targetPage = findSongPage(songNumber);
+  renderPage(targetPage);
   addToRecientes(songNumber);
   closeSongJump();
+  // Jumping OFF the director's live page = intentional browsing: pause auto-follow and
+  // surface the "Volver a en vivo" bar so getting back is obvious. (Jumping TO the
+  // director's page keeps you live.)
+  if (relay.hasDirector && relay.livePage != null && targetPage !== relay.livePage) {
+    relay.browsing = true;
+    relay.following = false;
+    showGoLiveBar();
+    renderRelayPill();
+  }
 };
 
 const goBackInHistory = () => {
@@ -2229,6 +2239,8 @@ const bindReaderEvents = () => {
 
   // ── Jump-to-song modal: trigger / cancel / backdrop ──
   songJumpTrigger.addEventListener("click", () => { haptic(); openSongJump(); });
+  // Tapping the song title is the discoverable, deliberate entry to jump-to-song / browse.
+  songStatus.addEventListener("click", () => { haptic(); openSongJump(); });
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
@@ -2694,6 +2706,7 @@ const relay = {
   manualClose: false,
   pollTimer: 0,
   lastSeq: -1,
+  browsing: false,   // user opted into manual browse (tap title → jump-to-song): pause auto-follow
   following: true,   // apply pushes until the user browses away
   appliedPage: null, // last page WE applied from the relay
   livePage: null,    // latest page the director is on (tracked even while browsing)
@@ -2719,11 +2732,7 @@ const ensureRelayPill = () => {
   relayPill.type = "button";
   relayPill.addEventListener("click", () => {
     if (!relayPill.classList.contains("is-resync") || relay.livePage == null) return;
-    relay.following = true;
-    relay.appliedPage = relay.livePage;
-    renderPage(relay.livePage, { pushToHistory: false });
-    renderRelayPill();
-    haptic(12);
+    goLive();   // amber dot is also a "go live" affordance (same as the bar)
   });
   document.body.appendChild(relayPill);
   return relayPill;
@@ -2735,6 +2744,47 @@ const renderRelayPill = () => {
   pill.style.display = "block";
   pill.className = relay.following ? "is-live" : "is-resync";
   pill.setAttribute("aria-label", relay.following ? "En vivo con el director" : "Volver a en vivo");
+};
+
+// ── "Volver a en vivo" bar — shown while the user is browsing the songbook off-live ─────
+let goLiveBar = null;
+const ensureGoLiveBar = () => {
+  if (goLiveBar) return goLiveBar;
+  const style = document.createElement("style");
+  style.textContent =
+    "#sv-golive-bar{position:fixed;left:50%;transform:translateX(-50%);" +
+    "bottom:max(1.1rem,env(safe-area-inset-bottom,0px));z-index:48;display:none;" +
+    "align-items:center;gap:0.4rem;padding:0.7rem 1.3rem;border:0;border-radius:999px;" +
+    "background:#22c55e;color:#fff;font:600 0.98rem/1 system-ui,-apple-system,sans-serif;" +
+    "cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);" +
+    "-webkit-tap-highlight-color:transparent}" +
+    "#sv-golive-bar.is-visible{display:flex;animation:sv-golive-in .2s ease}" +
+    "@keyframes sv-golive-in{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}" +
+    "#song-status{cursor:pointer}";
+  document.head.appendChild(style);
+  goLiveBar = document.createElement("button");
+  goLiveBar.id = "sv-golive-bar";
+  goLiveBar.type = "button";
+  goLiveBar.textContent = "↩  Volver a en vivo";
+  goLiveBar.addEventListener("click", () => goLive());
+  document.body.appendChild(goLiveBar);
+  return goLiveBar;
+};
+const showGoLiveBar = () => { if (relay.hasDirector) ensureGoLiveBar().classList.add("is-visible"); };
+const hideGoLiveBar = () => { if (goLiveBar) goLiveBar.classList.remove("is-visible"); };
+
+// Leave browse mode and snap back to the director's current page.
+const goLive = () => {
+  relay.browsing = false;
+  relay.following = true;
+  hideGoLiveBar();
+  closeSongJump();
+  if (relay.livePage != null) {
+    relay.appliedPage = relay.livePage;
+    if (state.currentPage !== relay.livePage) renderPage(relay.livePage, { pushToHistory: false });
+  }
+  renderRelayPill();
+  haptic(12);
 };
 
 const relayIsFreshLive = (snap) =>
@@ -2761,6 +2811,11 @@ const applyRelaySnapshot = (snap, { force = false } = {}) => {
   }
   relay.hasDirector = true;
   relay.livePage = snap.page;
+
+  // The user is intentionally browsing the songbook (tapped the title → jumped). Track the
+  // director's latest page so "Volver a en vivo" lands on the current spot, but DON'T yank
+  // them off their page.
+  if (relay.browsing) { renderRelayPill(); return; }
 
   // A congregation follower should ALWAYS track the director. We only reach here for a
   // NEW director position (same-seq heartbeat pings are seq-guarded above), so the director
