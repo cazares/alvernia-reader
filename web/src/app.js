@@ -2675,6 +2675,8 @@ const relay = {
   backoff: 500,
   manualClose: false,
   pollTimer: 0,
+  safetyTimer: 0,
+  safetyDelay: 1000,
   lastSeq: -1,
   following: true,   // apply pushes until the user browses away
   appliedPage: null, // last page WE applied from the relay
@@ -2773,13 +2775,34 @@ const relayPollOnce = async (force = false) => {
 // still keeps the follower in sync.
 const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
 
+// Adaptive safety resync: poll fast (1s) right after activity so a follower on a flaky
+// WS catches the director within ~1s, then back off ×1.5 toward 8s when nothing's
+// changing (spares battery/data). Any new director page, foreground, reconnect, or WS
+// push snaps it back to 1s. The WS stays the instant path whenever it's healthy.
+const RELAY_POLL_MIN_MS = 1000;
+const RELAY_POLL_MAX_MS = 8000;
+const scheduleSafetyPoll = () => {
+  clearTimeout(relay.safetyTimer);
+  relay.safetyTimer = setTimeout(async () => {
+    if (document.visibilityState === "visible") {
+      const before = relay.lastSeq;
+      await relayPollOnce(true);
+      relay.safetyDelay = relay.lastSeq !== before
+        ? RELAY_POLL_MIN_MS
+        : Math.min(Math.round(relay.safetyDelay * 1.5), RELAY_POLL_MAX_MS);
+    }
+    scheduleSafetyPoll();
+  }, relay.safetyDelay);
+};
+const bumpRelayPollFast = () => { relay.safetyDelay = RELAY_POLL_MIN_MS; scheduleSafetyPoll(); };
+
 const connectRelay = () => {
   relay.manualClose = false;
   stopRelayPolling();
   let ws;
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
-  ws.addEventListener("open", () => { relay.backoff = 500; relayPollOnce(true); }); // resync to current page on (re)connect
-  ws.addEventListener("message", (ev) => { try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
+  ws.addEventListener("open", () => { relay.backoff = 500; relayPollOnce(true); bumpRelayPollFast(); }); // resync on (re)connect
+  ws.addEventListener("message", (ev) => { try { applyRelaySnapshot(JSON.parse(ev.data)); bumpRelayPollFast(); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
     if (relay.manualClose) return;
@@ -2792,15 +2815,13 @@ const connectRelay = () => {
 const startRelayFollow = () => {
   if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") relayPollOnce(true);   // forced resync on foreground
+    if (document.visibilityState === "visible") { relayPollOnce(true); bumpRelayPollFast(); }   // resync on foreground
   });
-  window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
-  // Safety-net resync: flaky cell can leave the WS a "zombie" — open but silently no
-  // longer delivering, with NO close event — so pushes stop with no foreground or
-  // reconnect event to catch it. Re-sync to the director's current page every 4s while
-  // the tab is visible: cheap (tiny payload), a no-op when already in sync, and it
-  // respects browse-away. The WS still delivers instant updates whenever it's healthy.
-  setInterval(() => { if (document.visibilityState === "visible") relayPollOnce(true); }, 4000);
+  window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); bumpRelayPollFast(); });
+  // Adaptive safety-net resync (see scheduleSafetyPoll): catches a "zombie" WS — open but
+  // silently no longer delivering, with NO close event — that no foreground or reconnect
+  // would otherwise catch. Starts fast (~1s), backs off toward 8s when idle.
+  scheduleSafetyPoll();
   relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
   if ("WebSocket" in window) connectRelay(); else startRelayPolling();
 };
