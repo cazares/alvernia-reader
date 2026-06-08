@@ -2723,10 +2723,26 @@ const relayIsFreshLive = (snap) =>
   snap && typeof snap.seq === "number" && snap.seq > 0 &&
   (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
 
-const applyRelaySnapshot = (snap) => {
+const applyRelaySnapshot = (snap, { initial = false } = {}) => {
   if (!snap || typeof snap.page !== "number") return;
   if (typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return; // stale / out-of-order
   if (typeof snap.seq === "number") relay.lastSeq = snap.seq;
+
+  const hasPublished = typeof snap.seq === "number" && snap.seq > 0;
+
+  // On first load, OPEN on the director's last-published page even if they've been
+  // lingering past the live-freshness window — a follower joining mid-Mass must land
+  // where the director is, not on the default page. (relayIsFreshLive only gates the
+  // ongoing auto-follow / "is the director still pushing" behavior below.)
+  if (initial && hasPublished) {
+    relay.hasDirector = true;
+    relay.livePage = snap.page;
+    relay.following = true;
+    relay.appliedPage = snap.page;
+    if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
+    renderRelayPill();
+    return;
+  }
 
   if (!relayIsFreshLive(snap)) {        // no director live (seq 0 / stale) → behave like a normal songbook
     relay.hasDirector = false;
@@ -2752,10 +2768,10 @@ const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) 
 const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
 
 const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
-const relayPollOnce = async () => {
+const relayPollOnce = async (initial = false) => {
   try {
     const r = await fetch(relayStateUrl(), { cache: "no-store" });
-    if (r.ok) applyRelaySnapshot(await r.json());
+    if (r.ok) applyRelaySnapshot(await r.json(), { initial });
   } catch {}
 };
 const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(relayPollOnce, 4000); relayPollOnce(); };
@@ -2782,7 +2798,7 @@ const startRelayFollow = () => {
     if (document.visibilityState === "visible") relayPollOnce();
   });
   window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
-  relayPollOnce();   // instant first paint at the director's current page
+  relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
   if ("WebSocket" in window) connectRelay(); else startRelayPolling();
 };
 
@@ -2819,7 +2835,14 @@ const initReader = async () => {
   // Show the reader IMMEDIATELY — never block the congregation behind the big
   // offline pre-cache. The service worker caches every page in the background.
   setOfflineGateState({ visible: false });
-  renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
+  // Open directly on the director's current page if one is broadcasting (the relay
+  // state is tiny — just a page number — so this barely delays first paint). Bounded
+  // by a short timeout so a slow/dead relay can't block the reader. The native app /
+  // offline bundle skip the relay (the native bridge drives the page there).
+  if (!hasNativeBridge() && !NATIVE_FILE_MODE) {
+    await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
+  }
+  if (!relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   startRelayFollow();
   // Search index is loaded lazily on first search-open (see activateTab) so it
   // never weighs down the follower's first paint.
