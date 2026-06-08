@@ -2693,8 +2693,6 @@ const relay = {
   backoff: 500,
   manualClose: false,
   pollTimer: 0,
-  safetyTimer: 0,
-  safetyDelay: 1000,
   lastSeq: -1,
   following: true,   // apply pushes until the user browses away
   appliedPage: null, // last page WE applied from the relay
@@ -2793,53 +2791,46 @@ const relayPollOnce = async (force = false) => {
 // still keeps the follower in sync.
 const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
 
-// Adaptive safety resync: poll fast (1s) right after activity so a follower on a flaky
-// WS catches the director within ~1s, then back off ×1.5 toward 8s when nothing's
-// changing (spares battery/data). Any new director page, foreground, reconnect, or WS
-// push snaps it back to 1s. The WS stays the instant path whenever it's healthy.
-const RELAY_POLL_MIN_MS = 1000;
-const RELAY_POLL_MAX_MS = 8000;
-const scheduleSafetyPoll = () => {
-  clearTimeout(relay.safetyTimer);
-  relay.safetyTimer = setTimeout(async () => {
-    if (document.visibilityState === "visible") {
-      const before = relay.lastSeq;
-      await relayPollOnce(true);
-      relay.safetyDelay = relay.lastSeq !== before
-        ? RELAY_POLL_MIN_MS
-        : Math.min(Math.round(relay.safetyDelay * 1.5), RELAY_POLL_MAX_MS);
-    }
-    scheduleSafetyPoll();
-  }, relay.safetyDelay);
-};
-const bumpRelayPollFast = () => { relay.safetyDelay = RELAY_POLL_MIN_MS; scheduleSafetyPoll(); };
-
 const connectRelay = () => {
   relay.manualClose = false;
   stopRelayPolling();
   let ws;
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
-  ws.addEventListener("open", () => { relay.backoff = 500; relayPollOnce(true); bumpRelayPollFast(); }); // resync on (re)connect
-  ws.addEventListener("message", (ev) => { try { applyRelaySnapshot(JSON.parse(ev.data)); bumpRelayPollFast(); } catch {} });
+  let lastMsgAt = Date.now();
+  let heartbeatTimer = 0;
+  ws.addEventListener("open", () => {
+    relay.backoff = 500;
+    lastMsgAt = Date.now();
+    relayPollOnce(true);   // force-resync to the director's current page on (re)connect
+    // Heartbeat: ping over the EXISTING socket every 4s. If it goes silent for 12s the
+    // socket is a "zombie" (flaky cell can drop it dead with NO close event) — close it so
+    // the reconnect + resync fires. Reuses the relay's ping->snapshot handler, so it's tiny
+    // WS frames, not HTTP /state polls — cheap on weak cell, and each ping reply doubles as
+    // a resync that catches any missed push within ~4s.
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) { clearInterval(heartbeatTimer); return; }
+      if (Date.now() - lastMsgAt > 12000) { try { ws.close(); } catch {} return; }
+      try { ws.send("ping"); } catch {}
+    }, 4000);
+  });
+  ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
+    clearInterval(heartbeatTimer);
     if (relay.manualClose) return;
     setTimeout(connectRelay, relay.backoff);
     relay.backoff = Math.min(relay.backoff * 2, 8000);
-    if (relay.backoff >= 8000) startRelayPolling();   // WS won't hold → fall back to polling
+    if (relay.backoff >= 8000) startRelayPolling();   // WS truly won't hold -> /state fallback
   });
 };
 
 const startRelayFollow = () => {
   if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") { relayPollOnce(true); bumpRelayPollFast(); }   // resync on foreground
+    if (document.visibilityState === "visible") relayPollOnce(true);   // resync on foreground
   });
-  window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); bumpRelayPollFast(); });
-  // Adaptive safety-net resync (see scheduleSafetyPoll): catches a "zombie" WS — open but
-  // silently no longer delivering, with NO close event — that no foreground or reconnect
-  // would otherwise catch. Starts fast (~1s), backs off toward 8s when idle.
-  scheduleSafetyPoll();
+  window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
   relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
   if ("WebSocket" in window) connectRelay(); else startRelayPolling();
 };
