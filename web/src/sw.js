@@ -1,6 +1,6 @@
 const CACHE_VERSION = "__CACHE_VERSION__";
-const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
-const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
+const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
 const CORE_ASSETS = [
   "/",
   "/index.html",
