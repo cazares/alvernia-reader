@@ -1,6 +1,6 @@
 const CACHE_VERSION = "__CACHE_VERSION__";
-const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
-const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
+const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -51,14 +51,16 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  // Clean up old-version caches. We deliberately do NOT pre-fetch all 370 pages
+  // anymore — that ~34 MB background download froze first loads. Followers cache
+  // pages on demand (cache-first handler below); the offline iPad still preloads
+  // the whole manual via signovivo.com?admin=1.
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(
-        keys
-          .filter((key) => ![STATIC_CACHE, PAGE_CACHE].includes(key))
-          .map((key) => caches.delete(key)),
-      ))
-      .then(() => backgroundCacheAllPages()),
+    caches.keys().then((keys) => Promise.all(
+      keys
+        .filter((key) => ![STATIC_CACHE, PAGE_CACHE].includes(key))
+        .map((key) => caches.delete(key)),
+    )),
   );
   self.clients.claim();
 });
@@ -97,21 +99,28 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Stale-while-revalidate: serve the cached copy INSTANTLY (critical on weak cell —
+  // never wait on the network for assets we already have), then refresh the cache in
+  // the background so the next load is current. A deploy is thus picked up one load
+  // later, which is safe: the director's live page arrives over the relay WebSocket,
+  // not these cached files. Cold cache falls back to network; dead network to cache.
   if (NETWORK_FIRST_PATHS.has(requestUrl.pathname)) {
-    event.respondWith(
-      caches.open(STATIC_CACHE).then(async (cache) => {
-        try {
-          const response = await fetch(event.request);
-          if (response.ok && shouldCacheResponse(response)) {
-            cache.put(event.request, response.clone());
-          }
-          return response;
-        } catch (error) {
-          const cached = await cache.match(event.request);
-          if (cached) return cached;
-          throw error;
+    const revalidate = caches.open(STATIC_CACHE).then(async (cache) => {
+      try {
+        const response = await fetch(event.request);
+        if (response.ok && shouldCacheResponse(response)) {
+          await cache.put(event.request, response.clone());
         }
-      }),
+        return response;
+      } catch (error) {
+        return null;
+      }
+    });
+    event.waitUntil(revalidate);
+    event.respondWith(
+      caches.match(event.request).then(
+        (cached) => cached || revalidate.then((response) => response || fetch(event.request)),
+      ),
     );
     return;
   }

@@ -141,10 +141,10 @@ const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
 const CACHE_VERSION = "__CACHE_VERSION__";
-const STATIC_CACHE = `signo-vino-static-${CACHE_VERSION}`;
-const PAGE_CACHE = `signo-vino-pages-${CACHE_VERSION}`;
+const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
-const OFFLINE_DB_NAME = "signo-vino-offline";
+const OFFLINE_DB_NAME = "signo-vivo-offline";
 const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
 const OFFLINE_PAGES = window.OFFLINE_PAGES || null;
@@ -430,7 +430,7 @@ const stopLoadingPhrases = () => {
 
 const setOfflineGateState = ({
   visible,
-  title = "Preparando Signo Vino",
+  title = "Preparando Signo Vivo",
   body = "Descargando todo el manual para que funcione 100% offline.",
   progress = 0,
   total = 0,
@@ -574,7 +574,7 @@ const requireOfflineBundle = async (totalPages) => {
   setOfflineGateState({
     visible: true,
     title: "Descargando todo el manual",
-    body: "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+    body: "No cierres la app. Cuando termine, Signo Vivo quedará listo para usarse sin internet.",
     progress: 0,
     total: totalPages,
     showAdminNote: true,
@@ -587,7 +587,7 @@ const requireOfflineBundle = async (totalPages) => {
       title: progress >= total ? "Verificando descarga" : "Descargando todo el manual",
       body: progress >= total
         ? "Comprobando que todas las páginas ya quedaron guardadas en este iPad."
-        : "No cierres la app. Cuando termine, Signo Vino quedará listo para usarse sin internet.",
+        : "No cierres la app. Cuando termine, Signo Vivo quedará listo para usarse sin internet.",
       progress,
       total,
       showAdminNote: true,
@@ -601,7 +601,7 @@ const requireOfflineBundle = async (totalPages) => {
   setOfflineGateState({
     visible: true,
     title: "Offline listo",
-    body: "La descarga terminó. Este iPad ya puede abrir Signo Vino sin internet.",
+    body: "La descarga terminó. Este iPad ya puede abrir Signo Vivo sin internet.",
     progress: totalPages,
     total: totalPages,
     showAdminNote: true,
@@ -688,6 +688,17 @@ const prefetchSongPage = (pageNumber) => {
 
 // ── Status rendering ──────────────────────────────────────────────────────────
 const renderStatus = () => {
+  // The song index hydrates lazily, off the critical first paint. Until it lands,
+  // show a neutral "Página N" instead of a bogus "Canción 0", and park song-nav.
+  if (!state.songIndex.length) {
+    songStatus.textContent = `Página ${state.currentPage}`;
+    songIntroEl.classList.add("is-hidden");
+    prevPageButton.disabled = true;
+    nextPageButton.disabled = true;
+    prevCornerButton.disabled = state.pageHistory.length === 0;
+    prevCornerButton.classList.toggle("is-unavailable", state.pageHistory.length === 0);
+    return;
+  }
   const index = findSongIndexAtOrBeforePage(state.currentPage);
   const entry = index >= 0 ? state.songIndex[index] : null;
 
@@ -1824,11 +1835,29 @@ const wireServiceWorkerRegistration = (registration) => {
 
   const refreshRegistration = () => registration.update().catch(() => {});
   window.addEventListener("online", refreshRegistration);
+  // Adaptive new-deploy check: fast (3s) right after the tab is foregrounded — so a
+  // follower picks up a fresh deploy within seconds during active use/testing — then
+  // back off ×1.5 toward 60s while it sits idle, sparing weak-cell data + battery over
+  // a long Mass. Foregrounding snaps it back to 3s. On a new version the SW chain
+  // auto-reloads the tab (controllerchange handler).
+  let swUpdateTimer = 0;
+  let swUpdateDelay = 3000;
+  const scheduleUpdateCheck = () => {
+    clearTimeout(swUpdateTimer);
+    swUpdateTimer = setTimeout(() => {
+      if (document.visibilityState === "visible") refreshRegistration();
+      swUpdateDelay = Math.min(Math.round(swUpdateDelay * 1.5), 60000);
+      scheduleUpdateCheck();
+    }, swUpdateDelay);
+  };
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       refreshRegistration();
+      swUpdateDelay = 3000;
+      scheduleUpdateCheck();
     }
   });
+  scheduleUpdateCheck();
 };
 
 const registerServiceWorker = async () => {
@@ -2094,6 +2123,10 @@ const activateTab = (tabId) => {
   }
   state.activeTab = tabId;
 
+  // Lazy-load the search index the first time search opens — keeps ~45 KB out of
+  // first paint, since web followers almost never search.
+  if (isBuscar && !state.searchIndexPages.length) loadSearchIndex();
+
   // Update rail highlight
   drawerTabRail.querySelectorAll(".rail-tab").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.tab === tabId);
@@ -2196,6 +2229,8 @@ const bindReaderEvents = () => {
 
   // ── Jump-to-song modal: trigger / cancel / backdrop ──
   songJumpTrigger.addEventListener("click", () => { haptic(); openSongJump(); });
+  const searchFab = document.getElementById("search-fab");
+  if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
   songJumpBackdrop.addEventListener("click", () => { closeSongJump(); });
 
@@ -2670,16 +2705,14 @@ const ensureRelayPill = () => {
   if (relayPill) return relayPill;
   const style = document.createElement("style");
   style.textContent =
-    "#sv-live-pill{position:fixed;left:50%;transform:translateX(-50%);" +
-    "bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:9999;border:0;" +
-    "font:600 14px/1 -apple-system,system-ui,sans-serif;color:#fff;padding:9px 15px;" +
-    "border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none;" +
-    "align-items:center;gap:7px;user-select:none;-webkit-tap-highlight-color:transparent}" +
-    "#sv-live-pill.is-live{background:#1f7a4d}" +
-    "#sv-live-pill.is-resync{background:#9a6a12;cursor:pointer}" +
-    "#sv-live-pill .dot{width:8px;height:8px;border-radius:50%;background:#fff}" +
-    "#sv-live-pill.is-live .dot{animation:sv-pulse 1.6s ease-in-out infinite}" +
-    "@keyframes sv-pulse{0%,100%{opacity:1}50%{opacity:.3}}";
+    "#sv-live-pill{position:fixed;top:max(0.6rem,env(safe-area-inset-top,0px));" +
+    "right:max(0.7rem,env(safe-area-inset-right,0px));z-index:46;border:0;padding:0;" +
+    "width:8px;height:8px;border-radius:50%;display:none;cursor:pointer;" +
+    "box-shadow:0 0 0 2px rgba(255,255,255,0.55),0 1px 3px rgba(0,0,0,.35);" +
+    "user-select:none;-webkit-tap-highlight-color:transparent}" +
+    "#sv-live-pill.is-live{background:#22c55e;animation:sv-pulse 1.7s ease-in-out infinite}" +
+    "#sv-live-pill.is-resync{background:#f0c040}" +
+    "@keyframes sv-pulse{0%,100%{opacity:1}50%{opacity:.35}}";
   document.head.appendChild(style);
   relayPill = document.createElement("button");
   relayPill.id = "sv-live-pill";
@@ -2699,32 +2732,38 @@ const ensureRelayPill = () => {
 const renderRelayPill = () => {
   const pill = ensureRelayPill();
   if (!relay.hasDirector) { pill.style.display = "none"; return; }
-  pill.style.display = "inline-flex";
-  if (relay.following) {
-    pill.className = "is-live";
-    pill.innerHTML = '<span class="dot"></span>EN VIVO';
-  } else {
-    pill.className = "is-resync";
-    pill.textContent = "▶ Volver a en vivo";
-  }
+  pill.style.display = "block";
+  pill.className = relay.following ? "is-live" : "is-resync";
+  pill.setAttribute("aria-label", relay.following ? "En vivo con el director" : "Volver a en vivo");
 };
 
 const relayIsFreshLive = (snap) =>
   snap && typeof snap.seq === "number" && snap.seq > 0 &&
   (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
 
-const applyRelaySnapshot = (snap) => {
+const applyRelaySnapshot = (snap, { force = false } = {}) => {
   if (!snap || typeof snap.page !== "number") return;
-  if (typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return; // stale / out-of-order
-  if (typeof snap.seq === "number") relay.lastSeq = snap.seq;
+  // Ongoing pushes are de-duped / ordered by seq. A FORCED resync (initial load,
+  // reconnect, foreground, or the safety poll) must re-apply the director's CURRENT
+  // page even when the seq isn't newer — the director may be sitting still — so it
+  // skips the seq guard.
+  if (!force && typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return;
+  if (typeof snap.seq === "number") relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
 
-  if (!relayIsFreshLive(snap)) {        // no director live (seq 0 / stale) → behave like a normal songbook
+  const hasPublished = typeof snap.seq === "number" && snap.seq > 0;
+  // No director has ever published, OR (ongoing only) the director has gone stale →
+  // behave like a normal songbook. A forced resync ignores the freshness window: a
+  // director lingering on a page is still the page the follower should be on.
+  if (!hasPublished || (!force && !relayIsFreshLive(snap))) {
     relay.hasDirector = false;
     renderRelayPill();
     return;
   }
   relay.hasDirector = true;
   relay.livePage = snap.page;
+
+  // First time we ever see the director (e.g. initial load) → adopt and follow.
+  if (relay.appliedPage == null) relay.following = true;
 
   // If the user has browsed away since our last applied page, don't yank them —
   // offer "Volver a en vivo" instead.
@@ -2742,75 +2781,129 @@ const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) 
 const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
 
 const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
-const relayPollOnce = async () => {
+const relayPollOnce = async (force = false) => {
   try {
     const r = await fetch(relayStateUrl(), { cache: "no-store" });
-    if (r.ok) applyRelaySnapshot(await r.json());
+    if (r.ok) applyRelaySnapshot(await r.json(), { force });
   } catch {}
 };
-const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(relayPollOnce, 4000); relayPollOnce(); };
+// Fallback polling (when the WS won't hold): force every tick so a stationary director
+// still keeps the follower in sync.
+const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
 
 const connectRelay = () => {
   relay.manualClose = false;
   stopRelayPolling();
   let ws;
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
-  ws.addEventListener("open", () => { relay.backoff = 500; });
-  ws.addEventListener("message", (ev) => { try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
+  let lastMsgAt = Date.now();
+  let heartbeatTimer = 0;
+  ws.addEventListener("open", () => {
+    relay.backoff = 500;
+    lastMsgAt = Date.now();
+    relayPollOnce(true);   // force-resync to the director's current page on (re)connect
+    // Heartbeat: ping over the EXISTING socket every 4s. If it goes silent for 12s the
+    // socket is a "zombie" (flaky cell can drop it dead with NO close event) — close it so
+    // the reconnect + resync fires. Reuses the relay's ping->snapshot handler, so it's tiny
+    // WS frames, not HTTP /state polls — cheap on weak cell, and each ping reply doubles as
+    // a resync that catches any missed push within ~4s.
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) { clearInterval(heartbeatTimer); return; }
+      if (Date.now() - lastMsgAt > 12000) { try { ws.close(); } catch {} return; }
+      try { ws.send("ping"); } catch {}
+    }, 4000);
+  });
+  ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
+    clearInterval(heartbeatTimer);
     if (relay.manualClose) return;
     setTimeout(connectRelay, relay.backoff);
     relay.backoff = Math.min(relay.backoff * 2, 8000);
-    if (relay.backoff >= 8000) startRelayPolling();   // WS won't hold → fall back to polling
+    if (relay.backoff >= 8000) startRelayPolling();   // WS truly won't hold -> /state fallback
   });
 };
 
 const startRelayFollow = () => {
   if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") relayPollOnce();
+    if (document.visibilityState === "visible") relayPollOnce(true);   // resync on foreground
   });
   window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
-  relayPollOnce();   // instant first paint at the director's current page
+  relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
   if ("WebSocket" in window) connectRelay(); else startRelayPolling();
 };
 
 const initReader = async () => {
+  // The inlined manifest now carries ONLY { totalPages } — just enough to paint
+  // the director's page instantly. The song index (~50 KB: titles, themes, intro
+  // chords, jump-to-song) hydrates separately so it never blocks first paint.
   const inlinedPages = document.getElementById("pages-data");
   const manifest = inlinedPages
     ? JSON.parse(inlinedPages.textContent)
     : await fetch(resolveAppPath("/pages.json"), { cache: "no-store" }).then((r) => r.json());
   state.totalPages = manifest.totalPages;
-  state.songIndex = [...manifest.songIndex].sort((left, right) => left.song - right.song);
-  state.totalSongs = state.songIndex.length;
-  state.themeIndex = manifest.themeIndex || [];
   state.currentPage = DEFAULT_START_PAGE;
-  // Build the song→page lookup up front so jump-to-song works immediately,
-  // independent of the (optional, slow) offline pre-cache below.
-  state.songPageLookup = buildSongPageLookup(state.songIndex);
+
+  // Fold the full song index into state and refresh everything that depends on it.
+  // Runs immediately if the index was inlined (offline / ?admin build), otherwise
+  // in the background once /pages.json lands (see below).
+  const hydrateSongIndex = (data) => {
+    if (!data || !data.songIndex) return;
+    state.songIndex = [...data.songIndex].sort((left, right) => left.song - right.song);
+    state.totalSongs = state.songIndex.length;
+    state.themeIndex = data.themeIndex || [];
+    state.songPageLookup = buildSongPageLookup(state.songIndex);
+    renderStatus();
+    renderNativeSyncPanel();
+    renderActiveTab();
+  };
+  if (manifest.songIndex) hydrateSongIndex(manifest);
   renderDraft();
   renderStatus();
   renderNativeSyncPanel();
   updateFullscreenButton();
   hideLoadingIndicator();
-  // Offline pre-cache shows the spinner gate during the first big download.
-  // It must NEVER block or break navigation — a failure here is non-fatal.
-  try {
-    await requireOfflineBundle(state.totalPages);
-  } catch (error) {
-    console.warn("Pre-cache offline incompleto:", error);
-  }
+  // Show the reader IMMEDIATELY — never block the congregation behind the big
+  // offline pre-cache. The service worker caches every page in the background.
   setOfflineGateState({ visible: false });
-  renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
+  // Open directly on the director's current page if one is broadcasting (the relay
+  // state is tiny — just a page number — so this barely delays first paint). Bounded
+  // by a short timeout so a slow/dead relay can't block the reader. The native app /
+  // offline bundle skip the relay (the native bridge drives the page there).
+  if (!hasNativeBridge() && !NATIVE_FILE_MODE) {
+    await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
+  }
+  if (!relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   startRelayFollow();
-  loadSearchIndex();
+  // Search index is loaded lazily on first search-open (see activateTab) so it
+  // never weighs down the follower's first paint.
   renderActiveTab();
   postNativeBridge({
     type: "bridge-ready",
     page: DEFAULT_START_PAGE,
     totalPages: state.totalPages,
   });
+  // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
+  // off the critical first paint without losing titles, themes, or jump-to-song.
+  if (!manifest.songIndex) {
+    fetch(resolveAppPath("/pages.json"), { cache: "no-store" })
+      .then((response) => response.json())
+      .then(hydrateSongIndex)
+      .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
+  }
+  // Full offline pre-cache (downloads the whole manual). Only show the blocking
+  // spinner gate when an admin is explicitly provisioning a dedicated offline iPad
+  // via signovivo.com?admin=1 — everyone else gets an instant reader.
+  if (isAdminSetupMode) {
+    try {
+      await requireOfflineBundle(state.totalPages);
+    } catch (error) {
+      console.warn("Pre-cache offline incompleto:", error);
+    }
+    setOfflineGateState({ visible: false });
+  }
 };
 
 if (appVersionLabel && window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION) {
@@ -2823,5 +2916,5 @@ bindViewportMetrics();
 bindReaderEvents();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
-  setLoading(true, "No se pudo cargar Signo Vino.");
+  setLoading(true, "No se pudo cargar Signo Vivo.");
 });

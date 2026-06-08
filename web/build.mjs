@@ -609,14 +609,25 @@ for (const entry of songIndex) {
 fs.writeFileSync(path.join(distDir, "song-titles.json"), JSON.stringify(songTitles));
 fs.writeFileSync(path.join(distDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
 
-// Inject page manifest and search index into HTML for .webarchive compatibility
-const pagesJson = JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex });
-const searchJson = JSON.stringify({ pages: searchIndexPages });
+// Inline ONLY { totalPages } — the bare minimum to paint the director's page
+// instantly. The full song index (~50 KB: titles, themes, intro chords) and the
+// search index are both fetched lazily from /pages.json and /search-index.json,
+// so the follower's first-paint HTML stays tiny (~5 KB on the wire). The full
+// manifest is still written to /pages.json (above) for that lazy hydrate.
+const pagesMeta = JSON.stringify({ totalPages: pageFiles.length });
 const inlineScripts =
-  `  <script id="pages-data" type="application/json">${pagesJson}</script>\n` +
-  `  <script id="search-data" type="application/json">${searchJson}</script>\n`;
+  `  <script id="pages-data" type="application/json">${pagesMeta}</script>\n`;
 const htmlSrc = fs.readFileSync(path.join(srcDir, "index.html"), "utf8");
 fs.writeFileSync(
   path.join(distDir, "index.html"),
   htmlSrc.replace("</head>", `${inlineScripts}</head>`),
+);
+
+// Far-future browser cache for the immutable page images. The WebP filenames are
+// content-stable (page-NNN.webp); page updates ride the SW cache-version bump, so
+// it's safe to tell the browser to keep these forever. Cloudflare Pages serves
+// custom headers from this _headers file.
+fs.writeFileSync(
+  path.join(distDir, "_headers"),
+  "/pages/*\n  Cache-Control: public, max-age=31536000, immutable\n",
 );

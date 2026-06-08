@@ -6,12 +6,28 @@
     <meta name="theme-color" content="#060a18" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Signo Vino" />
+    <meta name="apple-mobile-web-app-title" content="Signo Vivo" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="application-name" content="Signo Vino" />
+    <meta name="application-name" content="Signo Vivo" />
     <meta name="format-detection" content="telephone=no" />
-    <meta name="description" content="Manual de coro Signo Vino — lector simple y navegación rápida." />
-    <title>Signo Vino</title>
+    <meta name="description" content="Manual de coro Signo Vivo — lector simple y navegación rápida." />
+    <title>Signo Vivo</title>
+    <!-- Open Graph / Twitter link-preview card (iMessage, WhatsApp, Facebook, etc.) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Signo Vivo" />
+    <meta property="og:title" content="Signo Vivo" />
+    <meta property="og:description" content="Manual de coro Signo Vivo — sigue al director en vivo desde tu teléfono." />
+    <meta property="og:url" content="https://signovivo.com/" />
+    <meta property="og:image" content="https://signovivo.com/icon.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="1024" />
+    <meta property="og:image:alt" content="Signo Vivo" />
+    <meta property="og:locale" content="es_MX" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Signo Vivo" />
+    <meta name="twitter:description" content="Manual de coro Signo Vivo — sigue al director en vivo." />
+    <meta name="twitter:image" content="https://signovivo.com/icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/icon-512.png" />
@@ -20,7 +36,7 @@
   <body>
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
-        <img id="page-image" src="/pages/page-002.webp" alt="Pagina actual del manual" />
+        <img id="page-image" src="/pages/page-002.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
         <div class="director-mode-badge is-hidden" id="director-mode-badge" aria-live="polite">
           <span class="director-mode-badge-eyebrow">Modo activo</span>
           <strong class="director-mode-badge-title">DIRECTOR</strong>
@@ -30,12 +46,12 @@
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
           <div class="offline-gate-card">
             <p class="offline-gate-eyebrow">Modo sin internet</p>
-            <h1 class="offline-gate-title" id="offline-gate-title">Preparando Signo Vino</h1>
+            <h1 class="offline-gate-title" id="offline-gate-title">Preparando Signo Vivo</h1>
             <p class="offline-gate-body" id="offline-gate-body">Descargando todo el manual para que funcione 100% offline.</p>
             <div class="offline-spinner" id="offline-spinner" aria-hidden="true"></div>
             <p class="offline-progress-value" id="offline-progress-value" aria-live="polite">Preparando…</p>
             <p class="offline-admin-note is-hidden" id="offline-admin-note">No entregues este iPad hasta ver “Offline listo”.</p>
-            <p class="offline-ready-note is-hidden" id="offline-ready-note">Ya puedes usar Signo Vino sin internet en este iPad.</p>
+            <p class="offline-ready-note is-hidden" id="offline-ready-note">Ya puedes usar Signo Vivo sin internet en este iPad.</p>
             <p class="offline-meta-note is-hidden" id="offline-meta-note"></p>
             <button class="offline-test-button is-hidden" id="offline-test-button" type="button">Probar sin internet</button>
             <button class="offline-continue-button is-hidden" id="offline-continue-button" type="button">Continuar</button>
@@ -49,8 +65,9 @@
         <span class="drawer-handle-lines" aria-hidden="true">›</span>
       </button>
 
-      <!-- ♪ Jump-to-song trigger (opens the centered modal) -->
+      <!-- ♪ Jump-to-song + ⌕ search — native-style top-right cluster -->
       <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto">♪</button>
+      <button class="search-fab" id="search-fab" type="button" aria-label="Buscar">⌕</button>
 
       <!-- ── Jump-to-song modal (native-style) ── -->
       <div class="song-jump-modal is-hidden" id="song-jump-modal" role="dialog" aria-modal="true" aria-label="Ir a canto">
