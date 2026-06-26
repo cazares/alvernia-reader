@@ -26,6 +26,11 @@ export interface Env {
 
 const PROTOCOL_VERSION = 1;
 
+// Past which age (seconds) a snapshot counts as "no active director" — matches the web
+// follower's RELAY_LIVE_MAX_AGE_S. Build 332+ directors re-publish every ~12s, so a live
+// director never goes stale; a stale snapshot means the director is gone.
+const RELAY_LIVE_MAX_AGE_S = 90;
+
 type Snapshot = {
   v: number;
   page: number;
@@ -65,8 +70,16 @@ export class SyncRoom extends DurableObject<Env> {
   /** RPC: director publishes a new page state. Latest-wins, stale-guarded. */
   async publish(input: Partial<Snapshot>): Promise<{ ok: true; seq: number; ignored?: boolean }> {
     const incomingSeq = Number(input.seq ?? 0);
-    // Ignore out-of-order / duplicate / replayed packets so the song can't rewind.
-    if (incomingSeq > 0 && incomingSeq <= this.snapshot.seq) {
+    // The seq guard stops a burst of page turns on a weak link from arriving out of order
+    // and rewinding the song — but ONLY while a director is actively live (fresh snapshot).
+    // If nobody has published within the live window the snapshot is stale (no active
+    // director), so a NEW director may take over regardless of seq. This also self-heals a
+    // poisoned / wrongly-scaled seq left behind by a gone director (otherwise a too-high
+    // stale seq would silently block every future director from ever transmitting).
+    const nowSec = Math.floor(Date.now() / 1000);
+    const snapshotStale =
+      this.snapshot.seq === 0 || nowSec - this.snapshot.ts > RELAY_LIVE_MAX_AGE_S;
+    if (!snapshotStale && incomingSeq > 0 && incomingSeq <= this.snapshot.seq) {
       return { ok: true, seq: this.snapshot.seq, ignored: true };
     }
     const next: Snapshot = {
