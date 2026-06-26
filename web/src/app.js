@@ -709,7 +709,7 @@ const prefetchSongPage = (pageNumber) => {
 const prefetchNeighborPages = (pageNumber) => {
   const neighbors = [pageNumber + 1, pageNumber + 2, pageNumber - 1];
   const schedule = window.requestIdleCallback
-    ? window.requestIdleCallback.bind(window)
+    ? (cb) => window.requestIdleCallback(cb, { timeout: 300 })
     : (cb) => window.setTimeout(cb, 0);
   schedule(() => {
     for (const n of neighbors) {
@@ -719,7 +719,12 @@ const prefetchNeighborPages = (pageNumber) => {
       prefetchedPageUrls.add(url);
       const im = new Image();
       im.decoding = "async";
+      // Neighbor prefetch must never compete with the CURRENT page's fetch.
+      im.fetchPriority = "low";
       im.src = url;
+      // Decode ahead so the eventual swap to this page paints instantly (no
+      // decode stall). Some browsers reject decode() on detached images — swallow it.
+      im.decode().catch(() => {});
     }
   });
 };
@@ -2744,9 +2749,24 @@ const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) 
 const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
 
 const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
+// Map the worker's X-Hymnal IP-geo header to a book id (web followers only).
+const bookFromHymnal = (h) => (h === "standard" ? "standard" : h === "nonstandard" ? "hymns-4" : null);
+let relayGeoBookApplied = false;
 const relayPollOnce = async (force = false) => {
   try {
     const r = await fetch(relayStateUrl(), { cache: "no-store" });
+    // IP-geo book selection for web followers (signovivo.com): Del Rio (78840/78841) ->
+    // standard manual, elsewhere -> hymns-4, read from the relay's X-Hymnal response header.
+    // The native shell injects __SIGNO_VINO_INITIAL_BOOK instead, so this applies only on the
+    // web. Switch the book BEFORE applying the snapshot so the director's page lands in the
+    // right book (otherwise a Del Rio follower defaults to hymns-4 and the page gets clamped).
+    if (!relayGeoBookApplied && !NATIVE_FILE_MODE && !hasNativeBridge()) {
+      const geoBook = bookFromHymnal(r.headers.get("X-Hymnal"));
+      if (geoBook) {
+        relayGeoBookApplied = true;
+        if (geoBook !== state.currentBook) await switchBook(geoBook, { fromNative: true });
+      }
+    }
     if (r.ok) applyRelaySnapshot(await r.json(), { force });
   } catch {}
 };

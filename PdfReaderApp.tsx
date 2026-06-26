@@ -191,7 +191,14 @@ export default function App() {
         return;
       }
       try {
-        await startNearbyDirector(DIRECTOR_SESSION);
+        try {
+          await startNearbyDirector(DIRECTOR_SESSION);
+        } catch {
+          // Mesh startup can transiently fail (permission race, radio warm-up).
+          // Wait briefly and retry the start exactly once before giving up.
+          await new Promise((r) => setTimeout(r, 2000));
+          await startNearbyDirector(DIRECTOR_SESSION);
+        }
         roleRef.current = "director";
         await AsyncStorage.multiSet([
           [STORAGE_KEYS.lastSyncRole, "director"],
@@ -215,7 +222,16 @@ export default function App() {
     stopDirectorHeartbeat(); // a follower must never re-broadcast
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower");
-      if (syncAvailable) await startNearbyFollower(DIRECTOR_SESSION);
+      if (syncAvailable) {
+        try {
+          await startNearbyFollower(DIRECTOR_SESSION);
+        } catch {
+          // Transient mesh startup failure (permission race, radio warm-up):
+          // wait briefly and retry the start exactly once before giving up.
+          await new Promise((r) => setTimeout(r, 2000));
+          await startNearbyFollower(DIRECTOR_SESSION);
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -592,6 +608,10 @@ export default function App() {
         }}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
+        cacheEnabled={true}
+        allowsLinkPreview={false}
+        dataDetectorTypes="none"
+        setSupportMultipleWindows={false}
         bounces={false}
         overScrollMode="never"
         scrollEnabled
