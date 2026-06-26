@@ -24,7 +24,6 @@ const numberpadGrid = document.getElementById("numberpad-grid");
 const backspaceButton = document.getElementById("backspace-button");
 const goButton = document.getElementById("go-button");
 const directorModeBadge = document.getElementById("director-mode-badge");
-const directorModeBadgeCode = document.getElementById("director-mode-badge-code");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
@@ -39,13 +38,6 @@ const helpPanel = document.getElementById("help-panel");
 const helpCloseButton = document.getElementById("help-close");
 const helpSettingsLabel = document.getElementById("help-settings-label");
 const hapticToggleButton = document.getElementById("haptic-toggle");
-const directorSyncPanel = document.getElementById("director-sync-panel");
-const directorSyncCodeInput = document.getElementById("director-sync-code");
-const directorSyncStartDirectorButton = document.getElementById("director-sync-start-director");
-const directorSyncStartFollowerButton = document.getElementById("director-sync-start-follower");
-const directorSyncStopButton = document.getElementById("director-sync-stop");
-const directorSyncStatus = document.getElementById("director-sync-status");
-const directorSyncError = document.getElementById("director-sync-error");
 const numpadTipWrap = document.getElementById("numpad-tip-wrap");
 const tipDismissButton = document.getElementById("tip-dismiss");
 const drawerCloseButton = document.getElementById("drawer-close");
@@ -105,19 +97,53 @@ const state = {
   activeTab: "todas",
   prevTab: "todas",     // where to return when exiting search fullscreen
   drawerMode: "browse", // browse-only — jump-to-song is now a centered modal
-  nativeSyncUnlocked: false,
-  nativeSyncAvailable: false,
-  nativeSyncRole: "off",
-  nativeSyncStatus: "",
-  nativeSyncError: "",
-  nativeSyncSessionCode: "2046",
-  nativeSyncAutoStartRequested: false,
-  nativeSyncAutoStartSuppressed: false,
+  currentBook: "hymns-4", // resolved below from the registry / native-injected globals
+  syncRole: "none",       // last role the native shell reported (director/follower/none)
+  nativeBridgeAvailable: false,
+  nativeSyncRole: "off",   // drives the DIRECTOR badge visibility
 };
+
+// ── Book registry (multi-book) ──────────────────────────────────────────────────
+// The build inlines the registry as <script id="books-data">…</script>. Parse it
+// defensively; if it's missing (e.g. a stale shell), fall back to the known books.
+const isBookId = (v) => v === "standard" || v === "hymns-4";
+const FALLBACK_BOOK_REGISTRY = {
+  default: "hymns-4",
+  books: {
+    "hymns-4": { label: "Himnos de Sión", totalPages: 51 },
+    standard: { label: "Manual Alvernia", totalPages: 371 },
+  },
+};
+const loadBookRegistry = () => {
+  try {
+    const node = document.getElementById("books-data");
+    if (!node) return FALLBACK_BOOK_REGISTRY;
+    const parsed = JSON.parse(node.textContent || "{}");
+    if (parsed && parsed.books && typeof parsed.books === "object") return parsed;
+    return FALLBACK_BOOK_REGISTRY;
+  } catch {
+    return FALLBACK_BOOK_REGISTRY;
+  }
+};
+const bookRegistry = loadBookRegistry();
+const resolveInitialBook = () => {
+  // Precedence: native-injected initial book → registry default → hymns-4.
+  if (isBookId(window.__SIGNO_VINO_INITIAL_BOOK)) return window.__SIGNO_VINO_INITIAL_BOOK;
+  if (isBookId(bookRegistry.default)) return bookRegistry.default;
+  return "hymns-4";
+};
+state.currentBook = resolveInitialBook();
+const bookLabel = (bookId) => bookRegistry.books?.[bookId]?.label || "";
 
 let cachedSongKeys = null;
 let cachedSongLengths = null;
 let cachedKeywords = null;
+
+// ── Adjacent-page prefetch (perceived-speed win for live followers) ─────────────
+// Warm the NEXT page(s) so a director's +1 page-turn is instant. URL-keyed so the
+// same page in different books never collides; cleared on every book change so a
+// switch doesn't leave stale entries. Module-level + book-scoped on purpose.
+const prefetchedPageUrls = new Set();
 
 // ── Environment detection ─────────────────────────────────────────────────────
 const initialUrl = new URL(window.location.href);
@@ -146,33 +172,47 @@ const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
 const NATIVE_FILE_MODE = Boolean(window.__SIGNO_VINO_NATIVE_FILE_MODE || window.location.protocol === "file:");
 const NATIVE_BRIDGE_CHANNEL = "signovivo-native";
-const NATIVE_SYNC_SESSION_KEY = "sv-native-sync-session";
-const DEFAULT_NATIVE_SYNC_SESSION = "2046";
-const SECRET_DIRECTOR_DRAFT = "2046";
 const resolveAppPath = (pathname) => {
   if (!NATIVE_FILE_MODE) return pathname;
   if (pathname === "/") return "./";
   return pathname.replace(/^\//, "");
 };
-const CORE_ASSETS = [
+// Shell assets that are book-agnostic (always cached).
+const SHELL_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
   "/app.js",
   "/manifest.webmanifest",
-  "/pages.json",
-  "/search-index.json",
+  "/books.json",
   "/icon.png",
   "/icon-192.png",
   "/icon-512.png",
 ].map(resolveAppPath);
+// The per-book manifests live under books/<id>/. Cache the ones for the book the
+// offline bundle is being prepared for (the current book).
+const bookManifestAssets = (bookId) => [
+  resolveAppPath(`/books/${bookId}/pages.json`),
+  resolveAppPath(`/books/${bookId}/search-index.json`),
+];
+const coreAssetsForBook = (bookId) => [...SHELL_ASSETS, ...bookManifestAssets(bookId)];
 
 // ── Utilities ────────────────────────────────────────────────────────────────
+// pdftoppm zero-pads page filenames to the WIDTH of each book's total page count
+// (hymns-4: 51 pages → page-02.webp; standard: 371 → page-001.webp). So the pad
+// width is per-book — derive it from the registry's totalPages for this book (with
+// a fallback to live state.totalPages if the registry is silent). No artificial floor:
+// pdftoppm pads to String(count).length with NO minimum, so a <10-page book renders
+// render-1..render-9 (width 1) — flooring to 2 would 404 every page on such a book.
+const bookPagePadWidth = (bookId) => {
+  const total = bookRegistry.books?.[bookId]?.totalPages || state.totalPages || 0;
+  return String(total).length;
+};
 const pageFileName = (pageNumber) => {
-  const padded = String(pageNumber).padStart(3, "0");
-  // In native file mode pages are staged flat (no pages/ subdir) so WKWebView
-  // can reach them via loadRequest:'s parent-directory sandbox.
-  return NATIVE_FILE_MODE ? `page-${padded}.webp` : `/pages/page-${padded}.webp`;
+  const padded = String(pageNumber).padStart(bookPagePadWidth(state.currentBook), "0");
+  // Always RELATIVE and book-scoped so the same path resolves over https
+  // (signovivo.com) AND file:// (native WKWebView bundle). No leading slash.
+  return `books/${state.currentBook}/pages/page-${padded}.webp`;
 };
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
@@ -182,7 +222,14 @@ const pageImageMatches = (pageNumber) => {
   const currentSrc = pageImage.getAttribute("src") || "";
   return currentSrc.endsWith(pageFileName(pageNumber));
 };
-const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
+// ALWAYS returns an in-range INTEGER. A float (2.7) or NaN must never reach
+// pageFileName → page-2.7.webp / page-NaN.webp would 404 and stick the render.
+const clampPage = (pageNumber) => {
+  const n = Math.trunc(Number(pageNumber));
+  if (!Number.isFinite(n)) return state.currentPage || 1;
+  const total = Number.isFinite(state.totalPages) && state.totalPages > 0 ? state.totalPages : 1;
+  return Math.max(1, Math.min(n, total));
+};
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 const isFullscreen = () => Boolean(getFullscreenElement());
@@ -205,28 +252,10 @@ const bindViewportMetrics = () => {
   window.visualViewport?.addEventListener("scroll", setViewportCssVars, { passive: true });
 };
 
-const normalizeText = (text) => text
+const normalizeText = (text) => String(text ?? "")
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
   .toLowerCase();
-
-const normalizeSyncSessionCode = (value = "") => value
-  .toUpperCase()
-  .replace(/[^A-Z0-9]/g, "")
-  .slice(0, 12);
-
-const loadNativeSyncSessionCode = () => {
-  try {
-    const stored = localStorage.getItem(NATIVE_SYNC_SESSION_KEY) || "";
-    const normalized = normalizeSyncSessionCode(stored);
-    if (!normalized || normalized === "CORO") return DEFAULT_NATIVE_SYNC_SESSION;
-    return normalized;
-  } catch {
-    return DEFAULT_NATIVE_SYNC_SESSION;
-  }
-};
-
-state.nativeSyncSessionCode = loadNativeSyncSessionCode();
 
 const hasNativeBridge = () => Boolean(window.ReactNativeWebView?.postMessage);
 
@@ -450,8 +479,13 @@ const setOfflineGateState = ({
 
 const extractCachedPageNumber = (request) => {
   const pathname = new URL(request.url).pathname;
-  const match = pathname.match(/^\/pages\/page-(\d+)\.webp$/);
-  return match ? Number.parseInt(match[1], 10) : null;
+  // Book-scoped page path: /books/<id>/pages/page-NNN.webp. Only count pages that
+  // belong to the CURRENT book so the offline-ready check isn't skewed by the
+  // other book's cached pages.
+  const match = pathname.match(/\/books\/([^/]+)\/pages\/page-(\d+)\.webp$/);
+  if (!match) return null;
+  if (match[1] !== state.currentBook) return null;
+  return Number.parseInt(match[2], 10);
 };
 
 const getCachedPageSet = async (cache) => {
@@ -465,7 +499,7 @@ const getCachedPageSet = async (cache) => {
 
 const ensureCoreAssetsCached = async () => {
   const cache = await caches.open(STATIC_CACHE);
-  await cache.addAll(CORE_ASSETS);
+  await cache.addAll(coreAssetsForBook(state.currentBook));
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {
@@ -523,7 +557,9 @@ const isOfflineBundleReady = async (totalPages) => {
     if (metadata.totalPages !== totalPages) return false;
 
     const staticCache = await caches.open(STATIC_CACHE);
-    const coreMatches = await Promise.all(CORE_ASSETS.map((asset) => staticCache.match(asset)));
+    const coreMatches = await Promise.all(
+      coreAssetsForBook(state.currentBook).map((asset) => staticCache.match(asset)),
+    );
     if (coreMatches.some((match) => !match)) return false;
 
     const pageCache = await caches.open(PAGE_CACHE);
@@ -674,6 +710,34 @@ const prefetchSongPage = (pageNumber) => {
   });
 };
 
+// Warm the immediate page NEIGHBORS so the next page-turn is instant. A live
+// follower almost always advances +1, so +1/+2 matter most; -1 covers a step back.
+// Fire-and-forget Image() warming — works for file:// (warms the decode) and https
+// (warms HTTP + service-worker cache). Scheduled off the critical paint so it never
+// delays the current page. URL-keyed via prefetchedPageUrls to skip dupes.
+const prefetchNeighborPages = (pageNumber) => {
+  const neighbors = [pageNumber + 1, pageNumber + 2, pageNumber - 1];
+  const schedule = window.requestIdleCallback
+    ? (cb) => window.requestIdleCallback(cb, { timeout: 300 })
+    : (cb) => window.setTimeout(cb, 0);
+  schedule(() => {
+    for (const n of neighbors) {
+      if (n < 1 || n > state.totalPages) continue;
+      const url = pageFileName(n);
+      if (prefetchedPageUrls.has(url)) continue;
+      prefetchedPageUrls.add(url);
+      const im = new Image();
+      im.decoding = "async";
+      // Neighbor prefetch must never compete with the CURRENT page's fetch.
+      im.fetchPriority = "low";
+      im.src = url;
+      // Decode ahead so the eventual swap to this page paints instantly (no
+      // decode stall). Some browsers reject decode() on detached images — swallow it.
+      im.decode().catch(() => {});
+    }
+  });
+};
+
 // ── Status rendering ──────────────────────────────────────────────────────────
 const renderStatus = () => {
   // The song index hydrates lazily, off the critical first paint. Until it lands,
@@ -696,8 +760,9 @@ const renderStatus = () => {
     songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
   }
 
-  // Intro chord display
-  if (entry && entry.intro) {
+  // Intro chord display. Guard chords: a malformed entry (intro present but chords
+  // not an array) must not crash the status render — hide the intro instead.
+  if (entry && entry.intro && Array.isArray(entry.intro.chords)) {
     const { key, solfege, chords, capo } = entry.intro;
     let introText = `Intro en ${key} (${solfege}): ${chords.join(", ")}`;
     if (capo) introText += ` – Capo ${capo}`;
@@ -726,113 +791,37 @@ const renderDraft = () => {
   goButton.disabled = !state.songDraft;
 };
 
-const persistNativeSyncSessionCode = () => {
-  try {
-    localStorage.setItem(NATIVE_SYNC_SESSION_KEY, state.nativeSyncSessionCode);
-  } catch {}
-};
-
-const describeNativeSyncState = () => {
-  if (!state.nativeSyncAvailable) {
-    return hasNativeBridge()
-      ? "Preparando sincronización…"
-      : "Solo disponible dentro de la app instalada.";
-  }
-  if (state.nativeSyncStatus) return state.nativeSyncStatus;
-  if (state.nativeSyncRole === "director") return "Modo director activo.";
-  if (state.nativeSyncRole === "follower") return "Sincronizado con el director.";
-  return "Escribe 2046 y toca ↵ para entrar como director.";
-};
-
+// The native shell reports director/follower role over the bridge; the only surviving
+// surface is the tiny "Modo activo / DIRECTOR" badge — show it when this device directs.
 const renderDirectorModeBadge = () => {
-  if (!directorModeBadge || !directorModeBadgeCode) return;
-  const isDirector = state.nativeSyncRole === "director";
-  directorModeBadge.classList.toggle("is-hidden", !isDirector);
-  directorModeBadgeCode.textContent = `Código ${state.nativeSyncSessionCode}`;
+  if (!directorModeBadge) return;
+  directorModeBadge.classList.toggle("is-hidden", state.nativeSyncRole !== "director");
 };
 
-const renderNativeSyncPanel = () => {
-  if (!directorSyncPanel) return;
-  directorSyncPanel.classList.toggle("is-hidden", !state.nativeSyncUnlocked);
-  directorSyncCodeInput.value = state.nativeSyncSessionCode;
-  directorSyncStatus.textContent = describeNativeSyncState();
-  const showError = Boolean(state.nativeSyncError);
-  directorSyncError.classList.toggle("is-hidden", !showError);
-  directorSyncError.textContent = state.nativeSyncError;
-
-  const disabled = !state.nativeSyncAvailable;
-  const isActive = state.nativeSyncRole !== "off";
-  directorSyncCodeInput.classList.toggle("is-hidden", true);
-  if (directorSyncCodeInput.labels) {
-    for (const label of directorSyncCodeInput.labels) {
-      label.classList.toggle("is-hidden", true);
-    }
-  }
-  directorSyncStartDirectorButton.disabled = disabled || state.nativeSyncRole === "director";
-  directorSyncStartDirectorButton.textContent = state.nativeSyncRole === "director"
-    ? "Director activo"
-    : "Entrar como director";
-  directorSyncStartFollowerButton.classList.add("is-hidden");
-  directorSyncStopButton.classList.toggle("is-hidden", !isActive);
-  directorSyncStopButton.disabled = false;
-  renderDirectorModeBadge();
-};
-
-const unlockNativeSyncPanel = () => {
-  if (state.nativeSyncUnlocked) return;
-  state.nativeSyncUnlocked = true;
-  renderNativeSyncPanel();
-  haptic(12);
-};
-
-const requestAutoFollowerMode = () => {
-  if (!state.nativeSyncAvailable || state.nativeSyncRole !== "off") return;
-  if (state.nativeSyncAutoStartRequested || state.nativeSyncAutoStartSuppressed) return;
-  if (!postNativeBridge({ type: "sync-start-follower", sessionCode: state.nativeSyncSessionCode })) return;
-
-  state.nativeSyncAutoStartRequested = true;
-  state.nativeSyncError = "";
-  state.nativeSyncStatus = "";
-  renderNativeSyncPanel();
-};
-
-const activateDirectorShortcut = () => {
-  // If another device is already directing, ask before overriding
-  if (state.nativeSyncRole === "follower") {
-    const ok = window.confirm("Ya hay un director activo cerca.\n¿Quieres tomar el control como director en este dispositivo?");
-    if (!ok) { clearDraft(); return false; }
-  }
-  state.nativeSyncSessionCode = DEFAULT_NATIVE_SYNC_SESSION;
-  persistNativeSyncSessionCode();
-  state.nativeSyncAutoStartSuppressed = false;
-  state.nativeSyncAutoStartRequested = false;
-  state.nativeSyncError = "";
-  state.nativeSyncStatus = "Activando modo director...";
-  unlockNativeSyncPanel();
-  renderNativeSyncPanel();
-  if (!postNativeBridge({ type: "sync-start-director", sessionCode: state.nativeSyncSessionCode })) {
-    state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
-    renderNativeSyncPanel();
-    return false;
-  }
-  clearDraft();
-  closeDrawer();
-  haptic(20);
-  return true;
-};
-
-const applyNativeSyncEvent = (payload) => {
+const applyNativeSyncEvent = async (payload) => {
   if (!payload || typeof payload !== "object") return;
 
   if (payload.type === "bridge-state") {
-    state.nativeSyncAvailable = Boolean(payload.available);
-    if (state.nativeSyncAvailable) {
-      requestAutoFollowerMode();
+    state.nativeBridgeAvailable = Boolean(payload.available);
+    return;
+  }
+
+  // Native asks the web layer to switch books (geo / restore / follow director).
+  if (payload.type === "set-book") {
+    if (isBookId(payload.book)) await switchBook(payload.book, { fromNative: true });
+    return;
+  }
+
+  // Role changes after a code / conflict / takeover. Store it and surface the tiny
+  // director badge — never throw.
+  if (payload.type === "role") {
+    if (typeof payload.role === "string") {
+      state.syncRole = payload.role;
+      if (payload.role === "director" || payload.role === "follower" || payload.role === "none") {
+        state.nativeSyncRole = payload.role === "none" ? "off" : payload.role;
+        renderDirectorModeBadge();
+      }
     }
-    if (!state.nativeSyncAvailable && state.nativeSyncRole === "off") {
-      state.nativeSyncStatus = "";
-    }
-    renderNativeSyncPanel();
     return;
   }
 
@@ -840,44 +829,12 @@ const applyNativeSyncEvent = (payload) => {
 
   const event = payload.event || {};
 
-  if (event.sessionCode) {
-    state.nativeSyncSessionCode = normalizeSyncSessionCode(String(event.sessionCode)) || state.nativeSyncSessionCode;
-    persistNativeSyncSessionCode();
-  }
-
   if (event.type === "page" && Number.isFinite(event.page)) {
-    state.nativeSyncError = "";
-    state.nativeSyncStatus = "";
-    renderNativeSyncPanel();
+    // A director on a different book: switch first so the page lands in the right book.
+    if (isBookId(event.book) && event.book !== state.currentBook) {
+      await switchBook(event.book, { fromNative: true });
+    }
     renderPage(event.page, { pushToHistory: false });
-    return;
-  }
-
-  if (event.type === "state") {
-    state.nativeSyncError = "";
-    if (event.status === "idle") {
-      state.nativeSyncRole = "off";
-      state.nativeSyncAutoStartRequested = false;
-      state.nativeSyncStatus = "";
-    } else if (event.role === "director" || event.role === "follower") {
-      state.nativeSyncRole = event.role;
-      state.nativeSyncAutoStartRequested = false;
-      // Only keep native message if it's meaningful; otherwise let describeNativeSyncState handle it
-      state.nativeSyncStatus = (event.status === "connected" || event.status === "waiting-followers" || event.status === "searching") ? "" : (event.message || "");
-    }
-    renderNativeSyncPanel();
-    return;
-  }
-
-  if (event.type === "error") {
-    unlockNativeSyncPanel();
-    state.nativeSyncError = event.message || "La sincronización offline falló.";
-    if (event.role === "off" || event.code === "DIRECTOR_CONFLICT") {
-      state.nativeSyncRole = "off";
-      state.nativeSyncAutoStartRequested = false;
-    }
-    if (event.message) state.nativeSyncStatus = event.message;
-    renderNativeSyncPanel();
   }
 };
 
@@ -951,6 +908,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
       type: "page-changed",
       page: nextPage,
       totalPages: state.totalPages,
+      book: state.currentBook,
     });
     if (direction !== 0) {
       const animClass = direction > 0 ? "slide-from-right" : "slide-from-left";
@@ -962,6 +920,9 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     renderStatus();
     hideLoadingIndicator();
     getAdjacentSongPages().forEach(prefetchSongPage);
+    // Warm the next page(s) so the director's +1 page-turn lands instantly. Fire-and-
+    // forget; scheduled off this paint so it never delays the current page.
+    prefetchNeighborPages(nextPage);
   } catch (error) {
     if (requestId !== state.pageLoadRequest) return;
     clearLoadingTimer();
@@ -969,6 +930,92 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     setLoading(true, "No se pudo cargar esta página.");
     closeDrawer();
   }
+};
+
+// ── Multi-book: hydrate / load / switch ─────────────────────────────────────────
+// Fold a book's pages.json into state (mirrors initReader's inline hydrate). Also
+// resets the per-book derived caches so nothing leaks across a book switch.
+const hydrateBookData = (data) => {
+  if (!data) return;
+  // Only adopt a positive-integer totalPages — a missing / NaN / string value would
+  // NaN-stick the whole reader. Fall back to the per-book registry count, else keep
+  // the prior value; never assign NaN/undefined.
+  const tp = Number(data.totalPages);
+  if (Number.isInteger(tp) && tp > 0) {
+    state.totalPages = tp;
+  } else {
+    const registryTotal = Number(bookRegistry.books?.[state.currentBook]?.totalPages);
+    if (Number.isInteger(registryTotal) && registryTotal > 0) state.totalPages = registryTotal;
+  }
+  state.songIndex = Array.isArray(data.songIndex)
+    ? [...data.songIndex].sort((left, right) => left.song - right.song)
+    : [];
+  state.totalSongs = state.songIndex.length;
+  state.themeIndex = data.themeIndex || [];
+  state.songPageLookup = buildSongPageLookup(state.songIndex);
+  // The lazily-loaded search index + derived index caches belong to the OLD book —
+  // drop them so they re-build for the new one.
+  state.searchIndexPages = [];
+  cachedSongKeys = null;
+  cachedSongLengths = null;
+  cachedKeywords = null;
+  // The warmed neighbor-page URLs belong to the OLD book — drop them so a switch
+  // doesn't leave stale entries (page paths are book-scoped via pageFileName).
+  prefetchedPageUrls.clear();
+};
+
+// Generation counter so a rapid book switch can't let a STALE loadBook (still fetching the
+// previous book) overwrite the newer book's totalPages — which would break clamping and
+// per-book page padding (e.g. book=standard but totalPages=51 → page-05.webp 404s).
+let bookSwitchGeneration = 0;
+
+// Fetch a book's manifest and hydrate state from it. totalPages comes straight from the
+// manifest so paging clamps to the right book. The optional `generation` guards against a
+// superseding switch: if a newer switchBook started while we were fetching, drop this load.
+const loadBook = async (bookId, generation) => {
+  const response = await fetch(resolveAppPath(`/books/${bookId}/pages.json`), { cache: "no-store" });
+  const data = await response.json();
+  if (generation !== undefined && generation !== bookSwitchGeneration) return;
+  hydrateBookData(data);
+  renderStatus();
+  renderActiveTab();
+};
+
+// Switch the active book: load it, jump to its start page, and (unless the change came FROM
+// native) tell native so it can persist + re-broadcast. Generation-guarded so rapid switches
+// can't leave currentBook and totalPages disagreeing.
+const switchBook = async (bookId, opts = {}) => {
+  if (!isBookId(bookId) || bookId === state.currentBook) return;
+  const prevBook = state.currentBook;
+  const gen = ++bookSwitchGeneration;
+  state.currentBook = bookId;
+  try {
+    await loadBook(bookId, gen);
+  } catch (error) {
+    if (gen !== bookSwitchGeneration) return;
+    console.warn("No se pudo cargar el libro", bookId, error);
+    // Roll back: loadBook threw (offline / 404 / bad JSON) so the new book is only
+    // half-loaded. Restore the previous book and bail WITHOUT rendering, so currentBook
+    // never disagrees with totalPages / songIndex.
+    state.currentBook = prevBook;
+    return;
+  }
+  if (gen !== bookSwitchGeneration) return; // a newer switchBook superseded us
+  const startPage = clampPage(DEFAULT_START_PAGE);
+  // Forget the previous book's history — its page numbers don't map here.
+  state.pageHistory = [];
+  renderPage(startPage, { pushToHistory: false });
+  updateBookLabel();
+  if (!opts.fromNative) {
+    postNativeBridge({ type: "book-changed", book: bookId });
+  }
+};
+
+// Reflect the active book in any visible label (no dedicated switcher UI by design).
+const updateBookLabel = () => {
+  const label = bookLabel(state.currentBook);
+  if (!label) return;
+  document.documentElement.dataset.book = state.currentBook;
 };
 
 // ── Drawer open / close ───────────────────────────────────────────────────────
@@ -997,7 +1044,9 @@ const updateFullscreenButton = () => {
 
 // ── Draft management ──────────────────────────────────────────────────────────
 const appendDigit = (digit) => {
-  if (state.songDraft.length >= 4) return;
+  // Songs are <= 3 digits, but director / secret codes run up to 10 digits and are
+  // entered on this same numpad (then routed to native in goToDraftSong).
+  if (state.songDraft.length >= 10) return;
   state.songDraft = `${state.songDraft}${digit}`;
   renderDraft();
 };
@@ -1028,6 +1077,15 @@ const closeSongJump = () => {
 const goToDraftSong = () => {
   const songNumber = normalizeSongDraftNumber(state.songDraft);
   if (songNumber === null) { closeSongJump(); return; }
+  // Director / secret codes are out-of-range numbers (songs cap at totalPages) or
+  // long codes (5+ digits). Route them to native for validation instead of treating
+  // them as a song jump, then clear + close the numpad.
+  if (songNumber > state.totalPages || String(songNumber).length >= 5) {
+    postNativeBridge({ type: "director-code", code: String(songNumber) });
+    clearDraft();
+    closeSongJump();
+    return;
+  }
   const targetPage = findSongPage(songNumber);
   renderPage(targetPage);
   addToRecientes(songNumber);
@@ -1053,12 +1111,18 @@ const goBackInHistory = () => {
 const loadSearchIndex = async () => {
   const inlined = document.getElementById("search-data");
   if (inlined) {
-    const data = JSON.parse(inlined.textContent);
-    state.searchIndexPages = data.pages || [];
-    return;
+    // Defensive inline parse (mirrors loadBookRegistry): a malformed inline blob must
+    // not throw out of this un-awaited loader → fall through to the fetch path instead.
+    try {
+      const data = JSON.parse(inlined.textContent);
+      state.searchIndexPages = data.pages || [];
+      return;
+    } catch (error) {
+      console.warn("Índice de búsqueda inline inválido, recurriendo a la red", error);
+    }
   }
   try {
-    const response = await fetch(resolveAppPath("/search-index.json"), { cache: "no-store" });
+    const response = await fetch(resolveAppPath(`/books/${state.currentBook}/search-index.json`), { cache: "no-store" });
     const data = await response.json();
     state.searchIndexPages = data.pages || [];
   } catch (error) {
@@ -1082,6 +1146,9 @@ const searchPages = (query) => {
   const words = normalizedQuery.split(/\s+/).filter(Boolean);
   const results = [];
   for (const entry of state.searchIndexPages) {
+    // Skip malformed entries with no string text — they can't match and downstream
+    // snippet rendering (entry.text.slice) would otherwise throw.
+    if (typeof entry?.text !== "string") continue;
     const normalizedText = normalizeText(entry.text);
     if (words.every((word) => normalizedText.includes(word))) {
       results.push(entry);
@@ -1158,8 +1225,8 @@ const searchByTheme = (query) => {
   const norm = normalizeText(query.trim());
   if (!norm) return null;
   for (const theme of state.themeIndex) {
-    const normId = normalizeText(theme.id.replace(/_/g, " "));
-    const normLabel = normalizeText(theme.label);
+    const normId = normalizeText(String(theme.id ?? "").replace(/_/g, " "));
+    const normLabel = normalizeText(String(theme.label ?? ""));
     if (normLabel.includes(norm) || normId.includes(norm) || norm === theme.emoji) {
       const songs = state.songIndex.filter((entry) => entry.themes && entry.themes.includes(theme.id));
       return { theme, songs };
@@ -2415,7 +2482,6 @@ const bindReaderEvents = () => {
   helpButton.addEventListener("click", () => {
     haptic();
     helpPanel.classList.remove("is-hidden");
-    renderNativeSyncPanel();
   });
 
   helpCloseButton.addEventListener("click", () => {
@@ -2441,67 +2507,6 @@ const bindReaderEvents = () => {
     syncHapticToggle();
     haptic(12); // Give immediate feedback when turning ON
   });
-
-  let hiddenSyncPressTimer = 0;
-  const clearHiddenSyncPressTimer = () => {
-    if (!hiddenSyncPressTimer) return;
-    window.clearTimeout(hiddenSyncPressTimer);
-    hiddenSyncPressTimer = 0;
-  };
-  const queueHiddenSyncUnlock = () => {
-    clearHiddenSyncPressTimer();
-    hiddenSyncPressTimer = window.setTimeout(() => {
-      unlockNativeSyncPanel();
-    }, 900);
-  };
-
-  ["mousedown", "touchstart"].forEach((eventName) => {
-    helpSettingsLabel.addEventListener(eventName, queueHiddenSyncUnlock, { passive: true });
-  });
-  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((eventName) => {
-    helpSettingsLabel.addEventListener(eventName, clearHiddenSyncPressTimer, { passive: true });
-  });
-
-  // The director-sync panel was removed from the markup (takeover killed),
-  // so only wire its controls when they actually exist — otherwise this whole
-  // function throws on a null ref and init never runs.
-  if (directorSyncPanel) {
-    directorSyncCodeInput.addEventListener("input", () => {
-      const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
-      state.nativeSyncSessionCode = normalized;
-      directorSyncCodeInput.value = normalized;
-      persistNativeSyncSessionCode();
-      state.nativeSyncError = "";
-      renderNativeSyncPanel();
-    });
-
-    directorSyncStartDirectorButton.addEventListener("click", () => {
-      haptic(12);
-      activateDirectorShortcut();
-    });
-
-    directorSyncStartFollowerButton.addEventListener("click", () => {
-      // Follower mode is automatic — button is hidden but kept for compat
-      haptic(12);
-      state.nativeSyncAutoStartSuppressed = false;
-      requestAutoFollowerMode();
-    });
-
-    directorSyncStopButton.addEventListener("click", () => {
-      haptic();
-      state.nativeSyncAutoStartSuppressed = true;
-      state.nativeSyncAutoStartRequested = false;
-      state.nativeSyncError = "";
-      state.nativeSyncStatus = "";
-      renderNativeSyncPanel();
-      if (!postNativeBridge({ type: "sync-stop" })) {
-        state.nativeSyncRole = "off";
-        state.nativeSyncStatus = "";
-        state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
-        renderNativeSyncPanel();
-      }
-    });
-  }
 
   // Fullscreen
   fullscreenButton.addEventListener("click", () => {
@@ -2743,19 +2748,27 @@ const goLive = () => {
 };
 
 const relayIsFreshLive = (snap) =>
-  snap && typeof snap.seq === "number" && snap.seq > 0 &&
+  snap && Number.isFinite(snap.seq) && snap.seq > 0 &&
   (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
 
-const applyRelaySnapshot = (snap, { force = false } = {}) => {
-  if (!snap || typeof snap.page !== "number") return;
-  // Ongoing pushes are de-duped / ordered by seq. A FORCED resync (initial load,
-  // reconnect, foreground, or the safety poll) must re-apply the director's CURRENT
-  // page even when the seq isn't newer — the director may be sitting still — so it
-  // skips the seq guard.
-  if (!force && typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return;
-  if (typeof snap.seq === "number") relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
+const applyRelaySnapshot = async (snap, { force = false } = {}) => {
+  // Number.isFinite rejects NaN (typeof NaN === "number" let it slip the old guard) →
+  // a NaN page would clamp/render bogusly. Reject non-finite page outright.
+  if (!snap || !Number.isFinite(snap.page)) return;
+  // A director on a DIFFERENT book: switch first (mirrors the native set-book path) so
+  // the page lands in the right book even if IP-geo was wrong/slow. Awaited so totalPages
+  // and pad width are correct before we renderPage below.
+  if (isBookId(snap.bookId) && snap.bookId !== state.currentBook) {
+    await switchBook(snap.bookId, { fromNative: true });
+  }
+  // Ongoing pushes are de-duped / ordered by seq (Number.isFinite so a NaN seq can't
+  // slip the guard). A FORCED resync (initial load, reconnect, foreground, or the safety
+  // poll) must re-apply the director's CURRENT page even when the seq isn't newer — the
+  // director may be sitting still — so it skips the seq guard.
+  if (!force && Number.isFinite(snap.seq) && snap.seq > 0 && snap.seq <= relay.lastSeq) return;
+  if (Number.isFinite(snap.seq)) relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
 
-  const hasPublished = typeof snap.seq === "number" && snap.seq > 0;
+  const hasPublished = Number.isFinite(snap.seq) && snap.seq > 0;
   // No director has ever published, OR (ongoing only) the director has gone stale →
   // behave like a normal songbook. A forced resync ignores the freshness window: a
   // director lingering on a page is still the page the follower should be on.
@@ -2789,10 +2802,25 @@ const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) 
 const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
 
 const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
+// Map the worker's X-Hymnal IP-geo header to a book id (web followers only).
+const bookFromHymnal = (h) => (h === "standard" ? "standard" : h === "nonstandard" ? "hymns-4" : null);
+let relayGeoBookApplied = false;
 const relayPollOnce = async (force = false) => {
   try {
     const r = await fetch(relayStateUrl(), { cache: "no-store" });
-    if (r.ok) applyRelaySnapshot(await r.json(), { force });
+    // IP-geo book selection for web followers (signovivo.com): Del Rio (78840/78841) ->
+    // standard manual, elsewhere -> hymns-4, read from the relay's X-Hymnal response header.
+    // The native shell injects __SIGNO_VINO_INITIAL_BOOK instead, so this applies only on the
+    // web. Switch the book BEFORE applying the snapshot so the director's page lands in the
+    // right book (otherwise a Del Rio follower defaults to hymns-4 and the page gets clamped).
+    if (!relayGeoBookApplied && !NATIVE_FILE_MODE && !hasNativeBridge()) {
+      const geoBook = bookFromHymnal(r.headers.get("X-Hymnal"));
+      if (geoBook) {
+        relayGeoBookApplied = true;
+        if (geoBook !== state.currentBook) await switchBook(geoBook, { fromNative: true });
+      }
+    }
+    if (r.ok) await applyRelaySnapshot(await r.json(), { force });
   } catch {}
 };
 // Fallback polling (when the WS won't hold): force every tick so a stationary director
@@ -2822,12 +2850,17 @@ const connectRelay = () => {
       try { ws.send("ping"); } catch {}
     }, 4000);
   });
-  ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
+  ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)).catch(() => {}); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
     clearInterval(heartbeatTimer);
     if (relay.manualClose) return;
-    setTimeout(connectRelay, relay.backoff);
+    // Add ±30% JITTER so many followers don't reconnect in lockstep after a shared
+    // network blip (thundering-herd on the worker). The first retry stays fast (the
+    // 500ms floor), and the (re)open handler force-polls to resync. Backoff itself
+    // remains the clean exponential base so the 8000ms cap + /state fallback are intact.
+    const delay = relay.backoff * (0.7 + Math.random() * 0.6);
+    setTimeout(connectRelay, delay);
     relay.backoff = Math.min(relay.backoff * 2, 8000);
     if (relay.backoff >= 8000) startRelayPolling();   // WS truly won't hold -> /state fallback
   });
@@ -2847,30 +2880,51 @@ const initReader = async () => {
   // The inlined manifest now carries ONLY { totalPages } — just enough to paint
   // the director's page instantly. The song index (~50 KB: titles, themes, intro
   // chords, jump-to-song) hydrates separately so it never blocks first paint.
+  // The inlined #pages-data describes ONLY the DEFAULT book (just { totalPages }) for
+  // instant first paint. If the chosen book is the default we paint inline now and
+  // hydrate the song index in the background; if it's a NON-default book we must load
+  // that book's manifest before first paint so totalPages/pages match.
   const inlinedPages = document.getElementById("pages-data");
-  const manifest = inlinedPages
+  const usingInlineDefault = Boolean(inlinedPages) && state.currentBook === bookRegistry.default;
+  const manifest = usingInlineDefault
     ? JSON.parse(inlinedPages.textContent)
-    : await fetch(resolveAppPath("/pages.json"), { cache: "no-store" }).then((r) => r.json());
-  state.totalPages = manifest.totalPages;
+    : await fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" }).then((r) => r.json());
+  // Only adopt a positive-integer totalPages — a missing / NaN / string value would
+  // NaN-stick the whole reader. Fall back to the per-book registry count, else keep
+  // the state default; never assign NaN/undefined.
+  const manifestTotal = Number(manifest.totalPages);
+  if (Number.isInteger(manifestTotal) && manifestTotal > 0) {
+    state.totalPages = manifestTotal;
+  } else {
+    const registryTotal = Number(bookRegistry.books?.[state.currentBook]?.totalPages);
+    if (Number.isInteger(registryTotal) && registryTotal > 0) state.totalPages = registryTotal;
+  }
   state.currentPage = DEFAULT_START_PAGE;
 
   // Fold the full song index into state and refresh everything that depends on it.
-  // Runs immediately if the index was inlined (offline / ?admin build), otherwise
-  // in the background once /pages.json lands (see below).
+  // Runs immediately if the index came inline with the manifest (offline / ?admin
+  // build), otherwise in the background once the book's pages.json lands (see below).
   const hydrateSongIndex = (data) => {
     if (!data || !data.songIndex) return;
     state.songIndex = [...data.songIndex].sort((left, right) => left.song - right.song);
     state.totalSongs = state.songIndex.length;
     state.themeIndex = data.themeIndex || [];
     state.songPageLookup = buildSongPageLookup(state.songIndex);
+    // For the default book, totalPages was painted from inline #pages-data and never
+    // reconciled with the authoritative fetched pages.json. If they drift, adopt the
+    // fetched value (positive integer only) and re-render so paging/padding stay correct.
+    const dataTotal = Number(data.totalPages);
+    if (Number.isInteger(dataTotal) && dataTotal > 0 && dataTotal !== state.totalPages) {
+      state.totalPages = dataTotal;
+      renderPage(state.currentPage, { pushToHistory: false });
+    }
     renderStatus();
-    renderNativeSyncPanel();
     renderActiveTab();
   };
   if (manifest.songIndex) hydrateSongIndex(manifest);
+  updateBookLabel();
   renderDraft();
   renderStatus();
-  renderNativeSyncPanel();
   updateFullscreenButton();
   hideLoadingIndicator();
   // Show the reader IMMEDIATELY — never block the congregation behind the big
@@ -2890,13 +2944,14 @@ const initReader = async () => {
   renderActiveTab();
   postNativeBridge({
     type: "bridge-ready",
-    page: DEFAULT_START_PAGE,
+    page: state.currentPage,
     totalPages: state.totalPages,
+    book: state.currentBook,
   });
   // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
   // off the critical first paint without losing titles, themes, or jump-to-song.
   if (!manifest.songIndex) {
-    fetch(resolveAppPath("/pages.json"), { cache: "no-store" })
+    fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" })
       .then((response) => response.json())
       .then(hydrateSongIndex)
       .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));

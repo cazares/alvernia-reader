@@ -18,11 +18,18 @@ export interface Env {
   /** Comma-separated allow-list for CORS on /state. "*" allows all (fine — no credentials). */
   ALLOWED_ORIGINS?: string;
   /** Comma-separated transmitter access codes accepted via the `X-Director-Code` header.
-   *  Defaults to "12345678840" if unset. Gates who may publish (page numbers only). */
+   *  Defaults to the legacy transmitter code plus the four director codes if unset.
+   *  Gates who may publish (page numbers only). The legacy "12345678840" stays until
+   *  native build 332 is confirmed live on TestFlight, then it is removed (Phase 7). */
   TRANSMITTER_CODES?: string;
 }
 
 const PROTOCOL_VERSION = 1;
+
+// Past which age (seconds) a snapshot counts as "no active director" — matches the web
+// follower's RELAY_LIVE_MAX_AGE_S. Build 332+ directors re-publish every ~12s, so a live
+// director never goes stale; a stale snapshot means the director is gone.
+const RELAY_LIVE_MAX_AGE_S = 90;
 
 type Snapshot = {
   v: number;
@@ -62,17 +69,33 @@ export class SyncRoom extends DurableObject<Env> {
 
   /** RPC: director publishes a new page state. Latest-wins, stale-guarded. */
   async publish(input: Partial<Snapshot>): Promise<{ ok: true; seq: number; ignored?: boolean }> {
-    const incomingSeq = Number(input.seq ?? 0);
-    // Ignore out-of-order / duplicate / replayed packets so the song can't rewind.
-    if (incomingSeq > 0 && incomingSeq <= this.snapshot.seq) {
+    // Sanitize seq before it touches the guard. A non-finite (Infinity/NaN), negative, or
+    // unreachably-high seq would poison the room: Infinity serializes as null and, since every
+    // finite seq is <= Infinity, would block every future director for the whole live window.
+    // Collapse any such value to 0 so the `incomingSeq > 0 ? … : this.snapshot.seq + 1` branch
+    // below assigns a sane monotonic seq instead.
+    let incomingSeq = Number(input.seq ?? 0);
+    if (!Number.isFinite(incomingSeq) || incomingSeq < 0 || incomingSeq > Date.now() + 60000) {
+      incomingSeq = 0;
+    }
+    // The seq guard stops a burst of page turns on a weak link from arriving out of order
+    // and rewinding the song — but ONLY while a director is actively live (fresh snapshot).
+    // If nobody has published within the live window the snapshot is stale (no active
+    // director), so a NEW director may take over regardless of seq. This also self-heals a
+    // poisoned / wrongly-scaled seq left behind by a gone director (otherwise a too-high
+    // stale seq would silently block every future director from ever transmitting).
+    const nowSec = Math.floor(Date.now() / 1000);
+    const snapshotStale =
+      this.snapshot.seq === 0 || nowSec - this.snapshot.ts > RELAY_LIVE_MAX_AGE_S;
+    if (!snapshotStale && incomingSeq > 0 && incomingSeq <= this.snapshot.seq) {
       return { ok: true, seq: this.snapshot.seq, ignored: true };
     }
     const next: Snapshot = {
       v: PROTOCOL_VERSION,
-      page: Math.max(1, Number(input.page ?? this.snapshot.page) || 1),
-      totalPages: Math.max(0, Number(input.totalPages ?? this.snapshot.totalPages) || 0),
-      mode: String(input.mode ?? this.snapshot.mode ?? ""),
-      bookId: String(input.bookId ?? this.snapshot.bookId ?? ""),
+      page: Math.max(1, Math.min(Number(input.page ?? this.snapshot.page) || 1, 100000)),
+      totalPages: Math.max(0, Math.min(Number(input.totalPages ?? this.snapshot.totalPages) || 0, 100000)),
+      mode: String(input.mode ?? this.snapshot.mode ?? "").slice(0, 64),
+      bookId: String(input.bookId ?? this.snapshot.bookId ?? "").slice(0, 64),
       seq: incomingSeq > 0 ? incomingSeq : this.snapshot.seq + 1,
       ts: Math.floor(Date.now() / 1000),
     };
@@ -153,7 +176,11 @@ function corsHeaders(origin: string | null, env: Env): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization,Content-Type",
+    // X-Director-Code is required so the web app (inside the native file:// WebView, or
+    // signovivo.com) can POST /publish without the preflight stripping the auth header.
+    "Access-Control-Allow-Headers": "Authorization,Content-Type,X-Director-Code",
+    // Expose X-Hymnal so browser fetch() can READ it cross-origin (otherwise it's hidden).
+    "Access-Control-Expose-Headers": "X-Hymnal",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -173,6 +200,15 @@ export default {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
     const cors = corsHeaders(origin, env);
+
+    // IP geolocation → which hymnal book the follower should default to.
+    // Del Rio, TX (the parish; zip 78840/78841) sings from the standard manual
+    // (alvernia_manual_2); everywhere else defaults to hymns-4 ("Himnos de Sión").
+    // Sent on every response; the web app reads it on its first /state fetch.
+    const postal = String((request.cf?.postalCode as string) || "");
+    const cityLc = String((request.cf?.city as string) || "").toLowerCase();
+    const isStandard = postal === "78840" || postal === "78841" || cityLc === "del rio";
+    cors["X-Hymnal"] = isStandard ? "standard" : "nonstandard";
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
@@ -212,20 +248,47 @@ export default {
       const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
       const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
       const validCodes = new Set(
-        (env.TRANSMITTER_CODES || "12345678840").split(",").map((c) => c.trim()).filter(Boolean),
+        (
+          env.TRANSMITTER_CODES ||
+          // legacy transmitter code + the four director codes (admin 8307343376 + 3 regular).
+          // Legacy "12345678840" removed in Phase 7 once build 332 is confirmed on TestFlight.
+          "12345678840,8307343376,8304533367,8307197000,8303130470"
+        )
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean),
       );
       const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && token === env.RELAY_DIRECTOR_TOKEN;
       const codeOk = code.length > 0 && validCodes.has(code);
       if (!tokenOk && !codeOk) {
         return json({ ok: false, error: "unauthorized" }, 401, cors);
       }
-      let body: Partial<Snapshot>;
+      // Reject oversized bodies early (a snapshot is a few hundred bytes). Cloudflare's own
+      // body-size limit otherwise rejects request.json() with a non-SyntaxError that would
+      // escape as an HTML 500; this returns a clean 413 first.
+      const contentLen = Number(request.headers.get("content-length") || 0);
+      if (contentLen > 64 * 1024) {
+        return json({ ok: false, error: "payload_too_large" }, 413, cors);
+      }
+      let parsed: unknown;
       try {
-        body = (await request.json()) as Partial<Snapshot>;
+        parsed = await request.json();
       } catch {
+        // Any parse/body failure (malformed JSON, oversized chunked body) — not just SyntaxError.
         return json({ ok: false, error: "bad_json" }, 400, cors);
       }
-      const result = await stub.publish(body);
+      // A raw JSON `null` / array / primitive is valid JSON but not a snapshot; coerce to {}
+      // so publish() never dereferences a non-object.
+      const body: Partial<Snapshot> =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Partial<Snapshot>)
+          : {};
+      let result;
+      try {
+        result = await stub.publish(body);
+      } catch {
+        return json({ ok: false, error: "publish_failed" }, 500, cors);
+      }
       return json(result, 200, cors);
     }
 

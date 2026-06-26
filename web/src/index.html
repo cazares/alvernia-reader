@@ -28,19 +28,22 @@
     <meta name="twitter:title" content="Signo Vivo" />
     <meta name="twitter:description" content="Manual de coro Signo Vivo — sigue al director en vivo." />
     <meta name="twitter:image" content="https://signovivo.com/icon.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icon-192.png" />
-    <link rel="apple-touch-icon" href="/icon-512.png" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="icon-512.png" />
+    <!-- Warm the relay origin so the first live-follow WS/state connection is fast on
+         signovivo.com cold loads. Harmless in native file:// mode (origin unused). -->
+    <link rel="preconnect" href="https://signovivo-sync.4j4982y8jp.workers.dev" crossorigin />
+    <link rel="dns-prefetch" href="https://signovivo-sync.4j4982y8jp.workers.dev" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
-        <img id="page-image" src="/pages/page-002.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
+        <img id="page-image" src="books/hymns-4/pages/page-02.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
         <div class="director-mode-badge is-hidden" id="director-mode-badge" aria-live="polite">
           <span class="director-mode-badge-eyebrow">Modo activo</span>
           <strong class="director-mode-badge-title">DIRECTOR</strong>
-          <span class="director-mode-badge-code" id="director-mode-badge-code">Código 2046</span>
         </div>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
@@ -305,42 +308,6 @@
                 </span>
               </button>
             </div>
-            <div class=”director-sync-panel is-hidden” id=”director-sync-panel”>
-              <div class=”director-sync-header”>
-                <p class=”director-sync-eyebrow”>Modo oculto</p>
-                <strong class=”director-sync-title”>Director offline</strong>
-                <p class=”director-sync-copy”>
-                  Escribe <strong>2046</strong> en el teclado y toca ↵ para entrar como director. Los demás dispositivos siguen automáticamente.
-                </p>
-              </div>
-              <label class=”director-sync-label is-hidden” for=”director-sync-code”>Código</label>
-              <input
-                class=”director-sync-input is-hidden”
-                id=”director-sync-code”
-                type=”text”
-                inputmode=”text”
-                autocomplete=”off”
-                autocorrect=”off”
-                autocapitalize=”characters”
-                spellcheck=”false”
-                maxlength=”12”
-                placeholder=”2046”
-                aria-label=”Código de sincronización”
-              />
-              <div class=”director-sync-actions”>
-                <button class=”director-sync-button director-sync-button-primary” id=”director-sync-start-director” type=”button”>
-                  Entrar como director
-                </button>
-                <button class=”director-sync-button is-hidden” id=”director-sync-start-follower” type=”button”>
-                  Seguir director
-                </button>
-                <button class=”director-sync-button director-sync-button-muted is-hidden” id=”director-sync-stop” type=”button”>
-                  Salir de sync
-                </button>
-              </div>
-              <p class=”director-sync-status” id=”director-sync-status”></p>
-              <p class=”director-sync-error is-hidden” id=”director-sync-error”></p>
-            </div>
           <p class="app-version-label" id="app-version-label"></p>
           </div><!-- /help-panel -->
 
@@ -349,6 +316,6 @@
       </section>
     </main>
 
-    <script defer src="/app.js"></script>
+    <script defer src="app.js"></script>
   </body>
 </html>
