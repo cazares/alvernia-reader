@@ -7,7 +7,6 @@ const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
 const srcDir = path.join(rootDir, "web", "src");
 const distDir = path.join(rootDir, "web", "dist");
 const pagesDir = path.join(distDir, "pages");
-const thumbsDir = path.join(distDir, "thumbs");
 const cacheVersion = (() => {
   const gitSha = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
     cwd: rootDir,
@@ -22,7 +21,6 @@ const cacheVersion = (() => {
 fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
 fs.mkdirSync(pagesDir, { recursive: true });
-fs.mkdirSync(thumbsDir, { recursive: true });
 
 fs.copyFileSync(path.join(srcDir, "styles.css"), path.join(distDir, "styles.css"));
 const relayBase = (process.env.ALVERNIA_RELAY_BASE || "https://signovivo-sync.4j4982y8jp.workers.dev").replace(/\/+$/, "");
@@ -89,12 +87,8 @@ const pngFiles = fs
   .filter((file) => /^render-\d+\.png$/.test(file))
   .sort((left, right) => left.localeCompare(right));
 
-const THUMB_WIDTH = parsePositiveInt(process.env.ALVERNIA_THUMB_WIDTH, 320);
-const THUMB_JPEG_QUALITY = parseJpegQuality(process.env.ALVERNIA_THUMB_JPEG_QUALITY, 70);
-
-// Encode each rendered page to WebP (page-NNN.webp) + a JPEG thumb (thumb-NNN.jpg),
-// then drop the intermediate PNG.
-console.log(`Encoding ${pngFiles.length} pages to WebP q${WEBP_QUALITY} @ ${PDF_RENDER_DPI} DPI + thumbs...`);
+// Encode each rendered page to WebP (page-NNN.webp), then drop the intermediate PNG.
+console.log(`Encoding ${pngFiles.length} pages to WebP q${WEBP_QUALITY} @ ${PDF_RENDER_DPI} DPI...`);
 for (let i = 0; i < pngFiles.length; i++) {
   const num = pngFiles[i].match(/render-(\d+)\.png$/)[1];
   const pngPath = path.join(pagesDir, pngFiles[i]);
@@ -107,19 +101,10 @@ for (let i = 0; i < pngFiles.length; i++) {
   if (webp.status !== 0 || !fs.existsSync(webpOut)) {
     throw new Error(`cwebp failed for ${pngFiles[i]} (status ${webp.status ?? "?"})`);
   }
-  const thumbOut = path.join(thumbsDir, `thumb-${num}.jpg`);
-  const thumb = spawnSync(
-    "sips",
-    ["-Z", String(THUMB_WIDTH), "-s", "format", "jpeg", "-s", "formatOptions", String(THUMB_JPEG_QUALITY), pngPath, "--out", thumbOut],
-    { stdio: "pipe" },
-  );
-  if (thumb.status !== 0 || !fs.existsSync(thumbOut)) {
-    throw new Error(`Failed generating thumb for ${pngFiles[i]}`);
-  }
   fs.unlinkSync(pngPath);
   if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pngFiles.length}\n`);
 }
-console.log("WebP + thumb generation done.");
+console.log("WebP generation done.");
 
 const pageFiles = fs
   .readdirSync(pagesDir)

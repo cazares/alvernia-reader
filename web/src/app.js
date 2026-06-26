@@ -7,10 +7,8 @@ const offlineGateTitle = document.getElementById("offline-gate-title");
 const offlineGateBody = document.getElementById("offline-gate-body");
 const offlineSpinner = document.getElementById("offline-spinner");
 const offlineProgressValue = document.getElementById("offline-progress-value");
-const offlineAdminNote = document.getElementById("offline-admin-note");
 const offlineReadyNote = document.getElementById("offline-ready-note");
 const offlineMetaNote = document.getElementById("offline-meta-note");
-const offlineTestButton = document.getElementById("offline-test-button");
 const offlineContinueButton = document.getElementById("offline-continue-button");
 const offlineRetryButton = document.getElementById("offline-retry-button");
 const overlayControls = document.getElementById("overlay-controls");
@@ -123,7 +121,6 @@ let cachedKeywords = null;
 
 // ── Environment detection ─────────────────────────────────────────────────────
 const initialUrl = new URL(window.location.href);
-const isAdminSetupMode = initialUrl.searchParams.get("admin") === "1";
 const userAgent = navigator.userAgent;
 const isIOS = /iphone|ipad|ipod/i.test(userAgent);
 const isStandaloneApp = window.matchMedia("(display-mode: standalone)").matches
@@ -147,7 +144,6 @@ const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
 const OFFLINE_DB_NAME = "signo-vivo-offline";
 const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
-const OFFLINE_PAGES = window.OFFLINE_PAGES || null;
 const NATIVE_FILE_MODE = Boolean(window.__SIGNO_VINO_NATIVE_FILE_MODE || window.location.protocol === "file:");
 const NATIVE_BRIDGE_CHANNEL = "signovivo-native";
 const NATIVE_SYNC_SESSION_KEY = "sv-native-sync-session";
@@ -181,15 +177,9 @@ const pageFileName = (pageNumber) => {
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
   : pageFileName(pageNumber);
-const resolvePageSrc = (pageNumber, retryToken = "") => {
-  if (OFFLINE_PAGES?.[pageNumber]) return OFFLINE_PAGES[pageNumber];
-  return pageFileUrl(pageNumber, retryToken);
-};
+const resolvePageSrc = (pageNumber, retryToken = "") => pageFileUrl(pageNumber, retryToken);
 const pageImageMatches = (pageNumber) => {
   const currentSrc = pageImage.getAttribute("src") || "";
-  if (OFFLINE_PAGES?.[pageNumber]) {
-    return currentSrc === OFFLINE_PAGES[pageNumber];
-  }
   return currentSrc.endsWith(pageFileName(pageNumber));
 };
 const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
@@ -451,11 +441,9 @@ const setOfflineGateState = ({
     stopLoadingPhrases();
     offlineProgressValue.textContent = "";
   }
-  offlineAdminNote.classList.toggle("is-hidden", !(showAdminNote && isAdminSetupMode));
   offlineReadyNote.classList.toggle("is-hidden", !ready);
   offlineMetaNote.textContent = metadataText;
   offlineMetaNote.classList.toggle("is-hidden", !metadataText);
-  offlineTestButton.classList.toggle("is-hidden", !(canTestOffline && isAdminSetupMode));
   offlineContinueButton.classList.toggle("is-hidden", !ready);
   offlineRetryButton.classList.toggle("is-hidden", !canRetry);
 };
@@ -547,7 +535,7 @@ const isOfflineBundleReady = async (totalPages) => {
 };
 
 const requireOfflineBundle = async (totalPages) => {
-  if (OFFLINE_PAGES || NATIVE_FILE_MODE) {
+  if (NATIVE_FILE_MODE) {
     setOfflineGateState({ visible: false });
     return;
   }
@@ -2163,39 +2151,6 @@ const activateTab = (tabId) => {
 
 // ── Event binding ─────────────────────────────────────────────────────────────
 const bindReaderEvents = () => {
-  offlineTestButton.addEventListener("click", async () => {
-    const wasVisible = !offlineGate.classList.contains("is-hidden");
-    setOfflineGateState({ visible: false });
-    try {
-      await renderPage(state.currentPage || DEFAULT_START_PAGE, { pushToHistory: false });
-      const wasOnline = navigator.onLine ? "Con internet activo" : "Sin internet detectado";
-      setOfflineGateState({
-        visible: true,
-        title: "Prueba completada",
-        body: "La página actual cargó correctamente. Si quieres, ahora apaga Wi‑Fi y vuelve a tocar este botón para confirmar la prueba real offline.",
-        progress: state.totalPages,
-        total: state.totalPages,
-        showAdminNote: true,
-        ready: true,
-        metadataText: wasOnline,
-        canTestOffline: true,
-        canRetry: false,
-      });
-    } catch {
-      setOfflineGateState({
-        visible: true,
-        title: "Prueba falló",
-        body: "Todavía no está listo para entregarse. Mantén este iPad conectado y vuelve a intentarlo cuando termine la descarga.",
-        progress: 0,
-        total: state.totalPages,
-        showAdminNote: true,
-        canTestOffline: true,
-        canRetry: true,
-      });
-    }
-    if (!wasVisible) setLoading(false);
-  });
-
   offlineContinueButton.addEventListener("click", () => {
     setOfflineGateState({ visible: false });
   });
@@ -2946,16 +2901,12 @@ const initReader = async () => {
       .then(hydrateSongIndex)
       .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
   }
-  // Full offline pre-cache (downloads the whole manual). Only show the blocking
-  // spinner gate when an admin is explicitly provisioning a dedicated offline iPad
-  // via signovivo.com?admin=1 — everyone else gets an instant reader.
-  if (isAdminSetupMode) {
-    try {
-      await requireOfflineBundle(state.totalPages);
-    } catch (error) {
-      console.warn("Pre-cache offline incompleto:", error);
-    }
-    setOfflineGateState({ visible: false });
+  // Background pre-cache for everyone — at 13 MB it's cheap enough to always do.
+  // No blocking gate; pages download silently while the user reads.
+  if (!NATIVE_FILE_MODE && "caches" in window) {
+    ensureOfflineBundle(state.totalPages, () => {}).catch((error) =>
+      console.warn("Pre-cache offline incompleto:", error),
+    );
   }
 };
 

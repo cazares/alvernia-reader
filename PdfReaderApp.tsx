@@ -401,14 +401,6 @@ const buildPageAssets = (assets: Record<string, number>, totalPages: number, pdf
     return { page: pageNum, source: assets[key] as number | undefined, pdfSource: undefined as string | undefined };
   });
 
-const buildThumbAssets = (assets: Record<string, number>, totalPages: number, pdfSource?: string) =>
-  Array.from({ length: totalPages }, (_, i) => {
-    const pageNum = i + 1;
-    if (pdfSource) return { page: pageNum, source: undefined as number | undefined, pdfSource };
-    const key = `thumbs/thumb-${String(pageNum).padStart(3, "0")}.jpg`;
-    return { page: pageNum, source: assets[key] as number | undefined, pdfSource: undefined as string | undefined };
-  });
-
 // ── Zoomable page ─────────────────────────────────────────────────────────────
 function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { source: number | undefined; pdfSource?: string; page?: number; width: number; height: number; cacheKey?: number }) {
   const [pdfUri, setPdfUri] = useState<string | undefined>(undefined);
@@ -525,22 +517,6 @@ function ZoomablePage({ source, pdfSource, page, width, height, cacheKey }: { so
       )}
     </Animated.View>
   );
-}
-
-// ── Thumbnail cell (song grid) ────────────────────────────────────────────────
-function ThumbCell({ source, pdfSource, page, width, height }: { source: number | undefined; pdfSource?: string; page?: number; width: number; height: number }) {
-  const [uri, setUri] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    if (!pdfSource || !page) return;
-    let cancelled = false;
-    renderPdfPage(pdfSource, page)
-      .then((u) => { if (!cancelled) setUri(u); })
-      .catch(() => { /* thumb failure is silent — gray box is fine */ });
-    return () => { cancelled = true; };
-  }, [pdfSource, page]);
-  if (uri && uri.length > 0) return <Image source={{ uri: `file://${uri}` }} style={{ width, height }} resizeMode="cover" />;
-  if (source) return <Image source={source} style={{ width, height }} resizeMode="cover" />;
-  return <View style={{ width, height, backgroundColor: "#222" }} />;
 }
 
 // ── Pulsing dot for director mode ─────────────────────────────────────────────
@@ -794,8 +770,6 @@ export default function App() {
   const [codeInput, setCodeInput] = useState("");
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [syncRole, setSyncRole] = useState<SyncRole>("off");
-  const [gridVisible, setGridVisible] = useState(false);
-  const [gridDensityIdx, setGridDensityIdx] = useState(0);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [searchTab, setSearchTab] = useState<"todas" | "misa" | "tiempo" | "temas" | "recientes">("todas");
@@ -954,7 +928,6 @@ export default function App() {
     syncRoleRef.current = "follower";
     setSearchVisible(false);
     setBrowseVisible(false);
-    setGridVisible(false);
     setFollowerStatus("searching");
 
     try {
@@ -971,7 +944,6 @@ export default function App() {
   const totalPages = activeBook.totalPages || 1;
   const startPage = mode === "standard" ? STANDARD_START_PAGE : 1;
   const pageAssets = useMemo(() => buildPageAssets(activeBook.assets, totalPages, activeBook.pdfSource), [activeBook.assets, totalPages, activeBook.pdfSource]);
-  const thumbAssets = useMemo(() => buildThumbAssets(activeBook.assets, totalPages, activeBook.pdfSource), [activeBook.assets, totalPages, activeBook.pdfSource]);
   const isStandardMode = mode === "standard";
 
   // Safety: if bundled offline assets are missing/corrupt, fail closed with a recovery UI
@@ -1013,9 +985,6 @@ export default function App() {
     copy.sort((a, b) => a.song - b.song);
     return copy;
   }, [mode, bookSongToPage]);
-
-  const GRID_DENSITY = [2, 3, 4] as const;
-  const gridCols = GRID_DENSITY[gridDensityIdx];
 
   const loadPersistedLaunchState = useCallback(async (isCancelled: () => boolean = () => false) => {
     try {
@@ -1398,7 +1367,6 @@ export default function App() {
 	        noteMemoryPressure("native");
 	        writeBreadcrumb("memory-warning", { page: currentPageRef.current, mode: modeRef.current, bookId: activeBookIdRef.current }).catch(() => {});
 	        setImageCacheKey((k) => k + 1);
-	        setGridVisible(false);
 	        setSearchVisible(false);
 	        setBrowseVisible(false);
 	      } else if (event.type === "state" && syncRoleRef.current === "follower") {
@@ -1598,9 +1566,6 @@ export default function App() {
     setSearchJumpDirection("down");
     setBrowseVisible(false);
     setBrowseTab("todas");
-    setGridVisible(false);
-    setGridDensityIdx(0);
-    setSongModal(false);
     setSyncModal(false);
     setReconnectBusy(false);
     setReconnectMessage("");
@@ -1878,8 +1843,6 @@ export default function App() {
   const openSearch = useCallback(() => {
     setSearchVisible(true);
     setBrowseVisible(false);
-    setGridVisible(false);
-    setSearchJumpDirection("down");
     setTimeout(() => searchInputRef.current?.focus(), 80);
   }, []);
   const closeSearch = useCallback(() => {
@@ -2146,29 +2109,12 @@ export default function App() {
   const openBrowse = useCallback(() => {
     setBrowseVisible(true);
     setSearchVisible(false);
-    setGridVisible(false);
   }, []);
   const closeBrowse = useCallback(() => setBrowseVisible(false), []);
   const handleBrowseSongTap = useCallback((song: number) => {
     navigateToSong(song, closeBrowse);
   }, [closeBrowse, navigateToSong]);
 
-  const handleGridButtonPress = useCallback(() => {
-    setSearchVisible(false);
-    setBrowseVisible(false);
-    if (!gridVisible) {
-      setGridVisible(true);
-    } else {
-      setGridDensityIdx((i) => (i + 1) % GRID_DENSITY.length);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridVisible]);
-
-  const closeGrid = useCallback(() => setGridVisible(false), []);
-
-  const handleGridSongTap = useCallback((song: number) => {
-    navigateToSong(song, closeGrid);
-  }, [closeGrid, navigateToSong]);
 
   const viewabilityConfig = useMemo<ViewabilityConfig>(
     () => ({ viewAreaCoveragePercentThreshold: 50 }),
@@ -2306,61 +2252,6 @@ export default function App() {
         windowSize={memoryPressure ? 1 : 2}
         initialNumToRender={1}
       />
-
-      {/* ── Song grid (thumbnails) — full-screen overlay ── */}
-      {gridVisible && syncRole === "director" && isStandardMode && (() => {
-        const GAP = 6;
-        const cellW = (width - GAP * (gridCols + 1)) / gridCols;
-        const imgH = Math.round(cellW * 1.33);
-        const labelH = 28;
-        // rowH = cell content height + top/bottom margins (GAP/2 each = GAP total)
-        const rowH = imgH + labelH + GAP;
-
-        return (
-          <View style={styles.gridOverlay}>
-            <FlatList
-              data={SORTED_SONGS}
-              keyExtractor={(item) => String(item.song)}
-              numColumns={gridCols}
-              key={`grid-${gridCols}`}
-              windowSize={3}
-              maxToRenderPerBatch={gridCols * 2}
-              initialNumToRender={gridCols * 5}
-              contentContainerStyle={{ padding: GAP / 2 }}
-              getItemLayout={(_, index) => ({
-                length: rowH,
-                offset: GAP / 2 + rowH * Math.floor(index / gridCols),
-                index,
-              })}
-              renderItem={({ item }) => {
-                const thumb = thumbAssets[item.page - 1];
-                return (
-                  <TouchableOpacity
-                    style={{ width: cellW, margin: GAP / 2, backgroundColor: "#111", borderRadius: 6, overflow: "hidden" }}
-                    onPress={() => handleGridSongTap(item.song)}
-                    activeOpacity={0.7}
-                  >
-                    <ThumbCell source={thumb?.source} pdfSource={thumb?.pdfSource} page={thumb?.page} width={cellW} height={imgH} />
-                    <View style={{ height: labelH, backgroundColor: "#111", justifyContent: "center", alignItems: "center" }}>
-                      <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{item.song}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              }}
-            />
-            {/* Bottom toolbar */}
-            <View style={styles.gridToolbar}>
-              <TouchableOpacity style={styles.gridToolbarBtn} onPress={() => setGridDensityIdx((i) => (i + 1) % GRID_DENSITY.length)} activeOpacity={0.8}>
-                <Text style={styles.gridToolbarText}>⊞  {gridCols} col</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.gridToolbarBtn} onPress={closeGrid} activeOpacity={0.8}>
-                <Text style={styles.gridToolbarText}>✕  Cerrar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        );
-      })()}
-
       {/* ── Browse overlay — director only ── */}
       {browseVisible && syncRole === "director" && isStandardMode && (
         <View style={styles.gridOverlay}>
