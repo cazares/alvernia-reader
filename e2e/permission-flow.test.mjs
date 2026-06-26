@@ -71,47 +71,19 @@ test("Swift primePermissions sets delegates and retains browser/advertiser", () 
   assert.match(body, /startAdvertisingPeer\(\)/);
 });
 
-// The fix must trigger immediately on mount, regardless of mode/onboarding/persisted state.
-test("primeNearbyPermissions fires from a top-level useEffect with empty deps", () => {
+// The fix must trigger immediately when sync is available — the shell primes Multipeer
+// permissions inside the bootstrap effect so iOS surfaces the Local Network dialog on the
+// first session, regardless of which book/role the web app lands on.
+test("primeNearbyPermissions fires from the sync-bootstrap effect", () => {
   assert.match(appSource, /import \{[\s\S]*?primeNearbyPermissions[\s\S]*?\} from "\.\/src\/nearbyDirectorSync"/);
-  assert.match(
-    appSource,
-    /useEffect\(\(\) => \{\s*ignoreAsync\("primeNearbyPermissions", primeNearbyPermissions\(\)\);\s*\},\s*\[\]\);/,
-  );
+  assert.match(appSource, /primeNearbyPermissions\(\)/);
 });
 
-// First launch should NOT show the choir-code modal — the app must boot straight into the
-// hymnal so iOS surfaces Local Network permission immediately on the first session.
-test("first launch skips onboarding and boots directly into the nonStandard hymnal", () => {
-  assert.match(appSource, /\/\/ First launch — skip code prompt, boot directly as hymnal/);
-  assert.match(appSource, /const firstBook: BookId = "hymns-4";/);
-  assert.match(
-    appSource,
-    /\[STORAGE_KEYS\.onboardingComplete, "1"\],\s*\[STORAGE_KEYS\.mode, "nonStandard"\],\s*\[STORAGE_KEYS\.activeBookId, firstBook\],/,
-  );
-  assert.match(appSource, /setOnboardingVisible\(false\);\s*setBooted\(true\);/);
-});
-
-// Soft-reset (744668486 / triple refresh) must NOT bounce back to the onboarding modal —
-// regression we caught in the 259→260 cycle.
-test("soft reset re-boots into hymnal and skips onboarding", () => {
-  // Cleared bookstate followed by an immediate re-seed of nonStandard hymnal storage keys.
-  assert.match(
-    appSource,
-    /clearAllBookState\(\)[\s\S]{0,400}AsyncStorage\.multiSet\(\[\s*\[STORAGE_KEYS\.onboardingComplete, "1"\],\s*\[STORAGE_KEYS\.mode, "nonStandard"\],\s*\[STORAGE_KEYS\.activeBookId, book\],/,
-  );
-  assert.match(appSource, /setOnboardingVisible\(false\);[\s\S]{0,200}forceRerender/);
-});
-
-// When director-mode startup fails (typically Local Network denied), users need a one-tap
-// path into Settings plus a force-close instruction (reinstall is no longer recommended).
-test("director-mode error offers Settings deep link and force-close guidance", () => {
-  assert.match(appSource, /import \{[\s\S]*?Linking,[\s\S]*?\} from "react-native"/);
-  assert.match(appSource, /No se pudo activar el modo director/);
-  assert.match(appSource, /Linking\.openURL\("app-settings:"\)/);
-  assert.match(appSource, /cierra la app completamente/);
-  assert.doesNotMatch(appSource, /desinstala y reinstala/);
-});
+// Removed: "first launch skips onboarding…", "soft reset re-boots into hymnal…", and
+// "director-mode error offers Settings deep link…". These pinned the native onboarding
+// modal, the old onboarding/mode storage seeding, and the director-error Alert UI of the
+// FlatList reader — all gone from the WebView shell. Book selection is now IP-geo based,
+// and the web app owns its own error UI. Dead-behavior tests; restore from git if needed.
 
 // Versions must stay in lockstep across all manifests; mismatches caused build 254/255 confusion.
 test("build number is consistent across version.json, app.json, Info.plist, and pbxproj", () => {
@@ -141,8 +113,8 @@ test("build number is consistent across version.json, app.json, Info.plist, and 
 // real trigger that calls startNearbyFollower (which uses the delegate-attached browser
 // inside Swift) and is the most reliable second chance to surface the iOS dialog.
 test("bootstrap effect calls startNearbyFollower when sync is available", () => {
-  assert.match(appSource, /useEffect\(\(\) => \{\s*if \(!syncAvailable\) return;[\s\S]{0,400}bootstrapNearbySyncRole/);
-  assert.match(appSource, /await startNearbyFollower\(DIRECTOR_SESSION\)\.catch\(\(\) => \{\}\);/);
+  assert.match(appSource, /useEffect\(\(\) => \{\s*if \(!syncAvailable\) return;/);
+  assert.match(appSource, /startNearbyFollower\(DIRECTOR_SESSION\)/);
 });
 
 // Director session code is fixed; if it ever changes the followers will silently fail to

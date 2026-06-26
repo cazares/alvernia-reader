@@ -5,6 +5,10 @@ node_modules/
 ios/Pods/
 ios/build/
 ios/.xcode.env.local
+# Generated web bundle, copied from web/dist before archiving (regenerate via npm run build:web + cp).
+ios/WebBundle/
+# Local archives.
+ios/*.xcarchive/
 
 android/.gradle/
 android/build/

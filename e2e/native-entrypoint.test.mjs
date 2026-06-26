@@ -16,36 +16,25 @@ test("native app entrypoint registers the root App component", () => {
   assert.match(source, /import App from "\.\/(App|PdfReaderApp)"/);
 });
 
-test("native reader uses FlatList paging over bundled page assets — no WebView, no file staging", () => {
+test("native app is a react-native-webview shell — no native FlatList reader", () => {
   const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
 
-  assert.match(source, /FlatList/);
-  assert.match(source, /pagingEnabled/);
-  assert.match(source, /assets\/standard\/pages\.json/);
-  assert.match(source, /ALVERNIA_MANUAL_2_SONG_INDEX/);
-  assert.match(source, /resolveSongPage/);
-  assert.match(source, /keyboardType="number-pad"/);
-  assert.doesNotMatch(source, /react-native-webview/);
-  assert.doesNotMatch(source, /FileSystem/);
-  assert.doesNotMatch(source, /stageOfflinePages/);
+  // The reader UI now lives in a bundled web app loaded into a WKWebView.
+  assert.match(source, /react-native-webview/);
+  assert.match(source, /injectedJavaScriptBeforeContentLoaded/);
+  assert.match(source, /__signoVivoReceiveNativeEvent/);
+
+  // The old 3,536-line native FlatList/PDF reader is gone. Ignore the historical-note
+  // comment that still references it; assert the component is neither imported nor rendered.
+  const code = source.replace(/\/\/[^\n]*\n/g, "\n").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.doesNotMatch(code, /\bFlatList\b/);
+  assert.doesNotMatch(code, /pagingEnabled/);
 });
 
-test("offline asset recovery return does not appear before later hooks", () => {
-  const source = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
-  const appStart = source.indexOf("export default function App()");
-  assert.ok(appStart >= 0, "App component not found");
-
-  const appSource = source.slice(appStart);
-  const recoveryIdx = appSource.indexOf("if (offlineAssetsError)");
-  assert.ok(recoveryIdx >= 0, "offlineAssetsError recovery branch not found");
-
-  const afterRecovery = appSource.slice(recoveryIdx);
-  assert.doesNotMatch(
-    afterRecovery,
-    /\buse(State|Effect|Memo|Callback|Ref)\s*\(/,
-    "No React hooks may appear after the offlineAssetsError early return",
-  );
-});
+// Removed: "offline asset recovery return does not appear before later hooks" —
+// pinned the `offlineAssetsError` offline-staging early-return hooks ordering of the
+// native FlatList reader. The WebView shell loads the bundle from file:// and has no
+// such offline-staging machinery. Dead-behavior test; restore from git if it returns.
 
 // Removed: "approving takeover…" and "becoming director from follower…".
 // These pinned the director-takeover UI flow that the "kill takeover / lock to

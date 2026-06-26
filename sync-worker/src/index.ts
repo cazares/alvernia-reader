@@ -18,7 +18,9 @@ export interface Env {
   /** Comma-separated allow-list for CORS on /state. "*" allows all (fine — no credentials). */
   ALLOWED_ORIGINS?: string;
   /** Comma-separated transmitter access codes accepted via the `X-Director-Code` header.
-   *  Defaults to "12345678840" if unset. Gates who may publish (page numbers only). */
+   *  Defaults to the legacy transmitter code plus the four director codes if unset.
+   *  Gates who may publish (page numbers only). The legacy "12345678840" stays until
+   *  native build 332 is confirmed live on TestFlight, then it is removed (Phase 7). */
   TRANSMITTER_CODES?: string;
 }
 
@@ -153,7 +155,11 @@ function corsHeaders(origin: string | null, env: Env): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization,Content-Type",
+    // X-Director-Code is required so the web app (inside the native file:// WebView, or
+    // signovivo.com) can POST /publish without the preflight stripping the auth header.
+    "Access-Control-Allow-Headers": "Authorization,Content-Type,X-Director-Code",
+    // Expose X-Hymnal so browser fetch() can READ it cross-origin (otherwise it's hidden).
+    "Access-Control-Expose-Headers": "X-Hymnal",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -173,6 +179,15 @@ export default {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
     const cors = corsHeaders(origin, env);
+
+    // IP geolocation → which hymnal book the follower should default to.
+    // Del Rio, TX (the parish; zip 78840/78841) sings from the standard manual
+    // (alvernia_manual_2); everywhere else defaults to hymns-4 ("Himnos de Sión").
+    // Sent on every response; the web app reads it on its first /state fetch.
+    const postal = String((request.cf?.postalCode as string) || "");
+    const cityLc = String((request.cf?.city as string) || "").toLowerCase();
+    const isStandard = postal === "78840" || postal === "78841" || cityLc === "del rio";
+    cors["X-Hymnal"] = isStandard ? "standard" : "nonstandard";
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
@@ -212,7 +227,15 @@ export default {
       const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
       const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
       const validCodes = new Set(
-        (env.TRANSMITTER_CODES || "12345678840").split(",").map((c) => c.trim()).filter(Boolean),
+        (
+          env.TRANSMITTER_CODES ||
+          // legacy transmitter code + the four director codes (admin 8307343376 + 3 regular).
+          // Legacy "12345678840" removed in Phase 7 once build 332 is confirmed on TestFlight.
+          "12345678840,8307343376,8304533367,8307197000,8303130470"
+        )
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean),
       );
       const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && token === env.RELAY_DIRECTOR_TOKEN;
       const codeOk = code.length > 0 && validCodes.has(code);

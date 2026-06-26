@@ -80,6 +80,20 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// When backgrounded, avoid churny discovery timers (which can exacerbate memory/CPU pressure).
   private var appIsActive: Bool = true
 
+  // MARK: - Web-bundle distribution
+
+  /// The running app's build number — used as the web-bundle version. Followers learn the
+  /// director's version passively (it rides on every outbound page payload) and via the
+  /// proactive `bundle_offer` control message sent right after a peer connects.
+  private var currentBundleVersion: String {
+    Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+  }
+
+  /// Guards a follower so it requests + receives at most one bundle transfer at a time.
+  /// Set true when a `bundle_request` is sent (and on `didStartReceivingResource`), cleared
+  /// after install succeeds/fails. Prevents duplicate requests from repeated offers.
+  private var bundleTransferInFlight = false
+
   // MARK: - Convenience
 
   private var allConnectedPeers: [MCPeerID] {
@@ -106,6 +120,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       "totalPages": max(0, totalPages),
       "mode": currentMode,
       "bookId": currentBookId,
+      "bundleVersion": currentBundleVersion,
     ]
     return try? JSONSerialization.data(withJSONObject: payload)
   }
@@ -547,6 +562,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         "totalPages": max(0, totalPages.intValue),
         "mode": mode,
         "bookId": bookId,
+        "bundleVersion": self.currentBundleVersion,
       ]
       guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
         resolve(["deliveredPeers": 0])
@@ -563,6 +579,278 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       }
       self.emitState(status: "connected")
       resolve(["deliveredPeers": delivered])
+    }
+  }
+
+  // MARK: - Web-bundle distribution (peer-to-peer)
+
+  /// DIRECTOR → peer, sent right after the peer connects (alongside the page snapshot).
+  /// Advertises the director's bundle version so an offline follower on an older build can
+  /// pull the updated web bundle over the mesh. Uses the same reliable control-send helper
+  /// as the takeover_* messages.
+  private func sendBundleOffer(to peerID: MCPeerID) {
+    guard currentRole == "director" else { return }
+    let payload: [String: Any] = [
+      "v": Self.protocolVersion,
+      "type": "bundle_offer",
+      "version": currentBundleVersion,
+    ]
+    sendControlPayload(payload, to: peerID)
+  }
+
+  /// FOLLOWER side. On receiving a `bundle_offer`, compare versions numerically; if the
+  /// director's is newer and no transfer is already in flight, request the bundle once.
+  private func handleBundleOffer(version offeredVersion: String, from peerID: MCPeerID) {
+    guard currentRole == "follower" else { return }
+    guard !bundleTransferInFlight else { return }
+    let offered = Int(offeredVersion) ?? 0
+    let mine = Int(currentBundleVersion) ?? 0
+    guard offered > mine else { return }
+    bundleTransferInFlight = true
+    let payload: [String: Any] = [
+      "v": Self.protocolVersion,
+      "type": "bundle_request",
+      "version": String(mine),
+    ]
+    sendControlPayload(payload, to: peerID)
+  }
+
+  /// DIRECTOR side. On receiving a `bundle_request`, pack the running app's WebBundle and
+  /// stream it to the requesting peer via MCSession.sendResource (NOT subject to the 8 KB
+  /// control-payload cap). Cleans up the temp file on completion.
+  private func handleBundleRequest(from peerID: MCPeerID) {
+    guard currentRole == "director" else { return }
+    let version = currentBundleVersion
+    guard let session = mcSessions.first(where: { $0.connectedPeers.contains(peerID) }) else { return }
+    // Packing touches the filesystem (~30 MB of assets) — do it off the main thread, then
+    // hop back to the session for the actual sendResource call.
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      guard let self = self else { return }
+      guard let packedURL = self.packWebBundle(version: version) else {
+        DispatchQueue.main.async {
+          self.emitError(code: "BUNDLE_PACK_FAILED", message: "No se pudo empaquetar el contenido para enviar.")
+          self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "pack"] as [String: Any])
+        }
+        return
+      }
+      DispatchQueue.main.async {
+        guard self.currentRole == "director", session.connectedPeers.contains(peerID) else {
+          try? FileManager.default.removeItem(at: packedURL)
+          return
+        }
+        session.sendResource(
+          at: packedURL,
+          withName: "webbundle-\(version).pack",
+          toPeer: peerID,
+          withCompletionHandler: { [weak self] error in
+            // Always clean up the temp pack once the transfer settles.
+            try? FileManager.default.removeItem(at: packedURL)
+            if let error = error {
+              DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.emitError(code: "BUNDLE_SEND_FAILED", message: error.localizedDescription)
+                self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "send"] as [String: Any])
+              }
+            }
+          }
+        )
+      }
+    }
+  }
+
+  /// Packs the app's shipped `WebBundle` blue-folder resource into a single self-describing
+  /// archive with no external dependency:
+  ///   [4-byte big-endian UInt32 header length][header JSON UTF-8][file0 bytes][file1 bytes]...
+  /// header JSON = { "v":1, "version":"<ver>", "files":[ {"path":"index.html","len":1234}, ... ] }
+  /// `path` is the POSIX-relative path (forward slashes) within the WebBundle dir.
+  /// File bytes are streamed via FileHandle so we never hold the whole ~30 MB in memory.
+  /// Returns the temp-file URL, or nil on any failure.
+  private func packWebBundle(version: String) -> URL? {
+    let fm = FileManager.default
+    guard let resourceURL = Bundle.main.resourceURL else { return nil }
+    let sourceDir = resourceURL.appendingPathComponent("WebBundle", isDirectory: true)
+    var isDir: ObjCBool = false
+    guard fm.fileExists(atPath: sourceDir.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+
+    // Enumerate regular files only, recording each file's POSIX-relative path + byte length.
+    guard let enumerator = fm.enumerator(at: sourceDir, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else {
+      return nil
+    }
+    struct PackEntry { let url: URL; let path: String; let len: Int }
+    var entries: [PackEntry] = []
+    let basePath = sourceDir.standardizedFileURL.path
+    while let element = enumerator.nextObject() as? URL {
+      let resourceValues = try? element.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+      guard resourceValues?.isRegularFile == true else { continue }
+      let fullPath = element.standardizedFileURL.path
+      // Derive the relative path under WebBundle; skip anything outside the base (shouldn't happen).
+      guard fullPath.hasPrefix(basePath + "/") else { continue }
+      var relPath = String(fullPath.dropFirst(basePath.count + 1))
+      relPath = relPath.replacingOccurrences(of: "\\", with: "/")
+      guard !relPath.isEmpty else { continue }
+      let len = resourceValues?.fileSize ?? 0
+      entries.append(PackEntry(url: element, path: relPath, len: len))
+    }
+    guard !entries.isEmpty else { return nil }
+    // Deterministic order so the manifest matches the byte stream exactly.
+    entries.sort { $0.path < $1.path }
+
+    let manifest: [String: Any] = [
+      "v": Self.protocolVersion,
+      "version": version,
+      "files": entries.map { ["path": $0.path, "len": $0.len] },
+    ]
+    guard let headerData = try? JSONSerialization.data(withJSONObject: manifest) else { return nil }
+    guard headerData.count <= Int(UInt32.max) else { return nil }
+
+    let destURL = fm.temporaryDirectory.appendingPathComponent("webbundle-\(version).pack")
+    try? fm.removeItem(at: destURL)
+    guard fm.createFile(atPath: destURL.path, contents: nil) else { return nil }
+    guard let writer = try? FileHandle(forWritingTo: destURL) else { return nil }
+    defer { try? writer.close() }
+
+    // [4-byte big-endian header length]
+    var headerLen = UInt32(headerData.count).bigEndian
+    let lenBytes = withUnsafeBytes(of: &headerLen) { Data($0) }
+    writer.write(lenBytes)
+    // [header JSON]
+    writer.write(headerData)
+    // [file bytes, in manifest order] — streamed in chunks so memory stays flat.
+    for entry in entries {
+      guard let reader = try? FileHandle(forReadingFrom: entry.url) else {
+        try? fm.removeItem(at: destURL)
+        return nil
+      }
+      while true {
+        let chunk = reader.readData(ofLength: 1024 * 1024)
+        if chunk.isEmpty { break }
+        writer.write(chunk)
+      }
+      try? reader.close()
+    }
+    return destURL
+  }
+
+  /// FOLLOWER side. Unpacks a received `.pack` file into `Documents/WebBundle_new`, validates
+  /// it contains `index.html`, then atomically-ish swaps it into `Documents/WebBundle`. On
+  /// success emits `{type:"bundleUpdated", version:...}`; on any failure emits `{type:"bundle-error"}`.
+  /// Always clears `bundleTransferInFlight`. Reads are FileHandle-sliced so we don't load the
+  /// whole archive into memory.
+  private func installReceivedBundle(at localURL: URL) {
+    let fm = FileManager.default
+    defer { bundleTransferInFlight = false }
+
+    func fail(_ stage: String, cleanup newDir: URL?) {
+      if let newDir = newDir { try? fm.removeItem(at: newDir) }
+      DispatchQueue.main.async {
+        self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": stage] as [String: Any])
+      }
+    }
+
+    guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+      fail("docs", cleanup: nil); return
+    }
+    let newDir = docs.appendingPathComponent("WebBundle_new", isDirectory: true)
+    try? fm.removeItem(at: newDir)
+    do {
+      try fm.createDirectory(at: newDir, withIntermediateDirectories: true)
+    } catch {
+      fail("mkdir", cleanup: newDir); return
+    }
+
+    guard let reader = try? FileHandle(forReadingFrom: localURL) else {
+      fail("open", cleanup: newDir); return
+    }
+
+    // [4-byte big-endian header length]
+    let lenData = reader.readData(ofLength: 4)
+    guard lenData.count == 4 else { try? reader.close(); fail("header-len", cleanup: newDir); return }
+    let headerLen = lenData.withUnsafeBytes { rawBuffer -> UInt32 in
+      var value: UInt32 = 0
+      withUnsafeMutableBytes(of: &value) { $0.copyBytes(from: rawBuffer) }
+      return UInt32(bigEndian: value)
+    }
+    guard headerLen > 0 else { try? reader.close(); fail("header-empty", cleanup: newDir); return }
+
+    // [header JSON]
+    let headerData = reader.readData(ofLength: Int(headerLen))
+    guard headerData.count == Int(headerLen),
+          let headerObj = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
+          let files = headerObj["files"] as? [[String: Any]] else {
+      try? reader.close(); fail("header-parse", cleanup: newDir); return
+    }
+    let headerVersion = headerObj["version"] as? String ?? ""
+
+    // [file bytes] — slice sequentially; the reader's offset advances as we go.
+    for fileEntry in files {
+      guard let relPath = fileEntry["path"] as? String, !relPath.isEmpty,
+            let len = fileEntry["len"] as? Int, len >= 0 else {
+        try? reader.close(); fail("file-entry", cleanup: newDir); return
+      }
+      // Reject path traversal / absolute paths defensively (we control the sender, but Murphy).
+      let components = relPath.split(separator: "/").map(String.init)
+      guard !components.isEmpty, !components.contains(".."), !relPath.hasPrefix("/") else {
+        try? reader.close(); fail("file-path", cleanup: newDir); return
+      }
+      let destFileURL = newDir.appendingPathComponent(relPath)
+      let destFileDir = destFileURL.deletingLastPathComponent()
+      do {
+        try fm.createDirectory(at: destFileDir, withIntermediateDirectories: true)
+      } catch {
+        try? reader.close(); fail("file-mkdir", cleanup: newDir); return
+      }
+      guard fm.createFile(atPath: destFileURL.path, contents: nil),
+            let fileWriter = try? FileHandle(forWritingTo: destFileURL) else {
+        try? reader.close(); fail("file-create", cleanup: newDir); return
+      }
+      var remaining = len
+      while remaining > 0 {
+        let toRead = min(remaining, 1024 * 1024)
+        let chunk = reader.readData(ofLength: toRead)
+        if chunk.isEmpty { break } // truncated archive
+        fileWriter.write(chunk)
+        remaining -= chunk.count
+      }
+      try? fileWriter.close()
+      guard remaining == 0 else {
+        try? reader.close(); fail("file-truncated", cleanup: newDir); return
+      }
+    }
+    try? reader.close()
+
+    // Validate: the unpacked dir must contain index.html.
+    let indexURL = newDir.appendingPathComponent("index.html")
+    guard fm.fileExists(atPath: indexURL.path) else {
+      fail("no-index", cleanup: newDir); return
+    }
+
+    // Atomic-ish swap: move current WebBundle aside, move new into place, then drop the old.
+    let target = docs.appendingPathComponent("WebBundle", isDirectory: true)
+    let oldDir = docs.appendingPathComponent("WebBundle_old", isDirectory: true)
+    try? fm.removeItem(at: oldDir)
+    if fm.fileExists(atPath: target.path) {
+      do {
+        try fm.moveItem(at: target, to: oldDir)
+      } catch {
+        fail("swap-aside", cleanup: newDir); return
+      }
+    }
+    do {
+      try fm.moveItem(at: newDir, to: target)
+    } catch {
+      // Roll back: restore the old bundle if we moved it aside.
+      if fm.fileExists(atPath: oldDir.path) {
+        try? fm.moveItem(at: oldDir, to: target)
+      }
+      fail("swap-in", cleanup: newDir); return
+    }
+    try? fm.removeItem(at: oldDir)
+
+    DispatchQueue.main.async {
+      self.sendEvent(withName: Self.eventName, body: [
+        "type": "bundleUpdated",
+        "version": headerVersion,
+      ] as [String: Any])
     }
   }
 
@@ -803,6 +1091,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
     lastFollowerHelloAt = 0
     lastFollowerPageReceivedAt = 0
+    bundleTransferInFlight = false
     currentPageNumber = nil; currentTotalPages = 0
     currentMode = ""; currentBookId = ""
     lastEmittedStatus = ""; lastEmittedPeerCount = -1
@@ -1078,6 +1367,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.scheduleFollowerSnapshotProbe()
         } else if self.currentRole == "director" {
           self.sendCurrentPageSnapshot(to: peerID, via: session)
+          self.sendBundleOffer(to: peerID)
         }
         self.emitState(status: "connected")
       case .connecting:
@@ -1161,6 +1451,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         return
       }
 
+      if type == "bundle_offer" {
+        guard let version = payload["version"] as? String else { return }
+        self.handleBundleOffer(version: version, from: peerID)
+        return
+      }
+
+      if type == "bundle_request" {
+        self.handleBundleRequest(from: peerID)
+        return
+      }
+
       guard type == "page" else { return }
       guard let page = payload["page"] as? Int else { return }
       let totalPages = payload["totalPages"] as? Int ?? 0
@@ -1174,8 +1475,39 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
-  func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
-  func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
+
+  func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {
+    // A web-bundle transfer has begun. Mark in-flight so repeated bundle_offers don't double-request.
+    DispatchQueue.main.async {
+      self.bundleTransferInFlight = true
+    }
+  }
+
+  func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
+    DispatchQueue.main.async {
+      guard self.mcSessions.contains(where: { $0 === session }) else {
+        self.bundleTransferInFlight = false
+        return
+      }
+      if let error = error {
+        self.emitError(code: "BUNDLE_RECEIVE_FAILED", message: error.localizedDescription)
+        self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "receive"] as [String: Any])
+        self.bundleTransferInFlight = false
+        return
+      }
+      guard let localURL = localURL else {
+        self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "receive-nil"] as [String: Any])
+        self.bundleTransferInFlight = false
+        return
+      }
+      // Unpack + validate + swap off the main thread (filesystem-heavy); installReceivedBundle
+      // hops back to main for every sendEvent and clears bundleTransferInFlight when done.
+      let capturedURL = localURL
+      DispatchQueue.global(qos: .utility).async { [weak self] in
+        self?.installReceivedBundle(at: capturedURL)
+      }
+    }
+  }
   func session(_ session: MCSession, didReceiveCertificate certificate: [Any]?, fromPeer peerID: MCPeerID, certificateHandler: @escaping (Bool) -> Void) {
     certificateHandler(true)
   }

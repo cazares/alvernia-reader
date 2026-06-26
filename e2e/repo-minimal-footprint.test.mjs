@@ -34,13 +34,14 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
 
   const dependencyNames = Object.keys(packageJson.dependencies).sort();
   assert.equal(dependencyNames.includes("expo"), true);
-  assert.equal(dependencyNames.includes("tonal"), true);
   assert.equal(dependencyNames.includes("expo-asset"), true);
   assert.equal(dependencyNames.includes("expo-haptics"), true);
   assert.equal(dependencyNames.includes("react-native-webview"), true);
 
   for (const removedName of [
     "@react-native-community/netinfo",
+    "@react-native-picker/picker",
+    "tonal",
     "busboy",
     "expo-application",
     "expo-constants",

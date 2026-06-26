@@ -1,12 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { Scale, Note } from "tonal";
 
 const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
 const srcDir = path.join(rootDir, "web", "src");
 const distDir = path.join(rootDir, "web", "dist");
-const pagesDir = path.join(distDir, "pages");
+const booksDir = path.join(distDir, "books");
 const cacheVersion = (() => {
   const gitSha = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
     cwd: rootDir,
@@ -20,7 +19,7 @@ const cacheVersion = (() => {
 
 fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
-fs.mkdirSync(pagesDir, { recursive: true });
+fs.mkdirSync(booksDir, { recursive: true });
 
 fs.copyFileSync(path.join(srcDir, "styles.css"), path.join(distDir, "styles.css"));
 const relayBase = (process.env.ALVERNIA_RELAY_BASE || "https://signovivo-sync.4j4982y8jp.workers.dev").replace(/\/+$/, "");
@@ -70,67 +69,51 @@ const parseJpegQuality = (value, fallback) => {
 const PDF_RENDER_DPI = parsePositiveInt(process.env.ALVERNIA_PDF_RENDER_DPI, 115);
 const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60);
 
-const pdfPath = path.join(rootDir, "assets", "alvernia_manual_2.pdf");
-const pngPrefix = path.join(pagesDir, "render");
-const render = spawnSync(
-  "pdftoppm",
-  ["-png", "-r", String(PDF_RENDER_DPI), pdfPath, pngPrefix],
-  { stdio: "inherit" },
-);
-
-if (render.status !== 0) {
-  throw new Error(`pdftoppm failed with exit code ${render.status ?? 1}`);
-}
-
-const pngFiles = fs
-  .readdirSync(pagesDir)
-  .filter((file) => /^render-\d+\.png$/.test(file))
-  .sort((left, right) => left.localeCompare(right));
-
-// Encode each rendered page to WebP (page-NNN.webp), then drop the intermediate PNG.
-console.log(`Encoding ${pngFiles.length} pages to WebP q${WEBP_QUALITY} @ ${PDF_RENDER_DPI} DPI...`);
-for (let i = 0; i < pngFiles.length; i++) {
-  const num = pngFiles[i].match(/render-(\d+)\.png$/)[1];
-  const pngPath = path.join(pagesDir, pngFiles[i]);
-  const webpOut = path.join(pagesDir, `page-${num}.webp`);
-  const webp = spawnSync(
-    "cwebp",
-    ["-quiet", "-q", String(WEBP_QUALITY), pngPath, "-o", webpOut],
-    { stdio: "pipe" },
+// ─── Shared page render + encode ─────────────────────────────────────────────
+// Renders every PDF page to WebP under <bookOutDir>/pages/page-NNN.webp using the
+// same pdftoppm→cwebp path for every book. Returns the sorted list of webp files.
+const renderPagesToWebp = (pdfPath, pagesOutDir) => {
+  fs.mkdirSync(pagesOutDir, { recursive: true });
+  const pngPrefix = path.join(pagesOutDir, "render");
+  const render = spawnSync(
+    "pdftoppm",
+    ["-png", "-r", String(PDF_RENDER_DPI), pdfPath, pngPrefix],
+    { stdio: "inherit" },
   );
-  if (webp.status !== 0 || !fs.existsSync(webpOut)) {
-    throw new Error(`cwebp failed for ${pngFiles[i]} (status ${webp.status ?? "?"})`);
+
+  if (render.status !== 0) {
+    throw new Error(`pdftoppm failed with exit code ${render.status ?? 1} for ${pdfPath}`);
   }
-  fs.unlinkSync(pngPath);
-  if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pngFiles.length}\n`);
-}
-console.log("WebP generation done.");
 
-const pageFiles = fs
-  .readdirSync(pagesDir)
-  .filter((file) => /^page-\d+\.webp$/.test(file))
-  .sort((left, right) => left.localeCompare(right));
+  const pngFiles = fs
+    .readdirSync(pagesOutDir)
+    .filter((file) => /^render-\d+\.png$/.test(file))
+    .sort((left, right) => left.localeCompare(right));
 
-const songIndexSource = fs.readFileSync(path.join(rootDir, "src", "alverniaManual2SongIndex.js"), "utf8");
-const songIndex = [];
-for (const match of songIndexSource.matchAll(/\[(\d+),\s*(\d+)\]/g)) {
-  songIndex.push({ song: Number(match[1]), page: Number(match[2]) });
-}
+  // Encode each rendered page to WebP (page-NNN.webp), then drop the intermediate PNG.
+  console.log(`Encoding ${pngFiles.length} pages to WebP q${WEBP_QUALITY} @ ${PDF_RENDER_DPI} DPI...`);
+  for (let i = 0; i < pngFiles.length; i++) {
+    const num = pngFiles[i].match(/render-(\d+)\.png$/)[1];
+    const pngPath = path.join(pagesOutDir, pngFiles[i]);
+    const webpOut = path.join(pagesOutDir, `page-${num}.webp`);
+    const webp = spawnSync(
+      "cwebp",
+      ["-quiet", "-q", String(WEBP_QUALITY), pngPath, "-o", webpOut],
+      { stdio: "pipe" },
+    );
+    if (webp.status !== 0 || !fs.existsSync(webpOut)) {
+      throw new Error(`cwebp failed for ${pngFiles[i]} (status ${webp.status ?? "?"})`);
+    }
+    fs.unlinkSync(pngPath);
+    if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pngFiles.length}\n`);
+  }
+  console.log("WebP generation done.");
 
-// ─── PDF Text Extraction ────────────────────────────────────────────────────
-
-const pdfTextResult = spawnSync(
-  "pdftotext",
-  ["-layout", "-enc", "UTF-8", pdfPath, "-"],
-  { encoding: "utf8" },
-);
-
-if (pdfTextResult.status !== 0) {
-  throw new Error(`pdftotext failed with exit code ${pdfTextResult.status ?? 1}`);
-}
-
-const rawAllText = pdfTextResult.stdout || "";
-const pageTextsRaw = rawAllText.split("\f");
+  return fs
+    .readdirSync(pagesOutDir)
+    .filter((file) => /^page-\d+\.webp$/.test(file))
+    .sort((left, right) => left.localeCompare(right));
+};
 
 // ─── Song Title Overrides ────────────────────────────────────────────────────
 // Manual corrections for songs where OCR title extraction is inaccurate
@@ -197,6 +180,37 @@ const SOLFEGE = {
 
 const ALL_ROOTS = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
 
+// Static major-scale note names for each of the 12 ALL_ROOTS — sharps for
+// C/D/E/G/A/B majors, flats for Db/Eb/F/Ab/Bb majors. Hardcoded so the build has
+// no music-theory dependency.
+const MAJOR_SCALES = {
+  C:  ["C", "D", "E", "F", "G", "A", "B"],
+  Db: ["Db", "Eb", "F", "Gb", "Ab", "Bb", "C"],
+  D:  ["D", "E", "F#", "G", "A", "B", "C#"],
+  Eb: ["Eb", "F", "G", "Ab", "Bb", "C", "D"],
+  E:  ["E", "F#", "G#", "A", "B", "C#", "D#"],
+  F:  ["F", "G", "A", "Bb", "C", "D", "E"],
+  "F#": ["F#", "G#", "A#", "B", "C#", "D#", "E#"],
+  G:  ["G", "A", "B", "C", "D", "E", "F#"],
+  Ab: ["Ab", "Bb", "C", "Db", "Eb", "F", "G"],
+  A:  ["A", "B", "C#", "D", "E", "F#", "G#"],
+  Bb: ["Bb", "C", "D", "Eb", "F", "G", "A"],
+  B:  ["B", "C#", "D#", "E", "F#", "G#", "A#"],
+};
+
+// Enharmonic normalization for single-accidental note names ([A-G][#b]?). Chord
+// roots come from `extractChordRoot`, which only ever yields [A-G][#b]?, so
+// single-accidental coverage is sufficient. Only E#→F, B#→C, Cb→B, Fb→E actually
+// move; everything else maps to itself.
+const SIMPLIFY_NOTE = {
+  A: "A", B: "B", C: "C", D: "D", E: "E", F: "F", G: "G",
+  "A#": "A#", "C#": "C#", "D#": "D#", "F#": "F#", "G#": "G#",
+  Ab: "Ab", Bb: "Bb", Db: "Db", Eb: "Eb", Gb: "Gb",
+  "B#": "C", "E#": "F", Cb: "B", Fb: "E",
+};
+
+const simplifyNote = (n) => SIMPLIFY_NOTE[n] || n;
+
 // Single chord regex — matches common guitar chord names
 const CHORD_RE = /^[A-G][#b]?(?:m|M|maj|maj7|maj9|m7|m9|7|9|11|13|6|aug|dim|sus2|sus4|add9|add11)?(?:\/[A-G][#b]?)?$/;
 
@@ -209,14 +223,14 @@ const extractChordRoot = (chord) => {
 
 // Score how well a set of chord roots fits a given major key
 const scoreRootsInKey = (roots, tonic) => {
-  const majorNotes = new Set(Scale.get(`${tonic} major`).notes.map((n) => Note.simplify(n) || n));
+  const majorNotes = new Set((MAJOR_SCALES[tonic] || []).map((n) => simplifyNote(n)));
   let score = 0;
   for (const r of roots) {
-    const simplified = Note.simplify(r) || r;
+    const simplified = simplifyNote(r);
     if (majorNotes.has(simplified)) score += 1;
   }
   // Small bonus when the first chord's root matches the tonic (home-key feel)
-  const firstSimplified = Note.simplify(roots[0]) || roots[0];
+  const firstSimplified = simplifyNote(roots[0]);
   if (firstSimplified === tonic) score += 0.4;
   return score;
 };
@@ -479,7 +493,7 @@ const THEMES = [
 
 // Normalize: NFD + strip accents + lowercase
 const normalize = (text) =>
-  text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 const scoreThemes = (rawText) => {
   if (!rawText) return [];
@@ -523,85 +537,233 @@ const scoreThemes = (rawText) => {
     .map((s) => s.id);
 };
 
-// ─── Enrich songIndex with titles + themes + keys + intro ────────────────────
-
-const songSearchIndex = {};
-
-for (let i = 0; i < songIndex.length; i += 1) {
-  const entry = songIndex[i];
-  const nextEntry = songIndex[i + 1] || null;
-  const endPage = nextEntry ? nextEntry.page - 1 : pageTextsRaw.length;
-
-  // Collect all OCR text pages for this song
-  const songPages = pageTextsRaw.slice(entry.page - 1, endPage);
-  const songText = songPages.join("\n");
-  const firstPageText = pageTextsRaw[entry.page - 1] || "";
-
-  entry.title = TITLE_OVERRIDES[entry.song] || extractTitle(firstPageText) || null;
-  entry.themes = scoreThemes(firstPageText);
-  entry.lyrics = extractLyrics(songPages.join("\n"));
-  // For native in-app search we keep the full OCR blob per song.
-  songSearchIndex[String(entry.song)] = songText;
-
-  // Detect key from all chord lines in the song
-  const allChords = extractChordsFromText(songText);
-  const detectedKey = detectKeyFromChords(allChords);
-  entry.key = detectedKey || null;
-  entry.solfege = detectedKey ? (SOLFEGE[detectedKey] || detectedKey) : null;
-
-  // Harmonic complexity
-  entry.complexity = scoreComplexity(allChords);
-
-  // Parse intro info from first page
-  entry.intro = parseIntroInfo(firstPageText);
-}
-
-// ─── Search Index ────────────────────────────────────────────────────────────
-
-const searchIndexPages = pageFiles.map((file, idx) => {
-  const pageNum = idx + 1;
-  const songEntry = songIndex.find((s) => s.page === pageNum);
-  let text;
-  if (songEntry) {
-    // Song pages: index title + clean lyrics (no chord names) for accurate lyric search
-    const parts = [songEntry.title || "", songEntry.lyrics || ""].filter(Boolean);
-    text = parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 800);
-  } else {
-    text = (pageTextsRaw[idx] || "").replace(/\s+/g, " ").trim().slice(0, 600);
-  }
-  return { page: pageNum, text };
-}).filter((entry) => entry.text.length > 5);
-
-fs.writeFileSync(
-  path.join(distDir, "search-index.json"),
-  JSON.stringify({ pages: searchIndexPages }),
-);
-
-// ─── Write manifests ─────────────────────────────────────────────────────────
-
 const themeIndex = THEMES.map(({ id, label, emoji }) => ({ id, label, emoji }));
 
-fs.writeFileSync(
-  path.join(distDir, "pages.json"),
-  JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex }),
-);
+// ─── Per-book builders ───────────────────────────────────────────────────────
 
-// Used by the native reader for fast title lookups without pulling the full songIndex.
-const songTitles = {};
-for (const entry of songIndex) {
-  if (entry?.song && entry?.title) songTitles[String(entry.song)] = entry.title;
-}
-fs.writeFileSync(path.join(distDir, "song-titles.json"), JSON.stringify(songTitles));
-fs.writeFileSync(path.join(distDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
+// Full OCR pipeline for the standard manual: parse songIndex from source, run
+// pdftotext, derive titles/themes/keys/intro/complexity, and emit the four
+// per-book manifests. Mirrors the original single-book build exactly.
+const buildStandardManifests = ({ pageFiles, pdfPath, bookOutDir }) => {
+  const songIndexSource = fs.readFileSync(path.join(rootDir, "src", "alverniaManual2SongIndex.js"), "utf8");
+  const songIndex = [];
+  for (const match of songIndexSource.matchAll(/\[(\d+),\s*(\d+)\]/g)) {
+    songIndex.push({ song: Number(match[1]), page: Number(match[2]) });
+  }
 
-// Inline ONLY { totalPages } — the bare minimum to paint the director's page
-// instantly. The full song index (~50 KB: titles, themes, intro chords) and the
-// search index are both fetched lazily from /pages.json and /search-index.json,
-// so the follower's first-paint HTML stays tiny (~5 KB on the wire). The full
-// manifest is still written to /pages.json (above) for that lazy hydrate.
-const pagesMeta = JSON.stringify({ totalPages: pageFiles.length });
+  // ─── PDF Text Extraction ──────────────────────────────────────────────────
+
+  const pdfTextResult = spawnSync(
+    "pdftotext",
+    ["-layout", "-enc", "UTF-8", pdfPath, "-"],
+    { encoding: "utf8" },
+  );
+
+  if (pdfTextResult.status !== 0) {
+    throw new Error(`pdftotext failed with exit code ${pdfTextResult.status ?? 1}`);
+  }
+
+  const rawAllText = pdfTextResult.stdout || "";
+  const pageTextsRaw = rawAllText.split("\f");
+
+  // ─── Enrich songIndex with titles + themes + keys + intro ─────────────────
+
+  const songSearchIndex = {};
+
+  for (let i = 0; i < songIndex.length; i += 1) {
+    const entry = songIndex[i];
+    const nextEntry = songIndex[i + 1] || null;
+    const endPage = nextEntry ? nextEntry.page - 1 : pageTextsRaw.length;
+
+    // Collect all OCR text pages for this song
+    const songPages = pageTextsRaw.slice(entry.page - 1, endPage);
+    const songText = songPages.join("\n");
+    const firstPageText = pageTextsRaw[entry.page - 1] || "";
+
+    entry.title = TITLE_OVERRIDES[entry.song] || extractTitle(firstPageText) || null;
+    entry.themes = scoreThemes(firstPageText);
+    entry.lyrics = extractLyrics(songPages.join("\n"));
+    // For native in-app search we keep the full OCR blob per song.
+    songSearchIndex[String(entry.song)] = songText;
+
+    // Detect key from all chord lines in the song
+    const allChords = extractChordsFromText(songText);
+    const detectedKey = detectKeyFromChords(allChords);
+    entry.key = detectedKey || null;
+    entry.solfege = detectedKey ? (SOLFEGE[detectedKey] || detectedKey) : null;
+
+    // Harmonic complexity
+    entry.complexity = scoreComplexity(allChords);
+
+    // Parse intro info from first page
+    entry.intro = parseIntroInfo(firstPageText);
+  }
+
+  // ─── Search Index ──────────────────────────────────────────────────────────
+
+  const searchIndexPages = pageFiles.map((file, idx) => {
+    const pageNum = idx + 1;
+    const songEntry = songIndex.find((s) => s.page === pageNum);
+    let text;
+    if (songEntry) {
+      // Song pages: index title + clean lyrics (no chord names) for accurate lyric search
+      const parts = [songEntry.title || "", songEntry.lyrics || ""].filter(Boolean);
+      text = parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 800);
+    } else {
+      text = (pageTextsRaw[idx] || "").replace(/\s+/g, " ").trim().slice(0, 600);
+    }
+    return { page: pageNum, text };
+  }).filter((entry) => entry.text.length > 5);
+
+  fs.writeFileSync(
+    path.join(bookOutDir, "search-index.json"),
+    JSON.stringify({ pages: searchIndexPages }),
+  );
+
+  fs.writeFileSync(
+    path.join(bookOutDir, "pages.json"),
+    JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex }),
+  );
+
+  // Used by the native reader for fast title lookups without pulling the full songIndex.
+  const songTitles = {};
+  for (const entry of songIndex) {
+    if (entry?.song && entry?.title) songTitles[String(entry.song)] = entry.title;
+  }
+  fs.writeFileSync(path.join(bookOutDir, "song-titles.json"), JSON.stringify(songTitles));
+  fs.writeFileSync(path.join(bookOutDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
+
+  return pageFiles.length;
+};
+
+// Prebuilt manifests for hymns-4: we do NOT re-OCR this book. We reuse the
+// pre-generated JSON in assets/standard/ and adapt it into the per-book layout.
+//
+// Source shapes (read from assets/standard/):
+//   hymns-4-pages.json          → { totalPages, songIndex:[{song,page}], themeIndex:[] }
+//   hymns-4-song-titles.json    → { "<song>": "Title" }   (already target shape)
+//   hymns-4-song-search-index.json → [ { song, page, title, normalized, lyrics } ]  (a LIST)
+const buildHymns4Manifests = ({ pageFiles, bookOutDir }) => {
+  const prebuiltDir = path.join(rootDir, "assets", "standard");
+
+  const prebuiltPages = JSON.parse(
+    fs.readFileSync(path.join(prebuiltDir, "hymns-4-pages.json"), "utf8"),
+  );
+  const songTitles = JSON.parse(
+    fs.readFileSync(path.join(prebuiltDir, "hymns-4-song-titles.json"), "utf8"),
+  );
+  const searchList = JSON.parse(
+    fs.readFileSync(path.join(prebuiltDir, "hymns-4-song-search-index.json"), "utf8"),
+  );
+
+  // pages.json — { totalPages, songIndex, themeIndex }. totalPages is the ACTUAL
+  // rendered page count; reuse the prebuilt songIndex; no per-song themes for hymns.
+  const songIndex = Array.isArray(prebuiltPages.songIndex) ? prebuiltPages.songIndex : [];
+  fs.writeFileSync(
+    path.join(bookOutDir, "pages.json"),
+    JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex: [] }),
+  );
+
+  // song-titles.json — already in the { "<song>": "Title" } target shape.
+  fs.writeFileSync(path.join(bookOutDir, "song-titles.json"), JSON.stringify(songTitles));
+
+  // song-search-index.json — target shape is { "<song>": "ocr blob" }. The prebuilt
+  // file is a LIST, so fold it into a dict keyed by song, using title + lyrics as the
+  // searchable blob.
+  const songSearchIndex = {};
+  for (const item of searchList) {
+    if (item?.song == null) continue;
+    const blob = [item.title || "", item.lyrics || ""].filter(Boolean).join(" ").trim();
+    songSearchIndex[String(item.song)] = blob;
+  }
+  fs.writeFileSync(path.join(bookOutDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
+
+  // search-index.json — { pages:[{page,text}] }. Derive best-effort one entry per
+  // song page from title + blob, mirroring how the standard book slices to ~800 chars.
+  const searchIndexPages = [];
+  for (const item of searchList) {
+    if (item?.page == null) continue;
+    const text = [item.title || "", item.lyrics || ""]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 800);
+    if (text.length > 5) {
+      searchIndexPages.push({ page: item.page, text });
+    }
+  }
+  fs.writeFileSync(
+    path.join(bookOutDir, "search-index.json"),
+    JSON.stringify({ pages: searchIndexPages }),
+  );
+
+  return pageFiles.length;
+};
+
+// Render a book's pages and emit its manifests. `mode` selects the manifest
+// pipeline ("standard" → full OCR; "prebuilt-hymns4" → reuse assets/standard JSON).
+const buildBook = ({ id, label, pdfPath, mode }) => {
+  console.log(`\n── Building book "${id}" (${label}) ──`);
+  const bookOutDir = path.join(booksDir, id);
+  fs.mkdirSync(bookOutDir, { recursive: true });
+  const pagesOutDir = path.join(bookOutDir, "pages");
+
+  const pageFiles = renderPagesToWebp(pdfPath, pagesOutDir);
+
+  let totalPages;
+  if (mode === "standard") {
+    totalPages = buildStandardManifests({ pageFiles, pdfPath, bookOutDir });
+  } else if (mode === "prebuilt-hymns4") {
+    totalPages = buildHymns4Manifests({ pageFiles, bookOutDir });
+  } else {
+    throw new Error(`Unknown build mode "${mode}" for book "${id}"`);
+  }
+
+  console.log(`Book "${id}" done — ${totalPages} pages.`);
+  return { id, label, totalPages };
+};
+
+// ─── Build both books ────────────────────────────────────────────────────────
+
+const standard = buildBook({
+  id: "standard",
+  label: "Manual Alvernia",
+  pdfPath: path.join(rootDir, "assets", "alvernia_manual_2.pdf"),
+  mode: "standard",
+});
+
+const hymns4 = buildBook({
+  id: "hymns-4",
+  label: "Himnos de Sión",
+  pdfPath: path.join(rootDir, "assets", "hymns-4.pdf"),
+  mode: "prebuilt-hymns4",
+});
+
+// ─── books.json — top-level book registry ────────────────────────────────────
+
+const DEFAULT_BOOK = "hymns-4";
+const booksManifest = {
+  default: DEFAULT_BOOK,
+  books: {
+    [standard.id]: { label: standard.label, totalPages: standard.totalPages },
+    [hymns4.id]: { label: hymns4.label, totalPages: hymns4.totalPages },
+  },
+};
+fs.writeFileSync(path.join(distDir, "books.json"), JSON.stringify(booksManifest));
+
+const defaultTotalPages = booksManifest.books[DEFAULT_BOOK].totalPages;
+
+// ─── Shell HTML with inlined book registry + default-book page count ──────────
+//
+// Inline TWO script tags in <head>:
+//   #books-data  — the full books.json registry (label + totalPages per book)
+//   #pages-data  — { totalPages } for the DEFAULT book (hymns-4), the bare minimum
+//                  to paint first frame. Per-book song/search indexes are fetched
+//                  lazily from /books/<id>/{pages,search-index}.json.
 const inlineScripts =
-  `  <script id="pages-data" type="application/json">${pagesMeta}</script>\n`;
+  `  <script id="books-data" type="application/json">${JSON.stringify(booksManifest)}</script>\n` +
+  `  <script id="pages-data" type="application/json">${JSON.stringify({ totalPages: defaultTotalPages })}</script>\n`;
 const htmlSrc = fs.readFileSync(path.join(srcDir, "index.html"), "utf8");
 fs.writeFileSync(
   path.join(distDir, "index.html"),
@@ -609,10 +771,12 @@ fs.writeFileSync(
 );
 
 // Far-future browser cache for the immutable page images. The WebP filenames are
-// content-stable (page-NNN.webp); page updates ride the SW cache-version bump, so
-// it's safe to tell the browser to keep these forever. Cloudflare Pages serves
-// custom headers from this _headers file.
+// content-stable (page-NNN.webp) under each book; page updates ride the SW
+// cache-version bump, so it's safe to tell the browser to keep these forever.
+// Cloudflare Pages serves custom headers from this _headers file.
 fs.writeFileSync(
   path.join(distDir, "_headers"),
-  "/pages/*\n  Cache-Control: public, max-age=31536000, immutable\n",
+  "/books/*/pages/*\n  Cache-Control: public, max-age=31536000, immutable\n",
 );
+
+console.log(`\nBuild complete. Default book: ${DEFAULT_BOOK} (${defaultTotalPages} pages).`);

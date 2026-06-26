@@ -36,6 +36,10 @@ RCT_EXTERN_METHOD(refreshNearbyDiscovery:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(requestCurrentSnapshot:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(setIdleTimerDisabled:(BOOL)disabled
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(requestDirectorTakeover:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

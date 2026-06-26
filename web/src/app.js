@@ -105,6 +105,9 @@ const state = {
   activeTab: "todas",
   prevTab: "todas",     // where to return when exiting search fullscreen
   drawerMode: "browse", // browse-only — jump-to-song is now a centered modal
+  currentBook: "hymns-4", // resolved below from the registry / native-injected globals
+  syncRole: "none",       // last role the native shell reported (director/follower/none)
+  nativeBridgeAvailable: false,
   nativeSyncUnlocked: false,
   nativeSyncAvailable: false,
   nativeSyncRole: "off",
@@ -114,6 +117,38 @@ const state = {
   nativeSyncAutoStartRequested: false,
   nativeSyncAutoStartSuppressed: false,
 };
+
+// ── Book registry (multi-book) ──────────────────────────────────────────────────
+// The build inlines the registry as <script id="books-data">…</script>. Parse it
+// defensively; if it's missing (e.g. a stale shell), fall back to the known books.
+const isBookId = (v) => v === "standard" || v === "hymns-4";
+const FALLBACK_BOOK_REGISTRY = {
+  default: "hymns-4",
+  books: {
+    "hymns-4": { label: "Himnos de Sión", totalPages: 51 },
+    standard: { label: "Manual Alvernia", totalPages: 371 },
+  },
+};
+const loadBookRegistry = () => {
+  try {
+    const node = document.getElementById("books-data");
+    if (!node) return FALLBACK_BOOK_REGISTRY;
+    const parsed = JSON.parse(node.textContent || "{}");
+    if (parsed && parsed.books && typeof parsed.books === "object") return parsed;
+    return FALLBACK_BOOK_REGISTRY;
+  } catch {
+    return FALLBACK_BOOK_REGISTRY;
+  }
+};
+const bookRegistry = loadBookRegistry();
+const resolveInitialBook = () => {
+  // Precedence: native-injected initial book → registry default → hymns-4.
+  if (isBookId(window.__SIGNO_VINO_INITIAL_BOOK)) return window.__SIGNO_VINO_INITIAL_BOOK;
+  if (isBookId(bookRegistry.default)) return bookRegistry.default;
+  return "hymns-4";
+};
+state.currentBook = resolveInitialBook();
+const bookLabel = (bookId) => bookRegistry.books?.[bookId]?.label || "";
 
 let cachedSongKeys = null;
 let cachedSongLengths = null;
@@ -148,31 +183,45 @@ const NATIVE_FILE_MODE = Boolean(window.__SIGNO_VINO_NATIVE_FILE_MODE || window.
 const NATIVE_BRIDGE_CHANNEL = "signovivo-native";
 const NATIVE_SYNC_SESSION_KEY = "sv-native-sync-session";
 const DEFAULT_NATIVE_SYNC_SESSION = "2046";
-const SECRET_DIRECTOR_DRAFT = "2046";
 const resolveAppPath = (pathname) => {
   if (!NATIVE_FILE_MODE) return pathname;
   if (pathname === "/") return "./";
   return pathname.replace(/^\//, "");
 };
-const CORE_ASSETS = [
+// Shell assets that are book-agnostic (always cached).
+const SHELL_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
   "/app.js",
   "/manifest.webmanifest",
-  "/pages.json",
-  "/search-index.json",
+  "/books.json",
   "/icon.png",
   "/icon-192.png",
   "/icon-512.png",
 ].map(resolveAppPath);
+// The per-book manifests live under books/<id>/. Cache the ones for the book the
+// offline bundle is being prepared for (the current book).
+const bookManifestAssets = (bookId) => [
+  resolveAppPath(`/books/${bookId}/pages.json`),
+  resolveAppPath(`/books/${bookId}/search-index.json`),
+];
+const coreAssetsForBook = (bookId) => [...SHELL_ASSETS, ...bookManifestAssets(bookId)];
 
 // ── Utilities ────────────────────────────────────────────────────────────────
+// pdftoppm zero-pads page filenames to the WIDTH of each book's total page count
+// (hymns-4: 51 pages → page-02.webp; standard: 371 → page-001.webp). So the pad
+// width is per-book — derive it from the registry's totalPages for this book, with
+// a floor of 2 (and a fallback to live state.totalPages if the registry is silent).
+const bookPagePadWidth = (bookId) => {
+  const total = bookRegistry.books?.[bookId]?.totalPages || state.totalPages || 0;
+  return Math.max(2, String(total).length);
+};
 const pageFileName = (pageNumber) => {
-  const padded = String(pageNumber).padStart(3, "0");
-  // In native file mode pages are staged flat (no pages/ subdir) so WKWebView
-  // can reach them via loadRequest:'s parent-directory sandbox.
-  return NATIVE_FILE_MODE ? `page-${padded}.webp` : `/pages/page-${padded}.webp`;
+  const padded = String(pageNumber).padStart(bookPagePadWidth(state.currentBook), "0");
+  // Always RELATIVE and book-scoped so the same path resolves over https
+  // (signovivo.com) AND file:// (native WKWebView bundle). No leading slash.
+  return `books/${state.currentBook}/pages/page-${padded}.webp`;
 };
 const pageFileUrl = (pageNumber, retryToken = "") => retryToken
   ? `${pageFileName(pageNumber)}?reload=${retryToken}`
@@ -450,8 +499,13 @@ const setOfflineGateState = ({
 
 const extractCachedPageNumber = (request) => {
   const pathname = new URL(request.url).pathname;
-  const match = pathname.match(/^\/pages\/page-(\d+)\.webp$/);
-  return match ? Number.parseInt(match[1], 10) : null;
+  // Book-scoped page path: /books/<id>/pages/page-NNN.webp. Only count pages that
+  // belong to the CURRENT book so the offline-ready check isn't skewed by the
+  // other book's cached pages.
+  const match = pathname.match(/\/books\/([^/]+)\/pages\/page-(\d+)\.webp$/);
+  if (!match) return null;
+  if (match[1] !== state.currentBook) return null;
+  return Number.parseInt(match[2], 10);
 };
 
 const getCachedPageSet = async (cache) => {
@@ -465,7 +519,7 @@ const getCachedPageSet = async (cache) => {
 
 const ensureCoreAssetsCached = async () => {
   const cache = await caches.open(STATIC_CACHE);
-  await cache.addAll(CORE_ASSETS);
+  await cache.addAll(coreAssetsForBook(state.currentBook));
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {
@@ -523,7 +577,9 @@ const isOfflineBundleReady = async (totalPages) => {
     if (metadata.totalPages !== totalPages) return false;
 
     const staticCache = await caches.open(STATIC_CACHE);
-    const coreMatches = await Promise.all(CORE_ASSETS.map((asset) => staticCache.match(asset)));
+    const coreMatches = await Promise.all(
+      coreAssetsForBook(state.currentBook).map((asset) => staticCache.match(asset)),
+    );
     if (coreMatches.some((match) => !match)) return false;
 
     const pageCache = await caches.open(PAGE_CACHE);
@@ -821,10 +877,11 @@ const activateDirectorShortcut = () => {
   return true;
 };
 
-const applyNativeSyncEvent = (payload) => {
+const applyNativeSyncEvent = async (payload) => {
   if (!payload || typeof payload !== "object") return;
 
   if (payload.type === "bridge-state") {
+    state.nativeBridgeAvailable = Boolean(payload.available);
     state.nativeSyncAvailable = Boolean(payload.available);
     if (state.nativeSyncAvailable) {
       requestAutoFollowerMode();
@@ -833,6 +890,25 @@ const applyNativeSyncEvent = (payload) => {
       state.nativeSyncStatus = "";
     }
     renderNativeSyncPanel();
+    return;
+  }
+
+  // Native asks the web layer to switch books (geo / restore / follow director).
+  if (payload.type === "set-book") {
+    if (isBookId(payload.book)) await switchBook(payload.book, { fromNative: true });
+    return;
+  }
+
+  // Role changes after a code / conflict / takeover. Store it (and surface the tiny
+  // director badge if it already exists) — never throw.
+  if (payload.type === "role") {
+    if (typeof payload.role === "string") {
+      state.syncRole = payload.role;
+      if (payload.role === "director" || payload.role === "follower" || payload.role === "none") {
+        state.nativeSyncRole = payload.role === "none" ? "off" : payload.role;
+        renderDirectorModeBadge();
+      }
+    }
     return;
   }
 
@@ -849,6 +925,10 @@ const applyNativeSyncEvent = (payload) => {
     state.nativeSyncError = "";
     state.nativeSyncStatus = "";
     renderNativeSyncPanel();
+    // A director on a different book: switch first so the page lands in the right book.
+    if (isBookId(event.book) && event.book !== state.currentBook) {
+      await switchBook(event.book, { fromNative: true });
+    }
     renderPage(event.page, { pushToHistory: false });
     return;
   }
@@ -951,6 +1031,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
       type: "page-changed",
       page: nextPage,
       totalPages: state.totalPages,
+      book: state.currentBook,
     });
     if (direction !== 0) {
       const animClass = direction > 0 ? "slide-from-right" : "slide-from-left";
@@ -969,6 +1050,63 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     setLoading(true, "No se pudo cargar esta página.");
     closeDrawer();
   }
+};
+
+// ── Multi-book: hydrate / load / switch ─────────────────────────────────────────
+// Fold a book's pages.json into state (mirrors initReader's inline hydrate). Also
+// resets the per-book derived caches so nothing leaks across a book switch.
+const hydrateBookData = (data) => {
+  if (!data) return;
+  if (typeof data.totalPages === "number") state.totalPages = data.totalPages;
+  state.songIndex = Array.isArray(data.songIndex)
+    ? [...data.songIndex].sort((left, right) => left.song - right.song)
+    : [];
+  state.totalSongs = state.songIndex.length;
+  state.themeIndex = data.themeIndex || [];
+  state.songPageLookup = buildSongPageLookup(state.songIndex);
+  // The lazily-loaded search index + derived index caches belong to the OLD book —
+  // drop them so they re-build for the new one.
+  state.searchIndexPages = [];
+  cachedSongKeys = null;
+  cachedSongLengths = null;
+  cachedKeywords = null;
+};
+
+// Fetch a book's manifest and hydrate state from it. totalPages comes straight
+// from the manifest so paging clamps to the right book.
+const loadBook = async (bookId) => {
+  const response = await fetch(resolveAppPath(`/books/${bookId}/pages.json`), { cache: "no-store" });
+  const data = await response.json();
+  hydrateBookData(data);
+  renderStatus();
+  renderActiveTab();
+};
+
+// Switch the active book: load it, jump to its start page, and (unless the change
+// came FROM native) tell native so it can persist + re-broadcast.
+const switchBook = async (bookId, opts = {}) => {
+  if (!isBookId(bookId) || bookId === state.currentBook) return;
+  state.currentBook = bookId;
+  try {
+    await loadBook(bookId);
+  } catch (error) {
+    console.warn("No se pudo cargar el libro", bookId, error);
+  }
+  const startPage = clampPage(DEFAULT_START_PAGE);
+  // Forget the previous book's history — its page numbers don't map here.
+  state.pageHistory = [];
+  renderPage(startPage, { pushToHistory: false });
+  updateBookLabel();
+  if (!opts.fromNative) {
+    postNativeBridge({ type: "book-changed", book: bookId });
+  }
+};
+
+// Reflect the active book in any visible label (no dedicated switcher UI by design).
+const updateBookLabel = () => {
+  const label = bookLabel(state.currentBook);
+  if (!label) return;
+  document.documentElement.dataset.book = state.currentBook;
 };
 
 // ── Drawer open / close ───────────────────────────────────────────────────────
@@ -997,7 +1135,9 @@ const updateFullscreenButton = () => {
 
 // ── Draft management ──────────────────────────────────────────────────────────
 const appendDigit = (digit) => {
-  if (state.songDraft.length >= 4) return;
+  // Songs are <= 3 digits, but director / secret codes run up to 10 digits and are
+  // entered on this same numpad (then routed to native in goToDraftSong).
+  if (state.songDraft.length >= 10) return;
   state.songDraft = `${state.songDraft}${digit}`;
   renderDraft();
 };
@@ -1028,6 +1168,15 @@ const closeSongJump = () => {
 const goToDraftSong = () => {
   const songNumber = normalizeSongDraftNumber(state.songDraft);
   if (songNumber === null) { closeSongJump(); return; }
+  // Director / secret codes are out-of-range numbers (songs cap at totalPages) or
+  // long codes (5+ digits). Route them to native for validation instead of treating
+  // them as a song jump, then clear + close the numpad.
+  if (songNumber > state.totalPages || String(songNumber).length >= 5) {
+    postNativeBridge({ type: "director-code", code: String(songNumber) });
+    clearDraft();
+    closeSongJump();
+    return;
+  }
   const targetPage = findSongPage(songNumber);
   renderPage(targetPage);
   addToRecientes(songNumber);
@@ -1058,7 +1207,7 @@ const loadSearchIndex = async () => {
     return;
   }
   try {
-    const response = await fetch(resolveAppPath("/search-index.json"), { cache: "no-store" });
+    const response = await fetch(resolveAppPath(`/books/${state.currentBook}/search-index.json`), { cache: "no-store" });
     const data = await response.json();
     state.searchIndexPages = data.pages || [];
   } catch (error) {
@@ -2847,16 +2996,21 @@ const initReader = async () => {
   // The inlined manifest now carries ONLY { totalPages } — just enough to paint
   // the director's page instantly. The song index (~50 KB: titles, themes, intro
   // chords, jump-to-song) hydrates separately so it never blocks first paint.
+  // The inlined #pages-data describes ONLY the DEFAULT book (just { totalPages }) for
+  // instant first paint. If the chosen book is the default we paint inline now and
+  // hydrate the song index in the background; if it's a NON-default book we must load
+  // that book's manifest before first paint so totalPages/pages match.
   const inlinedPages = document.getElementById("pages-data");
-  const manifest = inlinedPages
+  const usingInlineDefault = Boolean(inlinedPages) && state.currentBook === bookRegistry.default;
+  const manifest = usingInlineDefault
     ? JSON.parse(inlinedPages.textContent)
-    : await fetch(resolveAppPath("/pages.json"), { cache: "no-store" }).then((r) => r.json());
+    : await fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" }).then((r) => r.json());
   state.totalPages = manifest.totalPages;
   state.currentPage = DEFAULT_START_PAGE;
 
   // Fold the full song index into state and refresh everything that depends on it.
-  // Runs immediately if the index was inlined (offline / ?admin build), otherwise
-  // in the background once /pages.json lands (see below).
+  // Runs immediately if the index came inline with the manifest (offline / ?admin
+  // build), otherwise in the background once the book's pages.json lands (see below).
   const hydrateSongIndex = (data) => {
     if (!data || !data.songIndex) return;
     state.songIndex = [...data.songIndex].sort((left, right) => left.song - right.song);
@@ -2868,6 +3022,7 @@ const initReader = async () => {
     renderActiveTab();
   };
   if (manifest.songIndex) hydrateSongIndex(manifest);
+  updateBookLabel();
   renderDraft();
   renderStatus();
   renderNativeSyncPanel();
@@ -2890,13 +3045,14 @@ const initReader = async () => {
   renderActiveTab();
   postNativeBridge({
     type: "bridge-ready",
-    page: DEFAULT_START_PAGE,
+    page: state.currentPage,
     totalPages: state.totalPages,
+    book: state.currentBook,
   });
   // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
   // off the critical first paint without losing titles, themes, or jump-to-song.
   if (!manifest.songIndex) {
-    fetch(resolveAppPath("/pages.json"), { cache: "no-store" })
+    fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" })
       .then((response) => response.json())
       .then(hydrateSongIndex)
       .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
