@@ -96,6 +96,12 @@ export default function App() {
   const webReadyRef = useRef(false);
   const pendingInjectRef = useRef<string[]>([]);
   const storedBookRef = useRef<BookId | null>(null);
+  // Last page/book the DIRECTOR broadcast to us over the mesh (distinct from the web's own
+  // page). Drives resync after a WebView reload / foreground for followers. Null until a
+  // director snapshot has actually been received (a fresh-boot follower must keep its own page).
+  const lastDirectorSnapshotRef = useRef<{ page: number; book: BookId } | null>(null);
+  // Director re-broadcast heartbeat: keeps late joiners + the Cloudflare relay snapshot fresh.
+  const directorHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const syncAvailable = useMemo(() => isNearbyDirectorSyncAvailable(), []);
 
@@ -154,6 +160,25 @@ export default function App() {
     }
   }, []);
 
+  // ── Director re-broadcast heartbeat ─────────────────────────────────────────
+  // Re-broadcasts the director's current page every 12s. Idempotent downstream
+  // (latest-wins / seq-guarded), so it just helps freshly-joined or packet-dropping
+  // followers catch up and keeps the relay snapshot's `ts` fresh for online followers.
+  const stopDirectorHeartbeat = useCallback(() => {
+    if (directorHeartbeatRef.current) {
+      clearInterval(directorHeartbeatRef.current);
+      directorHeartbeatRef.current = null;
+    }
+  }, []);
+
+  const startDirectorHeartbeat = useCallback(() => {
+    stopDirectorHeartbeat();
+    directorHeartbeatRef.current = setInterval(() => {
+      if (roleRef.current !== "director") return; // never run unless we're the director
+      broadcastPage(currentPageRef.current, currentBookRef.current);
+    }, 12000);
+  }, [broadcastPage, stopDirectorHeartbeat]);
+
   // ── Become director ────────────────────────────────────────────────────────
   const becomeDirector = useCallback(
     async (code: string) => {
@@ -175,17 +200,19 @@ export default function App() {
         ]);
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
+        startDirectorHeartbeat();
         breadcrumb("director");
       } catch {
         injectEvent({ type: "role", role: "none" });
       }
     },
-    [syncAvailable, injectEvent, broadcastPage, breadcrumb],
+    [syncAvailable, injectEvent, broadcastPage, breadcrumb, startDirectorHeartbeat],
   );
 
   const becomeFollower = useCallback(async () => {
     roleRef.current = "follower";
     explicitTransmitterRef.current = false;
+    stopDirectorHeartbeat(); // a follower must never re-broadcast
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower");
       if (syncAvailable) await startNearbyFollower(DIRECTOR_SESSION);
@@ -193,11 +220,12 @@ export default function App() {
       /* ignore */
     }
     injectEvent({ type: "role", role: "follower" });
-  }, [syncAvailable, injectEvent]);
+  }, [syncAvailable, injectEvent, stopDirectorHeartbeat]);
 
   // ── Soft reset (secret code 744668486) ─────────────────────────────────────
   const performSoftReset = useCallback(async () => {
     breadcrumb("soft-reset");
+    stopDirectorHeartbeat();
     try {
       await resetNearbyDirectorSync();
     } catch {
@@ -217,7 +245,7 @@ export default function App() {
     webReadyRef.current = false;
     pendingInjectRef.current = [];
     setMountKey((k) => k + 1); // remount the WebView from scratch
-  }, [breadcrumb]);
+  }, [breadcrumb, stopDirectorHeartbeat]);
 
   // ── Director-code dispatch (codes entered on the web numpad) ────────────────
   const onDirectorCode = useCallback(
@@ -266,9 +294,22 @@ export default function App() {
           if (isBookId(msg.book)) currentBookRef.current = msg.book;
           flushPendingInjects();
           injectEvent({ type: "bridge-state", available: syncAvailable });
+          // Always re-assert the current role to a freshly (re)loaded WebView so the web app's
+          // numpad/role UI matches reality after a crash-reload or boot.
+          injectEvent({ type: "role", role: roleRef.current === "off" ? "none" : roleRef.current });
           if (roleRef.current === "director") {
-            injectEvent({ type: "role", role: "director" });
+            // The director's own page is authoritative — just re-broadcast it.
             broadcastPage(currentPageRef.current, currentBookRef.current);
+          } else if (roleRef.current === "follower" && lastDirectorSnapshotRef.current) {
+            // A RELOADED follower (we already have a director snapshot) must resync to the
+            // director's last-known page instead of showing the web's stale/default boot page.
+            // The null-guard above is critical: a FRESH-BOOT follower that has never received a
+            // director snapshot keeps the web's own boot page (geo/stored) — we do NOT override.
+            const { page, book } = lastDirectorSnapshotRef.current;
+            currentPageRef.current = page;
+            currentBookRef.current = book;
+            if (book !== msg.book) injectEvent({ type: "set-book", book });
+            injectEvent({ type: "sync-event", event: { type: "page", page, book } });
           }
           break;
         }
@@ -383,6 +424,8 @@ export default function App() {
           const book = bookFromSync(event.bookId, event.mode);
           const page = Number(event.page) || currentPageRef.current;
           currentPageRef.current = page;
+          // Remember the director's latest snapshot so a reloaded/foregrounded follower resyncs.
+          lastDirectorSnapshotRef.current = { page, book };
           if (book !== currentBookRef.current) {
             currentBookRef.current = book;
             injectEvent({ type: "set-book", book });
@@ -404,7 +447,8 @@ export default function App() {
         }
         case "error": {
           if (String(event.code ?? "") === "DIRECTOR_CONFLICT") {
-            becomeFollower(); // a newer director won; step down
+            stopDirectorHeartbeat(); // a newer director won; stop re-broadcasting
+            becomeFollower(); // step down
           }
           break;
         }
@@ -438,8 +482,16 @@ export default function App() {
       } catch {
         /* ignore */
       }
+      stopDirectorHeartbeat(); // no leaked interval on unmount / effect re-run
     };
-  }, [syncAvailable, becomeDirector, becomeFollower, injectEvent, resolveBundleUri]);
+  }, [
+    syncAvailable,
+    becomeDirector,
+    becomeFollower,
+    injectEvent,
+    resolveBundleUri,
+    stopDirectorHeartbeat,
+  ]);
 
   // ── IP-geo book selection (first launch only; stored pref wins thereafter) ──
   useEffect(() => {
@@ -472,13 +524,25 @@ export default function App() {
     const sub = AppState.addEventListener("change", (next) => {
       if (next !== "active") return;
       refreshNearbyDiscovery().catch(() => {});
-      if (roleRef.current === "follower") requestCurrentSnapshot().catch(() => {});
-      else if (roleRef.current === "director") {
+      if (roleRef.current === "follower") {
+        requestCurrentSnapshot().catch(() => {});
+        // Re-assert the director's last-known snapshot immediately so the view is correct on
+        // foreground while the fresh snapshot request round-trips over the mesh.
+        if (lastDirectorSnapshotRef.current) {
+          const { page, book } = lastDirectorSnapshotRef.current;
+          currentPageRef.current = page;
+          if (book !== currentBookRef.current) {
+            currentBookRef.current = book;
+            injectEvent({ type: "set-book", book });
+          }
+          injectEvent({ type: "sync-event", event: { type: "page", page, book } });
+        }
+      } else if (roleRef.current === "director") {
         broadcastPage(currentPageRef.current, currentBookRef.current);
       }
     });
     return () => sub.remove();
-  }, [syncAvailable, broadcastPage]);
+  }, [syncAvailable, broadcastPage, injectEvent]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {

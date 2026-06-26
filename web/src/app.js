@@ -139,6 +139,12 @@ let cachedSongKeys = null;
 let cachedSongLengths = null;
 let cachedKeywords = null;
 
+// ── Adjacent-page prefetch (perceived-speed win for live followers) ─────────────
+// Warm the NEXT page(s) so a director's +1 page-turn is instant. URL-keyed so the
+// same page in different books never collides; cleared on every book change so a
+// switch doesn't leave stale entries. Module-level + book-scoped on purpose.
+const prefetchedPageUrls = new Set();
+
 // ── Environment detection ─────────────────────────────────────────────────────
 const initialUrl = new URL(window.location.href);
 const userAgent = navigator.userAgent;
@@ -695,6 +701,29 @@ const prefetchSongPage = (pageNumber) => {
   });
 };
 
+// Warm the immediate page NEIGHBORS so the next page-turn is instant. A live
+// follower almost always advances +1, so +1/+2 matter most; -1 covers a step back.
+// Fire-and-forget Image() warming — works for file:// (warms the decode) and https
+// (warms HTTP + service-worker cache). Scheduled off the critical paint so it never
+// delays the current page. URL-keyed via prefetchedPageUrls to skip dupes.
+const prefetchNeighborPages = (pageNumber) => {
+  const neighbors = [pageNumber + 1, pageNumber + 2, pageNumber - 1];
+  const schedule = window.requestIdleCallback
+    ? window.requestIdleCallback.bind(window)
+    : (cb) => window.setTimeout(cb, 0);
+  schedule(() => {
+    for (const n of neighbors) {
+      if (n < 1 || n > state.totalPages) continue;
+      const url = pageFileName(n);
+      if (prefetchedPageUrls.has(url)) continue;
+      prefetchedPageUrls.add(url);
+      const im = new Image();
+      im.decoding = "async";
+      im.src = url;
+    }
+  });
+};
+
 // ── Status rendering ──────────────────────────────────────────────────────────
 const renderStatus = () => {
   // The song index hydrates lazily, off the critical first paint. Until it lands,
@@ -876,6 +905,9 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     renderStatus();
     hideLoadingIndicator();
     getAdjacentSongPages().forEach(prefetchSongPage);
+    // Warm the next page(s) so the director's +1 page-turn lands instantly. Fire-and-
+    // forget; scheduled off this paint so it never delays the current page.
+    prefetchNeighborPages(nextPage);
   } catch (error) {
     if (requestId !== state.pageLoadRequest) return;
     clearLoadingTimer();
@@ -903,6 +935,9 @@ const hydrateBookData = (data) => {
   cachedSongKeys = null;
   cachedSongLengths = null;
   cachedKeywords = null;
+  // The warmed neighbor-page URLs belong to the OLD book — drop them so a switch
+  // doesn't leave stale entries (page paths are book-scoped via pageFileName).
+  prefetchedPageUrls.clear();
 };
 
 // Fetch a book's manifest and hydrate state from it. totalPages comes straight
@@ -2747,7 +2782,12 @@ const connectRelay = () => {
   ws.addEventListener("close", () => {
     clearInterval(heartbeatTimer);
     if (relay.manualClose) return;
-    setTimeout(connectRelay, relay.backoff);
+    // Add ±30% JITTER so many followers don't reconnect in lockstep after a shared
+    // network blip (thundering-herd on the worker). The first retry stays fast (the
+    // 500ms floor), and the (re)open handler force-polls to resync. Backoff itself
+    // remains the clean exponential base so the 8000ms cap + /state fallback are intact.
+    const delay = relay.backoff * (0.7 + Math.random() * 0.6);
+    setTimeout(connectRelay, delay);
     relay.backoff = Math.min(relay.backoff * 2, 8000);
     if (relay.backoff >= 8000) startRelayPolling();   // WS truly won't hold -> /state fallback
   });

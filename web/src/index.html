@@ -31,6 +31,10 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icon-192.png" />
     <link rel="apple-touch-icon" href="icon-512.png" />
+    <!-- Warm the relay origin so the first live-follow WS/state connection is fast on
+         signovivo.com cold loads. Harmless in native file:// mode (origin unused). -->
+    <link rel="preconnect" href="https://signovivo-sync.4j4982y8jp.workers.dev" crossorigin />
+    <link rel="dns-prefetch" href="https://signovivo-sync.4j4982y8jp.workers.dev" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
