@@ -12,10 +12,6 @@
 		45463C08756F2E76177D217C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CF20DDFF80796950EA7C43A0 /* PrivacyInfo.xcprivacy */; };
 		4AA18D770A0B4B4B82A0C001 /* DirectorSyncModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */; };
 		4AA18D790A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */; };
-		5PDF0001000000000000001A /* PdfPageRendererModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5PDF0000000000000000001A /* PdfPageRendererModule.swift */; };
-		5PDF0003000000000000001A /* PdfPageRendererBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 5PDF0002000000000000001A /* PdfPageRendererBridge.m */; };
-		5PDF0005000000000000001A /* alvernia_manual_2.pdf in Resources */ = {isa = PBXBuildFile; fileRef = 5PDF0004000000000000001A /* alvernia_manual_2.pdf */; };
-		5PDF0007000000000000001A /* hymns-4.pdf in Resources */ = {isa = PBXBuildFile; fileRef = 5PDF0006000000000000001A /* hymns-4.pdf */; };
 		930F66FC3CC80477827E2A2D /* libPods-SignoVivo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7026E80779919AA5EB73F6DA /* libPods-SignoVivo.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		EF15FA55DE47839821C64C02 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1C8C7013D71B20DEFEEF75 /* ExpoModulesProvider.swift */; };
@@ -29,10 +25,6 @@
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = SignoVivo/Info.plist; sourceTree = "<group>"; };
 		4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectorSyncModule.swift; path = SignoVivo/DirectorSyncModule.swift; sourceTree = "<group>"; };
 		4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DirectorSyncModuleBridge.m; path = SignoVivo/DirectorSyncModuleBridge.m; sourceTree = "<group>"; };
-		5PDF0000000000000000001A /* PdfPageRendererModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PdfPageRendererModule.swift; path = SignoVivo/PdfPageRendererModule.swift; sourceTree = "<group>"; };
-		5PDF0002000000000000001A /* PdfPageRendererBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PdfPageRendererBridge.m; path = SignoVivo/PdfPageRendererBridge.m; sourceTree = "<group>"; };
-		5PDF0004000000000000001A /* alvernia_manual_2.pdf */ = {isa = PBXFileReference; lastKnownFileType = file; name = alvernia_manual_2.pdf; path = ../assets/alvernia_manual_2.pdf; sourceTree = "<group>"; };
-		5PDF0006000000000000001A /* hymns-4.pdf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "hymns-4.pdf"; path = "../assets/hymns-4.pdf"; sourceTree = "<group>"; };
 		7026E80779919AA5EB73F6DA /* libPods-SignoVivo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-SignoVivo.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = SignoVivo/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -64,10 +56,6 @@
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
 				4AA18D760A0B4B4B82A0C001 /* DirectorSyncModule.swift */,
 				4AA18D780A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m */,
-				5PDF0000000000000000001A /* PdfPageRendererModule.swift */,
-				5PDF0002000000000000001A /* PdfPageRendererBridge.m */,
-				5PDF0004000000000000001A /* alvernia_manual_2.pdf */,
-				5PDF0006000000000000001A /* hymns-4.pdf */,
 				WEBB0004000000000000001A /* WebBundle */,
 				F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
@@ -217,8 +205,6 @@
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 				45463C08756F2E76177D217C /* PrivacyInfo.xcprivacy in Resources */,
-				5PDF0005000000000000001A /* alvernia_manual_2.pdf in Resources */,
-				5PDF0007000000000000001A /* hymns-4.pdf in Resources */,
 				WEBB0005000000000000001A /* WebBundle in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -351,8 +337,6 @@
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
 				4AA18D790A0B4B4B82A0C001 /* DirectorSyncModuleBridge.m in Sources */,
 				4AA18D770A0B4B4B82A0C001 /* DirectorSyncModule.swift in Sources */,
-				5PDF0003000000000000001A /* PdfPageRendererBridge.m in Sources */,
-				5PDF0001000000000000001A /* PdfPageRendererModule.swift in Sources */,
 				EF15FA55DE47839821C64C02 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

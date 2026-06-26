@@ -24,7 +24,6 @@ const numberpadGrid = document.getElementById("numberpad-grid");
 const backspaceButton = document.getElementById("backspace-button");
 const goButton = document.getElementById("go-button");
 const directorModeBadge = document.getElementById("director-mode-badge");
-const directorModeBadgeCode = document.getElementById("director-mode-badge-code");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
@@ -39,13 +38,6 @@ const helpPanel = document.getElementById("help-panel");
 const helpCloseButton = document.getElementById("help-close");
 const helpSettingsLabel = document.getElementById("help-settings-label");
 const hapticToggleButton = document.getElementById("haptic-toggle");
-const directorSyncPanel = document.getElementById("director-sync-panel");
-const directorSyncCodeInput = document.getElementById("director-sync-code");
-const directorSyncStartDirectorButton = document.getElementById("director-sync-start-director");
-const directorSyncStartFollowerButton = document.getElementById("director-sync-start-follower");
-const directorSyncStopButton = document.getElementById("director-sync-stop");
-const directorSyncStatus = document.getElementById("director-sync-status");
-const directorSyncError = document.getElementById("director-sync-error");
 const numpadTipWrap = document.getElementById("numpad-tip-wrap");
 const tipDismissButton = document.getElementById("tip-dismiss");
 const drawerCloseButton = document.getElementById("drawer-close");
@@ -108,14 +100,7 @@ const state = {
   currentBook: "hymns-4", // resolved below from the registry / native-injected globals
   syncRole: "none",       // last role the native shell reported (director/follower/none)
   nativeBridgeAvailable: false,
-  nativeSyncUnlocked: false,
-  nativeSyncAvailable: false,
-  nativeSyncRole: "off",
-  nativeSyncStatus: "",
-  nativeSyncError: "",
-  nativeSyncSessionCode: "2046",
-  nativeSyncAutoStartRequested: false,
-  nativeSyncAutoStartSuppressed: false,
+  nativeSyncRole: "off",   // drives the DIRECTOR badge visibility
 };
 
 // ── Book registry (multi-book) ──────────────────────────────────────────────────
@@ -181,8 +166,6 @@ const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
 const NATIVE_FILE_MODE = Boolean(window.__SIGNO_VINO_NATIVE_FILE_MODE || window.location.protocol === "file:");
 const NATIVE_BRIDGE_CHANNEL = "signovivo-native";
-const NATIVE_SYNC_SESSION_KEY = "sv-native-sync-session";
-const DEFAULT_NATIVE_SYNC_SESSION = "2046";
 const resolveAppPath = (pathname) => {
   if (!NATIVE_FILE_MODE) return pathname;
   if (pathname === "/") return "./";
@@ -258,24 +241,6 @@ const normalizeText = (text) => text
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
   .toLowerCase();
-
-const normalizeSyncSessionCode = (value = "") => value
-  .toUpperCase()
-  .replace(/[^A-Z0-9]/g, "")
-  .slice(0, 12);
-
-const loadNativeSyncSessionCode = () => {
-  try {
-    const stored = localStorage.getItem(NATIVE_SYNC_SESSION_KEY) || "";
-    const normalized = normalizeSyncSessionCode(stored);
-    if (!normalized || normalized === "CORO") return DEFAULT_NATIVE_SYNC_SESSION;
-    return normalized;
-  } catch {
-    return DEFAULT_NATIVE_SYNC_SESSION;
-  }
-};
-
-state.nativeSyncSessionCode = loadNativeSyncSessionCode();
 
 const hasNativeBridge = () => Boolean(window.ReactNativeWebView?.postMessage);
 
@@ -782,99 +747,11 @@ const renderDraft = () => {
   goButton.disabled = !state.songDraft;
 };
 
-const persistNativeSyncSessionCode = () => {
-  try {
-    localStorage.setItem(NATIVE_SYNC_SESSION_KEY, state.nativeSyncSessionCode);
-  } catch {}
-};
-
-const describeNativeSyncState = () => {
-  if (!state.nativeSyncAvailable) {
-    return hasNativeBridge()
-      ? "Preparando sincronización…"
-      : "Solo disponible dentro de la app instalada.";
-  }
-  if (state.nativeSyncStatus) return state.nativeSyncStatus;
-  if (state.nativeSyncRole === "director") return "Modo director activo.";
-  if (state.nativeSyncRole === "follower") return "Sincronizado con el director.";
-  return "Escribe 2046 y toca ↵ para entrar como director.";
-};
-
+// The native shell reports director/follower role over the bridge; the only surviving
+// surface is the tiny "Modo activo / DIRECTOR" badge — show it when this device directs.
 const renderDirectorModeBadge = () => {
-  if (!directorModeBadge || !directorModeBadgeCode) return;
-  const isDirector = state.nativeSyncRole === "director";
-  directorModeBadge.classList.toggle("is-hidden", !isDirector);
-  directorModeBadgeCode.textContent = `Código ${state.nativeSyncSessionCode}`;
-};
-
-const renderNativeSyncPanel = () => {
-  if (!directorSyncPanel) return;
-  directorSyncPanel.classList.toggle("is-hidden", !state.nativeSyncUnlocked);
-  directorSyncCodeInput.value = state.nativeSyncSessionCode;
-  directorSyncStatus.textContent = describeNativeSyncState();
-  const showError = Boolean(state.nativeSyncError);
-  directorSyncError.classList.toggle("is-hidden", !showError);
-  directorSyncError.textContent = state.nativeSyncError;
-
-  const disabled = !state.nativeSyncAvailable;
-  const isActive = state.nativeSyncRole !== "off";
-  directorSyncCodeInput.classList.toggle("is-hidden", true);
-  if (directorSyncCodeInput.labels) {
-    for (const label of directorSyncCodeInput.labels) {
-      label.classList.toggle("is-hidden", true);
-    }
-  }
-  directorSyncStartDirectorButton.disabled = disabled || state.nativeSyncRole === "director";
-  directorSyncStartDirectorButton.textContent = state.nativeSyncRole === "director"
-    ? "Director activo"
-    : "Entrar como director";
-  directorSyncStartFollowerButton.classList.add("is-hidden");
-  directorSyncStopButton.classList.toggle("is-hidden", !isActive);
-  directorSyncStopButton.disabled = false;
-  renderDirectorModeBadge();
-};
-
-const unlockNativeSyncPanel = () => {
-  if (state.nativeSyncUnlocked) return;
-  state.nativeSyncUnlocked = true;
-  renderNativeSyncPanel();
-  haptic(12);
-};
-
-const requestAutoFollowerMode = () => {
-  if (!state.nativeSyncAvailable || state.nativeSyncRole !== "off") return;
-  if (state.nativeSyncAutoStartRequested || state.nativeSyncAutoStartSuppressed) return;
-  if (!postNativeBridge({ type: "sync-start-follower", sessionCode: state.nativeSyncSessionCode })) return;
-
-  state.nativeSyncAutoStartRequested = true;
-  state.nativeSyncError = "";
-  state.nativeSyncStatus = "";
-  renderNativeSyncPanel();
-};
-
-const activateDirectorShortcut = () => {
-  // If another device is already directing, ask before overriding
-  if (state.nativeSyncRole === "follower") {
-    const ok = window.confirm("Ya hay un director activo cerca.\n¿Quieres tomar el control como director en este dispositivo?");
-    if (!ok) { clearDraft(); return false; }
-  }
-  state.nativeSyncSessionCode = DEFAULT_NATIVE_SYNC_SESSION;
-  persistNativeSyncSessionCode();
-  state.nativeSyncAutoStartSuppressed = false;
-  state.nativeSyncAutoStartRequested = false;
-  state.nativeSyncError = "";
-  state.nativeSyncStatus = "Activando modo director...";
-  unlockNativeSyncPanel();
-  renderNativeSyncPanel();
-  if (!postNativeBridge({ type: "sync-start-director", sessionCode: state.nativeSyncSessionCode })) {
-    state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
-    renderNativeSyncPanel();
-    return false;
-  }
-  clearDraft();
-  closeDrawer();
-  haptic(20);
-  return true;
+  if (!directorModeBadge) return;
+  directorModeBadge.classList.toggle("is-hidden", state.nativeSyncRole !== "director");
 };
 
 const applyNativeSyncEvent = async (payload) => {
@@ -882,14 +759,6 @@ const applyNativeSyncEvent = async (payload) => {
 
   if (payload.type === "bridge-state") {
     state.nativeBridgeAvailable = Boolean(payload.available);
-    state.nativeSyncAvailable = Boolean(payload.available);
-    if (state.nativeSyncAvailable) {
-      requestAutoFollowerMode();
-    }
-    if (!state.nativeSyncAvailable && state.nativeSyncRole === "off") {
-      state.nativeSyncStatus = "";
-    }
-    renderNativeSyncPanel();
     return;
   }
 
@@ -899,8 +768,8 @@ const applyNativeSyncEvent = async (payload) => {
     return;
   }
 
-  // Role changes after a code / conflict / takeover. Store it (and surface the tiny
-  // director badge if it already exists) — never throw.
+  // Role changes after a code / conflict / takeover. Store it and surface the tiny
+  // director badge — never throw.
   if (payload.type === "role") {
     if (typeof payload.role === "string") {
       state.syncRole = payload.role;
@@ -916,48 +785,12 @@ const applyNativeSyncEvent = async (payload) => {
 
   const event = payload.event || {};
 
-  if (event.sessionCode) {
-    state.nativeSyncSessionCode = normalizeSyncSessionCode(String(event.sessionCode)) || state.nativeSyncSessionCode;
-    persistNativeSyncSessionCode();
-  }
-
   if (event.type === "page" && Number.isFinite(event.page)) {
-    state.nativeSyncError = "";
-    state.nativeSyncStatus = "";
-    renderNativeSyncPanel();
     // A director on a different book: switch first so the page lands in the right book.
     if (isBookId(event.book) && event.book !== state.currentBook) {
       await switchBook(event.book, { fromNative: true });
     }
     renderPage(event.page, { pushToHistory: false });
-    return;
-  }
-
-  if (event.type === "state") {
-    state.nativeSyncError = "";
-    if (event.status === "idle") {
-      state.nativeSyncRole = "off";
-      state.nativeSyncAutoStartRequested = false;
-      state.nativeSyncStatus = "";
-    } else if (event.role === "director" || event.role === "follower") {
-      state.nativeSyncRole = event.role;
-      state.nativeSyncAutoStartRequested = false;
-      // Only keep native message if it's meaningful; otherwise let describeNativeSyncState handle it
-      state.nativeSyncStatus = (event.status === "connected" || event.status === "waiting-followers" || event.status === "searching") ? "" : (event.message || "");
-    }
-    renderNativeSyncPanel();
-    return;
-  }
-
-  if (event.type === "error") {
-    unlockNativeSyncPanel();
-    state.nativeSyncError = event.message || "La sincronización offline falló.";
-    if (event.role === "off" || event.code === "DIRECTOR_CONFLICT") {
-      state.nativeSyncRole = "off";
-      state.nativeSyncAutoStartRequested = false;
-    }
-    if (event.message) state.nativeSyncStatus = event.message;
-    renderNativeSyncPanel();
   }
 };
 
@@ -2564,7 +2397,6 @@ const bindReaderEvents = () => {
   helpButton.addEventListener("click", () => {
     haptic();
     helpPanel.classList.remove("is-hidden");
-    renderNativeSyncPanel();
   });
 
   helpCloseButton.addEventListener("click", () => {
@@ -2590,67 +2422,6 @@ const bindReaderEvents = () => {
     syncHapticToggle();
     haptic(12); // Give immediate feedback when turning ON
   });
-
-  let hiddenSyncPressTimer = 0;
-  const clearHiddenSyncPressTimer = () => {
-    if (!hiddenSyncPressTimer) return;
-    window.clearTimeout(hiddenSyncPressTimer);
-    hiddenSyncPressTimer = 0;
-  };
-  const queueHiddenSyncUnlock = () => {
-    clearHiddenSyncPressTimer();
-    hiddenSyncPressTimer = window.setTimeout(() => {
-      unlockNativeSyncPanel();
-    }, 900);
-  };
-
-  ["mousedown", "touchstart"].forEach((eventName) => {
-    helpSettingsLabel.addEventListener(eventName, queueHiddenSyncUnlock, { passive: true });
-  });
-  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((eventName) => {
-    helpSettingsLabel.addEventListener(eventName, clearHiddenSyncPressTimer, { passive: true });
-  });
-
-  // The director-sync panel was removed from the markup (takeover killed),
-  // so only wire its controls when they actually exist — otherwise this whole
-  // function throws on a null ref and init never runs.
-  if (directorSyncPanel) {
-    directorSyncCodeInput.addEventListener("input", () => {
-      const normalized = normalizeSyncSessionCode(directorSyncCodeInput.value) || DEFAULT_NATIVE_SYNC_SESSION;
-      state.nativeSyncSessionCode = normalized;
-      directorSyncCodeInput.value = normalized;
-      persistNativeSyncSessionCode();
-      state.nativeSyncError = "";
-      renderNativeSyncPanel();
-    });
-
-    directorSyncStartDirectorButton.addEventListener("click", () => {
-      haptic(12);
-      activateDirectorShortcut();
-    });
-
-    directorSyncStartFollowerButton.addEventListener("click", () => {
-      // Follower mode is automatic — button is hidden but kept for compat
-      haptic(12);
-      state.nativeSyncAutoStartSuppressed = false;
-      requestAutoFollowerMode();
-    });
-
-    directorSyncStopButton.addEventListener("click", () => {
-      haptic();
-      state.nativeSyncAutoStartSuppressed = true;
-      state.nativeSyncAutoStartRequested = false;
-      state.nativeSyncError = "";
-      state.nativeSyncStatus = "";
-      renderNativeSyncPanel();
-      if (!postNativeBridge({ type: "sync-stop" })) {
-        state.nativeSyncRole = "off";
-        state.nativeSyncStatus = "";
-        state.nativeSyncError = "Esta función solo vive dentro de la app instalada.";
-        renderNativeSyncPanel();
-      }
-    });
-  }
 
   // Fullscreen
   fullscreenButton.addEventListener("click", () => {
@@ -3018,14 +2789,12 @@ const initReader = async () => {
     state.themeIndex = data.themeIndex || [];
     state.songPageLookup = buildSongPageLookup(state.songIndex);
     renderStatus();
-    renderNativeSyncPanel();
     renderActiveTab();
   };
   if (manifest.songIndex) hydrateSongIndex(manifest);
   updateBookLabel();
   renderDraft();
   renderStatus();
-  renderNativeSyncPanel();
   updateFullscreenButton();
   hideLoadingIndicator();
   // Show the reader IMMEDIATELY — never block the congregation behind the big
