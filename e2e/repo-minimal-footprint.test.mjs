@@ -15,7 +15,6 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
   assert.deepEqual(Object.keys(packageJson.scripts).sort(), [
     "android",
     "build:web",
-    "build:web:offline",
     "ios",
     "ios:local",
     "ios:mpad",
@@ -65,12 +64,10 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "web/src/index.html",
     "web/src/app.js",
     "web/src/styles.css",
-	    "web/dist/signo-vino-offline.html",
-	    "assets/standard/pages.json",
-	    "assets/standard/song-titles.json",
-	    "assets/standard/song-search-index.json",
-	    "src/offlineWebBundle.d.ts",
-	  ]) {
+    "assets/standard/pages.json",
+    "assets/standard/song-titles.json",
+    "assets/standard/song-search-index.json",
+  ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected web path missing: ${relativePath}`);
   }
 
@@ -79,13 +76,16 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "CNAME",
     "scripts/upload-server.mjs",
     "scripts/keynote-promote.mjs",
+    "scripts/gen-offline-book-asset-map.mjs",
     "src/directorSync.js",
     "src/directorSync.d.ts",
+    "src/offlineWebBundle.d.ts",
     "assets/signo-vino-native.html",
     "src/offlineWebAssets.js",
     "src/offlineWebAssets.d.ts",
     "src/offlinePageAssets.js",
     "src/offlinePageAssets.d.ts",
+    "web/build-offline.mjs",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), false, `Unexpected leftover path: ${relativePath}`);
   }
