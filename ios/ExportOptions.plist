@@ -8,6 +8,10 @@
     <string>7QRW68DD5X</string>
     <key>signingStyle</key>
     <string>automatic</string>
+    <!-- Keep the archive's build number (don't let export auto-increment via App Store Connect),
+         so the IPA matches version.json / the in-app build label and builds stay reproducible. -->
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
     <key>stripSwiftSymbols</key>
     <true/>
     <key>uploadSymbols</key>
