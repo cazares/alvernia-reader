@@ -12,7 +12,6 @@
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
     "build:web": "node ./web/build.mjs",
-    "build:web:offline": "node ./web/build-offline.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "node --test ./e2e/*.test.mjs",
     "postinstall": "node scripts/patch-rn-webview.js && node scripts/patch-hermes-thread.js"
