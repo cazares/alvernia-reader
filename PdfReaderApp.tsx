@@ -100,8 +100,11 @@ export default function App() {
   // page). Drives resync after a WebView reload / foreground for followers. Null until a
   // director snapshot has actually been received (a fresh-boot follower must keep its own page).
   const lastDirectorSnapshotRef = useRef<{ page: number; book: BookId } | null>(null);
-  // Director re-broadcast heartbeat: keeps late joiners + the Cloudflare relay snapshot fresh.
-  const directorHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Director re-broadcast heartbeats. Two cadences: a FAST mesh re-send (local, free) so a
+  // dropped page-turn recovers in ~2s, and a SLOW relay keepalive that only refreshes the
+  // Cloudflare snapshot's freshness (page CHANGES publish to the relay immediately anyway).
+  const meshHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const relayHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const syncAvailable = useMemo(() => isNearbyDirectorSyncAvailable(), []);
 
@@ -160,24 +163,48 @@ export default function App() {
     }
   }, []);
 
-  // ── Director re-broadcast heartbeat ─────────────────────────────────────────
-  // Re-broadcasts the director's current page every 12s. Idempotent downstream
-  // (latest-wins / seq-guarded), so it just helps freshly-joined or packet-dropping
-  // followers catch up and keeps the relay snapshot's `ts` fresh for online followers.
+  // ── Director re-broadcast heartbeats ────────────────────────────────────────
+  // MESH every 2s: a tiny local Multipeer re-send. Followers DE-DUPE a same-page re-send
+  // (see the "page" case below), so this only does work when a page-turn packet was
+  // dropped — and then the follower recovers within ~2s. A fast cadence is free on a LAN.
+  // RELAY every 12s: page CHANGES already publish to the relay immediately (broadcastPage),
+  // so this only refreshes the snapshot's `ts` to keep signovivo.com followers "live"
+  // (RELAY_LIVE_MAX_AGE_S=90). Kept slow so weak-cell web followers aren't pushed a frame
+  // every couple seconds (they de-dupe renders, but it's still needless radio).
   const stopDirectorHeartbeat = useCallback(() => {
-    if (directorHeartbeatRef.current) {
-      clearInterval(directorHeartbeatRef.current);
-      directorHeartbeatRef.current = null;
+    if (meshHeartbeatRef.current) {
+      clearInterval(meshHeartbeatRef.current);
+      meshHeartbeatRef.current = null;
+    }
+    if (relayHeartbeatRef.current) {
+      clearInterval(relayHeartbeatRef.current);
+      relayHeartbeatRef.current = null;
     }
   }, []);
 
   const startDirectorHeartbeat = useCallback(() => {
     stopDirectorHeartbeat();
-    directorHeartbeatRef.current = setInterval(() => {
-      if (roleRef.current !== "director") return; // never run unless we're the director
-      broadcastPage(currentPageRef.current, currentBookRef.current);
+    meshHeartbeatRef.current = setInterval(() => {
+      if (roleRef.current !== "director") return;
+      const book = currentBookRef.current;
+      sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, {
+        mode: modeForBook(book),
+        bookId: book,
+      }).catch(() => {});
+    }, 2000);
+    relayHeartbeatRef.current = setInterval(() => {
+      if (roleRef.current !== "director" && !explicitTransmitterRef.current) return;
+      const book = currentBookRef.current;
+      try {
+        publishPageToRelay(currentPageRef.current, totalPagesRef.current, {
+          mode: modeForBook(book),
+          bookId: book,
+        });
+      } catch {
+        /* network flaps are expected; the next tick / page change re-publishes */
+      }
     }, 12000);
-  }, [broadcastPage, stopDirectorHeartbeat]);
+  }, [stopDirectorHeartbeat]);
 
   // ── Become director ────────────────────────────────────────────────────────
   const becomeDirector = useCallback(
@@ -439,9 +466,13 @@ export default function App() {
           if (roleRef.current === "director") break; // ignore our own echoes
           const book = bookFromSync(event.bookId, event.mode);
           const page = Number(event.page) || currentPageRef.current;
-          currentPageRef.current = page;
           // Remember the director's latest snapshot so a reloaded/foregrounded follower resyncs.
           lastDirectorSnapshotRef.current = { page, book };
+          // De-dupe the 2s mesh heartbeat: if we're already on this page+book it's just a
+          // keepalive re-send — do nothing (no redundant renderPage). A genuinely new page, a
+          // book switch, or a recovered dropped packet (page differs from ours) still syncs.
+          if (page === currentPageRef.current && book === currentBookRef.current) break;
+          currentPageRef.current = page;
           if (book !== currentBookRef.current) {
             currentBookRef.current = book;
             injectEvent({ type: "set-book", book });
