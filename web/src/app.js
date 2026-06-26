@@ -2946,16 +2946,12 @@ const initReader = async () => {
       .then(hydrateSongIndex)
       .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
   }
-  // Full offline pre-cache (downloads the whole manual). Only show the blocking
-  // spinner gate when an admin is explicitly provisioning a dedicated offline iPad
-  // via signovivo.com?admin=1 — everyone else gets an instant reader.
-  if (isAdminSetupMode) {
-    try {
-      await requireOfflineBundle(state.totalPages);
-    } catch (error) {
-      console.warn("Pre-cache offline incompleto:", error);
-    }
-    setOfflineGateState({ visible: false });
+  // Background pre-cache for everyone — at 13 MB it's cheap enough to always do.
+  // No blocking gate; pages download silently while the user reads.
+  if (!OFFLINE_PAGES && !NATIVE_FILE_MODE && "caches" in window) {
+    ensureOfflineBundle(state.totalPages, () => {}).catch((error) =>
+      console.warn("Pre-cache offline incompleto:", error),
+    );
   }
 };
 
