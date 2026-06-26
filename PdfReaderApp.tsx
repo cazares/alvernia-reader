@@ -89,6 +89,10 @@ export default function App() {
   const [mountKey, setMountKey] = useState(0);
 
   const roleRef = useRef<SyncRole>("off");
+  // Bumped at the top of every role-entry path. A become*() captures this at entry and bails
+  // after each await if it's been superseded (e.g. a rapid director→soft-reset→director flip
+  // inside the 2s mesh-start retry window), so a stale become* can't write roleRef late.
+  const roleGenerationRef = useRef(0);
   const explicitTransmitterRef = useRef(false);
   const currentPageRef = useRef(1);
   const totalPagesRef = useRef(0);
@@ -118,21 +122,32 @@ export default function App() {
   }, []);
 
   // ── Native -> Web injection (queued until the web app signals bridge-ready) ──
-  const injectEvent = useCallback((payload: Record<string, unknown>) => {
-    const js =
-      `window.__signoVivoReceiveNativeEvent && window.__signoVivoReceiveNativeEvent(${JSON.stringify(
-        payload,
-      )}); true;`;
-    if (!webReadyRef.current || !webViewRef.current) {
-      pendingInjectRef.current.push(js);
-      return;
-    }
-    try {
-      webViewRef.current.injectJavaScript(js);
-    } catch {
-      pendingInjectRef.current.push(js);
-    }
+  // Bound the pending-inject backlog: if the WebView never signals bridge-ready (broken/blank
+  // bundle, crash-loop), the 2s heartbeat + page events would otherwise grow native heap without
+  // limit. Drop the oldest queued inject once we exceed the cap — newer events are what matter.
+  const queueInject = useCallback((js: string) => {
+    if (pendingInjectRef.current.length > 100) pendingInjectRef.current.shift();
+    pendingInjectRef.current.push(js);
   }, []);
+
+  const injectEvent = useCallback(
+    (payload: Record<string, unknown>) => {
+      const js =
+        `window.__signoVivoReceiveNativeEvent && window.__signoVivoReceiveNativeEvent(${JSON.stringify(
+          payload,
+        )}); true;`;
+      if (!webReadyRef.current || !webViewRef.current) {
+        queueInject(js);
+        return;
+      }
+      try {
+        webViewRef.current.injectJavaScript(js);
+      } catch {
+        queueInject(js);
+      }
+    },
+    [queueInject],
+  );
 
   const flushPendingInjects = useCallback(() => {
     const ref = webViewRef.current;
@@ -209,6 +224,8 @@ export default function App() {
   // ── Become director ────────────────────────────────────────────────────────
   const becomeDirector = useCallback(
     async (code: string) => {
+      // Claim this role transition; a later flip bumps the generation and supersedes us.
+      const myGen = ++roleGenerationRef.current;
       if (!syncAvailable) {
         // No mesh on this device — still act as an online transmitter to the relay.
         explicitTransmitterRef.current = true;
@@ -224,14 +241,17 @@ export default function App() {
           // Mesh startup can transiently fail (permission race, radio warm-up).
           // Wait briefly and retry the start exactly once before giving up.
           await new Promise((r) => setTimeout(r, 2000));
+          if (myGen !== roleGenerationRef.current) return; // superseded during the retry sleep
           await startNearbyDirector(DIRECTOR_SESSION);
         }
+        if (myGen !== roleGenerationRef.current) return; // superseded while the mesh was starting
         roleRef.current = "director";
         await AsyncStorage.multiSet([
           [STORAGE_KEYS.lastSyncRole, "director"],
           [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
           [STORED_CODE_KEY, code],
         ]);
+        if (myGen !== roleGenerationRef.current) return; // superseded while persisting
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
         startDirectorHeartbeat();
@@ -244,11 +264,14 @@ export default function App() {
   );
 
   const becomeFollower = useCallback(async () => {
+    // Claim this role transition; a later flip bumps the generation and supersedes us.
+    const myGen = ++roleGenerationRef.current;
     roleRef.current = "follower";
     explicitTransmitterRef.current = false;
     stopDirectorHeartbeat(); // a follower must never re-broadcast
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower");
+      if (myGen !== roleGenerationRef.current) return; // superseded while persisting
       if (syncAvailable) {
         try {
           await startNearbyFollower(DIRECTOR_SESSION);
@@ -256,18 +279,21 @@ export default function App() {
           // Transient mesh startup failure (permission race, radio warm-up):
           // wait briefly and retry the start exactly once before giving up.
           await new Promise((r) => setTimeout(r, 2000));
+          if (myGen !== roleGenerationRef.current) return; // superseded during the retry sleep
           await startNearbyFollower(DIRECTOR_SESSION);
         }
       }
     } catch {
       /* ignore */
     }
+    if (myGen !== roleGenerationRef.current) return; // superseded while the mesh was starting
     injectEvent({ type: "role", role: "follower" });
   }, [syncAvailable, injectEvent, stopDirectorHeartbeat]);
 
   // ── Soft reset (secret code 744668486) ─────────────────────────────────────
   const performSoftReset = useCallback(async () => {
     breadcrumb("soft-reset");
+    roleGenerationRef.current++; // supersede any in-flight become* from the prior role
     stopDirectorHeartbeat();
     try {
       await resetNearbyDirectorSync();
@@ -293,6 +319,9 @@ export default function App() {
   // ── Director-code dispatch (codes entered on the web numpad) ────────────────
   const onDirectorCode = useCallback(
     (rawCode: unknown) => {
+      // A fresh code entry is a new role-entry path: supersede any in-flight become* up front.
+      // (The become*/performSoftReset paths below re-bump and capture their own generation.)
+      roleGenerationRef.current++;
       const code = digitsOnly(rawCode);
       if (!code) {
         injectEvent({ type: "role", role: "none" });
@@ -357,7 +386,10 @@ export default function App() {
           break;
         }
         case "page-changed": {
-          const page = Number(msg.page) || currentPageRef.current;
+          // Clamp: a buggy/tampered web bundle must not push a wild page to mesh followers.
+          // Floor at 1; cap at totalPages when we have a positive count.
+          let page = Math.max(1, Number(msg.page) || currentPageRef.current);
+          if (totalPagesRef.current > 0) page = Math.min(page, totalPagesRef.current);
           currentPageRef.current = page;
           if (typeof msg.totalPages === "number" && msg.totalPages > 0) {
             totalPagesRef.current = msg.totalPages;

@@ -93,6 +93,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// Set true when a `bundle_request` is sent (and on `didStartReceivingResource`), cleared
   /// after install succeeds/fails. Prevents duplicate requests from repeated offers.
   private var bundleTransferInFlight = false
+  /// Generation token for the bundle-transfer watchdog. Incremented every time a transfer is
+  /// marked in-flight; the watchdog captures the current value and only fires if it still
+  /// matches (i.e. no newer transfer started and nothing cleared the flag in between). Guards
+  /// against a director vanishing mid-transfer and leaving bundleTransferInFlight stuck forever.
+  private var bundleTransferGeneration: Int = 0
+  /// How long a single bundle transfer may stay in-flight before the watchdog force-clears it.
+  private static let bundleTransferWatchdogSeconds: TimeInterval = 90
 
   // MARK: - Convenience
 
@@ -606,13 +613,31 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     let offered = Int(offeredVersion) ?? 0
     let mine = Int(currentBundleVersion) ?? 0
     guard offered > mine else { return }
-    bundleTransferInFlight = true
+    beginBundleTransfer()
     let payload: [String: Any] = [
       "v": Self.protocolVersion,
       "type": "bundle_request",
       "version": String(mine),
     ]
     sendControlPayload(payload, to: peerID)
+  }
+
+  /// FOLLOWER side. Marks a bundle transfer in-flight and arms a watchdog so the flag can never
+  /// stick forever if the director vanishes mid-transfer and MPC never delivers a terminal
+  /// didFinishReceivingResource. Idempotent for repeated arming (e.g. request then
+  /// didStartReceivingResource) — each call bumps the generation so only the latest watchdog acts.
+  /// Must be called on the main queue.
+  private func beginBundleTransfer() {
+    bundleTransferInFlight = true
+    bundleTransferGeneration += 1
+    let generation = bundleTransferGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.bundleTransferWatchdogSeconds) { [weak self] in
+      guard let self = self else { return }
+      // Only act if this is still the same transfer AND it never completed/cleared.
+      guard self.bundleTransferGeneration == generation, self.bundleTransferInFlight else { return }
+      self.bundleTransferInFlight = false
+      self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "timeout"] as [String: Any])
+    }
   }
 
   /// DIRECTOR side. On receiving a `bundle_request`, pack the running app's WebBundle and
@@ -770,7 +795,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       withUnsafeMutableBytes(of: &value) { $0.copyBytes(from: rawBuffer) }
       return UInt32(bigEndian: value)
     }
-    guard headerLen > 0 else { try? reader.close(); fail("header-empty", cleanup: newDir); return }
+    // Bound the declared header length BEFORE allocating. A corrupt/malicious pack could claim a
+    // ~4 GB header → a multi-GB contiguous alloc → memory warning → jetsam kill (blank app). 4 MB
+    // is generous for a file manifest of a ~30 MB bundle.
+    guard headerLen > 0, headerLen <= 4 * 1024 * 1024 else {
+      try? reader.close(); fail("header-len-bounds", cleanup: newDir); return
+    }
 
     // [header JSON]
     let headerData = reader.readData(ofLength: Int(headerLen))
@@ -780,6 +810,27 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       try? reader.close(); fail("header-parse", cleanup: newDir); return
     }
     let headerVersion = headerObj["version"] as? String ?? ""
+
+    // Cheap up-front sanity check: the received file size must equal the 4-byte length prefix +
+    // the header JSON + the sum of every declared file length. A grossly truncated or oversized
+    // archive is rejected here before we extract a single byte. (Per-file size is re-verified
+    // exactly below; this catches whole-archive corruption early.)
+    var declaredFileBytes = 0
+    var declaredOverflow = false
+    for fileEntry in files {
+      let len = (fileEntry["len"] as? Int) ?? 0
+      guard len >= 0 else { declaredOverflow = true; break }
+      let (sum, overflow) = declaredFileBytes.addingReportingOverflow(len)
+      if overflow { declaredOverflow = true; break }
+      declaredFileBytes = sum
+    }
+    let receivedSize = (try? fm.attributesOfItem(atPath: localURL.path)[.size] as? Int) ?? nil
+    if !declaredOverflow, let receivedSize = receivedSize {
+      let expectedSize = 4 + Int(headerLen) + declaredFileBytes
+      guard receivedSize == expectedSize else {
+        try? reader.close(); fail("archive-size-mismatch", cleanup: newDir); return
+      }
+    }
 
     // [file bytes] — slice sequentially; the reader's offset advances as we go.
     for fileEntry in files {
@@ -815,13 +866,21 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       guard remaining == 0 else {
         try? reader.close(); fail("file-truncated", cleanup: newDir); return
       }
+      // Verify the extracted file's on-disk size matches the manifest exactly. A short/garbage
+      // file would otherwise silently brick the follower's WebView once swapped in.
+      let onDiskSize = (try? fm.attributesOfItem(atPath: destFileURL.path)[.size] as? Int) ?? nil
+      guard onDiskSize == len else {
+        try? reader.close(); fail("file-size-mismatch", cleanup: newDir); return
+      }
     }
     try? reader.close()
 
-    // Validate: the unpacked dir must contain index.html.
+    // Validate: the unpacked dir must contain a non-trivial index.html. A zero/tiny index.html
+    // would brick the follower into a blank WebView, so require it to clear a small floor.
     let indexURL = newDir.appendingPathComponent("index.html")
-    guard fm.fileExists(atPath: indexURL.path) else {
-      fail("no-index", cleanup: newDir); return
+    let indexSize = (try? fm.attributesOfItem(atPath: indexURL.path)[.size] as? Int) ?? nil
+    guard let indexBytes = indexSize, indexBytes > 200 else {
+      fail("index-too-small", cleanup: newDir); return
     }
 
     // Atomic-ish swap: move current WebBundle aside, move new into place, then drop the old.
@@ -1477,9 +1536,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
 
   func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {
-    // A web-bundle transfer has begun. Mark in-flight so repeated bundle_offers don't double-request.
+    // A web-bundle transfer has begun. Mark in-flight (and re-arm the watchdog) so repeated
+    // bundle_offers don't double-request and a stalled transfer can't wedge the flag forever.
     DispatchQueue.main.async {
-      self.bundleTransferInFlight = true
+      self.beginBundleTransfer()
     }
   }
 

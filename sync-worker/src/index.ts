@@ -69,7 +69,15 @@ export class SyncRoom extends DurableObject<Env> {
 
   /** RPC: director publishes a new page state. Latest-wins, stale-guarded. */
   async publish(input: Partial<Snapshot>): Promise<{ ok: true; seq: number; ignored?: boolean }> {
-    const incomingSeq = Number(input.seq ?? 0);
+    // Sanitize seq before it touches the guard. A non-finite (Infinity/NaN), negative, or
+    // unreachably-high seq would poison the room: Infinity serializes as null and, since every
+    // finite seq is <= Infinity, would block every future director for the whole live window.
+    // Collapse any such value to 0 so the `incomingSeq > 0 ? … : this.snapshot.seq + 1` branch
+    // below assigns a sane monotonic seq instead.
+    let incomingSeq = Number(input.seq ?? 0);
+    if (!Number.isFinite(incomingSeq) || incomingSeq < 0 || incomingSeq > Date.now() + 60000) {
+      incomingSeq = 0;
+    }
     // The seq guard stops a burst of page turns on a weak link from arriving out of order
     // and rewinding the song — but ONLY while a director is actively live (fresh snapshot).
     // If nobody has published within the live window the snapshot is stale (no active
@@ -84,10 +92,10 @@ export class SyncRoom extends DurableObject<Env> {
     }
     const next: Snapshot = {
       v: PROTOCOL_VERSION,
-      page: Math.max(1, Number(input.page ?? this.snapshot.page) || 1),
-      totalPages: Math.max(0, Number(input.totalPages ?? this.snapshot.totalPages) || 0),
-      mode: String(input.mode ?? this.snapshot.mode ?? ""),
-      bookId: String(input.bookId ?? this.snapshot.bookId ?? ""),
+      page: Math.max(1, Math.min(Number(input.page ?? this.snapshot.page) || 1, 100000)),
+      totalPages: Math.max(0, Math.min(Number(input.totalPages ?? this.snapshot.totalPages) || 0, 100000)),
+      mode: String(input.mode ?? this.snapshot.mode ?? "").slice(0, 64),
+      bookId: String(input.bookId ?? this.snapshot.bookId ?? "").slice(0, 64),
       seq: incomingSeq > 0 ? incomingSeq : this.snapshot.seq + 1,
       ts: Math.floor(Date.now() / 1000),
     };
@@ -255,13 +263,32 @@ export default {
       if (!tokenOk && !codeOk) {
         return json({ ok: false, error: "unauthorized" }, 401, cors);
       }
-      let body: Partial<Snapshot>;
+      // Reject oversized bodies early (a snapshot is a few hundred bytes). Cloudflare's own
+      // body-size limit otherwise rejects request.json() with a non-SyntaxError that would
+      // escape as an HTML 500; this returns a clean 413 first.
+      const contentLen = Number(request.headers.get("content-length") || 0);
+      if (contentLen > 64 * 1024) {
+        return json({ ok: false, error: "payload_too_large" }, 413, cors);
+      }
+      let parsed: unknown;
       try {
-        body = (await request.json()) as Partial<Snapshot>;
+        parsed = await request.json();
       } catch {
+        // Any parse/body failure (malformed JSON, oversized chunked body) — not just SyntaxError.
         return json({ ok: false, error: "bad_json" }, 400, cors);
       }
-      const result = await stub.publish(body);
+      // A raw JSON `null` / array / primitive is valid JSON but not a snapshot; coerce to {}
+      // so publish() never dereferences a non-object.
+      const body: Partial<Snapshot> =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Partial<Snapshot>)
+          : {};
+      let result;
+      try {
+        result = await stub.publish(body);
+      } catch {
+        return json({ ok: false, error: "publish_failed" }, 500, cors);
+      }
       return json(result, 200, cors);
     }
 

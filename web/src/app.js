@@ -200,11 +200,13 @@ const coreAssetsForBook = (bookId) => [...SHELL_ASSETS, ...bookManifestAssets(bo
 // ── Utilities ────────────────────────────────────────────────────────────────
 // pdftoppm zero-pads page filenames to the WIDTH of each book's total page count
 // (hymns-4: 51 pages → page-02.webp; standard: 371 → page-001.webp). So the pad
-// width is per-book — derive it from the registry's totalPages for this book, with
-// a floor of 2 (and a fallback to live state.totalPages if the registry is silent).
+// width is per-book — derive it from the registry's totalPages for this book (with
+// a fallback to live state.totalPages if the registry is silent). No artificial floor:
+// pdftoppm pads to String(count).length with NO minimum, so a <10-page book renders
+// render-1..render-9 (width 1) — flooring to 2 would 404 every page on such a book.
 const bookPagePadWidth = (bookId) => {
   const total = bookRegistry.books?.[bookId]?.totalPages || state.totalPages || 0;
-  return Math.max(2, String(total).length);
+  return String(total).length;
 };
 const pageFileName = (pageNumber) => {
   const padded = String(pageNumber).padStart(bookPagePadWidth(state.currentBook), "0");
@@ -220,7 +222,14 @@ const pageImageMatches = (pageNumber) => {
   const currentSrc = pageImage.getAttribute("src") || "";
   return currentSrc.endsWith(pageFileName(pageNumber));
 };
-const clampPage = (pageNumber) => Math.max(1, Math.min(pageNumber, state.totalPages));
+// ALWAYS returns an in-range INTEGER. A float (2.7) or NaN must never reach
+// pageFileName → page-2.7.webp / page-NaN.webp would 404 and stick the render.
+const clampPage = (pageNumber) => {
+  const n = Math.trunc(Number(pageNumber));
+  if (!Number.isFinite(n)) return state.currentPage || 1;
+  const total = Number.isFinite(state.totalPages) && state.totalPages > 0 ? state.totalPages : 1;
+  return Math.max(1, Math.min(n, total));
+};
 const clampSongIndex = (index) => Math.max(0, Math.min(index, state.totalSongs - 1));
 const getFullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 const isFullscreen = () => Boolean(getFullscreenElement());
@@ -243,7 +252,7 @@ const bindViewportMetrics = () => {
   window.visualViewport?.addEventListener("scroll", setViewportCssVars, { passive: true });
 };
 
-const normalizeText = (text) => text
+const normalizeText = (text) => String(text ?? "")
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
   .toLowerCase();
@@ -751,8 +760,9 @@ const renderStatus = () => {
     songStatus.textContent = `Canción ${getCurrentSongNumber()}`;
   }
 
-  // Intro chord display
-  if (entry && entry.intro) {
+  // Intro chord display. Guard chords: a malformed entry (intro present but chords
+  // not an array) must not crash the status render — hide the intro instead.
+  if (entry && entry.intro && Array.isArray(entry.intro.chords)) {
     const { key, solfege, chords, capo } = entry.intro;
     let introText = `Intro en ${key} (${solfege}): ${chords.join(", ")}`;
     if (capo) introText += ` – Capo ${capo}`;
@@ -927,7 +937,16 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
 // resets the per-book derived caches so nothing leaks across a book switch.
 const hydrateBookData = (data) => {
   if (!data) return;
-  if (typeof data.totalPages === "number") state.totalPages = data.totalPages;
+  // Only adopt a positive-integer totalPages — a missing / NaN / string value would
+  // NaN-stick the whole reader. Fall back to the per-book registry count, else keep
+  // the prior value; never assign NaN/undefined.
+  const tp = Number(data.totalPages);
+  if (Number.isInteger(tp) && tp > 0) {
+    state.totalPages = tp;
+  } else {
+    const registryTotal = Number(bookRegistry.books?.[state.currentBook]?.totalPages);
+    if (Number.isInteger(registryTotal) && registryTotal > 0) state.totalPages = registryTotal;
+  }
   state.songIndex = Array.isArray(data.songIndex)
     ? [...data.songIndex].sort((left, right) => left.song - right.song)
     : [];
@@ -945,26 +964,43 @@ const hydrateBookData = (data) => {
   prefetchedPageUrls.clear();
 };
 
-// Fetch a book's manifest and hydrate state from it. totalPages comes straight
-// from the manifest so paging clamps to the right book.
-const loadBook = async (bookId) => {
+// Generation counter so a rapid book switch can't let a STALE loadBook (still fetching the
+// previous book) overwrite the newer book's totalPages — which would break clamping and
+// per-book page padding (e.g. book=standard but totalPages=51 → page-05.webp 404s).
+let bookSwitchGeneration = 0;
+
+// Fetch a book's manifest and hydrate state from it. totalPages comes straight from the
+// manifest so paging clamps to the right book. The optional `generation` guards against a
+// superseding switch: if a newer switchBook started while we were fetching, drop this load.
+const loadBook = async (bookId, generation) => {
   const response = await fetch(resolveAppPath(`/books/${bookId}/pages.json`), { cache: "no-store" });
   const data = await response.json();
+  if (generation !== undefined && generation !== bookSwitchGeneration) return;
   hydrateBookData(data);
   renderStatus();
   renderActiveTab();
 };
 
-// Switch the active book: load it, jump to its start page, and (unless the change
-// came FROM native) tell native so it can persist + re-broadcast.
+// Switch the active book: load it, jump to its start page, and (unless the change came FROM
+// native) tell native so it can persist + re-broadcast. Generation-guarded so rapid switches
+// can't leave currentBook and totalPages disagreeing.
 const switchBook = async (bookId, opts = {}) => {
   if (!isBookId(bookId) || bookId === state.currentBook) return;
+  const prevBook = state.currentBook;
+  const gen = ++bookSwitchGeneration;
   state.currentBook = bookId;
   try {
-    await loadBook(bookId);
+    await loadBook(bookId, gen);
   } catch (error) {
+    if (gen !== bookSwitchGeneration) return;
     console.warn("No se pudo cargar el libro", bookId, error);
+    // Roll back: loadBook threw (offline / 404 / bad JSON) so the new book is only
+    // half-loaded. Restore the previous book and bail WITHOUT rendering, so currentBook
+    // never disagrees with totalPages / songIndex.
+    state.currentBook = prevBook;
+    return;
   }
+  if (gen !== bookSwitchGeneration) return; // a newer switchBook superseded us
   const startPage = clampPage(DEFAULT_START_PAGE);
   // Forget the previous book's history — its page numbers don't map here.
   state.pageHistory = [];
@@ -1075,9 +1111,15 @@ const goBackInHistory = () => {
 const loadSearchIndex = async () => {
   const inlined = document.getElementById("search-data");
   if (inlined) {
-    const data = JSON.parse(inlined.textContent);
-    state.searchIndexPages = data.pages || [];
-    return;
+    // Defensive inline parse (mirrors loadBookRegistry): a malformed inline blob must
+    // not throw out of this un-awaited loader → fall through to the fetch path instead.
+    try {
+      const data = JSON.parse(inlined.textContent);
+      state.searchIndexPages = data.pages || [];
+      return;
+    } catch (error) {
+      console.warn("Índice de búsqueda inline inválido, recurriendo a la red", error);
+    }
   }
   try {
     const response = await fetch(resolveAppPath(`/books/${state.currentBook}/search-index.json`), { cache: "no-store" });
@@ -1104,6 +1146,9 @@ const searchPages = (query) => {
   const words = normalizedQuery.split(/\s+/).filter(Boolean);
   const results = [];
   for (const entry of state.searchIndexPages) {
+    // Skip malformed entries with no string text — they can't match and downstream
+    // snippet rendering (entry.text.slice) would otherwise throw.
+    if (typeof entry?.text !== "string") continue;
     const normalizedText = normalizeText(entry.text);
     if (words.every((word) => normalizedText.includes(word))) {
       results.push(entry);
@@ -1180,8 +1225,8 @@ const searchByTheme = (query) => {
   const norm = normalizeText(query.trim());
   if (!norm) return null;
   for (const theme of state.themeIndex) {
-    const normId = normalizeText(theme.id.replace(/_/g, " "));
-    const normLabel = normalizeText(theme.label);
+    const normId = normalizeText(String(theme.id ?? "").replace(/_/g, " "));
+    const normLabel = normalizeText(String(theme.label ?? ""));
     if (normLabel.includes(norm) || normId.includes(norm) || norm === theme.emoji) {
       const songs = state.songIndex.filter((entry) => entry.themes && entry.themes.includes(theme.id));
       return { theme, songs };
@@ -2703,19 +2748,27 @@ const goLive = () => {
 };
 
 const relayIsFreshLive = (snap) =>
-  snap && typeof snap.seq === "number" && snap.seq > 0 &&
+  snap && Number.isFinite(snap.seq) && snap.seq > 0 &&
   (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
 
-const applyRelaySnapshot = (snap, { force = false } = {}) => {
-  if (!snap || typeof snap.page !== "number") return;
-  // Ongoing pushes are de-duped / ordered by seq. A FORCED resync (initial load,
-  // reconnect, foreground, or the safety poll) must re-apply the director's CURRENT
-  // page even when the seq isn't newer — the director may be sitting still — so it
-  // skips the seq guard.
-  if (!force && typeof snap.seq === "number" && snap.seq > 0 && snap.seq <= relay.lastSeq) return;
-  if (typeof snap.seq === "number") relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
+const applyRelaySnapshot = async (snap, { force = false } = {}) => {
+  // Number.isFinite rejects NaN (typeof NaN === "number" let it slip the old guard) →
+  // a NaN page would clamp/render bogusly. Reject non-finite page outright.
+  if (!snap || !Number.isFinite(snap.page)) return;
+  // A director on a DIFFERENT book: switch first (mirrors the native set-book path) so
+  // the page lands in the right book even if IP-geo was wrong/slow. Awaited so totalPages
+  // and pad width are correct before we renderPage below.
+  if (isBookId(snap.bookId) && snap.bookId !== state.currentBook) {
+    await switchBook(snap.bookId, { fromNative: true });
+  }
+  // Ongoing pushes are de-duped / ordered by seq (Number.isFinite so a NaN seq can't
+  // slip the guard). A FORCED resync (initial load, reconnect, foreground, or the safety
+  // poll) must re-apply the director's CURRENT page even when the seq isn't newer — the
+  // director may be sitting still — so it skips the seq guard.
+  if (!force && Number.isFinite(snap.seq) && snap.seq > 0 && snap.seq <= relay.lastSeq) return;
+  if (Number.isFinite(snap.seq)) relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
 
-  const hasPublished = typeof snap.seq === "number" && snap.seq > 0;
+  const hasPublished = Number.isFinite(snap.seq) && snap.seq > 0;
   // No director has ever published, OR (ongoing only) the director has gone stale →
   // behave like a normal songbook. A forced resync ignores the freshness window: a
   // director lingering on a page is still the page the follower should be on.
@@ -2767,7 +2820,7 @@ const relayPollOnce = async (force = false) => {
         if (geoBook !== state.currentBook) await switchBook(geoBook, { fromNative: true });
       }
     }
-    if (r.ok) applyRelaySnapshot(await r.json(), { force });
+    if (r.ok) await applyRelaySnapshot(await r.json(), { force });
   } catch {}
 };
 // Fallback polling (when the WS won't hold): force every tick so a stationary director
@@ -2797,7 +2850,7 @@ const connectRelay = () => {
       try { ws.send("ping"); } catch {}
     }, 4000);
   });
-  ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)); } catch {} });
+  ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)).catch(() => {}); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
     clearInterval(heartbeatTimer);
@@ -2836,7 +2889,16 @@ const initReader = async () => {
   const manifest = usingInlineDefault
     ? JSON.parse(inlinedPages.textContent)
     : await fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" }).then((r) => r.json());
-  state.totalPages = manifest.totalPages;
+  // Only adopt a positive-integer totalPages — a missing / NaN / string value would
+  // NaN-stick the whole reader. Fall back to the per-book registry count, else keep
+  // the state default; never assign NaN/undefined.
+  const manifestTotal = Number(manifest.totalPages);
+  if (Number.isInteger(manifestTotal) && manifestTotal > 0) {
+    state.totalPages = manifestTotal;
+  } else {
+    const registryTotal = Number(bookRegistry.books?.[state.currentBook]?.totalPages);
+    if (Number.isInteger(registryTotal) && registryTotal > 0) state.totalPages = registryTotal;
+  }
   state.currentPage = DEFAULT_START_PAGE;
 
   // Fold the full song index into state and refresh everything that depends on it.
@@ -2848,6 +2910,14 @@ const initReader = async () => {
     state.totalSongs = state.songIndex.length;
     state.themeIndex = data.themeIndex || [];
     state.songPageLookup = buildSongPageLookup(state.songIndex);
+    // For the default book, totalPages was painted from inline #pages-data and never
+    // reconciled with the authoritative fetched pages.json. If they drift, adopt the
+    // fetched value (positive integer only) and re-render so paging/padding stay correct.
+    const dataTotal = Number(data.totalPages);
+    if (Number.isInteger(dataTotal) && dataTotal > 0 && dataTotal !== state.totalPages) {
+      state.totalPages = dataTotal;
+      renderPage(state.currentPage, { pushToHistory: false });
+    }
     renderStatus();
     renderActiveTab();
   };
