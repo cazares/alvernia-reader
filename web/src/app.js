@@ -2822,15 +2822,22 @@ const relayPollOnce = async (force = false) => {
     // The native shell injects __SIGNO_VINO_INITIAL_BOOK instead, so this applies only on the
     // web. Switch the book BEFORE applying the snapshot so the director's page lands in the
     // right book (otherwise a Del Rio follower defaults to hymns-4 and the page gets clamped).
+    let geoJustResolved = false;
     if (!relayGeoBookApplied && !NATIVE_FILE_MODE && !hasNativeBridge()) {
       const geoBook = bookFromHymnal(r.headers.get("X-Hymnal"));
       if (geoBook) {
         relayGeoBookApplied = true;
+        geoJustResolved = true;
         if (geoBook !== state.currentBook) await switchBook(geoBook, { fromNative: true });
       }
     }
     if (r.ok) await applyRelaySnapshot(await r.json(), { force });
-    revealReader();   // geo (X-Hymnal) + any director snapshot are settled → safe to paint
+    // Reveal ONLY from the poll that JUST resolved geo — AFTER its awaited switchBook. Several
+    // polls fire at boot; a concurrent one that skipped the geo block (flag already set) must
+    // NOT lift the white gate while THIS call is still loading the standard manual → that race
+    // was the residual hymns-4 flash. The 3s safety net + native/offline paths still cover the
+    // no-geo cases.
+    if (geoJustResolved) revealReader();
   } catch {}
 };
 // Fallback polling (when the WS won't hold): force every tick so a stationary director
@@ -3006,6 +3013,10 @@ initReader().catch((error) => {
   setLoading(true, "No se pudo cargar Signo Vivo.");
   revealReader();   // even on a boot failure, don't trap the user behind a blank white gate
 });
-// Safety net: never leave the white geo-gate up forever — reveal within 3s no matter what
-// (hung relay, slow geo, anything). Normal web loads reveal far sooner via relayPollOnce.
-setTimeout(revealReader, 3000);
+// Safety nets for the white geo-gate. (1) If geo NEVER resolves (relay down/blocked/offline
+// misread), reveal with the default book after 3s — but ONLY if geo is still unresolved, so
+// this can't preempt a slow-but-working geo+switchBook (that path reveals itself once the
+// manual lands, avoiding the flash). (2) An absolute 8s backstop covers any pathological hang
+// so the user is never trapped behind white.
+setTimeout(() => { if (!relayGeoBookApplied) revealReader(); }, 3000);
+setTimeout(revealReader, 8000);
