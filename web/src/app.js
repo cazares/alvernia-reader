@@ -726,8 +726,12 @@ const renderDraft = () => {
 // The native shell reports director/follower role over the bridge; the only surviving
 // surface is the tiny "Modo activo / DIRECTOR" badge — show it when this device directs.
 const renderDirectorModeBadge = () => {
+  const isDirector = state.nativeSyncRole === "director";
+  // Drive the control layout: followers (web + any non-director native) get ⟳ resync + ♪;
+  // a director gets ♪ + ⌕ search. Default "follower" so signovivo.com is right from boot.
+  document.documentElement.dataset.role = isDirector ? "director" : "follower";
   if (!directorModeBadge) return;
-  directorModeBadge.classList.toggle("is-hidden", state.nativeSyncRole !== "director");
+  directorModeBadge.classList.toggle("is-hidden", !isDirector);
 };
 
 const applyNativeSyncEvent = async (payload) => {
@@ -2213,15 +2217,16 @@ const bindReaderEvents = () => {
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
 
-  // Parity controls in the drawer: manual book switch + reconnect (labels from the registry)
+  // Manual book switch — now lives in the ♪ panel (labels from the registry)
   document.querySelectorAll(".book-switch-btn").forEach((btn) => {
     const id = btn.dataset.book;
     const label = bookLabel(id);
     if (label) btn.textContent = label;
     btn.addEventListener("click", () => { haptic(); switchBookManual(id); });
   });
-  const reconnectBtn = document.getElementById("reconnect-btn");
-  if (reconnectBtn) reconnectBtn.addEventListener("click", () => reconnectRelay());
+  // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection
+  const resyncFab = document.getElementById("resync-fab");
+  if (resyncFab) resyncFab.addEventListener("click", () => reconnectRelay());
 
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
   songJumpBackdrop.addEventListener("click", () => { closeSongJump(); });
