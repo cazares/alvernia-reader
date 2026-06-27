@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
@@ -11,10 +12,19 @@ const cacheVersion = (() => {
     cwd: rootDir,
     encoding: "utf8",
   });
-  if (gitSha.status === 0 && gitSha.stdout.trim()) {
-    return gitSha.stdout.trim();
+  const sha = gitSha.status === 0 && gitSha.stdout.trim() ? gitSha.stdout.trim() : "nogit";
+  // Content hash of every source file that determines the built bundle. CRITICAL: the bundle is
+  // built from the WORKING TREE, so a git-SHA-only version COLLIDES across two deploys made at the
+  // same HEAD with different uncommitted content — returning users would keep a stale Service Worker
+  // cache and never receive the fix. Hashing the actual source guarantees the cache busts whenever
+  // the content changes, regardless of commit state. The SHA prefix stays for human traceability.
+  const hash = crypto.createHash("sha256");
+  for (const f of ["app.js", "sw.js", "styles.css", "index.html", "manifest.webmanifest"]) {
+    const p = path.join(srcDir, f);
+    if (fs.existsSync(p)) hash.update(fs.readFileSync(p));
   }
-  return `${Date.now()}`;
+  hash.update(fs.readFileSync(new URL(import.meta.url))); // build.mjs itself (template/inlining logic)
+  return `${sha}-${hash.digest("hex").slice(0, 8)}`;
 })();
 
 fs.rmSync(distDir, { recursive: true, force: true });
@@ -120,8 +130,40 @@ const renderPagesToWebp = (pdfPath, pagesOutDir) => {
 
 const TITLE_OVERRIDES = {
   24:  "Santo Juvenil",
+  61:  "Vía Crucis",
+  74:  "3ª Estación — Vía Crucis",
+  115: "13ª Estación — Vía Crucis",
   198: "Señor quien puede entrar",
   249: "Solamente de la Santa Trinidad",
+};
+
+// Curated titles for the 22 hymns-4 (Himnos de Sión) songs. The source JSON is raw
+// OCR from the original hymnal and often contains garbage (section headers, chord marks,
+// continuation lines). These hand-verified titles replace the OCR text so the Index
+// "Todas" tab and search results show real song names instead of "Canción N".
+const HYMNS4_TITLE_OVERRIDES = {
+  1:   "Aparte del Mundo",
+  3:   "Estando Allí",
+  4:   "Con Humilde Oración",
+  6:   "Hoy es Día de Reposo",
+  7:   "La Expiación Necesaria",
+  9:   "¡Oh, Qué Amigo Nos es Cristo!",
+  14:  "¡De la Ley Libre!",
+  15:  "Solo a Ti, Dios y Señor",
+  17:  "Todos Juntos Tributemos",
+  26:  "Alabemos al Eterno",
+  33:  "En el Curso de Este Día",
+  42:  "Grato es Decir la Historia",
+  45:  "Aunque Soy Pequeñuelo",
+  86:  "De la Vida Eterna Luz",
+  89:  "¡Gloria a Ti, Jesús Divino!",
+  106: "Ven, Santo Espíritu de Amor",
+  108: "Precepto es del Señor",
+  110: "Andaba Yo en Males Mil",
+  119: "Yo Acudo a Mi Rey",
+  125: "De Tal Manera Dios Amó",
+  127: "De la Cumbre del Calvario",
+  133: "Volveos, Volveos",
 };
 
 // ─── Song Title Extraction ───────────────────────────────────────────────────
@@ -410,13 +452,9 @@ const THEMES = [
     words: [],
   },
   // ── Liturgical seasons ──────────────────────────────────────────────────────
-  {
-    id: "adviento",
-    label: "Adviento",
-    emoji: "🕯️",
-    phrases: ["ven señor no tardes", "preparad el camino", "maranatha", "viene el señor", "tiempo de adviento", "luz en la oscuridad", "el señor viene", "ven señor jesucristo", "preparad los caminos"],
-    words: ["adviento", "maranatha", "venida", "preparad", "vigilad", "anunciad", "espera", "llegará"],
-  },
+  // NOTE: adviento removed — no songs in the songbook matched its phrase/word set.
+  // Keeping it would produce a dead filter in the Temas tab (the UI already hides empty
+  // themes, but a zero-song entry in themeIndex is misleading data).
   // ── Sacramental / life-event themes ────────────────────────────────────────
   {
     id: "bautismo",
@@ -432,13 +470,7 @@ const THEMES = [
     phrases: ["amor conyugal", "cuando dos se aman", "el amor es paciente", "el amor es benigno", "el amor todo lo puede", "en el día de tu boda", "dos en uno"],
     words: ["boda", "bodas", "matrimonio", "esposos", "novios", "alianza matrimonial", "casamiento", "desposorio", "esposo", "esposa"],
   },
-  {
-    id: "funerales",
-    label: "Funerales / Difuntos",
-    emoji: "🌹",
-    phrases: ["descansa en paz", "en la casa del padre", "vida eterna para", "aunque pase por el valle", "el señor es mi pastor", "no temas la muerte", "resurrección de los muertos"],
-    words: ["difuntos", "funeral", "entierro", "eterno descanso", "fallecido", "cementerio", "velorio", "luto", "sepultura", "duelo"],
-  },
+  // funerales removed — no songs matched. See adviento note above.
   {
     id: "confirmacion",
     label: "Confirmación",
@@ -446,13 +478,7 @@ const THEMES = [
     phrases: ["sellados por el espíritu", "confirmados en la fe", "ungidos por el espíritu", "vengan al altar de dios"],
     words: ["confirmación", "confirmados", "crismación", "unción", "ungido", "sello"],
   },
-  {
-    id: "primera_comunion",
-    label: "Primera Comunión",
-    emoji: "🍞",
-    phrases: ["hoy recibo a jesús", "por primera vez", "primera comunión", "me acerco a ti señor", "vengo a ti por primera"],
-    words: ["primera comunión", "primicias", "primera vez"],
-  },
+  // primera_comunion removed — no songs matched. See adviento note above.
   // ── Functional / directorial themes ────────────────────────────────────────
   {
     id: "entrada",
@@ -461,13 +487,7 @@ const THEMES = [
     phrases: ["entremos en la casa del señor", "venid al templo", "venimos a adorarte", "hoy venimos ante ti", "entramos en tu presencia", "aquí estamos reunidos"],
     words: ["entramos", "venimos", "congregamos", "reunidos", "asamblea", "gathering"],
   },
-  {
-    id: "envio",
-    label: "Envío / Final de Misa",
-    emoji: "🙌",
-    phrases: ["id a anunciar", "vayan en paz", "salid al mundo", "id por todo el mundo", "misión cumplida", "la misa ha terminado"],
-    words: ["envío", "misión", "anunciad", "proclamad", "id", "marchad", "salid"],
-  },
+  // envio removed — no songs matched. See adviento note above.
   {
     id: "paz",
     label: "Paz / Unidad",
@@ -482,13 +502,7 @@ const THEMES = [
     phrases: ["en procesión", "camino al altar", "somos peregrinos", "juntos en el camino", "caminamos hacia ti"],
     words: ["procesión", "peregrinación", "peregrinos", "marcha", "caminamos", "peregrinar"],
   },
-  {
-    id: "santos",
-    label: "Santos / Fiestas Patronales",
-    emoji: "👑",
-    phrases: ["fiesta de todos los santos", "comunión de los santos", "fiesta patronal", "intercede por nosotros"],
-    words: ["santos", "mártires", "patrono", "patrona", "beatificación", "santoral", "fiesta", "intercesor", "interces"],
-  },
+  // santos removed — no songs matched. See adviento note above.
 ];
 
 // Normalize: NFD + strip accents + lowercase
@@ -657,15 +671,25 @@ const buildHymns4Manifests = ({ pageFiles, bookOutDir }) => {
   );
 
   // pages.json — { totalPages, songIndex, themeIndex }. totalPages is the ACTUAL
-  // rendered page count; reuse the prebuilt songIndex; no per-song themes for hymns.
-  const songIndex = Array.isArray(prebuiltPages.songIndex) ? prebuiltPages.songIndex : [];
+  // rendered page count; reuse the prebuilt songIndex enriched with curated titles;
+  // no per-song themes for hymns.
+  const songIndex = (Array.isArray(prebuiltPages.songIndex) ? prebuiltPages.songIndex : [])
+    .map((entry) => ({
+      ...entry,
+      title: HYMNS4_TITLE_OVERRIDES[entry.song] ?? songTitles[String(entry.song)] ?? null,
+    }));
   fs.writeFileSync(
     path.join(bookOutDir, "pages.json"),
     JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex: [] }),
   );
 
-  // song-titles.json — already in the { "<song>": "Title" } target shape.
-  fs.writeFileSync(path.join(bookOutDir, "song-titles.json"), JSON.stringify(songTitles));
+  // song-titles.json — already in the { "<song>": "Title" } target shape; augment
+  // with curated overrides so the title lookup is consistent with songIndex.
+  const mergedTitles = { ...songTitles };
+  for (const [song, title] of Object.entries(HYMNS4_TITLE_OVERRIDES)) {
+    mergedTitles[String(song)] = title;
+  }
+  fs.writeFileSync(path.join(bookOutDir, "song-titles.json"), JSON.stringify(mergedTitles));
 
   // song-search-index.json — target shape is { "<song>": "ocr blob" }. The prebuilt
   // file is a LIST, so fold it into a dict keyed by song, using title + lyrics as the
@@ -678,11 +702,17 @@ const buildHymns4Manifests = ({ pageFiles, bookOutDir }) => {
   }
   fs.writeFileSync(path.join(bookOutDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
 
-  // search-index.json — { pages:[{page,text}] }. Derive best-effort one entry per
-  // song page from title + blob, mirroring how the standard book slices to ~800 chars.
+  // search-index.json — { pages:[{page,text}] }. CRITICAL: the prebuilt searchList uses
+  // ORIGINAL-book page numbers (the full hymnal, songs 1..3300, pages up to 228), but this
+  // rendered book is only `pageFiles.length` pages and contains a SUBSET of songs. Emitting
+  // item.page verbatim made every lyric-search result navigate to a wrong/clamped page.
+  // Remap each entry's page to the RENDERED page via songIndex (song -> rendered page), and
+  // DROP entries whose song isn't in this rendered book.
+  const songRenderedPage = new Map(songIndex.map((s) => [s.song, s.page]));
   const searchIndexPages = [];
   for (const item of searchList) {
-    if (item?.page == null) continue;
+    const renderedPage = songRenderedPage.get(item?.song);
+    if (renderedPage == null) continue; // song not present in this rendered book — skip
     const text = [item.title || "", item.lyrics || ""]
       .filter(Boolean)
       .join(" ")
@@ -690,9 +720,16 @@ const buildHymns4Manifests = ({ pageFiles, bookOutDir }) => {
       .trim()
       .slice(0, 800);
     if (text.length > 5) {
-      searchIndexPages.push({ page: item.page, text });
+      searchIndexPages.push({ page: renderedPage, text });
     }
   }
+  // Build-time safety net: a search result must never point outside the rendered range.
+  for (const e of searchIndexPages) {
+    if (!Number.isInteger(e.page) || e.page < 1 || e.page > pageFiles.length) {
+      throw new Error(`hymns-4 search-index page ${e.page} out of range [1, ${pageFiles.length}]`);
+    }
+  }
+
   fs.writeFileSync(
     path.join(bookOutDir, "search-index.json"),
     JSON.stringify({ pages: searchIndexPages }),

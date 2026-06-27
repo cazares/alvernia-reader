@@ -1,14 +1,16 @@
 const CACHE_VERSION = "__CACHE_VERSION__";
 const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
+// NOTE: per-book manifests (/books/<id>/pages.json, /books/<id>/search-index.json) are NOT
+// listed here — they don't exist at the root in the multi-book build and are cached by
+// app.js coreAssetsForBook() at their real /books/<id>/ paths. Listing the old single-book
+// root paths here previously risked aborting the atomic install precache (404 → addAll rejects).
 const CORE_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
   "/app.js",
   "/manifest.webmanifest",
-  "/pages.json",
-  "/search-index.json",
   "/icon.png",
   "/icon-192.png",
   "/icon-512.png",
@@ -19,33 +21,20 @@ const NETWORK_FIRST_PATHS = new Set([
   "/styles.css",
   "/app.js",
   "/manifest.webmanifest",
-  "/pages.json",
-  "/search-index.json",
 ]);
 
-const backgroundCacheAllPages = async () => {
-  try {
-    const manifest = await fetch("/pages.json", { cache: "no-store" }).then((r) => r.json());
-    const cache = await caches.open(PAGE_CACHE);
-    for (let i = 1; i <= manifest.totalPages; i++) {
-      const url = `/pages/page-${String(i).padStart(3, "0")}.webp`;
-      if (!(await cache.match(url))) {
-        try {
-          const res = await fetch(url);
-          if (res.ok) await cache.put(url, res);
-        } catch {
-          // skip individual failures silently
-        }
-      }
-    }
-  } catch {
-    // ignore if offline or manifest unavailable
-  }
-};
+// NOTE: bulk offline precaching lives in app.js (ensureOfflineBundle), which is
+// multi-book-aware (caches /books/<book>/pages/... into PAGE_CACHE per book). The old
+// SW-side single-book backgroundCacheAllPages() helper was dead code with stale
+// /pages.json + /pages/ paths and has been removed to avoid confusion.
 
 self.addEventListener("install", (event) => {
+  // Resilient precache: cache each core asset independently so a single failure (404 /
+  // offline) can never abort the whole install the way the atomic cache.addAll() would.
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => cache.addAll(CORE_ASSETS)),
+    caches.open(STATIC_CACHE).then((cache) =>
+      Promise.allSettled(CORE_ASSETS.map((asset) => cache.add(asset))),
+    ),
   );
   self.skipWaiting();
 });
@@ -71,7 +60,10 @@ self.addEventListener("message", (event) => {
   }
 });
 
-const isPageImageRequest = (requestUrl) => requestUrl.pathname.startsWith("/pages/");
+// Matches both the legacy single-book "/pages/page-NNN.webp" and the multi-book
+// "/books/<book>/pages/page-NNN.webp" so page images use the dedicated PAGE_CACHE
+// (consistent with app.js ensureOfflineBundle + the isOfflineBundleReady page count).
+const isPageImageRequest = (requestUrl) => requestUrl.pathname.includes("/pages/");
 const shouldCacheResponse = (response) => {
   if (!response) return false;
   const cacheControl = response.headers.get("cache-control") || "";
