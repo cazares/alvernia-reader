@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
@@ -11,10 +12,19 @@ const cacheVersion = (() => {
     cwd: rootDir,
     encoding: "utf8",
   });
-  if (gitSha.status === 0 && gitSha.stdout.trim()) {
-    return gitSha.stdout.trim();
+  const sha = gitSha.status === 0 && gitSha.stdout.trim() ? gitSha.stdout.trim() : "nogit";
+  // Content hash of every source file that determines the built bundle. CRITICAL: the bundle is
+  // built from the WORKING TREE, so a git-SHA-only version COLLIDES across two deploys made at the
+  // same HEAD with different uncommitted content — returning users would keep a stale Service Worker
+  // cache and never receive the fix. Hashing the actual source guarantees the cache busts whenever
+  // the content changes, regardless of commit state. The SHA prefix stays for human traceability.
+  const hash = crypto.createHash("sha256");
+  for (const f of ["app.js", "sw.js", "styles.css", "index.html", "manifest.webmanifest"]) {
+    const p = path.join(srcDir, f);
+    if (fs.existsSync(p)) hash.update(fs.readFileSync(p));
   }
-  return `${Date.now()}`;
+  hash.update(fs.readFileSync(new URL(import.meta.url))); // build.mjs itself (template/inlining logic)
+  return `${sha}-${hash.digest("hex").slice(0, 8)}`;
 })();
 
 fs.rmSync(distDir, { recursive: true, force: true });
@@ -678,11 +688,17 @@ const buildHymns4Manifests = ({ pageFiles, bookOutDir }) => {
   }
   fs.writeFileSync(path.join(bookOutDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
 
-  // search-index.json — { pages:[{page,text}] }. Derive best-effort one entry per
-  // song page from title + blob, mirroring how the standard book slices to ~800 chars.
+  // search-index.json — { pages:[{page,text}] }. CRITICAL: the prebuilt searchList uses
+  // ORIGINAL-book page numbers (the full hymnal, songs 1..3300, pages up to 228), but this
+  // rendered book is only `pageFiles.length` pages and contains a SUBSET of songs. Emitting
+  // item.page verbatim made every lyric-search result navigate to a wrong/clamped page.
+  // Remap each entry's page to the RENDERED page via songIndex (song -> rendered page), and
+  // DROP entries whose song isn't in this rendered book.
+  const songRenderedPage = new Map(songIndex.map((s) => [s.song, s.page]));
   const searchIndexPages = [];
   for (const item of searchList) {
-    if (item?.page == null) continue;
+    const renderedPage = songRenderedPage.get(item?.song);
+    if (renderedPage == null) continue; // song not present in this rendered book — skip
     const text = [item.title || "", item.lyrics || ""]
       .filter(Boolean)
       .join(" ")
@@ -690,9 +706,16 @@ const buildHymns4Manifests = ({ pageFiles, bookOutDir }) => {
       .trim()
       .slice(0, 800);
     if (text.length > 5) {
-      searchIndexPages.push({ page: item.page, text });
+      searchIndexPages.push({ page: renderedPage, text });
     }
   }
+  // Build-time safety net: a search result must never point outside the rendered range.
+  for (const e of searchIndexPages) {
+    if (!Number.isInteger(e.page) || e.page < 1 || e.page > pageFiles.length) {
+      throw new Error(`hymns-4 search-index page ${e.page} out of range [1, ${pageFiles.length}]`);
+    }
+  }
+
   fs.writeFileSync(
     path.join(bookOutDir, "search-index.json"),
     JSON.stringify({ pages: searchIndexPages }),

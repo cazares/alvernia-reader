@@ -1009,6 +1009,13 @@ const switchBook = async (bookId, opts = {}) => {
   state.pageHistory = [];
   renderPage(startPage, { pushToHistory: false });
   updateBookLabel();
+  // Pre-cache the newly-active book for offline too — a Mass can use BOTH books, but the
+  // startup pre-cache (initReader) only covered the initial book. Background, non-blocking.
+  if (!NATIVE_FILE_MODE && "caches" in window) {
+    ensureOfflineBundle(state.totalPages, () => {}).catch((error) =>
+      console.warn("Pre-cache offline incompleto (cambio de libro):", error),
+    );
+  }
   if (!opts.fromNative) {
     postNativeBridge({ type: "book-changed", book: bookId });
   }
