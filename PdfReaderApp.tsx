@@ -232,6 +232,7 @@ export default function App() {
         roleRef.current = "off";
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
+        startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
         return;
       }
       try {
@@ -339,12 +340,13 @@ export default function App() {
         explicitTransmitterRef.current = true;
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
+        startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
         return;
       }
       // Unrecognized → tell the web it was wrong so it can surface "código incorrecto".
       injectEvent({ type: "role", role: "none" });
     },
-    [injectEvent, performSoftReset, becomeDirector, broadcastPage],
+    [injectEvent, performSoftReset, becomeDirector, broadcastPage, startDirectorHeartbeat],
   );
 
   // ── Web -> Native message router ───────────────────────────────────────────
@@ -367,8 +369,16 @@ export default function App() {
           flushPendingInjects();
           injectEvent({ type: "bridge-state", available: syncAvailable });
           // Always re-assert the current role to a freshly (re)loaded WebView so the web app's
-          // numpad/role UI matches reality after a crash-reload or boot.
-          injectEvent({ type: "role", role: roleRef.current === "off" ? "none" : roleRef.current });
+          // numpad/role UI matches reality after a crash-reload or boot. A transmitter-only device
+          // has roleRef "off" but must still re-assert "director" (it keeps publishing to the relay),
+          // otherwise a crash-reload would silently strip its director/transmitter UI to "none".
+          const assertedRole =
+            roleRef.current === "director" || explicitTransmitterRef.current
+              ? "director"
+              : roleRef.current === "off"
+                ? "none"
+                : roleRef.current;
+          injectEvent({ type: "role", role: assertedRole });
           if (roleRef.current === "director") {
             // The director's own page is authoritative — just re-broadcast it.
             broadcastPage(currentPageRef.current, currentBookRef.current);
@@ -598,11 +608,15 @@ export default function App() {
   }, [booted, injectEvent]);
 
   // ── Foreground: nudge mesh rediscovery + pull a fresh snapshot ──────────────
+  // Always registered: a transmitter-only device (no mesh, syncAvailable false) becomes a
+  // transmitter AFTER mount via a numpad code, so we can't gate the listener on the mount-time
+  // syncAvailable value — it would never fire for that device. The listener body is fully
+  // role-gated (every branch checks roleRef / explicitTransmitterRef) and mesh-only calls are
+  // gated on syncAvailable, so this is harmless for a plain offline follower.
   useEffect(() => {
-    if (!syncAvailable) return;
     const sub = AppState.addEventListener("change", (next) => {
       if (next !== "active") return;
-      refreshNearbyDiscovery().catch(() => {});
+      if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (roleRef.current === "follower") {
         requestCurrentSnapshot().catch(() => {});
         // Re-assert the director's last-known snapshot immediately so the view is correct on
@@ -617,6 +631,10 @@ export default function App() {
           injectEvent({ type: "sync-event", event: { type: "page", page, book } });
         }
       } else if (roleRef.current === "director") {
+        broadcastPage(currentPageRef.current, currentBookRef.current);
+      } else if (explicitTransmitterRef.current) {
+        // Transmitter-only (no mesh): re-publish on foreground so the relay snapshot doesn't
+        // stay stale after the device was backgrounded past the freshness window.
         broadcastPage(currentPageRef.current, currentBookRef.current);
       }
     });
@@ -667,6 +685,7 @@ export default function App() {
         onContentProcessDidTerminate={() => {
           breadcrumb("webview-terminated");
           webReadyRef.current = false;
+          pendingInjectRef.current = []; // drop stale queued injects so they don't flush into the fresh page
           webViewRef.current?.reload();
         }}
         allowsInlineMediaPlayback

@@ -737,33 +737,44 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // [4-byte big-endian header length]
     var headerLen = UInt32(headerData.count).bigEndian
     let lenBytes = withUnsafeBytes(of: &headerLen) { Data($0) }
-    writer.write(lenBytes)
-    // [header JSON]
-    writer.write(headerData)
-    // [file bytes, in manifest order] — streamed in chunks so memory stays flat.
-    for entry in entries {
-      guard let reader = try? FileHandle(forReadingFrom: entry.url) else {
-        try? fm.removeItem(at: destURL)
-        return nil
+    // Use the THROWING FileHandle API: the non-throwing write(_:)/readData(ofLength:) raise an
+    // uncatchable Objective-C NSFileHandleOperationException on I/O failure (e.g. disk full),
+    // which Swift do/catch and try? cannot trap → process crash. Route every I/O failure through
+    // cleanup + nil instead.
+    do {
+      try writer.write(contentsOf: lenBytes)
+      // [header JSON]
+      try writer.write(contentsOf: headerData)
+      // [file bytes, in manifest order] — streamed in chunks so memory stays flat.
+      for entry in entries {
+        let reader = try FileHandle(forReadingFrom: entry.url)
+        defer { try? reader.close() }
+        while true {
+          // read(upToCount:) returns Data? — nil/empty both mean EOF.
+          guard let chunk = try reader.read(upToCount: 1024 * 1024), !chunk.isEmpty else { break }
+          try writer.write(contentsOf: chunk)
+        }
       }
-      while true {
-        let chunk = reader.readData(ofLength: 1024 * 1024)
-        if chunk.isEmpty { break }
-        writer.write(chunk)
-      }
-      try? reader.close()
+    } catch {
+      try? writer.close()
+      try? fm.removeItem(at: destURL)
+      return nil
     }
     return destURL
   }
 
-  /// FOLLOWER side. Unpacks a received `.pack` file into `Documents/WebBundle_new`, validates
-  /// it contains `index.html`, then atomically-ish swaps it into `Documents/WebBundle`. On
+  /// FOLLOWER side. Unpacks a received `.pack` file into a unique `Documents/WebBundle_new-<uuid>`
+  /// temp dir, validates it contains `index.html`, then atomically-ish swaps it into
+  /// `Documents/WebBundle`. On
   /// success emits `{type:"bundleUpdated", version:...}`; on any failure emits `{type:"bundle-error"}`.
   /// Always clears `bundleTransferInFlight`. Reads are FileHandle-sliced so we don't load the
   /// whole archive into memory.
   private func installReceivedBundle(at localURL: URL) {
     let fm = FileManager.default
-    defer { bundleTransferInFlight = false }
+    // This runs on a background utility queue, but bundleTransferInFlight is otherwise only ever
+    // touched on the main queue (beginBundleTransfer, the offer guard, the watchdog, resetTransport,
+    // the resource delegates). Marshal the clear back to main to avoid an unsynchronized write.
+    defer { DispatchQueue.main.async { self.bundleTransferInFlight = false } }
 
     func fail(_ stage: String, cleanup newDir: URL?) {
       if let newDir = newDir { try? fm.removeItem(at: newDir) }
@@ -775,7 +786,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
       fail("docs", cleanup: nil); return
     }
-    let newDir = docs.appendingPathComponent("WebBundle_new", isDirectory: true)
+    // Unique per-install temp dir so two installs completing close together (director resend /
+    // takeover window) can't collide on a single fixed extraction path. Every exit path below —
+    // success AND fail() — removes THIS dir.
+    let newDir = docs.appendingPathComponent("WebBundle_new-\(UUID().uuidString)", isDirectory: true)
     try? fm.removeItem(at: newDir)
     do {
       try fm.createDirectory(at: newDir, withIntermediateDirectories: true)
@@ -788,8 +802,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
 
     // [4-byte big-endian header length]
-    let lenData = reader.readData(ofLength: 4)
-    guard lenData.count == 4 else { try? reader.close(); fail("header-len", cleanup: newDir); return }
+    // Use the THROWING read(upToCount:) — the non-throwing readData(ofLength:) raises an
+    // uncatchable Objective-C NSFileHandleOperationException on I/O failure (e.g. disk full),
+    // crashing the process. Route any read failure through fail() instead.
+    guard let lenData = try? reader.read(upToCount: 4), lenData.count == 4 else {
+      try? reader.close(); fail("header-len", cleanup: newDir); return
+    }
     let headerLen = lenData.withUnsafeBytes { rawBuffer -> UInt32 in
       var value: UInt32 = 0
       withUnsafeMutableBytes(of: &value) { $0.copyBytes(from: rawBuffer) }
@@ -803,8 +821,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
 
     // [header JSON]
-    let headerData = reader.readData(ofLength: Int(headerLen))
-    guard headerData.count == Int(headerLen),
+    guard let headerData = try? reader.read(upToCount: Int(headerLen)),
+          headerData.count == Int(headerLen),
           let headerObj = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
           let files = headerObj["files"] as? [[String: Any]] else {
       try? reader.close(); fail("header-parse", cleanup: newDir); return
@@ -855,14 +873,24 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         try? reader.close(); fail("file-create", cleanup: newDir); return
       }
       var remaining = len
+      var ioFailed = false
       while remaining > 0 {
         let toRead = min(remaining, 1024 * 1024)
-        let chunk = reader.readData(ofLength: toRead)
+        // Throwing read/write so a disk-full / I/O error routes through fail() instead of
+        // crashing via an uncatchable NSFileHandleOperationException.
+        guard let chunk = try? reader.read(upToCount: toRead) else { ioFailed = true; break }
         if chunk.isEmpty { break } // truncated archive
-        fileWriter.write(chunk)
+        do {
+          try fileWriter.write(contentsOf: chunk)
+        } catch {
+          ioFailed = true; break
+        }
         remaining -= chunk.count
       }
       try? fileWriter.close()
+      guard !ioFailed else {
+        try? reader.close(); fail("file-write", cleanup: newDir); return
+      }
       guard remaining == 0 else {
         try? reader.close(); fail("file-truncated", cleanup: newDir); return
       }
@@ -1539,6 +1567,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // A web-bundle transfer has begun. Mark in-flight (and re-arm the watchdog) so repeated
     // bundle_offers don't double-request and a stalled transfer can't wedge the flag forever.
     DispatchQueue.main.async {
+      // Ignore resources arriving on a stale/removed session, or when we're not a follower —
+      // otherwise a phantom transfer would re-arm the watchdog and bump the generation. didStart
+      // hasn't set the flag yet, so a plain early-return is correct here (unlike didFinish, which
+      // deliberately clears the flag on stale sessions).
+      guard self.mcSessions.contains(where: { $0 === session }), self.currentRole == "follower" else { return }
       self.beginBundleTransfer()
     }
   }

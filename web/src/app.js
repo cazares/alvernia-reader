@@ -833,6 +833,9 @@ const applyNativeSyncEvent = async (payload) => {
     // A director on a different book: switch first so the page lands in the right book.
     if (isBookId(event.book) && event.book !== state.currentBook) {
       await switchBook(event.book, { fromNative: true });
+      // switchBook rolls back currentBook on a load failure and returns silently. Bail
+      // BEFORE renderPage if the switch didn't take, so we don't render against the WRONG book.
+      if (event.book !== state.currentBook) return;
     }
     renderPage(event.page, { pushToHistory: false });
   }
@@ -1289,7 +1292,7 @@ const computeSongLengths = () => {
       const end = next ? next.page - 1 : state.totalPages;
       const len = state.searchIndexPages
         .filter((p) => p.page >= e.page && p.page <= end)
-        .reduce((s, p) => s + p.text.length, 0);
+        .reduce((s, p) => s + (typeof p?.text === "string" ? p.text.length : 0), 0);
       return [e.song, len];
     }),
   );
@@ -1960,7 +1963,7 @@ let drawerSwipe = null;
 const MISA_PARTS = [
   // ── Ordered by liturgical sequence ──────────────────────────────────────────
   { label: "🚪 Entrada",
-    check: (s) => s.themes.includes("entrada") || (s.title && /\bentrada\b/i.test(s.title)) },
+    check: (s) => (s.themes || []).includes("entrada") || (s.title && /\bentrada\b/i.test(s.title)) },
   { label: "🙏 Señor Ten Piedad (Kyrie)",
     check: (s) => s.title && /piedad|kyrie|ten\s+piedad/i.test(s.title) },
   { label: "✨ Gloria",
@@ -1974,23 +1977,23 @@ const MISA_PARTS = [
   { label: "🥖 Cordero de Dios (Agnus Dei)",
     check: (s) => s.title && /cordero|agnus/i.test(s.title) },
   { label: "🍞 Comunión / Eucaristía",
-    check: (s) => s.themes.includes("eucaristia") },
+    check: (s) => (s.themes || []).includes("eucaristia") },
   { label: "🕯️ Ofertorio / Presentación",
-    check: (s) => s.themes.includes("ofertorio") || (s.title && /ofertorio/i.test(s.title)) },
+    check: (s) => (s.themes || []).includes("ofertorio") || (s.title && /ofertorio/i.test(s.title)) },
   { label: "🚶 Procesión",
-    check: (s) => s.themes.includes("procesion") },
+    check: (s) => (s.themes || []).includes("procesion") },
   { label: "🌟 Envío / Salida",
-    check: (s) => s.themes.includes("envio") || (s.title && /\benvio\b|\bsalida\b/i.test(s.title)) },
+    check: (s) => (s.themes || []).includes("envio") || (s.title && /\benvio\b|\bsalida\b/i.test(s.title)) },
   { label: "⛪ General de Misa",
-    check: (s) => s.themes.includes("misa") },
+    check: (s) => (s.themes || []).includes("misa") },
 ];
 
 const TEMPORADA_GROUPS = [
-  { label: "Adviento 🕯️",        check: (s) => s.themes.includes("adviento") },
-  { label: "Navidad 🎄",          check: (s) => s.themes.includes("navidad") },
-  { label: "Cuaresma / Semana Santa ✝️", check: (s) => s.themes.includes("cuaresma") },
-  { label: "Pascua / Resurrección 🌅", check: (s) => s.themes.includes("resurreccion") },
-  { label: "Tiempo Ordinario ⭐", check: (s) => !s.themes.some((t) => ["adviento","navidad","cuaresma","resurreccion"].includes(t)) },
+  { label: "Adviento 🕯️",        check: (s) => (s.themes || []).includes("adviento") },
+  { label: "Navidad 🎄",          check: (s) => (s.themes || []).includes("navidad") },
+  { label: "Cuaresma / Semana Santa ✝️", check: (s) => (s.themes || []).includes("cuaresma") },
+  { label: "Pascua / Resurrección 🌅", check: (s) => (s.themes || []).includes("resurreccion") },
+  { label: "Tiempo Ordinario ⭐", check: (s) => !(s.themes || []).some((t) => ["adviento","navidad","cuaresma","resurreccion"].includes(t)) },
 ];
 
 // 8-color cycling palette — headers and number badges share the same gc class
@@ -2665,6 +2668,9 @@ const relay = {
   backoff: 500,
   manualClose: false,
   pollTimer: 0,
+  ws: null,            // the live WebSocket — stored so connectRelay can guard against dupes
+  heartbeatTimer: 0,   // 4s heartbeat interval id — cleared so it can't accumulate per socket
+  reconnectTimer: 0,   // pending backoff reconnect timeout id — cleared so only ONE is scheduled
   lastSeq: -1,
   browsing: false,   // user opted into manual browse (tap title → jump-to-song): pause auto-follow
   following: true,   // apply pushes until the user browses away
@@ -2760,6 +2766,10 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   // and pad width are correct before we renderPage below.
   if (isBookId(snap.bookId) && snap.bookId !== state.currentBook) {
     await switchBook(snap.bookId, { fromNative: true });
+    // switchBook rolls back currentBook on a load failure (offline / 404 / bad JSON) and
+    // returns silently. Bail BEFORE renderPage if the switch didn't take — otherwise we'd
+    // render the director's page against the WRONG book (clamped / 404'd).
+    if (snap.bookId !== state.currentBook) return;
   }
   // Ongoing pushes are de-duped / ordered by seq (Number.isFinite so a NaN seq can't
   // slip the guard). A FORCED resync (initial load, reconnect, foreground, or the safety
@@ -2828,12 +2838,20 @@ const relayPollOnce = async (force = false) => {
 const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
 
 const connectRelay = () => {
+  // Idempotent: if a socket is already CONNECTING (0) or OPEN (1), don't open a duplicate.
+  // iOS fires `online` on network changes even while a socket is healthy, and the close-
+  // handler's backoff reconnect can race with it — without this guard each call would stack
+  // another live socket, each with its own 4s heartbeat + message handler.
+  if (relay.ws && (relay.ws.readyState === 0 || relay.ws.readyState === 1)) return;
   relay.manualClose = false;
   stopRelayPolling();
+  // A reconnect is firing now (or was requested) — cancel any pending backoff timer so it
+  // can't schedule a second connect on top of this one.
+  if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
   let ws;
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
+  relay.ws = ws;
   let lastMsgAt = Date.now();
-  let heartbeatTimer = 0;
   ws.addEventListener("open", () => {
     relay.backoff = 500;
     lastMsgAt = Date.now();
@@ -2842,10 +2860,11 @@ const connectRelay = () => {
     // socket is a "zombie" (flaky cell can drop it dead with NO close event) — close it so
     // the reconnect + resync fires. Reuses the relay's ping->snapshot handler, so it's tiny
     // WS frames, not HTTP /state polls — cheap on weak cell, and each ping reply doubles as
-    // a resync that catches any missed push within ~4s.
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = setInterval(() => {
-      if (ws.readyState !== WebSocket.OPEN) { clearInterval(heartbeatTimer); return; }
+    // a resync that catches any missed push within ~4s. Tracked on `relay` and cleared first
+    // so a stale heartbeat from a prior socket can't accumulate.
+    if (relay.heartbeatTimer) clearInterval(relay.heartbeatTimer);
+    relay.heartbeatTimer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) { clearInterval(relay.heartbeatTimer); relay.heartbeatTimer = 0; return; }
       if (Date.now() - lastMsgAt > 12000) { try { ws.close(); } catch {} return; }
       try { ws.send("ping"); } catch {}
     }, 4000);
@@ -2853,14 +2872,19 @@ const connectRelay = () => {
   ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)).catch(() => {}); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
-    clearInterval(heartbeatTimer);
+    if (relay.heartbeatTimer) { clearInterval(relay.heartbeatTimer); relay.heartbeatTimer = 0; }
+    // Only forget the socket if it's still the one that just closed — a newer connectRelay
+    // may have already replaced relay.ws, and we must not clobber the live socket.
+    if (relay.ws === ws) relay.ws = null;
     if (relay.manualClose) return;
     // Add ±30% JITTER so many followers don't reconnect in lockstep after a shared
     // network blip (thundering-herd on the worker). The first retry stays fast (the
     // 500ms floor), and the (re)open handler force-polls to resync. Backoff itself
     // remains the clean exponential base so the 8000ms cap + /state fallback are intact.
+    // Clear any pending reconnect first so only ONE is ever scheduled.
     const delay = relay.backoff * (0.7 + Math.random() * 0.6);
-    setTimeout(connectRelay, delay);
+    if (relay.reconnectTimer) clearTimeout(relay.reconnectTimer);
+    relay.reconnectTimer = setTimeout(() => { relay.reconnectTimer = 0; connectRelay(); }, delay);
     relay.backoff = Math.min(relay.backoff * 2, 8000);
     if (relay.backoff >= 8000) startRelayPolling();   // WS truly won't hold -> /state fallback
   });
