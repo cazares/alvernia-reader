@@ -63,6 +63,20 @@ button:disabled {
   opacity: 0.35;
 }
 
+/* Blank-white gate over the whole reader until the book is resolved (no wrong-manual flash).
+   Visible by default; app.js's revealReader() adds .is-hidden to fade it out. */
+#geo-gate {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  z-index: 150;
+  transition: opacity 160ms ease;
+}
+#geo-gate.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .app-shell {
   position: relative;
   width: var(--viewport-width);

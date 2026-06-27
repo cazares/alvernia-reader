@@ -2,6 +2,16 @@
 const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
 const loading = document.getElementById("loading");
+// Blank-white gate over the whole reader until the BOOK is known, so signovivo.com never
+// flashes the default hymns-4 manual before geo IP resolves (Del Rio → standard, else
+// hymns-4). Native injects its book, so it reveals at once. Idempotent.
+const geoGate = document.getElementById("geo-gate");
+let readerRevealed = false;
+const revealReader = () => {
+  if (readerRevealed) return;
+  readerRevealed = true;
+  geoGate?.classList.add("is-hidden");
+};
 const offlineGate = document.getElementById("offline-gate");
 const offlineGateTitle = document.getElementById("offline-gate-title");
 const offlineGateBody = document.getElementById("offline-gate-body");
@@ -2820,6 +2830,7 @@ const relayPollOnce = async (force = false) => {
       }
     }
     if (r.ok) await applyRelaySnapshot(await r.json(), { force });
+    revealReader();   // geo (X-Hymnal) + any director snapshot are settled → safe to paint
   } catch {}
 };
 // Fallback polling (when the WS won't hold): force every tick so a stationary director
@@ -2951,6 +2962,10 @@ const initReader = async () => {
     await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
   }
   if (!relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
+  // Reveal the reader once the BOOK is known. Native injects it, and an offline web client
+  // can't geo-resolve — both reveal now. An online web client waits for relayPollOnce to read
+  // X-Hymnal (it reveals there); the 3s safety net below covers a hung/blocked relay.
+  if (NATIVE_FILE_MODE || hasNativeBridge() || !navigator.onLine) revealReader();
   startRelayFollow();
   // Search index is loaded lazily on first search-open (see activateTab) so it
   // never weighs down the follower's first paint.
@@ -2989,4 +3004,8 @@ bindReaderEvents();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
   setLoading(true, "No se pudo cargar Signo Vivo.");
+  revealReader();   // even on a boot failure, don't trap the user behind a blank white gate
 });
+// Safety net: never leave the white geo-gate up forever — reveal within 3s no matter what
+// (hung relay, slow geo, anything). Normal web loads reveal far sooner via relayPollOnce.
+setTimeout(revealReader, 3000);
