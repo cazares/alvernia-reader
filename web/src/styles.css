@@ -1954,6 +1954,14 @@ button:disabled {
 /* Web reader is a pure follower display — no floating buttons, just the status dot. */
 .song-jump-fab,
 .search-fab { display: none !important; }
+/* …but the NATIVE parish iPad (file:// WebBundle) IS the control surface — unlike a
+   signovivo.com phone follower, it must reach director mode. The ♪ opens the numpad (the
+   ONLY way to type a director code) and the ⌕ opens the browse/search drawer (prev/next +
+   tabs). Without these, a fresh iPad is permanently locked out of director mode.
+   Higher specificity (html[data-native] …) than the hide above, so it wins; signovivo.com
+   (https) never matches and stays dot-only. */
+html[data-native] .song-jump-fab,
+html[data-native] .search-fab { display: flex !important; }
 
 /* Modal shell + backdrop */
 .song-jump-modal {
