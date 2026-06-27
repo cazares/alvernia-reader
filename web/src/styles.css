@@ -413,34 +413,25 @@ button:disabled {
   color: #fff;
 }
 
-/* ── Manual book switch + reconnect (web/native parity controls) ─────────────── */
-.drawer-book-row {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
-  background: #0d1030;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-}
+/* ── Manual book switch — a segmented control inside the ♪ panel (light modal) ── */
 .book-switch {
   display: flex;
-  flex: 1;
-  gap: 3px;
-  padding: 3px;
-  background: rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
+  gap: 4px;
+  padding: 4px;
+  background: #ebebf0;
+  border-radius: 12px;
 }
+.book-switch-modal { margin: 0 0 14px; }
 .book-switch-btn {
   flex: 1;
-  padding: 0.5rem 0.4rem;
+  padding: 0.6rem 0.4rem;
   border: 0;
-  border-radius: 8px;
+  border-radius: 9px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 0.82rem;
+  color: #4b4b63;
+  font-size: 0.9rem;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.15;
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -451,26 +442,8 @@ html[data-book="hymns-4"] .book-switch-btn[data-book="hymns-4"],
 html[data-book="standard"] .book-switch-btn[data-book="standard"] {
   background: #2563eb;
   color: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.4);
 }
-.reconnect-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.5rem 0.7rem;
-  border: 0;
-  border-radius: 9px;
-  background: rgba(34, 197, 94, 0.16);
-  color: #6ee7a8;
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  transition: background 130ms;
-}
-.reconnect-btn:active { background: rgba(34, 197, 94, 0.3); }
 
 /* ── Drawer nav row: ← Canción Anterior | Song info | Siguiente Canción → ────── */
 .drawer-nav-row {
@@ -1982,9 +1955,10 @@ html[data-book="standard"] .book-switch-btn[data-book="standard"] {
    "♪ Abrir Canto ♪", "Cancelar". The drawer Teclado tab is retired.
    ════════════════════════════════════════════════════════════════════════════ */
 
-/* Floating ♪ trigger — matches the native translucent-navy rounded-square clusterBtn */
+/* Floating fabs — native-style translucent-navy rounded squares */
 .song-jump-fab,
-.search-fab {
+.search-fab,
+.resync-fab {
   position: fixed;
   top: max(0.55rem, env(safe-area-inset-top, 0px));
   z-index: 45;
@@ -2008,17 +1982,23 @@ html[data-book="standard"] .book-switch-btn[data-book="standard"] {
 }
 .search-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
 .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
+.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 2.25rem; }
 .song-jump-fab:active,
-.search-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
-/* Web/native PARITY: the ♪ (jump-to-song / switch book / enter a director code) and ⌕
-   (search + browse drawer) show everywhere — signovivo.com behaves exactly like the native
-   iPad shell that wraps it. (Earlier builds hid these on the web as a "status-dot-only
-   follower"; that broke parity and left web users stuck on the geo-IP book with no way to
-   navigate or switch.) The base .song-jump-fab/.search-fab rule above already sets
-   display:flex, so nothing more is needed there. */
-/* …but hide them WHILE the drawer is open (they'd float over it; the drawer has its own nav). */
+.search-fab:active,
+.resync-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
+
+/* ── Role-based controls ──────────────────────────────────────────────────────
+   FOLLOWER (default — all of signovivo.com + any non-director native device):
+     ⟳ resync (top-LEFT) + ♪ (top-RIGHT). No ⌕ search.
+   DIRECTOR (native iPad after a director code → html[data-role="director"]):
+     ♪ + ⌕ (top-RIGHT). No ⟳ (a director is the source; nothing to resync to). */
+.search-fab { display: none; }                              /* hidden for followers */
+html[data-role="director"] .search-fab { display: flex; }   /* shown for the director */
+html[data-role="director"] .resync-fab { display: none; }   /* hidden for the director */
+/* Hide the right-side fabs WHILE the drawer is open (director-only; the drawer has its own
+   nav). !important so it still wins over the director rule above. */
 body.sv-drawer-open .song-jump-fab,
-body.sv-drawer-open .search-fab { display: none; }
+body.sv-drawer-open .search-fab { display: none !important; }
 
 /* Modal shell + backdrop */
 .song-jump-modal {

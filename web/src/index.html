@@ -68,7 +68,11 @@
         <span class="drawer-handle-lines" aria-hidden="true">›</span>
       </button>
 
-      <!-- ♪ Jump-to-song + ⌕ search — native-style top-right cluster -->
+      <!-- ⟳ resync — top-LEFT FOLLOWER control: rejoin the live director + refresh the link.
+           Shown for followers (incl. all of signovivo.com); hidden for a director (data-role). -->
+      <button class="resync-fab" id="resync-fab" type="button" aria-label="Volver a sincronizar con el director">⟳</button>
+
+      <!-- ♪ Jump-to-song (top-RIGHT, everyone) + ⌕ search (top-RIGHT, DIRECTOR only via data-role) -->
       <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto">♪</button>
       <button class="search-fab" id="search-fab" type="button" aria-label="Buscar">⌕</button>
 
@@ -77,6 +81,13 @@
         <div class="song-jump-backdrop" id="song-jump-backdrop"></div>
         <div class="song-jump-card" role="document">
           <h2 class="song-jump-title">IR A CANTO</h2>
+
+          <!-- Manual book switch — pick the hymnal, then the song number below. Labels are
+               filled from the book registry at boot. -->
+          <div class="book-switch book-switch-modal" id="book-switch" role="group" aria-label="Elegir manual">
+            <button class="book-switch-btn" data-book="hymns-4" type="button">Himnos de Sión</button>
+            <button class="book-switch-btn" data-book="standard" type="button">Manual Alvernia</button>
+          </div>
 
           <div class="numberpad-display-wrap">
             <div
@@ -122,18 +133,6 @@
           <div class="drawer-top-bar">
             <button class="drawer-close-btn" id="drawer-close" type="button" aria-label="Cerrar menú">
               ← Cerrar menú
-            </button>
-          </div>
-
-          <!-- ★ Manual book switch + reconnect — for when geo-IP picked the wrong manual or
-               the live-follow dropped. Labels are filled from the book registry at boot. ★ -->
-          <div class="drawer-book-row" id="drawer-book-row">
-            <div class="book-switch" id="book-switch" role="group" aria-label="Elegir manual">
-              <button class="book-switch-btn" data-book="hymns-4" type="button">Himnos de Sión</button>
-              <button class="book-switch-btn" data-book="standard" type="button">Manual Alvernia</button>
-            </div>
-            <button class="reconnect-btn" id="reconnect-btn" type="button" aria-label="Reconectar con el director en vivo">
-              <span aria-hidden="true">⟳</span> Reconectar
             </button>
           </div>
 
