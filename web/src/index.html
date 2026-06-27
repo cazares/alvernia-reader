@@ -2,6 +2,21 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
+    <!-- Mark the native parish iPad (file:// WebBundle) BEFORE first paint. Unlike
+         signovivo.com phone followers — which are intentionally a status-dot-only display —
+         the native shell is the control surface: it needs the ♪ numpad (the ONLY way to
+         enter a director code), search, and the drawer. styles.css re-shows those controls
+         under html[data-native] with zero flash. Keyed on the native bridge flag (injected
+         via injectedJavaScriptBeforeContentLoaded, so present before this runs) AND the
+         file:// protocol, so it holds whether the bundle ever loads from file:// or a
+         custom scheme. -->
+    <script>
+      try {
+        if (window.__SIGNO_VINO_NATIVE_FILE_MODE || location.protocol === "file:") {
+          document.documentElement.dataset.native = "1";
+        }
+      } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, user-scalable=yes, viewport-fit=cover" />
     <meta name="theme-color" content="#060a18" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
