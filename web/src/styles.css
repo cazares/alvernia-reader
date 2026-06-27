@@ -413,6 +413,65 @@ button:disabled {
   color: #fff;
 }
 
+/* ── Manual book switch + reconnect (web/native parity controls) ─────────────── */
+.drawer-book-row {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #0d1030;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.book-switch {
+  display: flex;
+  flex: 1;
+  gap: 3px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+}
+.book-switch-btn {
+  flex: 1;
+  padding: 0.5rem 0.4rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.1;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 130ms, color 130ms;
+}
+/* Active book reflects html[data-book] (set by updateBookLabel) — no extra JS needed */
+html[data-book="hymns-4"] .book-switch-btn[data-book="hymns-4"],
+html[data-book="standard"] .book-switch-btn[data-book="standard"] {
+  background: #2563eb;
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.reconnect-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem 0.7rem;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(34, 197, 94, 0.16);
+  color: #6ee7a8;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 130ms;
+}
+.reconnect-btn:active { background: rgba(34, 197, 94, 0.3); }
+
 /* ── Drawer nav row: ← Canción Anterior | Song info | Siguiente Canción → ────── */
 .drawer-nav-row {
   display: flex;
@@ -1951,17 +2010,15 @@ button:disabled {
 .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
 .song-jump-fab:active,
 .search-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
-/* Web reader is a pure follower display — no floating buttons, just the status dot. */
-.song-jump-fab,
-.search-fab { display: none !important; }
-/* …but the NATIVE parish iPad (file:// WebBundle) IS the control surface — unlike a
-   signovivo.com phone follower, it must reach director mode. The ♪ opens the numpad (the
-   ONLY way to type a director code) and the ⌕ opens the browse/search drawer (prev/next +
-   tabs). Without these, a fresh iPad is permanently locked out of director mode.
-   Higher specificity (html[data-native] …) than the hide above, so it wins; signovivo.com
-   (https) never matches and stays dot-only. */
-html[data-native] .song-jump-fab,
-html[data-native] .search-fab { display: flex !important; }
+/* Web/native PARITY: the ♪ (jump-to-song / switch book / enter a director code) and ⌕
+   (search + browse drawer) show everywhere — signovivo.com behaves exactly like the native
+   iPad shell that wraps it. (Earlier builds hid these on the web as a "status-dot-only
+   follower"; that broke parity and left web users stuck on the geo-IP book with no way to
+   navigate or switch.) The base .song-jump-fab/.search-fab rule above already sets
+   display:flex, so nothing more is needed there. */
+/* …but hide them WHILE the drawer is open (they'd float over it; the drawer has its own nav). */
+body.sv-drawer-open .song-jump-fab,
+body.sv-drawer-open .search-fab { display: none; }
 
 /* Modal shell + backdrop */
 .song-jump-modal {

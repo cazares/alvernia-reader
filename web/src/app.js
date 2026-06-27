@@ -965,6 +965,10 @@ const openDrawer = () => {
   state.drawerOpen = true;
   overlayControls.classList.add("drawer-open");
   drawerHandle.classList.add("is-hidden");
+  // Hide the floating ♪/⌕ while the drawer is open — they'd overlap it, and the drawer
+  // already surfaces navigation. (Fabs sit before overlay-controls in the DOM, so a CSS
+  // sibling selector can't reach them — a body class does.)
+  document.body.classList.add("sv-drawer-open");
   // Drawer is browse-only now (jump-to-song lives in the modal); always open to it.
   switchDrawerMode("browse");
 };
@@ -973,6 +977,7 @@ const closeDrawer = () => {
   state.drawerOpen = false;
   overlayControls.classList.remove("drawer-open");
   drawerHandle.classList.remove("is-hidden");
+  document.body.classList.remove("sv-drawer-open");
 };
 
 // ── Fullscreen ────────────────────────────────────────────────────────────────
@@ -2207,6 +2212,17 @@ const bindReaderEvents = () => {
   songStatus.addEventListener("click", () => { haptic(); openSongJump(); });
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
+
+  // Parity controls in the drawer: manual book switch + reconnect (labels from the registry)
+  document.querySelectorAll(".book-switch-btn").forEach((btn) => {
+    const id = btn.dataset.book;
+    const label = bookLabel(id);
+    if (label) btn.textContent = label;
+    btn.addEventListener("click", () => { haptic(); switchBookManual(id); });
+  });
+  const reconnectBtn = document.getElementById("reconnect-btn");
+  if (reconnectBtn) reconnectBtn.addEventListener("click", () => reconnectRelay());
+
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
   songJumpBackdrop.addEventListener("click", () => { closeSongJump(); });
 
@@ -2688,6 +2704,35 @@ const goLive = () => {
     relay.appliedPage = relay.livePage;
     if (state.currentPage !== relay.livePage) renderPage(relay.livePage, { pushToHistory: false });
   }
+  renderRelayPill();
+  haptic(12);
+};
+
+// ── Manual book switch (parity control) — pick a manual when geo-IP guessed wrong ──────
+const switchBookManual = async (bookId) => {
+  if (!isBookId(bookId) || bookId === state.currentBook) return;
+  await switchBook(bookId);   // also calls updateBookLabel → html[data-book] → active highlight
+  // Manually choosing a book = intentional browse: pause auto-follow so a live director on
+  // the OTHER book can't yank us back. "Reconectar" / "Volver a en vivo" rejoins the director.
+  if (relay.hasDirector) {
+    relay.browsing = true;
+    relay.following = false;
+    showGoLiveBar();
+    renderRelayPill();
+  }
+};
+
+// ── Reconnect (parity control) — re-establish the live follow + resync to the director ─
+// connectRelay / relayPollOnce are defined below; this only runs on a user tap, well after
+// init, so the forward reference resolves fine.
+const reconnectRelay = () => {
+  relay.browsing = false;
+  relay.following = true;
+  relay.backoff = 500;
+  if (relay.ws) { try { relay.ws.close(); } catch {} relay.ws = null; }
+  connectRelay();        // fresh WS; its open handler force-resyncs via relayPollOnce
+  relayPollOnce(true);   // also resync now (covers the polling-only fallback path)
+  hideGoLiveBar();
   renderRelayPill();
   haptic(12);
 };
