@@ -1940,7 +1940,8 @@ button:disabled {
 /* Floating fabs — native-style translucent-navy rounded squares */
 .song-jump-fab,
 .search-fab,
-.resync-fab {
+.resync-fab,
+.fullscreen-fab {
   position: fixed;
   top: max(0.55rem, env(safe-area-inset-top, 0px));
   z-index: 45;
@@ -1967,10 +1968,22 @@ button:disabled {
    actually showing does ♪ shift 4.5rem left to make room for it. */
 .song-jump-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
 html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
-.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 2.25rem; }
+.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 3.05rem; }  /* ⟳ ~35% bigger */
+/* Fullscreen fab — bottom-right (override the base top); SVG icon sized to match the glyphs. */
+.fullscreen-fab {
+  top: auto;
+  bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+  right: max(0.55rem, env(safe-area-inset-right, 0px));
+}
+.fullscreen-fab svg { width: 2rem; height: 2rem; }
 .song-jump-fab:active,
 .search-fab:active,
-.resync-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
+.resync-fab:active,
+.fullscreen-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
+/* ⟳ icon spins while reconnecting (is-spinning toggled by JS) so the refresh is obvious. */
+.resync-icon { display: inline-block; line-height: 1; }
+.resync-fab.is-spinning .resync-icon { animation: sv-resync-spin 0.6s linear infinite; }
+@keyframes sv-resync-spin { to { transform: rotate(360deg); } }
 
 /* ── Role-based controls ──────────────────────────────────────────────────────
    FOLLOWER (default — all of signovivo.com + any non-director native device):

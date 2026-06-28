@@ -47,6 +47,7 @@ const directorModeBadge = document.getElementById("director-mode-badge");
 const prevPageButton = document.getElementById("prev-page");
 const nextPageButton = document.getElementById("next-page");
 const fullscreenButton = document.getElementById("fullscreen-button");
+const fullscreenFab = document.getElementById("fullscreen-fab");
 const prevCornerButton = document.getElementById("prev-corner");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
@@ -1008,9 +1009,11 @@ const closeDrawer = () => {
 const updateFullscreenButton = () => {
   if (!supportsFullscreen) {
     fullscreenButton.classList.add("is-hidden");
+    fullscreenFab?.classList.add("is-hidden");
     return;
   }
   fullscreenButton.classList.remove("is-hidden");
+  fullscreenFab?.classList.remove("is-hidden");
 };
 
 // ── Draft management ──────────────────────────────────────────────────────────
@@ -2237,9 +2240,16 @@ const bindReaderEvents = () => {
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
 
-  // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection
+  // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection.
+  // Spin the icon for ~1.1s on tap so it's obvious it's reconnecting/refreshing.
   const resyncFab = document.getElementById("resync-fab");
-  if (resyncFab) resyncFab.addEventListener("click", () => reconnectRelay());
+  if (resyncFab) resyncFab.addEventListener("click", () => {
+    resyncFab.classList.add("is-spinning");
+    window.setTimeout(() => resyncFab.classList.remove("is-spinning"), 1100);
+    reconnectRelay();
+  });
+  // ⛶ fullscreen fab (bottom-right) — same toggle as the legacy hidden button
+  if (fullscreenFab) fullscreenFab.addEventListener("click", () => { haptic(); toggleFullscreen().catch(() => {}); });
 
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
   songJumpBackdrop.addEventListener("click", () => { closeSongJump(); });
