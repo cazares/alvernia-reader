@@ -73,12 +73,26 @@
       </button>
 
       <!-- ⟳ resync — top-LEFT FOLLOWER control: rejoin the live director + refresh the link.
-           Shown for followers (incl. all of signovivo.com); hidden for a director (data-role). -->
-      <button class="resync-fab" id="resync-fab" type="button" aria-label="Volver a sincronizar con el director">⟳</button>
+           Shown for followers (incl. all of signovivo.com); hidden for a director (data-role).
+           The icon spins while reconnecting so it's obvious something is happening. -->
+      <button class="resync-fab" id="resync-fab" type="button" aria-label="Volver a sincronizar con el director">
+        <span class="resync-icon" aria-hidden="true">⟳</span>
+      </button>
 
       <!-- ♪ Jump-to-song (top-RIGHT, everyone) + ⌕ search (top-RIGHT, DIRECTOR only via data-role) -->
       <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto">♪</button>
       <button class="search-fab" id="search-fab" type="button" aria-label="Buscar">⌕</button>
+
+      <!-- ⛶ Fullscreen — bottom-RIGHT, same fab styling. Hidden where fullscreen isn't supported
+           (e.g. a regular iOS Safari tab); shown on desktop / Android / installed PWA. -->
+      <button class="fullscreen-fab is-hidden" id="fullscreen-fab" type="button" aria-label="Pantalla completa">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+          <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+          <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+          <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+        </svg>
+      </button>
 
       <!-- ── Jump-to-song modal (native-style) ── -->
       <div class="song-jump-modal is-hidden" id="song-jump-modal" role="dialog" aria-modal="true" aria-label="Ir a canto">
