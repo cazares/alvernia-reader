@@ -1980,10 +1980,10 @@ html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-ar
 .search-fab:active,
 .resync-fab:active,
 .fullscreen-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
-/* ⟳ icon spins while reconnecting (is-spinning toggled by JS) so the refresh is obvious. */
+/* ⟳ icon pulses opacity while reconnecting — soft breath instead of cartoonish spin */
 .resync-icon { display: inline-block; line-height: 1; }
-.resync-fab.is-spinning .resync-icon { animation: sv-resync-spin 0.6s linear infinite; }
-@keyframes sv-resync-spin { to { transform: rotate(360deg); } }
+.resync-fab.is-spinning .resync-icon { animation: sv-resync-pulse 1.5s ease-in-out infinite; }
+@keyframes sv-resync-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 
 /* ── Role-based controls ──────────────────────────────────────────────────────
    FOLLOWER (default — all of signovivo.com + any non-director native device):
