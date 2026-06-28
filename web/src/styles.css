@@ -1995,7 +1995,10 @@ html[data-book="standard"] .book-switch-btn[data-book="standard"] {
   -webkit-tap-highlight-color: transparent;
 }
 .search-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
-.song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
+/* FOLLOWER (⌕ hidden): ♪ sits flush in the top-right corner. Only when the director's ⌕ is
+   actually showing does ♪ shift 4.5rem left to make room for it. */
+.song-jump-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
+html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
 .resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 2.25rem; }
 .song-jump-fab:active,
 .search-fab:active,
