@@ -10,7 +10,17 @@ let readerRevealed = false;
 const revealReader = () => {
   if (readerRevealed) return;
   readerRevealed = true;
-  geoGate?.classList.add("is-hidden");
+  // Lift the gate only AFTER the resolved book's page image has actually decoded + painted.
+  // renderPage sets pageImage.src, but the <img> keeps showing the PREVIOUS (hymns-4) frame
+  // for a beat until the new src decodes — lifting in that window is the residual flash.
+  // decode() resolves when the current src is render-ready; the double rAF lets it hit screen.
+  const lift = () =>
+    requestAnimationFrame(() => requestAnimationFrame(() => geoGate?.classList.add("is-hidden")));
+  if (geoGate && pageImage && typeof pageImage.decode === "function") {
+    pageImage.decode().then(lift, lift);   // lift even if decode rejects (never trap behind white)
+  } else {
+    lift();
+  }
 };
 const offlineGate = document.getElementById("offline-gate");
 const offlineGateTitle = document.getElementById("offline-gate-title");
