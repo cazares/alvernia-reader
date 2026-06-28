@@ -2237,13 +2237,6 @@ const bindReaderEvents = () => {
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
 
-  // Manual book switch — now lives in the ♪ panel (labels from the registry)
-  document.querySelectorAll(".book-switch-btn").forEach((btn) => {
-    const id = btn.dataset.book;
-    const label = bookLabel(id);
-    if (label) btn.textContent = label;
-    btn.addEventListener("click", () => { haptic(); switchBookManual(id); });
-  });
   // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection
   const resyncFab = document.getElementById("resync-fab");
   if (resyncFab) resyncFab.addEventListener("click", () => reconnectRelay());
@@ -2731,20 +2724,6 @@ const goLive = () => {
   }
   renderRelayPill();
   haptic(12);
-};
-
-// ── Manual book switch (parity control) — pick a manual when geo-IP guessed wrong ──────
-const switchBookManual = async (bookId) => {
-  if (!isBookId(bookId) || bookId === state.currentBook) return;
-  await switchBook(bookId);   // also calls updateBookLabel → html[data-book] → active highlight
-  // Manually choosing a book = intentional browse: pause auto-follow so a live director on
-  // the OTHER book can't yank us back. "Reconectar" / "Volver a en vivo" rejoins the director.
-  if (relay.hasDirector) {
-    relay.browsing = true;
-    relay.following = false;
-    showGoLiveBar();
-    renderRelayPill();
-  }
 };
 
 // ── Reconnect (parity control) — re-establish the live follow + resync to the director ─

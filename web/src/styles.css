@@ -427,38 +427,6 @@ button:disabled {
   color: #fff;
 }
 
-/* ── Manual book switch — a segmented control inside the ♪ panel (light modal) ── */
-.book-switch {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: #ebebf0;
-  border-radius: 12px;
-}
-.book-switch-modal { margin: 0 0 14px; }
-.book-switch-btn {
-  flex: 1;
-  padding: 0.6rem 0.4rem;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: #4b4b63;
-  font-size: 0.9rem;
-  font-weight: 700;
-  line-height: 1.15;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  transition: background 130ms, color 130ms;
-}
-/* Active book reflects html[data-book] (set by updateBookLabel) — no extra JS needed */
-html[data-book="hymns-4"] .book-switch-btn[data-book="hymns-4"],
-html[data-book="standard"] .book-switch-btn[data-book="standard"] {
-  background: #2563eb;
-  color: #fff;
-  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.4);
-}
-
 /* ── Drawer nav row: ← Canción Anterior | Song info | Siguiente Canción → ────── */
 .drawer-nav-row {
   display: flex;
