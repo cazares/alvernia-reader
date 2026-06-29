@@ -2781,6 +2781,7 @@ const reconnectRelay = () => {
   relay.browsing = false;
   relay.following = true;
   relay.backoff = 500;
+  relay.lastSeq = -1;   // accept the director's CURRENT seq even if it restarted (seq reset low)
   if (relay.ws) { try { relay.ws.close(); } catch {} relay.ws = null; }
   connectRelay();        // fresh WS; its open handler force-resyncs via relayPollOnce
   relayPollOnce(true);   // also resync now (covers the polling-only fallback path)
@@ -2862,9 +2863,15 @@ const relayPollOnce = async (force = false) => {
     if (!relayGeoBookApplied && !NATIVE_FILE_MODE && !hasNativeBridge()) {
       const geoBook = bookFromHymnal(r.headers.get("X-Hymnal"));
       if (geoBook) {
-        relayGeoBookApplied = true;
-        geoJustResolved = true;
         if (geoBook !== state.currentBook) await switchBook(geoBook, { fromNative: true });
+        // Only mark geo RESOLVED once the switch actually took. switchBook rolls back on a load
+        // failure (cold cache / flaky network); marking it applied anyway would pin the wrong
+        // book forever (no switcher to recover). Leaving the flag false lets the next poll retry,
+        // and geoJustResolved stays false so we don't reveal the gate on the wrong book.
+        if (state.currentBook === geoBook) {
+          relayGeoBookApplied = true;
+          geoJustResolved = true;
+        }
       }
     }
     if (r.ok) await applyRelaySnapshot(await r.json(), { force });

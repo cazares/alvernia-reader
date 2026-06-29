@@ -430,8 +430,17 @@ export default function App() {
           // A follower tapped the ⟳ button in the web UI. The web relay is off in the shell,
           // so do the NATIVE resync: re-request the director's current snapshot over the mesh
           // and re-assert the last-known one immediately (mirrors the foreground resync).
-          if (roleRef.current === "follower") {
-            if (syncAvailable) requestCurrentSnapshot().catch(() => {});
+          // If somehow stranded in "off" (e.g. a prior soft-reset left sync off while the web
+          // still shows the follower ⟳), re-join the mesh as a follower first so ⟳ recovers it.
+          if (roleRef.current === "off" && syncAvailable) becomeFollower();
+          if (roleRef.current !== "director") {
+            if (syncAvailable) {
+              // ⟳ must also kick a fast re-browse: if the director vanished or a NEW director
+              // took over (handoff), requestCurrentSnapshot alone can't help until we re-find
+              // it. refreshNearbyDiscovery accelerates re-discovery so ⟳ actually recovers.
+              refreshNearbyDiscovery().catch(() => {});
+              requestCurrentSnapshot().catch(() => {});
+            }
             if (lastDirectorSnapshotRef.current) {
               const { page, book } = lastDirectorSnapshotRef.current;
               currentPageRef.current = page;
@@ -445,16 +454,20 @@ export default function App() {
           break;
         }
         case "exit-director": {
-          // Director tapped the badge to step down. Soft reset clears the role + the 24h
-          // restore window and remounts as a fresh follower (re-geos + follower controls).
-          performSoftReset();
+          // Director tapped the badge to step down → become a FOLLOWER (not "off") so the
+          // device immediately re-joins the mesh and follows the NEW director, and the ⟳
+          // resync stays live. Also forget the director code/time so a relaunch doesn't
+          // auto-restore director. (Using performSoftReset here left the device in "off" →
+          // stranded on the default page with a dead resync — the director-handoff bug.)
+          AsyncStorage.multiRemove([STORAGE_KEYS.lastDirectorAt, STORED_CODE_KEY]).catch(() => {});
+          becomeFollower();
           break;
         }
         default:
           break;
       }
     },
-    [flushPendingInjects, injectEvent, syncAvailable, broadcastPage, onDirectorCode, performSoftReset],
+    [flushPendingInjects, injectEvent, syncAvailable, broadcastPage, onDirectorCode, becomeFollower],
   );
 
   // ── Resolve the bundle URI (prefer a peer-pushed update in Documents) ───────
