@@ -444,11 +444,17 @@ export default function App() {
           }
           break;
         }
+        case "exit-director": {
+          // Director tapped the badge to step down. Soft reset clears the role + the 24h
+          // restore window and remounts as a fresh follower (re-geos + follower controls).
+          performSoftReset();
+          break;
+        }
         default:
           break;
       }
     },
-    [flushPendingInjects, injectEvent, syncAvailable, broadcastPage, onDirectorCode],
+    [flushPendingInjects, injectEvent, syncAvailable, broadcastPage, onDirectorCode, performSoftReset],
   );
 
   // ── Resolve the bundle URI (prefer a peer-pushed update in Documents) ───────
