@@ -1007,7 +1007,9 @@ const closeDrawer = () => {
 
 // ── Fullscreen ────────────────────────────────────────────────────────────────
 const updateFullscreenButton = () => {
-  if (!supportsFullscreen) {
+  // Hide on native too: the iPad shell is already fullscreen, so a fullscreen toggle is
+  // meaningless there (and some WKWebViews falsely report fullscreen support).
+  if (!supportsFullscreen || NATIVE_FILE_MODE) {
     fullscreenButton.classList.add("is-hidden");
     fullscreenFab?.classList.add("is-hidden");
     return;
@@ -2740,6 +2742,15 @@ const goLive = () => {
 // connectRelay / relayPollOnce are defined below; this only runs on a user tap, well after
 // init, so the forward reference resolves fine.
 const reconnectRelay = () => {
+  haptic(12);
+  // NATIVE: the web relay is intentionally OFF in the iPad shell (it syncs over the Multipeer
+  // mesh via the bridge). So a ⟳ tap must NOT open a web-relay socket — ask the shell to
+  // re-request the director's snapshot over the mesh instead.
+  if (hasNativeBridge() || NATIVE_FILE_MODE) {
+    postNativeBridge({ type: "resync" });
+    return;
+  }
+  // WEB: reconnect the relay socket + force a resync to the director.
   relay.browsing = false;
   relay.following = true;
   relay.backoff = 500;
@@ -2748,7 +2759,6 @@ const reconnectRelay = () => {
   relayPollOnce(true);   // also resync now (covers the polling-only fallback path)
   hideGoLiveBar();
   renderRelayPill();
-  haptic(12);
 };
 
 const relayIsFreshLive = (snap) =>

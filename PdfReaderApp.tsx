@@ -426,6 +426,24 @@ export default function App() {
           }
           break;
         }
+        case "resync": {
+          // A follower tapped the ⟳ button in the web UI. The web relay is off in the shell,
+          // so do the NATIVE resync: re-request the director's current snapshot over the mesh
+          // and re-assert the last-known one immediately (mirrors the foreground resync).
+          if (roleRef.current === "follower") {
+            if (syncAvailable) requestCurrentSnapshot().catch(() => {});
+            if (lastDirectorSnapshotRef.current) {
+              const { page, book } = lastDirectorSnapshotRef.current;
+              currentPageRef.current = page;
+              if (book !== currentBookRef.current) {
+                currentBookRef.current = book;
+                injectEvent({ type: "set-book", book });
+              }
+              injectEvent({ type: "sync-event", event: { type: "page", page, book } });
+            }
+          }
+          break;
+        }
         default:
           break;
       }
