@@ -6,22 +6,40 @@ const loading = document.getElementById("loading");
 // flashes the default hymns-4 manual before geo IP resolves (Del Rio → standard, else
 // hymns-4). Native injects its book, so it reveals at once. Idempotent.
 const geoGate = document.getElementById("geo-gate");
-let readerRevealed = false;
-const revealReader = () => {
-  if (readerRevealed) return;
-  readerRevealed = true;
-  // Lift the gate only AFTER the resolved book's page image has actually decoded + painted.
-  // renderPage sets pageImage.src, but the <img> keeps showing the PREVIOUS (hymns-4) frame
-  // for a beat until the new src decodes — lifting in that window is the residual flash.
-  // decode() resolves when the current src is render-ready; the double rAF lets it hit screen.
-  const lift = () =>
-    requestAnimationFrame(() => requestAnimationFrame(() => geoGate?.classList.add("is-hidden")));
-  if (geoGate && pageImage && typeof pageImage.decode === "function") {
-    pageImage.decode().then(lift, lift);   // lift even if decode rejects (never trap behind white)
-  } else {
-    lift();
+let revealRequested = false;
+let gateLifted = false;
+const liftGateNow = () => {
+  if (gateLifted) return;
+  gateLifted = true;
+  // double rAF so the decoded frame is on screen before the white lifts (no residual flash)
+  requestAnimationFrame(() => requestAnimationFrame(() => geoGate?.classList.add("is-hidden")));
+};
+// Lift the gate ONLY once the resolved book's page image is actually displayable. If it isn't
+// ready yet (slow / cold first load), HOLD the gate — a spinner shows it's loading — and re-try
+// on the next load event. Previously the gate dropped even when decode() rejected, which exposed
+// the still-loading <img> and its alt ("Pagina actual del manual") → read as "página… not found".
+const tryLiftGate = () => {
+  if (gateLifted || !revealRequested) return;
+  if (!geoGate || !pageImage) { liftGateNow(); return; }
+  if (typeof pageImage.decode === "function") {
+    pageImage.decode().then(liftGateNow, () => {});   // ready → lift; not-ready → wait, no lift
+  } else if (pageImage.complete && pageImage.naturalWidth > 0) {
+    liftGateNow();
   }
 };
+const revealReader = () => { revealRequested = true; tryLiftGate(); };
+// Re-attempt the lift when the page image loads, and recover transient first-load failures
+// (cold cache / flaky network) by retrying the src instead of revealing a broken image. Capped
+// so a genuinely-missing asset eventually gives up (the 12s backstop below still frees the gate).
+if (pageImage) {
+  let pageImgRetries = 0;
+  pageImage.addEventListener("load", () => { pageImgRetries = 0; tryLiftGate(); });
+  pageImage.addEventListener("error", () => {
+    if (pageImgRetries++ >= 4) return;
+    const base = (pageImage.currentSrc || pageImage.src).split("?")[0];
+    window.setTimeout(() => { pageImage.src = `${base}?retry=${pageImgRetries}`; }, 350 * pageImgRetries);
+  });
+}
 const offlineGate = document.getElementById("offline-gate");
 const offlineGateTitle = document.getElementById("offline-gate-title");
 const offlineGateBody = document.getElementById("offline-gate-body");
@@ -3038,3 +3056,7 @@ initReader().catch((error) => {
 // so the user is never trapped behind white.
 setTimeout(() => { if (!relayGeoBookApplied) revealReader(); }, 3000);
 setTimeout(revealReader, 8000);
+// (3) Absolute anti-trap: if the image still hasn't become displayable (persistent failure),
+// force the gate down so the user is never stranded behind white. Rare degraded case — the
+// retry above recovers the common transient first-load failure long before this fires.
+setTimeout(liftGateNow, 12000);
