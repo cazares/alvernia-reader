@@ -45,10 +45,11 @@
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" src="books/hymns-4/pages/page-02.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
-        <div class="director-mode-badge is-hidden" id="director-mode-badge" aria-live="polite">
+        <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button" aria-label="Salir del modo director">
           <span class="director-mode-badge-eyebrow">Modo activo</span>
           <strong class="director-mode-badge-title">DIRECTOR</strong>
-        </div>
+          <span class="director-mode-badge-exit" aria-hidden="true">✕ Salir</span>
+        </button>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
           <div class="offline-gate-card">
@@ -77,6 +78,7 @@
            The icon spins while reconnecting so it's obvious something is happening. -->
       <button class="resync-fab" id="resync-fab" type="button" aria-label="Volver a sincronizar con el director">
         <span class="resync-icon" aria-hidden="true">⟳</span>
+        <span class="resync-dots" aria-hidden="true"><span></span><span></span><span></span></span>
       </button>
 
       <!-- ♪ Jump-to-song (top-RIGHT, everyone) + ⌕ search (top-RIGHT, DIRECTOR only via data-role) -->

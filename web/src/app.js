@@ -2253,6 +2253,15 @@ const bindReaderEvents = () => {
   // ⛶ fullscreen fab (bottom-right) — same toggle as the legacy hidden button
   if (fullscreenFab) fullscreenFab.addEventListener("click", () => { haptic(); toggleFullscreen().catch(() => {}); });
 
+  // Director badge = tap-to-EXIT director mode (native only — the badge never shows on the web).
+  // Confirm first so a mid-Mass mistap doesn't drop the director; the shell does the soft reset.
+  if (directorModeBadge) directorModeBadge.addEventListener("click", () => {
+    haptic();
+    if (window.confirm("¿Salir del modo director?\n\nDejarás de dirigir y volverás a seguidor.")) {
+      postNativeBridge({ type: "exit-director" });
+    }
+  });
+
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
   songJumpBackdrop.addEventListener("click", () => { closeSongJump(); });
 
