@@ -1985,7 +1985,8 @@ button:disabled {
    actually showing does ♪ shift 4.5rem left to make room for it. */
 .song-jump-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
 html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 4.5rem); }
-.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 3.05rem; }  /* ⟳ ~35% bigger */
+.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 3.05rem; }
+.resync-fab.is-spinning { flex-direction: column; justify-content: center; padding-bottom: 4px; }  /* ⟳ ~35% bigger */
 /* Fullscreen fab — bottom-right (override the base top); SVG icon sized to match the glyphs. */
 .fullscreen-fab {
   top: auto;
@@ -1997,10 +1998,17 @@ html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-ar
 .search-fab:active,
 .resync-fab:active,
 .fullscreen-fab:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
-/* ⟳ icon pulses opacity while reconnecting — soft breath instead of cartoonish spin */
+/* ⟳ icon pulses opacity while reconnecting — soft breath, plus staggered dots below */
 .resync-icon { display: inline-block; line-height: 1; }
 .resync-fab.is-spinning .resync-icon { animation: sv-resync-pulse 1.5s ease-in-out infinite; }
 @keyframes sv-resync-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+/* Reconnect loading dots — three small circles that appear only while is-spinning */
+.resync-dots { display: none; justify-content: center; gap: 4px; margin-top: 4px; }
+.resync-fab.is-spinning .resync-dots { display: flex; }
+.resync-dots span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.3; animation: sv-dot-pulse 1.2s ease-in-out infinite; }
+.resync-dots span:nth-child(2) { animation-delay: 0.2s; }
+.resync-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes sv-dot-pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
 
 /* ── Role-based controls ──────────────────────────────────────────────────────
    FOLLOWER (default — all of signovivo.com + any non-director native device):

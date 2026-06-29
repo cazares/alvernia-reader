@@ -12,6 +12,7 @@
     "ios:local": "bash ./scripts/start-ios-simulator-local.sh",
     "android": "expo run:android",
     "build:web": "node ./web/build.mjs",
+    "deploy:web": "node ./web/build.mjs && npx wrangler pages deploy web/dist --project-name alvernia-reader",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "node --test ./e2e/*.test.mjs",
     "postinstall": "node scripts/patch-rn-webview.js && node scripts/patch-hermes-thread.js"
