@@ -3049,14 +3049,15 @@ initReader().catch((error) => {
   setLoading(true, "No se pudo cargar Signo Vivo.");
   revealReader();   // even on a boot failure, don't trap the user behind a blank white gate
 });
-// Safety nets for the white geo-gate. (1) If geo NEVER resolves (relay down/blocked/offline
-// misread), reveal with the default book after 3s — but ONLY if geo is still unresolved, so
-// this can't preempt a slow-but-working geo+switchBook (that path reveals itself once the
-// manual lands, avoiding the flash). (2) An absolute 8s backstop covers any pathological hang
-// so the user is never trapped behind white.
-setTimeout(() => { if (!relayGeoBookApplied) revealReader(); }, 3000);
+// Safety nets for the white geo-gate. PRIMARY reveal = the geo poll (relayPollOnce →
+// geoJustResolved → revealReader, AFTER its awaited switchBook), so the CORRECT book paints
+// before the gate lifts. We deliberately do NOT reveal the default book on a short timer: a
+// slow-but-working geo on mobile/incognito (cold relay connection, often 3–6s) would otherwise
+// flash the default Himnos de Sión before switchBook(standard) lands — exactly the flash a
+// user hit on incognito Chrome mobile. The gate stays white (with the spinner) until geo
+// resolves; only a LONG fallback reveals the default at 8s, for a genuinely dead/blocked relay.
 setTimeout(revealReader, 8000);
-// (3) Absolute anti-trap: if the image still hasn't become displayable (persistent failure),
-// force the gate down so the user is never stranded behind white. Rare degraded case — the
-// retry above recovers the common transient first-load failure long before this fires.
+// Absolute anti-trap: if the image still hasn't become displayable (persistent failure), force
+// the gate down so the user is never stranded behind white. Rare degraded case — the retry
+// above recovers the common transient first-load failure long before this fires.
 setTimeout(liftGateNow, 12000);
