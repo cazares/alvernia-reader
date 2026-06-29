@@ -71,11 +71,28 @@ button:disabled {
   background: #fff;
   z-index: 150;
   transition: opacity 160ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 #geo-gate.is-hidden {
   opacity: 0;
   pointer-events: none;
 }
+/* Loading spinner on the gate. It stays invisible for the first ~500ms (opacity 0 + delayed fade)
+   so a fast load shows clean white, never a spinner flash — but a slow/cold first load reads as
+   "loading" instead of blank-then-broken. */
+.geo-gate-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(20, 30, 60, 0.14);
+  border-top-color: rgba(20, 30, 60, 0.55);
+  opacity: 0;
+  animation: geo-gate-spin 0.8s linear infinite, geo-gate-fade 240ms ease 500ms forwards;
+}
+@keyframes geo-gate-spin { to { transform: rotate(360deg); } }
+@keyframes geo-gate-fade { to { opacity: 1; } }
 
 .app-shell {
   position: relative;

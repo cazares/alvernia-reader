@@ -41,7 +41,7 @@
     <!-- Blank-white gate: covers the reader until the book is resolved (geo IP on the web,
          injected on native) so signovivo.com never flashes the wrong manual. Visible by
          default; app.js reveals it via revealReader(). -->
-    <div id="geo-gate" aria-hidden="true"></div>
+    <div id="geo-gate" aria-hidden="true"><div class="geo-gate-spinner" aria-hidden="true"></div></div>
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" src="books/hymns-4/pages/page-02.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
