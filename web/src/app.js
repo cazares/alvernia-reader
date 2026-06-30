@@ -586,6 +586,46 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
   });
 };
 
+// Defer the ~13 MB background pre-cache until AFTER the reader is revealed (geo-gate lifted =
+// first page displayable). On weak connections an immediate pre-cache competes with the
+// critical first-paint fetches (current page image + geo /state call + relay WebSocket) and
+// drags out first load. We wait for gateLifted (poll every 1.5s) plus a base settle delay so
+// the critical fetches win the bandwidth, THEN start the for-everyone pre-cache. Non-blocking;
+// guarded PER-BOOK so each distinct book pre-caches exactly once — a Mass can use BOTH books
+// (a follower follows a director who switches mid-Mass), and the old single-shot boolean meant
+// only the FIRST book ever got background-precached. We track the set of book ids whose
+// pre-cache has already started and skip a duplicate run per book.
+const offlinePrecachedBooks = new Set();
+const deferOfflinePrecache = (totalPages, bookId = state.currentBook) => {
+  if (NATIVE_FILE_MODE || !("caches" in window)) return;
+  if (offlinePrecachedBooks.has(bookId)) return;
+  const SETTLE_MS = 4000;   // base delay so first paint + relay handshake finish first
+  const POLL_MS = 1500;     // how often we re-check the gate after the settle delay
+  const kick = () => {
+    // ensureOfflineBundle pre-caches the LIVE state.currentBook (via pageFileName /
+    // coreAssetsForBook), so only fire while THIS captured book is still the active one —
+    // otherwise we'd write the wrong book's pages under the wrong totalPages. If the book
+    // switched out from under us before the gate lifted, the new book's own
+    // deferOfflinePrecache call handles it.
+    if (state.currentBook !== bookId) return;
+    // Mark precached HERE (when it actually starts), NOT at schedule time: a book scheduled at
+    // boot but switched away from before the gate lifts would otherwise be flagged without ever
+    // precaching, and a later switch back would skip it forever (boot-race). Re-check in case a
+    // sibling timer already kicked this book.
+    if (offlinePrecachedBooks.has(bookId)) return;
+    offlinePrecachedBooks.add(bookId);
+    ensureOfflineBundle(totalPages, () => {}).catch((error) => {
+      offlinePrecachedBooks.delete(bookId);   // failed → let a later switch retry this book
+      console.warn("Pre-cache offline incompleto:", error);
+    });
+  };
+  const waitForGate = () => {
+    if (gateLifted) { kick(); return; }
+    setTimeout(waitForGate, POLL_MS);
+  };
+  setTimeout(waitForGate, SETTLE_MS);
+};
+
 const isOfflineBundleReady = async (totalPages) => {
   if (!("caches" in window)) return false;
   if (localStorage.getItem(OFFLINE_READY_KEY) !== "ready") return false;
@@ -985,12 +1025,9 @@ const switchBook = async (bookId, opts = {}) => {
   renderPage(startPage, { pushToHistory: false });
   updateBookLabel();
   // Pre-cache the newly-active book for offline too — a Mass can use BOTH books, but the
-  // startup pre-cache (initReader) only covered the initial book. Background, non-blocking.
-  if (!NATIVE_FILE_MODE && "caches" in window) {
-    ensureOfflineBundle(state.totalPages, () => {}).catch((error) =>
-      console.warn("Pre-cache offline incompleto (cambio de libro):", error),
-    );
-  }
+  // startup pre-cache (initReader) only covered the initial book. Deferred the same way
+  // (wait for the gate + settle) and guarded PER-BOOK so each distinct book pre-caches once.
+  deferOfflinePrecache(state.totalPages, state.currentBook);
   if (!opts.fromNative) {
     postNativeBridge({ type: "book-changed", book: bookId });
   }
@@ -2683,6 +2720,7 @@ const relay = {
   ws: null,            // the live WebSocket — stored so connectRelay can guard against dupes
   heartbeatTimer: 0,   // 4s heartbeat interval id — cleared so it can't accumulate per socket
   reconnectTimer: 0,   // pending backoff reconnect timeout id — cleared so only ONE is scheduled
+  lastMsgAt: 0,        // ts of the last WS message — read on foreground to detect a dead socket
   lastSeq: -1,
   browsing: false,   // user opted into manual browse (tap title → jump-to-song): pause auto-follow
   following: true,   // apply pushes until the user browses away
@@ -2820,6 +2858,11 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   // director lingering on a page is still the page the follower should be on.
   if (!hasPublished || (!force && !relayIsFreshLive(snap))) {
     relay.hasDirector = false;
+    // No live director → the "Volver a en vivo" bar would lie about going live (there's
+    // nowhere to go). Hide it and drop browsing state so bar, pill, and browse flag stay
+    // consistent: the user reverts to a normal songbook they can freely navigate.
+    relay.browsing = false;
+    hideGoLiveBar();
     renderRelayPill();
     return;
   }
@@ -2901,7 +2944,7 @@ const connectRelay = () => {
   let ws;
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
   relay.ws = ws;
-  let lastMsgAt = Date.now();
+  relay.lastMsgAt = Date.now();
   // Zombie-CONNECTING guard: a flaky network can leave a socket stuck in readyState 0
   // (CONNECTING) with NO open AND NO close event — it just hangs. The dupe-guard above then
   // treats it as "already connecting" and blocks every future automatic reconnect (online /
@@ -2917,7 +2960,7 @@ const connectRelay = () => {
   ws.addEventListener("open", () => {
     clearConnectTimer();
     relay.backoff = 500;
-    lastMsgAt = Date.now();
+    relay.lastMsgAt = Date.now();
     relayPollOnce(true);   // force-resync to the director's current page on (re)connect
     // Heartbeat: ping over the EXISTING socket every 4s. If it goes silent for 12s the
     // socket is a "zombie" (flaky cell can drop it dead with NO close event) — close it so
@@ -2928,11 +2971,11 @@ const connectRelay = () => {
     if (relay.heartbeatTimer) clearInterval(relay.heartbeatTimer);
     relay.heartbeatTimer = setInterval(() => {
       if (ws.readyState !== WebSocket.OPEN) { clearInterval(relay.heartbeatTimer); relay.heartbeatTimer = 0; return; }
-      if (Date.now() - lastMsgAt > 12000) { try { ws.close(); } catch {} return; }
+      if (Date.now() - relay.lastMsgAt > 12000) { try { ws.close(); } catch {} return; }
       try { ws.send("ping"); } catch {}
     }, 4000);
   });
-  ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)).catch(() => {}); } catch {} });
+  ws.addEventListener("message", (ev) => { relay.lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)).catch(() => {}); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
     clearConnectTimer();
@@ -2957,7 +3000,18 @@ const connectRelay = () => {
 const startRelayFollow = () => {
   if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") relayPollOnce(true);   // resync on foreground
+    if (document.visibilityState !== "visible") return;
+    relayPollOnce(true);   // resync on foreground
+    // iOS can silently kill a backgrounded socket with NO close event — readyState stays
+    // OPEN but the socket is dead, so the heartbeat never fires and we'd sit there frozen.
+    // On foreground, if the socket is gone, not OPEN, or has been silent past the 12s
+    // heartbeat window, force a fresh reconnect (fast backoff) to recover the live feed.
+    if (!relay.ws || relay.ws.readyState !== WebSocket.OPEN || (Date.now() - relay.lastMsgAt > 12000)) {
+      try { relay.ws && relay.ws.close(); } catch {}
+      relay.ws = null;
+      relay.backoff = 500;
+      connectRelay();
+    }
   });
   window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
   relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
@@ -3049,12 +3103,9 @@ const initReader = async () => {
       .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
   }
   // Background pre-cache for everyone — at 13 MB it's cheap enough to always do.
-  // No blocking gate; pages download silently while the user reads.
-  if (!NATIVE_FILE_MODE && "caches" in window) {
-    ensureOfflineBundle(state.totalPages, () => {}).catch((error) =>
-      console.warn("Pre-cache offline incompleto:", error),
-    );
-  }
+  // Deferred until AFTER the reader is revealed so it doesn't compete with first-paint
+  // fetches on weak connections; pages then download silently while the user reads.
+  deferOfflinePrecache(state.totalPages, state.currentBook);
 };
 
 if (appVersionLabel && window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION) {
