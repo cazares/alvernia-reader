@@ -26,6 +26,17 @@ const cacheVersion = (() => {
   hash.update(fs.readFileSync(new URL(import.meta.url))); // build.mjs itself (template/inlining logic)
   return `${sha}-${hash.digest("hex").slice(0, 8)}`;
 })();
+// Human-facing build number (from version.json) baked into the bundle so signovivo.com can show
+// "v<NNN>" — on native the shell injects __SIGNO_VINO_NATIVE_BUNDLE_VERSION instead (and shows its
+// own overlay). Lets anyone confirm at a glance which build a device/tab is on.
+const buildNumber = (() => {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(rootDir, "version.json"), "utf8"));
+    return String(v.buildNumber ?? "");
+  } catch {
+    return "";
+  }
+})();
 
 fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
@@ -36,7 +47,8 @@ const relayBase = (process.env.ALVERNIA_RELAY_BASE || "https://signovivo-sync.4j
 const appSource = fs
   .readFileSync(path.join(srcDir, "app.js"), "utf8")
   .replaceAll("__CACHE_VERSION__", cacheVersion)
-  .replaceAll("__RELAY_BASE__", relayBase);
+  .replaceAll("__RELAY_BASE__", relayBase)
+  .replaceAll("__BUILD_NUMBER__", buildNumber);
 fs.writeFileSync(path.join(distDir, "app.js"), appSource);
 fs.copyFileSync(path.join(srcDir, "manifest.webmanifest"), path.join(distDir, "manifest.webmanifest"));
 // index.html is written later with inlined JSON data
