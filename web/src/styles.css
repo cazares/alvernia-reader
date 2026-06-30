@@ -63,8 +63,10 @@ button:disabled {
   opacity: 0.35;
 }
 
-/* Blank-white gate over the whole reader until the book is resolved (no wrong-manual flash).
-   Visible by default; app.js's revealReader() adds .is-hidden to fade it out. */
+/* Full-page loading screen / gate over the whole reader until the book is resolved (no
+   wrong-manual flash). Visible by default; app.js's revealReader() adds .is-hidden to fade it
+   out — ONLY once the correct book's image decodes, so the reveal timing is unchanged: a fast
+   load still shows clean white briefly, a slow one shows a proper centered loader. */
 #geo-gate {
   position: fixed;
   inset: 0;
@@ -79,17 +81,39 @@ button:disabled {
   opacity: 0;
   pointer-events: none;
 }
-/* Loading spinner on the gate. It stays invisible for the first ~500ms (opacity 0 + delayed fade)
-   so a fast load shows clean white, never a spinner flash — but a slow/cold first load reads as
-   "loading" instead of blank-then-broken. */
+.geo-gate-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  /* The whole loader stays invisible for the first ~500ms (delayed fade) so a fast load shows
+     clean white, never a loader flash — but a slow/cold first load reads as "loading". */
+  opacity: 0;
+  animation: geo-gate-fade 240ms ease 500ms forwards;
+}
+/* Loading spinner on the gate. */
 .geo-gate-spinner {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   border: 3px solid rgba(20, 30, 60, 0.14);
   border-top-color: rgba(20, 30, 60, 0.55);
-  opacity: 0;
-  animation: geo-gate-spin 0.8s linear infinite, geo-gate-fade 240ms ease 500ms forwards;
+  animation: geo-gate-spin 0.8s linear infinite;
+}
+/* Subtle branding / loading caption under the spinner. */
+.geo-gate-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(20, 30, 60, 0.55);
+  text-align: center;
+}
+/* First-ever-visit-offline state: the geo relay is unreachable so we can't resolve the book.
+   We HOLD the gate (never flash a wrong/broken book) and surface a quiet retrying caption. */
+#geo-gate.is-offline .geo-gate-text {
+  color: rgba(120, 30, 30, 0.62);
 }
 @keyframes geo-gate-spin { to { transform: rotate(360deg); } }
 @keyframes geo-gate-fade { to { opacity: 1; } }
@@ -129,15 +153,17 @@ button:disabled {
    cluster (⟳ is hidden for directors, so the left corner is free). Shows only in director mode. */
 .director-mode-badge {
   position: absolute;
-  top: calc(var(--safe-top) + 14px);
-  left: calc(var(--safe-left) + 14px);
+  top: max(0.55rem, env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */
+  left: max(0.55rem, env(safe-area-inset-left, 0px));
   z-index: 46;                 /* above the fabs so the exit tap always lands */
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;     /* center DIRECTOR + ✕ Salir within the fixed height */
   gap: 0.15rem;
   margin: 0;
-  padding: 0.58rem 0.82rem;
+  height: 4rem;                /* same height as the upper-right ♪/⌕ fabs */
+  padding: 0 0.82rem;
   /* Styled to MATCH the ♪/⌕ fabs (upper-right): translucent navy + blur, low opacity so it
      blends in instead of standing out as a bold box. */
   border-radius: 14px;
