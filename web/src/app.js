@@ -196,6 +196,13 @@ let floorBookOnly = false;
 // The PUBLIC floor: "Himnos de Sión" is safe for anyone. "standard" (the Del Rio parish manual) is
 // PRIVATE and may only ever be shown on a Del-Rio-authorized device — it is NEVER the floor.
 const PUBLIC_FLOOR_BOOK = "hymns-4";
+// Explicit director-code UNLOCK of the PRIVATE standard manual. Lets authorized parish staff render
+// standard from ANY network — including cellular / wrong-geo ISPs the IP-geo radius can't place in
+// Del Rio. Set by unlockStandard() after the worker validates a code; read by isDelRioAuthorized()
+// and the geo resolver (which then never overrides standard back to the public Sión floor). The
+// PUBLIC can't set this — it requires a server-validated code. localStorage can throw — guard it.
+let standardUnlocked = false;
+try { standardUnlocked = localStorage.getItem("svStandardUnlock") === "1"; } catch {}
 const resolveInitialBook = () => {
   // Precedence: native-injected initial book → last geo-resolved book (offline restore) → PUBLIC
   // SIÓN FLOOR (hymns-4). NEVER null (a null book bricked a fresh/geo-failed device on a permanent
@@ -924,6 +931,22 @@ const renderDraft = () => {
   goButton.disabled = !state.songDraft;
 };
 
+// Brief inline feedback on the numpad display — used for the web director-code unlock result
+// (success switches the book visibly; an invalid code otherwise fails silently). Auto-reverts to
+// the live draft so the numpad is immediately reusable.
+let songDisplayFlashTimer = 0;
+const flashSongDisplay = (msg, kind) => {
+  if (!songDisplay) return;
+  if (songDisplayFlashTimer) clearTimeout(songDisplayFlashTimer);
+  songDisplay.textContent = msg;
+  songDisplay.classList.remove("is-ok", "is-err");
+  songDisplay.classList.add(kind === "ok" ? "is-ok" : "is-err");
+  songDisplayFlashTimer = window.setTimeout(() => {
+    songDisplay.classList.remove("is-ok", "is-err");
+    renderDraft();
+  }, 1600);
+};
+
 // The native shell reports director/follower role over the bridge; the only surviving
 // surface is the tiny "Modo activo / DIRECTOR" badge — show it when this device directs.
 const renderDirectorModeBadge = () => {
@@ -1278,9 +1301,22 @@ const goToDraftSong = () => {
   // a song number to its page — so gate on digit-length alone: 2-4 digit hymns always resolve here,
   // and a genuine 5+ digit code still routes to native.
   if (String(songNumber).length >= 5) {
-    postNativeBridge({ type: "director-code", code: String(songNumber) });
-    clearDraft();
-    closeSongJump();
+    const code = String(songNumber);
+    // NATIVE: hand the code to the shell (director / transmitter flow over Multipeer).
+    // WEB (no native bridge): a valid code UNLOCKS the private standard manual for this device,
+    // even off-Del-Rio (cellular / wrong-geo ISP). Invalid codes silently change nothing.
+    if (NATIVE_FILE_MODE || hasNativeBridge()) {
+      postNativeBridge({ type: "director-code", code });
+      clearDraft();
+      closeSongJump();
+    } else {
+      // WEB: validate + unlock the private standard manual. Success switches the book (the modal
+      // closes onto standard); an invalid code flashes an error and keeps the numpad open to retry.
+      unlockStandard(code).then((ok) => {
+        if (ok) { clearDraft(); closeSongJump(); }
+        else { clearDraft(); flashSongDisplay("Código no válido", "err"); }
+      });
+    }
     return;
   }
   const targetPage = findSongPage(songNumber);
@@ -3142,14 +3178,46 @@ let relayGeoBookApplied = false;
 // persisted standard geo from a prior Del-Rio visit — is authorized to render the PRIVATE parish
 // manual. A non-authorized device must IGNORE a director's standard broadcast (privacy).
 let relayGeoBook = null;
+// An explicit director-code unlock PINS this device to the standard manual: pre-mark geo as resolved
+// to standard so the geo resolver's one-shot block is skipped entirely and a nonstandard X-Hymnal
+// (cellular / wrong-geo ISP) can never override standard back to the public Sión floor. Boot already
+// lands on standard (unlockStandard persisted svGeoBook=standard → resolveInitialBook).
+if (standardUnlocked) { relayGeoBookApplied = true; relayGeoBook = "standard"; }
 // PRIVACY GATE for the private Del Rio parish manual ("standard"). True iff THIS device proved it
 // is Del-Rio-authorized: live geo X-Hymnal resolved to standard this session, OR a persisted
 // svGeoBook === "standard" (a prior confirmed Del-Rio visit). Everyone else is unauthorized and
 // must never see / switch to standard, even if a director broadcasts it. localStorage can throw
 // (private mode) — guard it.
 const isDelRioAuthorized = () => {
+  if (standardUnlocked) return true; // explicit director-code unlock — authorized from any network
   if (relayGeoBookApplied && relayGeoBook === "standard") return true;
   try { return localStorage.getItem("svGeoBook") === "standard"; } catch { return false; }
+};
+// Director-code UNLOCK (web only): POST the code to the worker, which validates it server-side
+// (the browser never learns the code set). On success, pin THIS device to the private standard
+// manual — persist the unlock, authorize it, freeze the geo resolver so it won't override, switch
+// to standard, and reveal. Returns true iff unlocked. Invalid/again-failed codes change nothing.
+const unlockStandard = async (rawCode) => {
+  const code = String(rawCode || "").replace(/[^0-9]/g, "");
+  if (!code) return false;
+  try {
+    const res = await fetch(
+      RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) + "/unlock",
+      { method: "POST", cache: "no-store", headers: { "X-Director-Code": code } },
+    );
+    let data = null;
+    try { data = await res.json(); } catch {}
+    if (!res.ok || !data || data.ok !== true) return false;
+  } catch { return false; }
+  standardUnlocked = true;
+  try { localStorage.setItem("svStandardUnlock", "1"); } catch {}
+  try { localStorage.setItem("svGeoBook", "standard"); } catch {} // boot straight to standard next time
+  relayGeoBookApplied = true;   // freeze geo: a nonstandard X-Hymnal can't override an explicit unlock
+  relayGeoBook = "standard";
+  floorBookOnly = false;
+  try { await switchBook("standard", { fromGeo: true }); } catch {}
+  revealReader();
+  return true;
 };
 // True while a geo-driven switchBook is actively mid-fetch. The 8s default-reveal backstop reads
 // this and HOLDS rather than revealing the default book out from under a slow-but-succeeding geo

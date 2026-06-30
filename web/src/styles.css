@@ -2161,6 +2161,24 @@ body.sv-drawer-open .search-fab { display: none !important; }
   text-align: center;
   box-shadow: none;
 }
+/* Director-code unlock feedback flashed in the numpad display (smaller so a message fits the
+   number-sized field; shakes on an invalid code). Higher specificity beats the 50px rule above. */
+.song-jump-card .numberpad-display.is-err {
+  color: #c0392b;
+  font-size: 22px;
+  font-weight: 700;
+  animation: numpad-shake 0.4s ease;
+}
+.song-jump-card .numberpad-display.is-ok {
+  color: #1e7a3c;
+  font-size: 26px;
+  font-weight: 700;
+}
+@keyframes numpad-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
 .song-jump-card .numberpad-display:empty::before {
   content: "Número de canto";
   color: rgba(0, 0, 0, 0.35);
