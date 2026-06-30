@@ -210,88 +210,112 @@ export default {
     const isStandard = postal === "78840" || postal === "78841" || cityLc === "del rio";
     cors["X-Hymnal"] = isStandard ? "standard" : "nonstandard";
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: cors });
+    // Outer guard: by here `cors` (incl. X-Hymnal) is fully built off request geo and never
+    // touches a Durable Object, so it's safe to emit no matter what the routing/DO logic does.
+    // Any unexpected throw below (DO eviction, RPC transport error, runtime hiccup) must STILL
+    // return CORS + X-Hymnal — otherwise the web client's fetch() rejects, geo never resolves,
+    // and a fresh / geo-failed device bricks on the loader instead of falling to the Sión floor.
+    try {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: cors });
+      }
+
+      if (url.pathname === "/" || url.pathname === "/health") {
+        return json({ ok: true, service: "signovivo-sync", v: PROTOCOL_VERSION }, 200, cors);
+      }
+
+      const m = url.pathname.match(ROUTE);
+      if (!m) return json({ ok: false, error: "not_found" }, 404, cors);
+
+      const room = m[1];
+      const action = m[2];
+      const stub = env.SYNC_ROOM.getByName(room);
+
+      if (action === "subscribe") {
+        if (request.headers.get("Upgrade") !== "websocket") {
+          return json({ ok: false, error: "expected_websocket" }, 426, cors);
+        }
+        return stub.fetch(request); // WS responses don't use CORS
+      }
+
+      if (action === "state") {
+        // The web client's geo resolution lives ENTIRELY in this response's X-Hymnal header
+        // (read off /state). If getState() throws — DO eviction mid-call, storage hiccup,
+        // RPC transport error — a bare throw would surface as a runtime 500 with NO CORS and
+        // NO X-Hymnal, so the browser's fetch() rejects, geo never resolves, and a fresh /
+        // geo-failed device bricks on the loader. Degrade to an empty (no-director) snapshot
+        // but ALWAYS keep CORS + X-Hymnal so geo still resolves and the Sión floor holds.
+        let snapshot: Snapshot;
+        try {
+          snapshot = await stub.getState();
+        } catch {
+          snapshot = EMPTY_SNAPSHOT;
+        }
+        return json(snapshot, 200, cors);
+      }
+
+      if (action === "publish") {
+        if (request.method !== "POST") {
+          return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+        }
+        // Authorized by EITHER the bearer token (scripts/testing) OR a valid
+        // transmitter access code in X-Director-Code (the native app — matches the
+        // memorable director codes already used in-app).
+        const auth = request.headers.get("Authorization") || "";
+        const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
+        const validCodes = new Set(
+          (
+            env.TRANSMITTER_CODES ||
+            // legacy transmitter code + the four director codes (admin 8307343376 + 3 regular).
+            // Legacy "12345678840" removed in Phase 7 once build 332 is confirmed on TestFlight.
+            "12345678840,8307343376,8304533367,8307197000,8303130470"
+          )
+            .split(",")
+            .map((c) => c.trim())
+            .filter(Boolean),
+        );
+        const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && token === env.RELAY_DIRECTOR_TOKEN;
+        const codeOk = code.length > 0 && validCodes.has(code);
+        if (!tokenOk && !codeOk) {
+          return json({ ok: false, error: "unauthorized" }, 401, cors);
+        }
+        // Reject oversized bodies early (a snapshot is a few hundred bytes). Cloudflare's own
+        // body-size limit otherwise rejects request.json() with a non-SyntaxError that would
+        // escape as an HTML 500; this returns a clean 413 first.
+        const contentLen = Number(request.headers.get("content-length") || 0);
+        if (contentLen > 64 * 1024) {
+          return json({ ok: false, error: "payload_too_large" }, 413, cors);
+        }
+        let parsed: unknown;
+        try {
+          parsed = await request.json();
+        } catch {
+          // Any parse/body failure (malformed JSON, oversized chunked body) — not just SyntaxError.
+          return json({ ok: false, error: "bad_json" }, 400, cors);
+        }
+        // A raw JSON `null` / array / primitive is valid JSON but not a snapshot; coerce to {}
+        // so publish() never dereferences a non-object.
+        const body: Partial<Snapshot> =
+          parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            ? (parsed as Partial<Snapshot>)
+            : {};
+        let result;
+        try {
+          result = await stub.publish(body);
+        } catch {
+          return json({ ok: false, error: "publish_failed" }, 500, cors);
+        }
+        return json(result, 200, cors);
+      }
+
+      return json({ ok: false, error: "not_found" }, 404, cors);
+    } catch {
+      // Last-resort guard for anything the per-branch try/catch above didn't cover (an
+      // unexpected throw in routing, header reads, or RPC transport). NEVER strip CORS /
+      // X-Hymnal — return a usable no-director snapshot shape so the web client's geo still
+      // resolves off X-Hymnal and falls to the public Sión floor instead of bricking.
+      return json(EMPTY_SNAPSHOT, 200, cors);
     }
-
-    if (url.pathname === "/" || url.pathname === "/health") {
-      return json({ ok: true, service: "signovivo-sync", v: PROTOCOL_VERSION }, 200, cors);
-    }
-
-    const m = url.pathname.match(ROUTE);
-    if (!m) return json({ ok: false, error: "not_found" }, 404, cors);
-
-    const room = m[1];
-    const action = m[2];
-    const stub = env.SYNC_ROOM.getByName(room);
-
-    if (action === "subscribe") {
-      if (request.headers.get("Upgrade") !== "websocket") {
-        return json({ ok: false, error: "expected_websocket" }, 426, cors);
-      }
-      return stub.fetch(request); // WS responses don't use CORS
-    }
-
-    if (action === "state") {
-      const snapshot = await stub.getState();
-      return json(snapshot, 200, cors);
-    }
-
-    if (action === "publish") {
-      if (request.method !== "POST") {
-        return json({ ok: false, error: "method_not_allowed" }, 405, cors);
-      }
-      // Authorized by EITHER the bearer token (scripts/testing) OR a valid
-      // transmitter access code in X-Director-Code (the native app — matches the
-      // memorable director codes already used in-app).
-      const auth = request.headers.get("Authorization") || "";
-      const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-      const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
-      const validCodes = new Set(
-        (
-          env.TRANSMITTER_CODES ||
-          // legacy transmitter code + the four director codes (admin 8307343376 + 3 regular).
-          // Legacy "12345678840" removed in Phase 7 once build 332 is confirmed on TestFlight.
-          "12345678840,8307343376,8304533367,8307197000,8303130470"
-        )
-          .split(",")
-          .map((c) => c.trim())
-          .filter(Boolean),
-      );
-      const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && token === env.RELAY_DIRECTOR_TOKEN;
-      const codeOk = code.length > 0 && validCodes.has(code);
-      if (!tokenOk && !codeOk) {
-        return json({ ok: false, error: "unauthorized" }, 401, cors);
-      }
-      // Reject oversized bodies early (a snapshot is a few hundred bytes). Cloudflare's own
-      // body-size limit otherwise rejects request.json() with a non-SyntaxError that would
-      // escape as an HTML 500; this returns a clean 413 first.
-      const contentLen = Number(request.headers.get("content-length") || 0);
-      if (contentLen > 64 * 1024) {
-        return json({ ok: false, error: "payload_too_large" }, 413, cors);
-      }
-      let parsed: unknown;
-      try {
-        parsed = await request.json();
-      } catch {
-        // Any parse/body failure (malformed JSON, oversized chunked body) — not just SyntaxError.
-        return json({ ok: false, error: "bad_json" }, 400, cors);
-      }
-      // A raw JSON `null` / array / primitive is valid JSON but not a snapshot; coerce to {}
-      // so publish() never dereferences a non-object.
-      const body: Partial<Snapshot> =
-        parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Partial<Snapshot>)
-          : {};
-      let result;
-      try {
-        result = await stub.publish(body);
-      } catch {
-        return json({ ok: false, error: "publish_failed" }, 500, cors);
-      }
-      return json(result, 200, cors);
-    }
-
-    return json({ ok: false, error: "not_found" }, 404, cors);
   },
 } satisfies ExportedHandler<Env>;
