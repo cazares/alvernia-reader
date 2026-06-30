@@ -3544,7 +3544,7 @@ if (appVersionLabel && resolvedBuild) {
 // double up inside the WebView. Lets anyone confirm at a glance which build signovivo.com is on.
 const buildBadge = document.getElementById("build-badge");
 if (buildBadge && resolvedBuild && !NATIVE_FILE_MODE && !hasNativeBridge()) {
-  buildBadge.textContent = `v${resolvedBuild}`;
+  buildBadge.textContent = `#${resolvedBuild}`;
   buildBadge.classList.add("is-shown");
 }
 

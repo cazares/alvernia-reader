@@ -926,7 +926,7 @@ export default function App() {
           pointerEvents="none" so it never intercepts a tap. */}
       {BUILD_VERSION ? (
         <Text style={styles.buildBadge} pointerEvents="none" allowFontScaling={false}>
-          {`b${BUILD_VERSION}`}
+          {`#${BUILD_VERSION}`}
         </Text>
       ) : null}
     </View>

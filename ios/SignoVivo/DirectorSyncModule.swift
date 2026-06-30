@@ -1127,10 +1127,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             self.scheduleNextDiscoveryRefresh()
             return
           }
-          if self.currentRole == "director", self.allConnectedPeers.isEmpty,
-             !self.discoveredFollowers.isEmpty {
-            self.dbgLog("refresh:hold-advertising", ["followers": self.discoveredFollowers.count])
-            self.scheduleNextDiscoveryRefresh() // keep the advertiser up so nearby followers can connect
+          // STABILITY PROTECTION for the director: do NOT tear down the advertiser while we are
+          // forming OR serving connections. Tearing it down aborts a connecting follower's invite AND
+          // drops the advertiser out from under ALREADY-CONNECTED followers — observed via /log: the
+          // connection died ~30s in when the director's 25s refresh tore down its advertiser (follower
+          // fired lostPeer → session went notConnected). A running advertiser/browser keeps finding
+          // new peers without a restart, so new followers still self-invite the live advertiser. We
+          // STILL run the split-brain announce/conflict here so two directors converge. Only churn the
+          // transport when the director is fully idle (no followers at all → discovery may be wedged).
+          if self.currentRole == "director",
+             !self.allConnectedPeers.isEmpty || !self.discoveredFollowers.isEmpty {
+            self.dbgLog("refresh:hold-serving", [
+              "connected": self.allConnectedPeers.count,
+              "discovered": self.discoveredFollowers.count,
+            ])
+            self.broadcastDirectorAnnounce()
+            for (_, token) in self.discoveredDirectors where !token.isEmpty {
+              self.handleDirectorConflict(with: token)
+              guard self.currentRole == "director" else { break }
+            }
+            self.scheduleNextDiscoveryRefresh()
             return
           }
           self.refreshDiscovery()
