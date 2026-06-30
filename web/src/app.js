@@ -28,6 +28,17 @@ const tryLiftGate = () => {
   }
 };
 const revealReader = () => { revealRequested = true; tryLiftGate(); };
+// Surface a quiet "offline — retrying" state INSIDE the gate instead of revealing a wrong/broken
+// book. Used only on a first-EVER visit while offline, when geo can't resolve and there's no
+// last-known book to fall back to (a returning user boots straight onto their cached book via the
+// persisted svGeoBook, so they never reach this state). The gate itself stays up — this only
+// swaps the caption — so the no-flash invariant is preserved.
+const geoGateText = document.getElementById("geo-gate-text");
+const setGateOffline = (offline) => {
+  if (!geoGate) return;
+  geoGate.classList.toggle("is-offline", offline);
+  if (geoGateText) geoGateText.textContent = offline ? "Sin conexión — reintentando…" : "Cargando Signo Vivo…";
+};
 // Re-attempt the lift when the page image loads, and recover transient first-load failures
 // (cold cache / flaky network) by retrying the src instead of revealing a broken image. Capped
 // so a genuinely-missing asset eventually gives up (the 12s backstop below still frees the gate).
@@ -165,9 +176,24 @@ const loadBookRegistry = () => {
   }
 };
 const bookRegistry = loadBookRegistry();
+// True when the initial book came from a KNOWN-CORRECT source (native injection or a persisted
+// geo-resolution) rather than the bare hymns-4/registry default. The offline backstop reads this:
+// a known-correct book may be revealed even if geo never confirms (returning offline user); the
+// bare default must NOT be flashed offline (first-ever visit) — we hold the gate + retry instead.
+let initialBookIsKnown = false;
 const resolveInitialBook = () => {
-  // Precedence: native-injected initial book → registry default → hymns-4.
-  if (isBookId(window.__SIGNO_VINO_INITIAL_BOOK)) return window.__SIGNO_VINO_INITIAL_BOOK;
+  // Precedence: native-injected initial book → last geo-resolved book (offline restore) →
+  // registry default → hymns-4.
+  if (isBookId(window.__SIGNO_VINO_INITIAL_BOOK)) { initialBookIsKnown = true; return window.__SIGNO_VINO_INITIAL_BOOK; }
+  // Restore the LAST geo-resolved book so an offline reload (wifi-without-internet: the geo
+  // fetch fails, relay never resolves) boots straight onto the right book — its pages are
+  // SW-cached from the prior online visit, so the white gate reveals the CORRECT book rather
+  // than the hymns-4 default. Online, the geo poll still re-confirms/corrects it for movers.
+  // localStorage can throw (private mode) — guard it.
+  try {
+    const stored = localStorage.getItem("svGeoBook");
+    if (isBookId(stored)) { initialBookIsKnown = true; return stored; }
+  } catch {}
   if (isBookId(bookRegistry.default)) return bookRegistry.default;
   return "hymns-4";
 };
@@ -3005,6 +3031,11 @@ const relayPollOnce = async (force = false) => {
         if (state.currentBook === geoBook) {
           relayGeoBookApplied = true;
           geoJustResolved = true;
+          // Persist the geo-resolved book so an OFFLINE reload (wifi-without-internet → the geo
+          // fetch fails → relay never resolves) can boot straight onto the LAST-KNOWN book instead
+          // of the hymns-4 default. Its pages are SW-cached from this online visit, so the gate
+          // reveals the RIGHT book offline. localStorage can throw (private mode) — guard it.
+          try { localStorage.setItem("svGeoBook", geoBook); } catch {}
         }
       }
     }
@@ -3203,10 +3234,13 @@ const initReader = async () => {
     await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
   }
   if (!relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
-  // Reveal the reader once the BOOK is known. Native injects it, and an offline web client
-  // can't geo-resolve — both reveal now. An online web client waits for relayPollOnce to read
-  // X-Hymnal (it reveals there); the 3s safety net below covers a hung/blocked relay.
-  if (NATIVE_FILE_MODE || hasNativeBridge() || !navigator.onLine) revealReader();
+  // Reveal the reader once the BOOK is known. Native injects it. An offline web client reveals
+  // now ONLY if it has a KNOWN book (restored svGeoBook) — a first-ever offline visit with no
+  // known book must NOT reveal the bare hymns-4 default here; the mustHoldForOffline() backstop
+  // holds the loader ("Sin conexión — reintentando…") instead and self-heals on reconnect. An
+  // online web client waits for relayPollOnce to read X-Hymnal (it reveals there); the safety
+  // net below still covers a hung/blocked relay.
+  if (NATIVE_FILE_MODE || hasNativeBridge() || (!navigator.onLine && initialBookIsKnown)) revealReader();
   startRelayFollow();
   // Search index is loaded lazily on first search-open (see activateTab) so it
   // never weighs down the follower's first paint.
@@ -3254,12 +3288,39 @@ initReader().catch((error) => {
 // BUT: if a geo switch is actively mid-fetch when 8s elapses (cold relay + slow pages.json on
 // incognito mobile), revealing now would flash the default book the instant before standard
 // lands. Hold and re-check briefly; the 12s liftGateNow is the absolute backstop either way.
+// HOLD condition: a FIRST-EVER visit while OFFLINE, where geo never resolved AND the initial book
+// is only the bare hymns-4/registry default (no native injection, no persisted svGeoBook). Here a
+// reveal would flash the WRONG/possibly-uncached default, so we keep the loader up (with a quiet
+// "Sin conexión — reintentando…" caption) and let the self-heal re-poll lift it once geo resolves.
+// A returning offline user does NOT hit this — initialBookIsKnown is true, so their cached correct
+// book reveals normally. Native/online paths are unaffected.
+const mustHoldForOffline = () =>
+  !relayGeoBookApplied && !initialBookIsKnown && !navigator.onLine
+  && !NATIVE_FILE_MODE && !hasNativeBridge();
 const revealAfterGeoSettle = () => {
   if (relayGeoSwitchInProgress) { setTimeout(revealAfterGeoSettle, 400); return; }
+  if (mustHoldForOffline()) { setGateOffline(true); setTimeout(revealAfterGeoSettle, 1500); return; }
+  setGateOffline(false);
   revealReader();
 };
 setTimeout(revealAfterGeoSettle, 8000);
-// Absolute anti-trap: if the image still hasn't become displayable (persistent failure), force
-// the gate down so the user is never stranded behind white. Rare degraded case — the retry
-// above recovers the common transient first-load failure long before this fires.
-setTimeout(liftGateNow, 12000);
+// Absolute anti-trap: if the image still hasn't become displayable (persistent failure), force the
+// gate down so the user is never stranded behind white. EXCEPTION: the first-ever-offline hold
+// above — there we deliberately keep the loader (never reveal a wrong/broken default); re-check on
+// a short timer so it self-heals the instant connectivity (and geo) returns, instead of trapping
+// at a broken default. The common transient first-load failure recovers long before this fires.
+const liftGateBackstop = () => {
+  if (mustHoldForOffline()) { setGateOffline(true); setTimeout(liftGateBackstop, 1500); return; }
+  setGateOffline(false);
+  liftGateNow();
+};
+setTimeout(liftGateBackstop, 12000);
+// Self-heal: when connectivity (and thus geo) returns to a client that booted offline-first-ever,
+// re-poll so geo resolves, switches to the correct book, and reveals. relayPollOnce is no-op once
+// relayGeoBookApplied is true (already-correct book → no re-switch flash), so this is safe to fire
+// on every reconnect. Only wired on the web follower path (native/offline-file modes skip relay).
+if (!NATIVE_FILE_MODE && !hasNativeBridge()) {
+  const reHealGeo = () => { if (!relayGeoBookApplied) relayPollOnce(true); };
+  window.addEventListener("online", reHealGeo);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reHealGeo(); });
+}
