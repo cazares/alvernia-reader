@@ -182,20 +182,26 @@ const bookRegistry = loadBookRegistry();
 // bare default must NOT be flashed offline (first-ever visit) — we hold the gate + retry instead.
 let initialBookIsKnown = false;
 const resolveInitialBook = () => {
-  // Precedence: native-injected initial book → last geo-resolved book (offline restore) →
-  // registry default → hymns-4.
+  // Precedence: native-injected initial book → last geo-resolved book (offline restore) → NULL.
+  // There is NO blind default: a fresh device with no native injection and no persisted geo book
+  // resolves to null and stays behind the loading screen until live geo resolves its book. This
+  // is the rule that prevents a fresh Del-Rio-or-elsewhere device from FLASHING the wrong book
+  // (Himnos de Sión) before geo lands.
   if (isBookId(window.__SIGNO_VINO_INITIAL_BOOK)) { initialBookIsKnown = true; return window.__SIGNO_VINO_INITIAL_BOOK; }
   // Restore the LAST geo-resolved book so an offline reload (wifi-without-internet: the geo
-  // fetch fails, relay never resolves) boots straight onto the right book — its pages are
-  // SW-cached from the prior online visit, so the white gate reveals the CORRECT book rather
-  // than the hymns-4 default. Online, the geo poll still re-confirms/corrects it for movers.
-  // localStorage can throw (private mode) — guard it.
+  // fetch fails / times out, relay never resolves) boots straight onto the right book — its pages
+  // are SW-cached from the prior online visit, so the white gate reveals the CORRECT book. This
+  // restore INCLUDES "standard" (the private Del Rio parish manual): a Del Rio device that
+  // resolved standard while online MUST show standard offline, else it confuses choir members.
+  // Online, the geo poll still re-confirms/corrects it for movers. localStorage can throw
+  // (private mode) — guard it.
   try {
     const stored = localStorage.getItem("svGeoBook");
     if (isBookId(stored)) { initialBookIsKnown = true; return stored; }
   } catch {}
-  if (isBookId(bookRegistry.default)) return bookRegistry.default;
-  return "hymns-4";
+  // No known source → NO book. The loading screen holds; live geo (or a reconnect re-heal) is the
+  // ONLY thing that may reveal a book from here. Never blind-default to hymns-4 OR standard.
+  return null;
 };
 state.currentBook = resolveInitialBook();
 const bookLabel = (bookId) => bookRegistry.books?.[bookId]?.label || "";
@@ -587,6 +593,9 @@ const cacheSinglePage = async (cache, pageNumber) => {
 };
 
 const ensureOfflineBundle = async (totalPages, onProgress) => {
+  // Defensive: never pre-cache against an unresolved book (coreAssetsForBook / pageFileName would
+  // build books/null/… requests). Callers already guard, but this keeps the function self-safe.
+  if (!isBookId(state.currentBook)) return;
   await ensureCoreAssetsCached();
   const cache = await caches.open(PAGE_CACHE);
   const cachedPages = await getCachedPageSet(cache);
@@ -632,6 +641,8 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
 const offlinePrecachedBooks = new Set();
 const deferOfflinePrecache = (totalPages, bookId = state.currentBook) => {
   if (NATIVE_FILE_MODE || !("caches" in window)) return;
+  // No resolved book → nothing to pre-cache (coreAssetsForBook would request books/null/… assets).
+  if (!isBookId(bookId)) return;
   if (offlinePrecachedBooks.has(bookId)) return;
   const SETTLE_MS = 4000;   // base delay so first paint + relay handshake finish first
   const POLL_MS = 1500;     // how often we re-check the gate after the settle delay
@@ -928,6 +939,10 @@ const loadPageImage = async (pageNumber, retryToken = "") => {
 };
 
 const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = {}) => {
+  // No resolved book → no page exists to render (pageFileName would build books/null/page-…webp,
+  // a guaranteed 404). No-op so nothing paints behind the loading gate. Once geo resolves and
+  // switchBook sets a real book, renderPage is driven normally.
+  if (!isBookId(state.currentBook)) return;
   const nextPage = clampPage(pageNumber);
   const requestId = state.pageLoadRequest + 1;
   state.pageLoadRequest = requestId;
@@ -2926,6 +2941,11 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   // legacy/unknown bookId made web silently render the page against its geo book while native
   // fell back to mode — they diverged).
   const snapBook = bookFromSnap(snap);
+  // Book still UNRESOLVED (null) and the director gave no usable book signal → we have no book to
+  // render this page against. Bail BEFORE the seq guard advances relay.lastSeq, so a later push
+  // carrying a real bookId/mode (or the geo X-Hymnal resolution) can still re-home and apply us.
+  // Rendering here would mean page-against-null-book → a wrong/404 paint behind the gate.
+  if (!snapBook && !isBookId(state.currentBook)) return;
   if (snapBook && snapBook !== state.currentBook) {
     await switchBook(snapBook, { fromNative: true });
     // switchBook rolls back currentBook on a load failure (offline / 404 / bad JSON) and
@@ -3012,7 +3032,20 @@ let relayGeoBookApplied = false;
 let relayGeoSwitchInProgress = false;
 const relayPollOnce = async (force = false) => {
   try {
-    const r = await fetch(relayStateUrl(), { cache: "no-store" });
+    // Time-box the geo /state fetch with an AbortController so a HUNG connection fails FAST.
+    // navigator.onLine is TRUE on wifi-without-internet, so the fetch can hang indefinitely —
+    // that hang previously let the 8s backstop reveal the wrong/default book. A ~6s abort makes
+    // the fetch reject (caught below → no reveal), so an unresolved client keeps the loader up
+    // (or restores its persisted book) instead of flashing a default. We do NOT consult
+    // navigator.onLine anywhere — fetch failure/timeout is the only "offline" signal.
+    const ac = typeof AbortController === "function" ? new AbortController() : null;
+    const abortTimer = ac ? setTimeout(() => { try { ac.abort(); } catch {} }, 6000) : 0;
+    let r;
+    try {
+      r = await fetch(relayStateUrl(), { cache: "no-store", signal: ac ? ac.signal : undefined });
+    } finally {
+      if (abortTimer) clearTimeout(abortTimer);
+    }
     // IP-geo book selection for web followers (signovivo.com): Del Rio (78840/78841) ->
     // standard manual, elsewhere -> hymns-4, read from the relay's X-Hymnal response header.
     // The native shell injects __SIGNO_VINO_INITIAL_BOOK instead, so this applies only on the
@@ -3183,89 +3216,111 @@ const initReader = async () => {
   // instant first paint. If the chosen book is the default we paint inline now and
   // hydrate the song index in the background; if it's a NON-default book we must load
   // that book's manifest before first paint so totalPages/pages match.
-  const inlinedPages = document.getElementById("pages-data");
-  const usingInlineDefault = Boolean(inlinedPages) && state.currentBook === bookRegistry.default;
-  const manifest = usingInlineDefault
-    ? JSON.parse(inlinedPages.textContent)
-    : await fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" }).then((r) => r.json());
-  // Only adopt a positive-integer totalPages — a missing / NaN / string value would
-  // NaN-stick the whole reader. Fall back to the per-book registry count, else keep
-  // the state default; never assign NaN/undefined.
-  const manifestTotal = Number(manifest.totalPages);
-  if (Number.isInteger(manifestTotal) && manifestTotal > 0) {
-    state.totalPages = manifestTotal;
-  } else {
-    const registryTotal = Number(bookRegistry.books?.[state.currentBook]?.totalPages);
-    if (Number.isInteger(registryTotal) && registryTotal > 0) state.totalPages = registryTotal;
-  }
-  state.currentPage = DEFAULT_START_PAGE;
-
-  // Fold the full song index into state and refresh everything that depends on it.
-  // Runs immediately if the index came inline with the manifest (offline / ?admin
-  // build), otherwise in the background once the book's pages.json lands (see below).
-  const hydrateSongIndex = (data) => {
-    if (!data || !data.songIndex) return;
-    state.songIndex = [...data.songIndex].sort((left, right) => left.song - right.song);
-    state.totalSongs = state.songIndex.length;
-    state.themeIndex = data.themeIndex || [];
-    state.songPageLookup = buildSongPageLookup(state.songIndex);
-    // For the default book, totalPages was painted from inline #pages-data and never
-    // reconciled with the authoritative fetched pages.json. If they drift, adopt the
-    // fetched value (positive integer only) and re-render so paging/padding stay correct.
-    const dataTotal = Number(data.totalPages);
-    if (Number.isInteger(dataTotal) && dataTotal > 0 && dataTotal !== state.totalPages) {
-      state.totalPages = dataTotal;
-      renderPage(state.currentPage, { pushToHistory: false });
+  // The book may be UNRESOLVED (null) — a fresh web device with no native injection and no
+  // persisted svGeoBook. In that case there is NO manifest to load, NO page to paint, and NO
+  // book to pre-cache: we skip the whole paint block, leave the #geo-gate loader up, and let the
+  // relay's X-Hymnal geo resolution (or a reconnect re-heal) switch us onto the right book and
+  // reveal. Painting anything here would FLASH a wrong/default book — the exact bug this guards.
+  if (isBookId(state.currentBook)) {
+    const inlinedPages = document.getElementById("pages-data");
+    const usingInlineDefault = Boolean(inlinedPages) && state.currentBook === bookRegistry.default;
+    const manifest = usingInlineDefault
+      ? JSON.parse(inlinedPages.textContent)
+      : await fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" }).then((r) => r.json());
+    // Only adopt a positive-integer totalPages — a missing / NaN / string value would
+    // NaN-stick the whole reader. Fall back to the per-book registry count, else keep
+    // the state default; never assign NaN/undefined.
+    const manifestTotal = Number(manifest.totalPages);
+    if (Number.isInteger(manifestTotal) && manifestTotal > 0) {
+      state.totalPages = manifestTotal;
+    } else {
+      const registryTotal = Number(bookRegistry.books?.[state.currentBook]?.totalPages);
+      if (Number.isInteger(registryTotal) && registryTotal > 0) state.totalPages = registryTotal;
     }
+    state.currentPage = DEFAULT_START_PAGE;
+
+    // Fold the full song index into state and refresh everything that depends on it.
+    // Runs immediately if the index came inline with the manifest (offline / ?admin
+    // build), otherwise in the background once the book's pages.json lands (see below).
+    const hydrateSongIndex = (data) => {
+      if (!data || !data.songIndex) return;
+      state.songIndex = [...data.songIndex].sort((left, right) => left.song - right.song);
+      state.totalSongs = state.songIndex.length;
+      state.themeIndex = data.themeIndex || [];
+      state.songPageLookup = buildSongPageLookup(state.songIndex);
+      // For the default book, totalPages was painted from inline #pages-data and never
+      // reconciled with the authoritative fetched pages.json. If they drift, adopt the
+      // fetched value (positive integer only) and re-render so paging/padding stay correct.
+      const dataTotal = Number(data.totalPages);
+      if (Number.isInteger(dataTotal) && dataTotal > 0 && dataTotal !== state.totalPages) {
+        state.totalPages = dataTotal;
+        renderPage(state.currentPage, { pushToHistory: false });
+      }
+      renderStatus();
+      renderActiveTab();
+    };
+    if (manifest.songIndex) hydrateSongIndex(manifest);
+    updateBookLabel();
+    renderDraft();
     renderStatus();
-    renderActiveTab();
-  };
-  if (manifest.songIndex) hydrateSongIndex(manifest);
-  updateBookLabel();
-  renderDraft();
-  renderStatus();
-  updateFullscreenButton();
-  hideLoadingIndicator();
-  // Show the reader IMMEDIATELY — never block the congregation behind the big
-  // offline pre-cache. The service worker caches every page in the background.
-  setOfflineGateState({ visible: false });
-  // Open directly on the director's current page if one is broadcasting (the relay
-  // state is tiny — just a page number — so this barely delays first paint). Bounded
-  // by a short timeout so a slow/dead relay can't block the reader. The native app /
-  // offline bundle skip the relay (the native bridge drives the page there).
-  if (!hasNativeBridge() && !NATIVE_FILE_MODE) {
-    await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    updateFullscreenButton();
+    hideLoadingIndicator();
+    // Show the reader IMMEDIATELY — never block the congregation behind the big
+    // offline pre-cache. The service worker caches every page in the background.
+    setOfflineGateState({ visible: false });
+    // Open directly on the director's current page if one is broadcasting (the relay
+    // state is tiny — just a page number — so this barely delays first paint). Bounded
+    // by a short timeout so a slow/dead relay can't block the reader. The native app /
+    // offline bundle skip the relay (the native bridge drives the page there).
+    if (!hasNativeBridge() && !NATIVE_FILE_MODE) {
+      await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    }
+    if (isBookId(state.currentBook) && !relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
+    // Reveal the reader once the BOOK is RESOLVED. Native injects it; a restored svGeoBook
+    // (initialBookIsKnown) reveals offline too — INCLUDING standard, so a Del Rio device shows
+    // its parish manual offline. A first-ever offline visit with NO resolved book never reaches
+    // here (the isBookId guard above skipped the whole block); it holds the loader and self-heals
+    // on reconnect. An online web client waits for relayPollOnce to read X-Hymnal (it reveals
+    // there); the safety net below still covers a hung/blocked relay. Decided by "is the book
+    // resolved", NOT navigator.onLine (which is TRUE on wifi-without-internet).
+    if (NATIVE_FILE_MODE || hasNativeBridge() || initialBookIsKnown) revealReader();
+    // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
+    // off the critical first paint without losing titles, themes, or jump-to-song.
+    if (!manifest.songIndex) {
+      fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" })
+        .then((response) => response.json())
+        .then(hydrateSongIndex)
+        .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
+    }
+    // Background pre-cache for everyone — at 13 MB it's cheap enough to always do.
+    // Deferred until AFTER the reader is revealed so it doesn't compete with first-paint
+    // fetches on weak connections; pages then download silently while the user reads.
+    deferOfflinePrecache(state.totalPages, state.currentBook);
+  } else {
+    // No resolved book: still get the chrome into a sane idle state behind the gate, then drive
+    // the relay so geo can resolve. Nothing is rendered/painted while currentBook is null.
+    updateFullscreenButton();
+    hideLoadingIndicator();
+    setOfflineGateState({ visible: false });
+    if (!hasNativeBridge() && !NATIVE_FILE_MODE) {
+      await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    }
+    // relayPollOnce reveals from inside (geoJustResolved → revealReader) once X-Hymnal resolves
+    // and switchBook lands; if geo didn't resolve, the gate stays up ("Sin conexión —
+    // reintentando…") and the reconnect re-heal retries. Do NOT revealReader() here.
   }
-  if (!relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
-  // Reveal the reader once the BOOK is known. Native injects it. An offline web client reveals
-  // now ONLY if it has a KNOWN book (restored svGeoBook) — a first-ever offline visit with no
-  // known book must NOT reveal the bare hymns-4 default here; the mustHoldForOffline() backstop
-  // holds the loader ("Sin conexión — reintentando…") instead and self-heals on reconnect. An
-  // online web client waits for relayPollOnce to read X-Hymnal (it reveals there); the safety
-  // net below still covers a hung/blocked relay.
-  if (NATIVE_FILE_MODE || hasNativeBridge() || (!navigator.onLine && initialBookIsKnown)) revealReader();
   startRelayFollow();
   // Search index is loaded lazily on first search-open (see activateTab) so it
   // never weighs down the follower's first paint.
   renderActiveTab();
+  // bridge-ready is for the native shell only (hasNativeBridge), where the book is always
+  // injected/resolved, so currentBook is never null here. Harmless no-op on the web.
   postNativeBridge({
     type: "bridge-ready",
     page: state.currentPage,
     totalPages: state.totalPages,
     book: state.currentBook,
   });
-  // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
-  // off the critical first paint without losing titles, themes, or jump-to-song.
-  if (!manifest.songIndex) {
-    fetch(resolveAppPath(`/books/${state.currentBook}/pages.json`), { cache: "no-store" })
-      .then((response) => response.json())
-      .then(hydrateSongIndex)
-      .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
-  }
-  // Background pre-cache for everyone — at 13 MB it's cheap enough to always do.
-  // Deferred until AFTER the reader is revealed so it doesn't compete with first-paint
-  // fetches on weak connections; pages then download silently while the user reads.
-  deferOfflinePrecache(state.totalPages, state.currentBook);
 };
 
 if (appVersionLabel && window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION) {
@@ -3283,23 +3338,24 @@ initReader().catch((error) => {
 });
 // Safety nets for the white geo-gate. PRIMARY reveal = the geo poll (relayPollOnce →
 // geoJustResolved → revealReader, AFTER its awaited switchBook), so the CORRECT book paints
-// before the gate lifts. We deliberately do NOT reveal the default book on a short timer: a
+// before the gate lifts. We deliberately do NOT reveal a default book on a short timer: a
 // slow-but-working geo on mobile/incognito (cold relay connection, often 3–6s) would otherwise
-// flash the default Himnos de Sión before switchBook(standard) lands — exactly the flash a
-// user hit on incognito Chrome mobile. The gate stays white (with the spinner) until geo
-// resolves; only a LONG fallback reveals the default at 8s, for a genuinely dead/blocked relay.
-// BUT: if a geo switch is actively mid-fetch when 8s elapses (cold relay + slow pages.json on
-// incognito mobile), revealing now would flash the default book the instant before standard
-// lands. Hold and re-check briefly; the 12s liftGateNow is the absolute backstop either way.
-// HOLD condition: a FIRST-EVER visit while OFFLINE, where geo never resolved AND the initial book
-// is only the bare hymns-4/registry default (no native injection, no persisted svGeoBook). Here a
-// reveal would flash the WRONG/possibly-uncached default, so we keep the loader up (with a quiet
-// "Sin conexión — reintentando…" caption) and let the self-heal re-poll lift it once geo resolves.
-// A returning offline user does NOT hit this — initialBookIsKnown is true, so their cached correct
-// book reveals normally. Native/online paths are unaffected.
-const mustHoldForOffline = () =>
-  !relayGeoBookApplied && !initialBookIsKnown && !navigator.onLine
-  && !NATIVE_FILE_MODE && !hasNativeBridge();
+// flash the wrong book before switchBook lands — exactly the flash a user hit on incognito
+// Chrome mobile.
+//
+// THE REVEAL RULE (authoritative): reveal the reader IFF a book is RESOLVED — native file mode,
+// native bridge, a persisted restore (initialBookIsKnown), OR a live-geo resolution this session
+// (relayGeoBookApplied). If UNRESOLVED, HOLD the loading screen forever (re-checking), with the
+// "Sin conexión — reintentando…" caption — NEVER reveal ANY book, not hymns-4 and not standard.
+// A fresh device with no persisted book and no live geo therefore shows NO book until real
+// internet returns and geo resolves (the reconnect re-heal below). We do NOT consult
+// navigator.onLine — it is TRUE on wifi-without-internet; the only "no book" signal is "no
+// resolved book" (which a hung/aborted geo fetch produces via the 6s AbortController timeout).
+const hasResolvedBook = () =>
+  NATIVE_FILE_MODE || hasNativeBridge() || initialBookIsKnown || relayGeoBookApplied;
+// HOLD whenever there is no resolved book. (Renamed concept: this is no longer about
+// navigator.onLine — it is purely "do we have a book to show".)
+const mustHoldForOffline = () => !hasResolvedBook();
 const revealAfterGeoSettle = () => {
   if (relayGeoSwitchInProgress) { setTimeout(revealAfterGeoSettle, 400); return; }
   if (mustHoldForOffline()) { setGateOffline(true); setTimeout(revealAfterGeoSettle, 1500); return; }
@@ -3307,23 +3363,36 @@ const revealAfterGeoSettle = () => {
   revealReader();
 };
 setTimeout(revealAfterGeoSettle, 8000);
-// Absolute anti-trap: if the image still hasn't become displayable (persistent failure), force the
-// gate down so the user is never stranded behind white. EXCEPTION: the first-ever-offline hold
-// above — there we deliberately keep the loader (never reveal a wrong/broken default); re-check on
-// a short timer so it self-heals the instant connectivity (and geo) returns, instead of trapping
-// at a broken default. The common transient first-load failure recovers long before this fires.
+// Absolute anti-trap: if a book IS resolved but its image still hasn't become displayable
+// (persistent decode failure), force the gate down so the user is never stranded behind white.
+// EXCEPTION: the no-resolved-book hold above — there we deliberately keep the loader (never reveal
+// a wrong/absent book); re-check on a short timer so it self-heals the instant connectivity (and
+// geo) returns. A device with NO book NEVER auto-reveals — that is the rule. The common transient
+// first-load failure (book resolved, image flaky) recovers long before this fires.
 const liftGateBackstop = () => {
   if (mustHoldForOffline()) { setGateOffline(true); setTimeout(liftGateBackstop, 1500); return; }
   setGateOffline(false);
   liftGateNow();
 };
 setTimeout(liftGateBackstop, 12000);
-// Self-heal: when connectivity (and thus geo) returns to a client that booted offline-first-ever,
-// re-poll so geo resolves, switches to the correct book, and reveals. relayPollOnce is no-op once
-// relayGeoBookApplied is true (already-correct book → no re-switch flash), so this is safe to fire
-// on every reconnect. Only wired on the web follower path (native/offline-file modes skip relay).
+// Self-heal: when connectivity (and thus geo) returns to a client that booted with an UNRESOLVED
+// or only-restored book, re-poll so geo resolves, switches to the correct book, persists
+// svGeoBook, and reveals (one clean switchBook — no flash). relayPollOnce is no-op once
+// relayGeoBookApplied is true (already-correct book → no re-switch), so this is safe to fire
+// repeatedly. We re-heal on three triggers because navigator.onLine does NOT flip when
+// wifi-without-internet silently becomes real internet (no `online` event fires): (1) the `online`
+// event, (2) tab foreground, and (3) a PERIODIC poll while geo is still unresolved — the periodic
+// tick is the only thing that recovers a fresh device sitting on flaky/captive wifi whose geo
+// fetch kept timing out. The interval self-stops once geo applies. Web follower path only.
 if (!NATIVE_FILE_MODE && !hasNativeBridge()) {
   const reHealGeo = () => { if (!relayGeoBookApplied) relayPollOnce(true); };
   window.addEventListener("online", reHealGeo);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reHealGeo(); });
+  // Periodic geo re-heal: every 5s retry the geo /state fetch while still unresolved (the 6s
+  // AbortController bounds each attempt). Clears itself the moment geo applies so we don't keep
+  // hitting the relay once a book is locked in.
+  const reHealTimer = setInterval(() => {
+    if (relayGeoBookApplied) { clearInterval(reHealTimer); return; }
+    relayPollOnce(true);
+  }, 5000);
 }
