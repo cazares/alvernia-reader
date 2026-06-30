@@ -109,6 +109,11 @@ export default function App() {
   // Cloudflare snapshot's freshness (page CHANGES publish to the relay immediately anyway).
   const meshHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const relayHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The role-restore bootstrap (auto-become director/follower from persisted state) must run
+  // EXACTLY ONCE per session. The mesh-bootstrap effect's deps include become*/injectEvent
+  // useCallbacks whose identities can change mid-session, re-running the effect — without this
+  // guard a re-run would re-fire the bootstrap and re-promote / re-mint a director under us.
+  const didBootstrapRef = useRef(false);
 
   const syncAvailable = useMemo(() => isNearbyDirectorSyncAvailable(), []);
 
@@ -221,49 +226,10 @@ export default function App() {
     }, 12000);
   }, [stopDirectorHeartbeat]);
 
-  // ── Become director ────────────────────────────────────────────────────────
-  const becomeDirector = useCallback(
-    async (code: string) => {
-      // Claim this role transition; a later flip bumps the generation and supersedes us.
-      const myGen = ++roleGenerationRef.current;
-      if (!syncAvailable) {
-        // No mesh on this device — still act as an online transmitter to the relay.
-        explicitTransmitterRef.current = true;
-        roleRef.current = "off";
-        injectEvent({ type: "role", role: "director" });
-        broadcastPage(currentPageRef.current, currentBookRef.current);
-        startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
-        return;
-      }
-      try {
-        try {
-          await startNearbyDirector(DIRECTOR_SESSION);
-        } catch {
-          // Mesh startup can transiently fail (permission race, radio warm-up).
-          // Wait briefly and retry the start exactly once before giving up.
-          await new Promise((r) => setTimeout(r, 2000));
-          if (myGen !== roleGenerationRef.current) return; // superseded during the retry sleep
-          await startNearbyDirector(DIRECTOR_SESSION);
-        }
-        if (myGen !== roleGenerationRef.current) return; // superseded while the mesh was starting
-        roleRef.current = "director";
-        await AsyncStorage.multiSet([
-          [STORAGE_KEYS.lastSyncRole, "director"],
-          [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
-          [STORED_CODE_KEY, code],
-        ]);
-        if (myGen !== roleGenerationRef.current) return; // superseded while persisting
-        injectEvent({ type: "role", role: "director" });
-        broadcastPage(currentPageRef.current, currentBookRef.current);
-        startDirectorHeartbeat();
-        breadcrumb("director");
-      } catch {
-        injectEvent({ type: "role", role: "none" });
-      }
-    },
-    [syncAvailable, injectEvent, broadcastPage, breadcrumb, startDirectorHeartbeat],
-  );
-
+  // ── Become follower ──────────────────────────────────────────────────────────
+  // Declared BEFORE becomeDirector: the live-takeover failure path in becomeDirector
+  // falls back to becomeFollower, so it must be initialized first (avoids a TDZ in the
+  // useCallback dependency array).
   const becomeFollower = useCallback(async () => {
     // Claim this role transition; a later flip bumps the generation and supersedes us.
     const myGen = ++roleGenerationRef.current;
@@ -290,6 +256,84 @@ export default function App() {
     if (myGen !== roleGenerationRef.current) return; // superseded while the mesh was starting
     injectEvent({ type: "role", role: "follower" });
   }, [syncAvailable, injectEvent, stopDirectorHeartbeat]);
+
+  // ── Become director ────────────────────────────────────────────────────────
+  const becomeDirector = useCallback(
+    async (code: string) => {
+      // Claim this role transition; a later flip bumps the generation and supersedes us.
+      const myGen = ++roleGenerationRef.current;
+      if (!syncAvailable) {
+        // No mesh on this device — still act as an online transmitter to the relay.
+        explicitTransmitterRef.current = true;
+        roleRef.current = "off";
+        injectEvent({ type: "role", role: "director" });
+        broadcastPage(currentPageRef.current, currentBookRef.current);
+        startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
+        return;
+      }
+      // LIVE-DIRECTOR TAKEOVER: if we're entering a director code while currently a CONNECTED
+      // follower, Swift's startDirector guard rejects with DIRECTOR_TAKEOVER_REQUIRED
+      // (currentRole=="follower" && connectedDirectorPeer != nil). Drop the follower link FIRST
+      // so the guard passes, then start as director (the most-recent token wins on contention).
+      const wasFollower = roleRef.current === "follower";
+      if (wasFollower) {
+        stopDirectorHeartbeat(); // belt-and-suspenders; a follower shouldn't have one running
+        try {
+          await resetNearbyDirectorSync();
+        } catch {
+          /* best-effort drop; startDirector below still attempts the takeover */
+        }
+        if (myGen !== roleGenerationRef.current) return; // superseded while dropping the link
+      }
+      try {
+        try {
+          await startNearbyDirector(DIRECTOR_SESSION);
+        } catch {
+          // Mesh startup can transiently fail (permission race, radio warm-up).
+          // Wait briefly and retry the start exactly once before giving up.
+          await new Promise((r) => setTimeout(r, 2000));
+          if (myGen !== roleGenerationRef.current) return; // superseded during the retry sleep
+          await startNearbyDirector(DIRECTOR_SESSION);
+        }
+        if (myGen !== roleGenerationRef.current) return; // superseded while the mesh was starting
+        roleRef.current = "director";
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.lastSyncRole, "director"],
+          [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
+          [STORED_CODE_KEY, code],
+        ]);
+        if (myGen !== roleGenerationRef.current) return; // superseded while persisting
+        injectEvent({ type: "role", role: "director" });
+        broadcastPage(currentPageRef.current, currentBookRef.current);
+        startDirectorHeartbeat();
+        // SPLIT-BRAIN MITIGATION: a brand-new director's token must propagate fast so peers
+        // (and any prior director) re-find it and converge, instead of waiting out the ~25s
+        // browse cycle while both broadcast and followers flap. Kick an immediate re-browse.
+        if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
+        breadcrumb("director");
+      } catch {
+        // A live-takeover attempt that still failed (e.g. Swift DIRECTOR_TAKEOVER_REQUIRED raced
+        // back, or a transient mesh error) must NOT strip a connected follower's UI to "none".
+        if (wasFollower) {
+          // We already dropped the follower link via resetNearbyDirectorSync above; re-join the
+          // mesh as a follower so the device keeps syncing instead of stranding link-less.
+          // (becomeFollower bumps the generation, so this also supersedes our own stale path.)
+          if (myGen === roleGenerationRef.current) becomeFollower();
+        } else {
+          injectEvent({ type: "role", role: "none" });
+        }
+      }
+    },
+    [
+      syncAvailable,
+      injectEvent,
+      broadcastPage,
+      breadcrumb,
+      startDirectorHeartbeat,
+      stopDirectorHeartbeat,
+      becomeFollower,
+    ],
+  );
 
   // ── Soft reset (secret code 744668486) ─────────────────────────────────────
   const performSoftReset = useCallback(async () => {
@@ -390,7 +434,9 @@ export default function App() {
             const { page, book } = lastDirectorSnapshotRef.current;
             currentPageRef.current = page;
             currentBookRef.current = book;
-            if (book !== msg.book) injectEvent({ type: "set-book", book });
+            // ONE event only: the page sync-event carries `book` and the web handler switches +
+            // renders atomically. A separate set-book first made the web jump to the book DEFAULT
+            // page, then the page event raced it — followers could flash the default or wedge.
             injectEvent({ type: "sync-event", event: { type: "page", page, book } });
           }
           break;
@@ -444,10 +490,10 @@ export default function App() {
             if (lastDirectorSnapshotRef.current) {
               const { page, book } = lastDirectorSnapshotRef.current;
               currentPageRef.current = page;
-              if (book !== currentBookRef.current) {
-                currentBookRef.current = book;
-                injectEvent({ type: "set-book", book });
-              }
+              // Keep the ref in sync, but DON'T inject a separate set-book: the single page
+              // sync-event below carries `book` and switches + renders atomically (no race / no
+              // momentary book-default flash from a two-script set-book→page interleave).
+              currentBookRef.current = book;
               injectEvent({ type: "sync-event", event: { type: "page", page, book } });
             }
           }
@@ -518,25 +564,32 @@ export default function App() {
     if (!syncAvailable) return;
     primeNearbyPermissions().catch(() => {});
 
-    (async () => {
-      try {
-        const [lastRole, lastAtRaw] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole),
-          AsyncStorage.getItem(STORAGE_KEYS.lastDirectorAt),
-        ]);
-        const lastAt = Number(lastAtRaw) || 0;
-        const recentlyDirector =
-          lastRole === "director" && Date.now() - lastAt < DIRECTOR_RESTORE_WINDOW_MS;
-        if (recentlyDirector) {
-          const code = (await AsyncStorage.getItem(STORED_CODE_KEY)) || ADMIN_CODE;
-          await becomeDirector(code);
-        } else {
-          await becomeFollower();
+    // Role-restore bootstrap: ONCE per session only. If this effect re-runs (its become*/
+    // injectEvent useCallback deps changed identity mid-session), re-firing this would re-promote
+    // or re-mint a director under the live role — clobbering an intentional in-session role flip.
+    // The listener below still re-registers on every run; only this restore is one-shot.
+    if (!didBootstrapRef.current) {
+      didBootstrapRef.current = true;
+      (async () => {
+        try {
+          const [lastRole, lastAtRaw] = await Promise.all([
+            AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole),
+            AsyncStorage.getItem(STORAGE_KEYS.lastDirectorAt),
+          ]);
+          const lastAt = Number(lastAtRaw) || 0;
+          const recentlyDirector =
+            lastRole === "director" && Date.now() - lastAt < DIRECTOR_RESTORE_WINDOW_MS;
+          if (recentlyDirector) {
+            const code = (await AsyncStorage.getItem(STORED_CODE_KEY)) || ADMIN_CODE;
+            await becomeDirector(code);
+          } else {
+            await becomeFollower();
+          }
+        } catch {
+          becomeFollower();
         }
-      } catch {
-        becomeFollower();
-      }
-    })();
+      })();
+    }
 
     const sub = addNearbyDirectorSyncListener((event: Record<string, unknown>) => {
       const type = String(event?.type ?? "");
@@ -552,10 +605,12 @@ export default function App() {
           // book switch, or a recovered dropped packet (page differs from ours) still syncs.
           if (page === currentPageRef.current && book === currentBookRef.current) break;
           currentPageRef.current = page;
-          if (book !== currentBookRef.current) {
-            currentBookRef.current = book;
-            injectEvent({ type: "set-book", book });
-          }
+          // Keep the ref in sync, but DON'T inject a separate set-book: the single page
+          // sync-event below carries `book`, and the web handler switches the book + renders the
+          // page atomically. The old set-book→page two-script sequence raced at the first
+          // `await switchBook` — followers could land on the book DEFAULT page or wedge on a
+          // rolled-back load. One event eliminates the race.
+          if (book !== currentBookRef.current) currentBookRef.current = book;
           injectEvent({ type: "sync-event", event: { type: "page", page, book } });
           break;
         }
@@ -661,10 +716,10 @@ export default function App() {
         if (lastDirectorSnapshotRef.current) {
           const { page, book } = lastDirectorSnapshotRef.current;
           currentPageRef.current = page;
-          if (book !== currentBookRef.current) {
-            currentBookRef.current = book;
-            injectEvent({ type: "set-book", book });
-          }
+          // Keep the ref in sync, but DON'T inject a separate set-book: the single page
+          // sync-event below carries `book` and switches + renders atomically (no two-script
+          // set-book→page race that could flash the book default on foreground).
+          if (book !== currentBookRef.current) currentBookRef.current = book;
           injectEvent({ type: "sync-event", event: { type: "page", page, book } });
         }
       } else if (roleRef.current === "director") {

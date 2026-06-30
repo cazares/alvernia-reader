@@ -2902,7 +2902,20 @@ const connectRelay = () => {
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
   relay.ws = ws;
   let lastMsgAt = Date.now();
+  // Zombie-CONNECTING guard: a flaky network can leave a socket stuck in readyState 0
+  // (CONNECTING) with NO open AND NO close event — it just hangs. The dupe-guard above then
+  // treats it as "already connecting" and blocks every future automatic reconnect (online /
+  // foreground), so the follower silently stalls. Arm a 6s timeout: if the socket is still
+  // CONNECTING when it fires, force-close it (that fires `close` → backoff reconnect) and fall
+  // back to /state polling immediately so the follower keeps syncing. Cleared on BOTH open and
+  // close below so it can't leak or fire late against a socket that already settled.
+  let connectTimer = setTimeout(() => {
+    connectTimer = 0;
+    if (ws.readyState === 0) { try { ws.close(); } catch {} startRelayPolling(); }
+  }, 6000);
+  const clearConnectTimer = () => { if (connectTimer) { clearTimeout(connectTimer); connectTimer = 0; } };
   ws.addEventListener("open", () => {
+    clearConnectTimer();
     relay.backoff = 500;
     lastMsgAt = Date.now();
     relayPollOnce(true);   // force-resync to the director's current page on (re)connect
@@ -2922,6 +2935,7 @@ const connectRelay = () => {
   ws.addEventListener("message", (ev) => { lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)).catch(() => {}); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
+    clearConnectTimer();
     if (relay.heartbeatTimer) { clearInterval(relay.heartbeatTimer); relay.heartbeatTimer = 0; }
     // Only forget the socket if it's still the one that just closed — a newer connectRelay
     // may have already replaced relay.ws, and we must not clobber the live socket.
