@@ -181,12 +181,23 @@ const bookRegistry = loadBookRegistry();
 // a known-correct book may be revealed even if geo never confirms (returning offline user); the
 // bare default must NOT be flashed offline (first-ever visit) — we hold the gate + retry instead.
 let initialBookIsKnown = false;
+// True when the initial book is the BARE PUBLIC SIÓN FLOOR (hymns-4) — not a known-correct source
+// (native inject / persisted geo). The floor guarantees state.currentBook is NEVER null (so nothing
+// renders/precaches against books/null/…), but it must NOT be revealed eagerly: an ONLINE fresh
+// device HOLDS the gate while live geo resolves the real book (no Sión flash), and only the geo
+// TIMEOUT/failure backstop reveals the floor. So floorBookOnly ⇒ initialBookIsKnown stays false
+// (initReader won't reveal at boot); the 8s/12s backstops reveal the floor once geo gives up.
+let floorBookOnly = false;
+// The PUBLIC floor: "Himnos de Sión" is safe for anyone. "standard" (the Del Rio parish manual) is
+// PRIVATE and may only ever be shown on a Del-Rio-authorized device — it is NEVER the floor.
+const PUBLIC_FLOOR_BOOK = "hymns-4";
 const resolveInitialBook = () => {
-  // Precedence: native-injected initial book → last geo-resolved book (offline restore) → NULL.
-  // There is NO blind default: a fresh device with no native injection and no persisted geo book
-  // resolves to null and stays behind the loading screen until live geo resolves its book. This
-  // is the rule that prevents a fresh Del-Rio-or-elsewhere device from FLASHING the wrong book
-  // (Himnos de Sión) before geo lands.
+  // Precedence: native-injected initial book → last geo-resolved book (offline restore) → PUBLIC
+  // SIÓN FLOOR (hymns-4). NEVER null (a null book bricked a fresh/geo-failed device on a permanent
+  // loader — build 351) and NEVER "standard" except via native inject or a persisted standard geo
+  // (standard is private to Del Rio). A device that proved Del Rio (svGeoBook=standard) → standard;
+  // everyone else → the public floor. The floor never FLASHES online: floorBookOnly holds the gate
+  // until live geo resolves the real book (see initReader + the reveal backstops).
   if (isBookId(window.__SIGNO_VINO_INITIAL_BOOK)) { initialBookIsKnown = true; return window.__SIGNO_VINO_INITIAL_BOOK; }
   // Restore the LAST geo-resolved book so an offline reload (wifi-without-internet: the geo
   // fetch fails / times out, relay never resolves) boots straight onto the right book — its pages
@@ -199,9 +210,11 @@ const resolveInitialBook = () => {
     const stored = localStorage.getItem("svGeoBook");
     if (isBookId(stored)) { initialBookIsKnown = true; return stored; }
   } catch {}
-  // No known source → NO book. The loading screen holds; live geo (or a reconnect re-heal) is the
-  // ONLY thing that may reveal a book from here. Never blind-default to hymns-4 OR standard.
-  return null;
+  // No known source → the PUBLIC SIÓN FLOOR (never null, never the private standard manual). The
+  // floor keeps the device renderable offline, but floorBookOnly defers the reveal: live geo (or a
+  // director snapshot, or the timeout backstop) decides when to lift the gate. Never bricks.
+  floorBookOnly = true;
+  return PUBLIC_FLOOR_BOOK;
 };
 state.currentBook = resolveInitialBook();
 const bookLabel = (bookId) => bookRegistry.books?.[bookId]?.label || "";
@@ -671,6 +684,65 @@ const deferOfflinePrecache = (totalPages, bookId = state.currentBook) => {
   setTimeout(waitForGate, SETTLE_MS);
 };
 
+// Pre-cache the PUBLIC SIÓN FLOOR (hymns-4) for ALL web clients, IN ADDITION to the current book,
+// so the offline floor is ALWAYS renderable — even on a Del Rio device whose active book is the
+// private "standard" manual. Build-style independent of state.currentBook (it caches hymns-4
+// EXPLICITLY), deferred until after first paint + guarded-once so it never competes with the
+// critical fetches and never double-runs. Native skips it (no SW / file-mode bundle ships its own).
+let publicFloorPrecacheStarted = false;
+const FLOOR_BOOK = PUBLIC_FLOOR_BOOK;   // "hymns-4"
+const floorPageFileName = (pageNumber, total) => {
+  const padded = String(pageNumber).padStart(String(total).length, "0");
+  return resolveAppPath(`/books/${FLOOR_BOOK}/pages/page-${padded}.webp`);
+};
+const precachePublicFloor = () => {
+  if (NATIVE_FILE_MODE || !("caches" in window)) return;
+  if (publicFloorPrecacheStarted) return;
+  // If the floor IS the active book, deferOfflinePrecache already (or will) cover it — don't
+  // duplicate the page fetches. We still mark started so a later book switch doesn't re-trigger.
+  if (state.currentBook === FLOOR_BOOK) { publicFloorPrecacheStarted = true; return; }
+  const total = Number(bookRegistry.books?.[FLOOR_BOOK]?.totalPages) || 0;
+  if (!Number.isInteger(total) || total <= 0) return;
+  publicFloorPrecacheStarted = true;
+  const run = async () => {
+    try {
+      const staticCache = await caches.open(STATIC_CACHE);
+      // Core/manifest assets for the floor, resiliently (allSettled — one bad asset can't abort
+      // the page precache that follows). Mirrors ensureCoreAssetsCached's per-asset resilience.
+      await Promise.allSettled(coreAssetsForBook(FLOOR_BOOK).map((asset) => staticCache.add(asset)));
+      const pageCache = await caches.open(PAGE_CACHE);
+      const missing = [];
+      for (let n = 1; n <= total; n += 1) {
+        const url = floorPageFileName(n, total);
+        if (!(await pageCache.match(url))) missing.push(url);
+      }
+      const concurrency = Math.min(4, Math.max(1, missing.length));
+      await Promise.all(Array.from({ length: concurrency }, async () => {
+        while (missing.length > 0) {
+          const url = missing.shift();
+          if (!url) return;
+          try {
+            const resp = await fetch(url, { cache: "no-store" });
+            if (resp.ok) await pageCache.put(url, resp.clone());
+          } catch {}   // a single page fetch failing must not abort the floor precache
+        }
+      }));
+    } catch (error) {
+      publicFloorPrecacheStarted = false;   // let a later trigger retry the floor precache
+      console.warn("Pre-cache del piso público (Sión) incompleto:", error);
+    }
+  };
+  // Defer the same way deferOfflinePrecache does: wait for first paint (gate lifted) + a settle
+  // delay so the floor's ~13 MB never competes with the active book's critical first-paint fetches.
+  const SETTLE_MS = 5000;   // slightly after the active book's precache so it wins the bandwidth
+  const POLL_MS = 1500;
+  const waitForGate = () => {
+    if (gateLifted) { run(); return; }
+    setTimeout(waitForGate, POLL_MS);
+  };
+  setTimeout(waitForGate, SETTLE_MS);
+};
+
 const isOfflineBundleReady = async (totalPages) => {
   if (!("caches" in window)) return false;
   if (localStorage.getItem(OFFLINE_READY_KEY) !== "ready") return false;
@@ -1068,6 +1140,14 @@ const loadBook = async (bookId, generation) => {
 // can't leave currentBook and totalPages disagreeing.
 const switchBook = async (bookId, opts = {}) => {
   if (!isBookId(bookId) || bookId === state.currentBook) return;
+  // PRIVACY (defense-in-depth): never switch a non-Del-Rio web device onto the private "standard"
+  // parish manual. bookFromSnap already filters standard for unauthorized followers — this is the
+  // last-line guard so no future caller can leak the private manual onto an unauthorized device.
+  // EXEMPT: native (no relay; injects its own book) and the GEO path (opts.fromGeo) — geo IS the
+  // authorizing signal (X-Hymnal=standard means this IP is Del Rio), and it sets isDelRioAuthorized
+  // only AFTER this switch succeeds, so gating it on isDelRioAuthorized here would deadlock the very
+  // path that authorizes the device.
+  if (bookId === "standard" && !opts.fromGeo && !NATIVE_FILE_MODE && !hasNativeBridge() && !isDelRioAuthorized()) return;
   const prevBook = state.currentBook;
   const gen = ++bookSwitchGeneration;
   state.currentBook = bookId;
@@ -1088,6 +1168,14 @@ const switchBook = async (bookId, opts = {}) => {
   state.pageHistory = [];
   renderPage(startPage, { pushToHistory: false });
   updateBookLabel();
+  // A successful switch landed us on a REAL book with a rendered page → it's safe to reveal. This
+  // is the no-flash-safe path: revealReader is decode-guarded (tryLiftGate waits for the NEW book's
+  // page image to decode) and idempotent, and it reveals only the book we just switched TO (the
+  // correct one) — never the floor. It frees a follower/geo client even if the dedicated
+  // geoJustResolved / snapshot reveals don't fire (e.g. an applyRelaySnapshot book switch where
+  // /state never carried X-Hymnal). The held floor (floorBookOnly) is unaffected — switchBook only
+  // runs when geo or a director moved us off it.
+  revealReader();
   // Pre-cache the newly-active book for offline too — a Mass can use BOTH books, but the
   // startup pre-cache (initReader) only covered the initial book. Deferred the same way
   // (wait for the gate + settle) and guarded PER-BOOK so each distinct book pre-caches once.
@@ -1178,10 +1266,13 @@ const closeSongJump = () => {
 const goToDraftSong = () => {
   const songNumber = normalizeSongDraftNumber(state.songDraft);
   if (songNumber === null) { closeSongJump(); return; }
-  // Director / secret codes are out-of-range numbers (songs cap at totalPages) or
-  // long codes (5+ digits). Route them to native for validation instead of treating
-  // them as a song jump, then clear + close the numpad.
-  if (songNumber > state.totalPages || String(songNumber).length >= 5) {
+  // Director / secret codes are LONG codes (5+ digits) ONLY. The old `songNumber > state.totalPages`
+  // clause MIS-ROUTED real hymns to the director-code path: a hymns-4 song number (e.g. 86, 89, 106,
+  // 110, 119, 125, 133) exceeds the book's PAGE count (51), so every such hymn got swallowed by the
+  // director-code branch and never resolved. Song NUMBERS are not page numbers — resolveSongPage maps
+  // a song number to its page — so gate on digit-length alone: 2-4 digit hymns always resolve here,
+  // and a genuine 5+ digit code still routes to native.
+  if (String(songNumber).length >= 5) {
     postNativeBridge({ type: "director-code", code: String(songNumber) });
     clearDraft();
     closeSongJump();
@@ -2923,11 +3014,21 @@ const relayIsFreshLive = (snap) =>
 // that case the web keeps its geo-resolved book rather than guessing, unlike native whose book
 // authority IS the director.
 const bookFromSnap = (snap) => {
-  if (isBookId(snap.bookId)) return snap.bookId;
-  const m = String(snap.mode ?? "");
-  if (m === "standard") return "standard";
-  if (m === "nonStandard" || m === "nonstandard") return "hymns-4";
-  return null;
+  let book = null;
+  if (isBookId(snap.bookId)) book = snap.bookId;
+  else {
+    const m = String(snap.mode ?? "");
+    if (m === "standard") book = "standard";
+    else if (m === "nonStandard" || m === "nonstandard") book = "hymns-4";
+  }
+  // PRIVACY: "standard" is the PRIVATE Del Rio parish manual. A follower may adopt it from a
+  // director broadcast ONLY if its OWN device is Del-Rio-authorized (live geo X-Hymnal resolved
+  // standard, or persisted svGeoBook === "standard"). An UNAUTHORIZED follower treats the standard
+  // broadcast as "no usable book signal" (null) → applyRelaySnapshot keeps it on its own book /
+  // Sión floor and never renders the private manual. (Native injects its book + has no relay, so
+  // this web-only gate never touches Del Rio's parish iPads.)
+  if (book === "standard" && !isDelRioAuthorized()) return null;
+  return book;
 };
 
 const applyRelaySnapshot = async (snap, { force = false } = {}) => {
@@ -3003,7 +3104,7 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   // The user is intentionally browsing the songbook (tapped the title → jumped). Track the
   // director's latest page so "Volver a en vivo" lands on the current spot, but DON'T yank
   // them off their page.
-  if (relay.browsing) { renderRelayPill(); return; }
+  if (relay.browsing) { renderRelayPill(); revealReader(); return; }
 
   // A congregation follower should ALWAYS track the director. We only reach here for a
   // NEW director position (same-seq heartbeat pings are seq-guarded above), so the director
@@ -3016,6 +3117,12 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   relay.appliedPage = snap.page;
   if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
   renderRelayPill();
+  // Reveal once a follower is homed onto a REAL book + the director's page (state.currentBook is
+  // guaranteed a real book here — earlier guards bail otherwise). This frees a follower whose book
+  // was resolved by a director SNAPSHOT even when HTTP /state never yields X-Hymnal (geoJustResolved
+  // never fired) — previously the white gate stayed stuck over a live feed. revealReader is
+  // idempotent + decode-guarded (tryLiftGate), so it won't flash a not-yet-decoded page.
+  revealReader();
 };
 
 const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) + "/state";
@@ -3025,6 +3132,20 @@ const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.poll
 // Map the worker's X-Hymnal IP-geo header to a book id (web followers only).
 const bookFromHymnal = (h) => (h === "standard" ? "standard" : h === "nonstandard" ? "hymns-4" : null);
 let relayGeoBookApplied = false;
+// The book LIVE geo (X-Hymnal) resolved this session, once relayGeoBookApplied is true. Drives
+// isDelRioAuthorized: only a device whose OWN live geo said "standard" (Del Rio IP) — or that has a
+// persisted standard geo from a prior Del-Rio visit — is authorized to render the PRIVATE parish
+// manual. A non-authorized device must IGNORE a director's standard broadcast (privacy).
+let relayGeoBook = null;
+// PRIVACY GATE for the private Del Rio parish manual ("standard"). True iff THIS device proved it
+// is Del-Rio-authorized: live geo X-Hymnal resolved to standard this session, OR a persisted
+// svGeoBook === "standard" (a prior confirmed Del-Rio visit). Everyone else is unauthorized and
+// must never see / switch to standard, even if a director broadcasts it. localStorage can throw
+// (private mode) — guard it.
+const isDelRioAuthorized = () => {
+  if (relayGeoBookApplied && relayGeoBook === "standard") return true;
+  try { return localStorage.getItem("svGeoBook") === "standard"; } catch { return false; }
+};
 // True while a geo-driven switchBook is actively mid-fetch. The 8s default-reveal backstop reads
 // this and HOLDS rather than revealing the default book out from under a slow-but-succeeding geo
 // switch (cold relay + a >2s pages.json fetch on incognito mobile is the exact race the gate was
@@ -3057,7 +3178,10 @@ const relayPollOnce = async (force = false) => {
       if (geoBook) {
         if (geoBook !== state.currentBook) {
           relayGeoSwitchInProgress = true;
-          try { await switchBook(geoBook, { fromNative: true }); }
+          // fromGeo marks this as the AUTHORIZING geo switch: it's the one path allowed to move a
+          // device onto the private "standard" manual without prior authorization (X-Hymnal=standard
+          // IS the Del Rio proof). Director-snapshot switches go through bookFromSnap's gate instead.
+          try { await switchBook(geoBook, { fromNative: true, fromGeo: true }); }
           finally { relayGeoSwitchInProgress = false; }
         }
         // Only mark geo RESOLVED once the switch actually took. switchBook rolls back on a load
@@ -3066,6 +3190,10 @@ const relayPollOnce = async (force = false) => {
         // and geoJustResolved stays false so we don't reveal the gate on the wrong book.
         if (state.currentBook === geoBook) {
           relayGeoBookApplied = true;
+          relayGeoBook = geoBook;   // record what LIVE geo resolved (drives isDelRioAuthorized)
+          // Live geo gave the real book → this is no longer the bare floor; let the normal reveal
+          // path (geoJustResolved below) own it.
+          floorBookOnly = false;
           geoJustResolved = true;
           // Persist the geo-resolved book so an OFFLINE reload (wifi-without-internet → the geo
           // fetch fails → relay never resolves) can boot straight onto the LAST-KNOWN book instead
@@ -3309,6 +3437,11 @@ const initReader = async () => {
     // and switchBook lands; if geo didn't resolve, the gate stays up ("Sin conexión —
     // reintentando…") and the reconnect re-heal retries. Do NOT revealReader() here.
   }
+  // Pre-cache the PUBLIC SIÓN FLOOR (hymns-4) for every web client, in addition to the active
+  // book, so the offline floor is always renderable (a Del Rio device on the private standard
+  // manual still gets the public floor cached for any later non-Del-Rio context). Deferred +
+  // guarded-once; no-op on native and once the floor IS the active book.
+  precachePublicFloor();
   startRelayFollow();
   // Search index is loaded lazily on first search-open (see activateTab) so it
   // never weighs down the follower's first paint.
@@ -3352,26 +3485,50 @@ initReader().catch((error) => {
 // navigator.onLine — it is TRUE on wifi-without-internet; the only "no book" signal is "no
 // resolved book" (which a hung/aborted geo fetch produces via the 6s AbortController timeout).
 const hasResolvedBook = () =>
-  NATIVE_FILE_MODE || hasNativeBridge() || initialBookIsKnown || relayGeoBookApplied;
-// HOLD whenever there is no resolved book. (Renamed concept: this is no longer about
-// navigator.onLine — it is purely "do we have a book to show".)
+  NATIVE_FILE_MODE || hasNativeBridge() || initialBookIsKnown || relayGeoBookApplied
+  // A real current book is itself a resolution: a director snapshot can switch the follower onto a
+  // real book even when HTTP /state never yields X-Hymnal (WS-only delivery, or geo header stripped
+  // by a proxy) — without this the white gate stayed stuck over a LIVE feed. It also makes the
+  // PUBLIC SIÓN FLOOR revealable: an online fresh device holds the gate for the first ~8s (geo's
+  // window — initReader does NOT reveal a floorBookOnly boot), then the 8s/12s backstops reveal the
+  // floor here once geo has timed out. isBookId is always true once currentBook is a real book.
+  || isBookId(state.currentBook);
+// HOLD whenever there is no resolved book. With the PUBLIC SIÓN FLOOR, hasResolvedBook is now
+// effectively always true online (currentBook is never null) — so this only stays held while the
+// 6s-aborted geo fetch is still in flight at boot (handled by the timing of the 8s settle below).
 const mustHoldForOffline = () => !hasResolvedBook();
 const revealAfterGeoSettle = () => {
   if (relayGeoSwitchInProgress) { setTimeout(revealAfterGeoSettle, 400); return; }
-  if (mustHoldForOffline()) { setGateOffline(true); setTimeout(revealAfterGeoSettle, 1500); return; }
+  // Hold the BARE floor at 8s too — give live geo the full ~12s window before showing Sión, so a slow
+  // Del Rio device resolves to standard without a Sión→standard flash. The 12s backstop reveals the
+  // floor (decode-guarded). mustHoldForOffline can't fire once a floor exists; floorBookOnly is the gate.
+  if (mustHoldForOffline() || floorBookOnly) { setGateOffline(true); setTimeout(revealAfterGeoSettle, 1500); return; }
   setGateOffline(false);
+  // Online HOLD honored: an online fresh device boots floorBookOnly (initReader does NOT reveal),
+  // so live geo gets the first ~8s to resolve the REAL book and reveal it (geoJustResolved /
+  // switchBook tail). If geo TIMED OUT/failed by now, reveal the FLOOR — but decode-guarded
+  // (revealReader → tryLiftGate): if the floor image isn't cached (offline first-ever visit), the
+  // gate HOLDS and the periodic re-heal keeps retrying geo. Never the wrong book, never a brick.
   revealReader();
 };
 setTimeout(revealAfterGeoSettle, 8000);
-// Absolute anti-trap: if a book IS resolved but its image still hasn't become displayable
-// (persistent decode failure), force the gate down so the user is never stranded behind white.
-// EXCEPTION: the no-resolved-book hold above — there we deliberately keep the loader (never reveal
-// a wrong/absent book); re-check on a short timer so it self-heals the instant connectivity (and
-// geo) returns. A device with NO book NEVER auto-reveals — that is the rule. The common transient
-// first-load failure (book resolved, image flaky) recovers long before this fires.
+// Absolute anti-trap: if a book IS resolved (native / persisted / live-geo / director-snapshot) but
+// its image still hasn't become displayable (persistent decode failure), force the gate down so the
+// user is never stranded behind white. EXCEPTIONS that keep HOLDING (re-check on a short timer):
+//  • mustHoldForOffline — no resolved book at all (can't happen with the floor, but kept for safety).
+//  • floorBookOnly — still on the BARE public floor (geo never resolved, no director, no persist).
+//    Here we must NOT force-lift a possibly-uncached floor image into a blank/broken page; we keep
+//    the decode guard (req: "if the floor image is not cached, hold the loader") and let the periodic
+//    geo re-heal recover. Once geo resolves or a director homes us, floorBookOnly clears and the
+//    anti-trap applies normally. The common transient first-load failure (real book, image flaky)
+//    recovers long before this fires.
 const liftGateBackstop = () => {
   if (mustHoldForOffline()) { setGateOffline(true); setTimeout(liftGateBackstop, 1500); return; }
   setGateOffline(false);
+  // Bare public floor at 12s: reveal it DECODE-GUARDED (cached Sión shows; uncached holds + the geo
+  // re-heal keeps retrying) — never force a blank floor down. A genuinely-resolved book whose image is
+  // just slow gets the absolute force-lift below.
+  if (floorBookOnly) { revealReader(); if (!gateLifted) setTimeout(liftGateBackstop, 1500); return; }
   liftGateNow();
 };
 setTimeout(liftGateBackstop, 12000);
