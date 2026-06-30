@@ -158,6 +158,29 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  // MARK: - Remote sync telemetry (CF /log)
+  // Fire-and-forget POST of the Multipeer connection lifecycle so the peer-to-peer handshake can be
+  // inspected remotely (no Xcode needed). `dev` is the real peer displayName so the iPad/iPhone are
+  // identifiable. Best-effort; never blocks or affects sync.
+  private func dbgLog(_ event: String, _ data: [String: Any] = [:]) {
+    var payload: [String: Any] = [
+      "t": Int(Date().timeIntervalSince1970 * 1000),
+      "dev": localPeerID?.displayName ?? "?",
+      "role": currentRole,
+      "src": "swift",
+      "build": currentBundleVersion,
+      "event": event,
+    ]
+    payload.merge(data) { _, new in new }
+    guard let url = URL(string: "https://signovivo-sync.4j4982y8jp.workers.dev/log"),
+          let body = try? JSONSerialization.data(withJSONObject: [payload]) else { return }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.httpBody = body
+    URLSession.shared.dataTask(with: req).resume()
+  }
+
   /// DIRECTOR → every currently-connected peer. Announces this device's director token so any
   /// connected peer that is ALSO directing (split-brain) can demote immediately via
   /// handleDirectorConflict, instead of waiting up to a full ~25 s browser-refresh cycle to
@@ -1089,6 +1112,27 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             self.scheduleNextDiscoveryRefresh()
             return
           }
+          // HANDSHAKE PROTECTION (fixes the follower-stuck bug): NEVER tear down the advertiser/
+          // browser while a connection is actively being established. refreshDiscovery() stops+
+          // restarts BOTH transports — that aborts the in-flight invite AND makes this device's
+          // advertiser vanish, firing a spurious lostPeer on the peer, so the MCSession never reaches
+          // .connected and the follower loops searching↔connecting forever (confirmed via /log).
+          // While a handshake is in progress, hold the transport STEADY and let it finish. Escape
+          // hatches: the invite's 30s timeout (follower) and lostPeer (peer truly left) both resume
+          // normal refresh, so a genuinely dead peer can't wedge us here.
+          if self.currentRole == "follower", self.pendingInvitePeer != nil,
+             Date().timeIntervalSince1970 - self.pendingInviteTimestamp < Self.inviteTimeout {
+            self.dbgLog("refresh:hold-connecting", ["target": self.pendingInvitePeer?.displayName ?? ""])
+            self.reconsiderFollowerTarget() // maintain/re-issue the invite on the LIVE browser
+            self.scheduleNextDiscoveryRefresh()
+            return
+          }
+          if self.currentRole == "director", self.allConnectedPeers.isEmpty,
+             !self.discoveredFollowers.isEmpty {
+            self.dbgLog("refresh:hold-advertising", ["followers": self.discoveredFollowers.count])
+            self.scheduleNextDiscoveryRefresh() // keep the advertiser up so nearby followers can connect
+            return
+          }
           self.refreshDiscovery()
           // Split-brain re-convergence (periodic). broadcastDirectorAnnounce/handleDirectorConflict
           // otherwise only fire on foreground, startDirector, and the one-shot foundPeer/.connected
@@ -1405,6 +1449,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       guard let self = self, self.currentRole == "follower",
             self.pendingInvitePeer == capturedTarget,
             !self.allConnectedPeers.contains(capturedTarget) else { return }
+      self.dbgLog("invite:send", ["to": capturedTarget.displayName])
       self.browser?.invitePeer(capturedTarget, to: capturedSession, withContext: nil, timeout: Self.inviteTimeout)
     }
   }
@@ -1444,7 +1489,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // invitation that arrives on the old advertiser would be silently rejected,
       // leaving the follower's pendingInvitePeer stuck indefinitely.
       // The role guard below is sufficient to reject invites during/after reset.
+      self.dbgLog("invite:recv", ["from": peerID.displayName])
       guard self.currentRole == "director" || self.currentRole == "follower" else {
+        self.dbgLog("invite:reject", ["why": "role-off"])
         invitationHandler(false, nil); return
       }
       if self.currentRole == "director" {
@@ -1455,17 +1502,21 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         let peerIsKnownDirector = self.discoveredDirectors[peerID] != nil
           || self.discoveredDirectorInfo[peerID]?["role"] == "director"
         if peerIsKnownDirector {
+          self.dbgLog("invite:reject", ["from": peerID.displayName, "why": "peer-is-director"])
           invitationHandler(false, nil)
           return
         }
         // Route incoming follower to a session with room
         if let session = self.availableSessionForNewFollower() {
+          self.dbgLog("invite:accept", ["from": peerID.displayName])
           invitationHandler(true, session)
         } else {
+          self.dbgLog("invite:reject", ["from": peerID.displayName, "why": "sessions-full"])
           invitationHandler(false, nil) // all sessions full (>14 followers)
         }
       } else {
         // Follower accepts from director into its single session
+        self.dbgLog("invite:accept", ["from": peerID.displayName, "as": "follower"])
         invitationHandler(true, self.mcSessions.first)
       }
     }
@@ -1496,6 +1547,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       guard browser === self.browser else { return }
       guard let sessionCode = info?["session"], sessionCode == self.currentSessionCode else { return }
       let role = info?["role"] ?? ""
+      self.dbgLog("found", ["peer": peerID.displayName, "prole": role])
 
       if role == "director" {
         let token = info?["token"] ?? peerID.displayName
@@ -1525,6 +1577,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
     DispatchQueue.main.async {
       guard browser === self.browser else { return }
+      self.dbgLog("lost", ["peer": peerID.displayName])
       self.discoveredDirectors.removeValue(forKey: peerID)
       self.discoveredDirectorSeenAt.removeValue(forKey: peerID)
       self.discoveredDirectorInfo.removeValue(forKey: peerID)
@@ -1561,6 +1614,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
     DispatchQueue.main.async {
       guard self.mcSessions.contains(where: { $0 === session }) else { return }
+      let stateName = state == .connected ? "connected" : (state == .connecting ? "connecting" : "notConnected")
+      self.dbgLog("session:\(stateName)", ["peer": peerID.displayName])
       switch state {
       case .connected:
         if self.currentRole == "follower" {
