@@ -14,7 +14,16 @@ on-hardware testing before touching the delicate Multipeer/Swift mesh)._
 | Web: transient geo-switch failure pins the WRONG book forever | `relayGeoBookApplied` set only AFTER `switchBook` confirms; else next poll retries | `web/src/app.js` relayPollOnce geo block |
 | Web: a restarted director (seq reset low) ignored as "stale" | ⟳ resets `relay.lastSeq = -1` so the director's current seq is accepted | `web/src/app.js` reconnectRelay |
 
-## ⛔ DEFERRED — need 2-device on-hardware testing (do NOT rush untested Swift mesh changes)
+## 🟡 IMPLEMENTED in build 345 — STILL NEED 2-device on-hardware verification
+
+_All items below were implemented in build 345 via a multi-agent workflow with adversarial
+verification (per-file implement → diverse-lens skeptics + cross-file coherence → repair → compile
+gate). TS typechecks + Swift compiles in the archive, but the Multipeer mesh logic CANNOT be proven
+correct without two physical devices — run the test plan at the bottom to confirm before relying on
+it. One deliberate deviation: the "snapshot → page 1 on nil" suggestion was REJECTED — sending page 1
+with an empty book would yank a geo-resolved (Del Rio/standard) follower onto hymns-4; the 2s
+heartbeat re-pulls the real snapshot anyway, so a nil page now sends nothing (a wrong guess is worse
+than none)._
 
 ### HIGH
 1. **No live-director takeover via the numpad.** Grab Device B (a connected follower) while Device A is still directing, enter the code → Swift rejects `DIRECTOR_TAKEOVER_REQUIRED` (`DirectorSyncModule.swift:264-266`), JS retries/fails → injects role `"none"`, stripping B's UI. Takeover only works if A first disappears. **Fix:** in `onDirectorCode`/`becomeDirector`, if connected as a follower, `resetNearbyDirectorSync()` first (drop the follower link) then `startNearbyDirector` (wins on newer token); and never inject role "none" on this rejection (`PdfReaderApp.tsx:321-350`, `becomeDirector` ~225-264).

@@ -158,8 +158,45 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  /// DIRECTOR → every currently-connected peer. Announces this device's director token so any
+  /// connected peer that is ALSO directing (split-brain) can demote immediately via
+  /// handleDirectorConflict, instead of waiting up to a full ~25 s browser-refresh cycle to
+  /// notice the higher token through discovery. Best-effort reliable control send per session.
+  private func broadcastDirectorAnnounce() {
+    guard currentRole == "director", !currentDirectorToken.isEmpty else { return }
+    let payload: [String: Any] = [
+      "v": Self.protocolVersion,
+      "type": "director_announce",
+      "token": currentDirectorToken,
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+    for session in mcSessions where !session.connectedPeers.isEmpty {
+      try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
+    }
+  }
+
+  /// DIRECTOR → a single peer. Same intent as broadcastDirectorAnnounce, but targeted at one
+  /// freshly-connected peer (e.g. another director that just cross-connected) so it demotes fast.
+  private func sendDirectorAnnounce(to peerID: MCPeerID) {
+    guard currentRole == "director", !currentDirectorToken.isEmpty else { return }
+    let payload: [String: Any] = [
+      "v": Self.protocolVersion,
+      "type": "director_announce",
+      "token": currentDirectorToken,
+    ]
+    sendControlPayload(payload, to: peerID)
+  }
+
   private func sendCurrentPageSnapshot(to peerID: MCPeerID, via session: MCSession) {
-    guard currentRole == "director", let page = currentPageNumber, let data = pagePayload(page: page, totalPages: currentTotalPages) else {
+    // Send NOTHING until the director has an actual page (and therefore a real book context).
+    // currentBookId/currentMode are only set alongside currentPageNumber in sendPageUpdate, so a
+    // nil page means we'd ship bookId=""/mode="" — which the follower's JS (bookFromSync) hard-
+    // coerces to the DEFAULT book "hymns-4", yanking a correctly geo-resolved "standard" (Del Rio)
+    // follower off its book onto hymns-4 page 1. The 2s mesh heartbeat + 1.5s snapshot-probe + 8s
+    // hello all re-pull the real snapshot the instant the director navigates, so the nil window
+    // loses nothing. A page-1-with-empty-book guess is a wrong guess — never broadcast it.
+    guard currentRole == "director", let page = currentPageNumber,
+          let data = pagePayload(page: page, totalPages: currentTotalPages) else {
       return
     }
     do {
@@ -225,6 +262,21 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     appIsActive = true
     guard currentRole != "off" else { return }
 
+    // Fix: the advertiser/browser silently stop retrying after 5 consecutive launch failures
+    // (e.g. Local Network permission was denied, then granted in Settings). Give them ONE more
+    // shot on foreground — the user may have just fixed permissions. Reset the counter so the
+    // back-off ladder starts fresh, then relaunch whichever transport had given up.
+    if advertiserFailureCount > 5 {
+      advertiserFailureCount = 0
+      advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
+      startAdvertising()
+    }
+    if browserFailureCount > 5 {
+      browserFailureCount = 0
+      browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
+      startBrowsing()
+    }
+
     if currentRole == "follower" {
       if connectedDirectorPeer != nil {
         pauseDiscoveryRefreshWhileConnected()
@@ -236,6 +288,16 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       }
     } else if currentRole == "director" {
       startDiscoveryRefreshTimer()
+      // After an iOS suspend, MPC may have silently dropped reliable sends to existing followers,
+      // leaving them stuck on a stale page (half-dead mesh). Proactively re-push the current
+      // snapshot to EVERY connected peer — not just newly-connecting ones — so they re-sync on
+      // resume. Re-announce our token too in case a split-brain formed while we were backgrounded.
+      for session in mcSessions where !session.connectedPeers.isEmpty {
+        for peerID in session.connectedPeers {
+          sendCurrentPageSnapshot(to: peerID, via: session)
+        }
+      }
+      broadcastDirectorAnnounce()
     }
   }
 
@@ -273,6 +335,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.startAdvertising()
       self.startBrowsing()
       self.startDiscoveryRefreshTimer()
+      // Split-brain mitigation: tell every peer still connected through this device that we are
+      // now the director carrying this token, so a peer that is ALSO directing demotes at once
+      // via handleDirectorConflict rather than waiting for the ~25 s browser cycle to catch the
+      // higher token. resetTransport() above tears down prior sessions, so this is usually a
+      // no-op at this instant; the per-peer announce on .connected (below) covers the live case.
+      self.broadcastDirectorAnnounce()
       self.emitState(status: "advertising")
       resolve(["role": "director", "sessionCode": normalizedSessionCode])
     }
@@ -1281,7 +1349,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // A director was found — cancel the self-directed fallback; we're about to connect.
     cancelSelfDirectedTimer()
 
-    let isLegacyDirector = (discoveredDirectorInfo[target]?["hgen"] == nil)
+    // A genuine legacy (build ≤226) director always advertises a NON-EMPTY discoveryInfo
+    // (it still carries "session"/"role" — that's how we matched the session code above) but
+    // omits "hgen". A target whose stored info is EMPTY means discoveryInfo arrived nil — that
+    // is NOT a legacy signal, and waiting for an invite from a modern director that will never
+    // send one wedges the follower at "connecting" forever. So only the present-but-no-hgen
+    // case is treated as legacy; a missing/empty info falls through to the modern self-invite.
+    let targetInfo = discoveredDirectorInfo[target] ?? [:]
+    let isLegacyDirector = !targetInfo.isEmpty && targetInfo["hgen"] == nil
     if isLegacyDirector {
       // Build ≤226 director: it will call invitePeer on us immediately upon foundPeer.
       // Do NOT self-invite — that causes the double-invite race that breaks the connection.
@@ -1319,7 +1394,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private static func randomToken() -> String {
-    String(format: "%020lld", Int64(Date().timeIntervalSince1970 * 1_000_000))
+    // The µs timestamp prefix preserves the "newer director wins" ordering used by
+    // handleDirectorConflict (lexicographic compare of a fixed-width zero-padded number).
+    // The UUID suffix guarantees two tokens minted in the same microsecond can never be
+    // exactly equal — equal tokens would deadlock conflict resolution (neither side > the other).
+    let micros = String(format: "%020lld", Int64(Date().timeIntervalSince1970 * 1_000_000))
+    return "\(micros)-\(UUID().uuidString)"
   }
 
   // MARK: - MCNearbyServiceAdvertiserDelegate
@@ -1340,6 +1420,16 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         invitationHandler(false, nil); return
       }
       if self.currentRole == "director" {
+        // Never accept another DIRECTOR as a "follower" — that produces two cross-connected
+        // directors fighting over the same followers (split-brain). If the inviting peer is one
+        // we've discovered advertising role=director, reject and let token-based conflict
+        // resolution (handleDirectorConflict) decide which one demotes instead.
+        let peerIsKnownDirector = self.discoveredDirectors[peerID] != nil
+          || self.discoveredDirectorInfo[peerID]?["role"] == "director"
+        if peerIsKnownDirector {
+          invitationHandler(false, nil)
+          return
+        }
         // Route incoming follower to a session with room
         if let session = self.availableSessionForNewFollower() {
           invitationHandler(true, session)
@@ -1453,6 +1543,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.sendFollowerHelloIfNeeded()
           self.scheduleFollowerSnapshotProbe()
         } else if self.currentRole == "director" {
+          // If this freshly-connected peer is one we've discovered advertising as a director, we
+          // have a split-brain: resolve it now via token tiebreak instead of waiting for the
+          // browser cycle. handleDirectorConflict demotes US (reset) if the peer's token is
+          // higher; otherwise the announce below nudges the peer to demote itself.
+          if let peerToken = self.discoveredDirectors[peerID], !peerToken.isEmpty {
+            self.handleDirectorConflict(with: peerToken)
+            // If the conflict demoted us, resetTransport already ran and emitted DIRECTOR_CONFLICT
+            // to JS — we're no longer a director, so stop here (the session is gone).
+            guard self.currentRole == "director" else { return }
+          }
+          self.sendDirectorAnnounce(to: peerID)
           self.sendCurrentPageSnapshot(to: peerID, via: session)
           self.sendBundleOffer(to: peerID)
         }
@@ -1502,6 +1603,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         if self.currentRole == "director" {
           self.sendCurrentPageSnapshot(to: peerID, via: session)
         }
+        return
+      }
+
+      if type == "director_announce" {
+        // Another device just declared itself director with this token. If WE are also a
+        // director, resolve the split-brain immediately: the lower token demotes to follower.
+        guard self.currentRole == "director" else { return }
+        guard let token = payload["token"] as? String, !token.isEmpty else { return }
+        self.handleDirectorConflict(with: token)
         return
       }
 
@@ -1555,6 +1665,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       let mode = payload["mode"] as? String ?? ""
       let bookId = payload["bookId"] as? String ?? ""
       if self.currentRole == "follower" {
+        // Only honor pages from the director we're actually connected to. A stray "page" from
+        // any other peer (e.g. a second director cross-connected during a split-brain window)
+        // must not yank the follower onto a foreign page.
+        guard let directorPeer = self.connectedDirectorPeer, directorPeer == peerID else { return }
         self.lastFollowerPageReceivedAt = Date().timeIntervalSince1970
         self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId)
       }
