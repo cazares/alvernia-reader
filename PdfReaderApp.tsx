@@ -126,6 +126,62 @@ export default function App() {
     }
   }, []);
 
+  // ── Remote sync telemetry → CF /log ─────────────────────────────────────────
+  // The iPad↔iPhone sync is peer-to-peer Multipeer (no server), so we can't see it remotely. This
+  // POSTs each device's sync LIFECYCLE (role chosen, connect/disconnect status, page sent/received)
+  // to the worker's /log ring buffer, batched ~1s. Then `GET /log` reveals the whole handshake from
+  // both sides — turning "follower stuck" guesses into a timeline. Best-effort: never blocks sync.
+  const dbgDeviceRef = useRef<string>("?");
+  const dbgBufferRef = useRef<Array<Record<string, unknown>>>([]);
+  const dbgFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dbgFlush = useCallback(() => {
+    const batch = dbgBufferRef.current;
+    if (batch.length === 0) return;
+    dbgBufferRef.current = [];
+    fetch(`${RELAY_BASE}/log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(batch),
+    }).catch(() => {
+      /* best-effort telemetry */
+    });
+  }, []);
+  const dbgLog = useCallback(
+    (event: string, data?: Record<string, unknown>) => {
+      try {
+        dbgBufferRef.current.push({
+          t: Date.now(),
+          dev: dbgDeviceRef.current,
+          role: roleRef.current,
+          build: BUILD_VERSION,
+          event,
+          ...(data || {}),
+        });
+        if (dbgFlushTimerRef.current) clearTimeout(dbgFlushTimerRef.current);
+        dbgFlushTimerRef.current = setTimeout(dbgFlush, 1000);
+      } catch {
+        /* ignore */
+      }
+    },
+    [dbgFlush],
+  );
+  // Stable per-install device id so the two devices are distinguishable in the log timeline.
+  useEffect(() => {
+    (async () => {
+      try {
+        let id = await AsyncStorage.getItem("sv_devid");
+        if (!id) {
+          id = Math.random().toString(36).slice(2, 8);
+          await AsyncStorage.setItem("sv_devid", id);
+        }
+        dbgDeviceRef.current = id;
+      } catch {
+        dbgDeviceRef.current = "?";
+      }
+      dbgLog("boot", { syncAvailable });
+    })();
+  }, [dbgLog, syncAvailable]);
+
   // ── Native -> Web injection (queued until the web app signals bridge-ready) ──
   // Bound the pending-inject backlog: if the WebView never signals bridge-ready (broken/blank
   // bundle, crash-loop), the 2s heartbeat + page events would otherwise grow native heap without
@@ -172,6 +228,7 @@ export default function App() {
     const mode = modeForBook(book);
     const total = totalPagesRef.current;
     if (roleRef.current === "director") {
+      dbgLog("page:send", { page, book });
       sendNearbyDirectorPageUpdate(page, total, { mode, bookId: book }).catch(() => {});
     }
     if (roleRef.current === "director" || explicitTransmitterRef.current) {
@@ -233,6 +290,7 @@ export default function App() {
   const becomeFollower = useCallback(async () => {
     // Claim this role transition; a later flip bumps the generation and supersedes us.
     const myGen = ++roleGenerationRef.current;
+    dbgLog("become:follower", { syncAvailable });
     roleRef.current = "follower";
     explicitTransmitterRef.current = false;
     stopDirectorHeartbeat(); // a follower must never re-broadcast
@@ -262,6 +320,7 @@ export default function App() {
     async (code: string) => {
       // Claim this role transition; a later flip bumps the generation and supersedes us.
       const myGen = ++roleGenerationRef.current;
+      dbgLog("become:director", { wasFollower: roleRef.current === "follower", syncAvailable });
       if (!syncAvailable) {
         // No mesh on this device — still act as an online transmitter to the relay.
         explicitTransmitterRef.current = true;
@@ -646,6 +705,11 @@ export default function App() {
           if (roleRef.current === "director") break; // ignore our own echoes
           const book = bookFromSync(event.bookId, event.mode);
           const page = Number(event.page) || currentPageRef.current;
+          dbgLog("mesh:page-recv", {
+            page,
+            book,
+            dup: page === currentPageRef.current && book === currentBookRef.current,
+          });
           // Remember the director's latest snapshot so a reloaded/foregrounded follower resyncs.
           lastDirectorSnapshotRef.current = { page, book };
           // De-dupe the 2s mesh heartbeat: if we're already on this page+book it's just a
@@ -663,6 +727,12 @@ export default function App() {
           break;
         }
         case "state": {
+          dbgLog("mesh:state", {
+            status: event.status,
+            srole: event.role,
+            peers: event.peerCount,
+            msg: event.message,
+          });
           injectEvent({
             type: "sync-event",
             event: {
@@ -675,6 +745,7 @@ export default function App() {
           break;
         }
         case "error": {
+          dbgLog("mesh:error", { code: event.code });
           if (String(event.code ?? "") === "DIRECTOR_CONFLICT") {
             stopDirectorHeartbeat(); // a newer director won; stop re-broadcasting
             becomeFollower(); // step down
