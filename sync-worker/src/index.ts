@@ -202,12 +202,50 @@ export default {
     const cors = corsHeaders(origin, env);
 
     // IP geolocation → which hymnal book the follower should default to.
-    // Del Rio, TX (the parish; zip 78840/78841) sings from the standard manual
-    // (alvernia_manual_2); everywhere else defaults to hymns-4 ("Himnos de Sión").
-    // Sent on every response; the web app reads it on its first /state fetch.
+    // The parish is Del Rio, TX + its cross-border sister city Ciudad Acuña, Coahuila
+    // (our families straddle the border), so BOTH sides — plus the immediate surroundings
+    // within a radius — get the standard manual (alvernia_manual_2). Everywhere else
+    // defaults to hymns-4 ("Himnos de Sión"), which is PUBLIC. The standard manual is
+    // PRIVATE to Del Rio / our church, so this gate stays tight to the border region
+    // (radius is well short of Eagle Pass ≈80 km and San Antonio ≈234 km). IP geo is
+    // approximate & ISP-dependent, so we OR several signals: physical radius (primary),
+    // exact ZIP, city name, and the Acuña MX postal block. Sent on every response; the
+    // web app reads X-Hymnal on its first /state fetch. Tune STANDARD_RADIUS_KM to taste.
     const postal = String((request.cf?.postalCode as string) || "");
-    const cityLc = String((request.cf?.city as string) || "").toLowerCase();
-    const isStandard = postal === "78840" || postal === "78841" || cityLc === "del rio";
+    const cityLc = String((request.cf?.city as string) || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, ""); // strip accents: "acuña" → "acuna"
+    const country = String((request.cf?.country as string) || "").toUpperCase();
+    const lat = Number(request.cf?.latitude ?? NaN);
+    const lon = Number(request.cf?.longitude ?? NaN);
+
+    // Haversine distance from Del Rio center; Ciudad Acuña's center is ≈7 km away, so a
+    // single radius covers both sides of the border without reaching the next parishes.
+    const DR_LAT = 29.3627;
+    const DR_LON = -100.8968;
+    const STANDARD_RADIUS_KM = 45;
+    const kmFromDelRio = (la: number, lo: number): number => {
+      const R = 6371;
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const dLat = toRad(la - DR_LAT);
+      const dLon = toRad(lo - DR_LON);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(DR_LAT)) * Math.cos(toRad(la)) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+    };
+    const distKm =
+      Number.isFinite(lat) && Number.isFinite(lon) ? kmFromDelRio(lat, lon) : Infinity;
+
+    const isStandard =
+      distKm <= STANDARD_RADIUS_KM || // primary: physical radius (both sides of the border)
+      postal === "78840" ||
+      postal === "78841" || // Del Rio, TX ZIPs (fallback if coords missing)
+      cityLc === "del rio" ||
+      cityLc === "ciudad acuna" ||
+      cityLc === "acuna" || // Ciudad Acuña, MX
+      (country === "MX" && /^262\d\d$/.test(postal)); // Acuña postal block 26200–26299
     cors["X-Hymnal"] = isStandard ? "standard" : "nonstandard";
 
     // Outer guard: by here `cors` (incl. X-Hymnal) is fully built off request geo and never
@@ -221,7 +259,28 @@ export default {
       }
 
       if (url.pathname === "/" || url.pathname === "/health") {
-        return json({ ok: true, service: "signovivo-sync", v: PROTOCOL_VERSION }, 200, cors);
+        // Echo the REQUESTER's own geo + the resulting book decision. Lets a device hit
+        // this URL in a browser and see precisely why it got standard vs nonstandard
+        // (diagnoses ISP geo-routing that lands a Del Rio device outside the radius).
+        return json(
+          {
+            ok: true,
+            service: "signovivo-sync",
+            v: PROTOCOL_VERSION,
+            geo: {
+              city: String((request.cf?.city as string) || ""),
+              region: String((request.cf?.region as string) || ""),
+              postal,
+              country,
+              lat: Number.isFinite(lat) ? lat : null,
+              lon: Number.isFinite(lon) ? lon : null,
+              kmFromDelRio: Number.isFinite(distKm) ? Math.round(distKm * 10) / 10 : null,
+              hymnal: cors["X-Hymnal"],
+            },
+          },
+          200,
+          cors,
+        );
       }
 
       const m = url.pathname.match(ROUTE);

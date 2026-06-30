@@ -11,8 +11,13 @@ let gateLifted = false;
 const liftGateNow = () => {
   if (gateLifted) return;
   gateLifted = true;
-  // double rAF so the decoded frame is on screen before the white lifts (no residual flash)
-  requestAnimationFrame(() => requestAnimationFrame(() => geoGate?.classList.add("is-hidden")));
+  const hide = () => geoGate?.classList.add("is-hidden"); // idempotent — safe to call twice
+  // Prefer a painted frame before the white lifts (no residual flash) via double rAF — BUT never
+  // depend on rAF alone: requestAnimationFrame is fully PAUSED while a tab is backgrounded/hidden
+  // and heavily throttled on iOS (the parish iPad), which would strand the loader over an
+  // already-resolved book. setTimeout still fires (throttled, not paused), so the gate ALWAYS lifts.
+  requestAnimationFrame(() => requestAnimationFrame(hide));
+  setTimeout(hide, 180);
 };
 // Lift the gate ONLY once the resolved book's page image is actually displayable. If it isn't
 // ready yet (slow / cold first load), HOLD the gate — a spinner shows it's loading — and re-try
