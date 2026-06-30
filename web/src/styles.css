@@ -1997,7 +1997,7 @@ button:disabled {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.search-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
+.search-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); font-size: 3.85rem; }  /* ⌕ glyph 35% bigger than the 2.85rem base fab */
 /* FOLLOWER (⌕ hidden): ♪ sits flush in the top-right corner. Only when the director's ⌕ is
    actually showing does ♪ shift 4.5rem left to make room for it. */
 .song-jump-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
@@ -2095,8 +2095,8 @@ body.sv-drawer-open .search-fab { display: none !important; }
   border-radius: 10px;
   background: #f4f4f4;
   color: #111;
-  font-size: 30px;
-  font-weight: 300;
+  font-size: 50px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: normal;
   text-align: center;
