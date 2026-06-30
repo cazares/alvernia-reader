@@ -260,6 +260,9 @@ const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
 const CACHE_VERSION = "__CACHE_VERSION__";
+// Human-facing build number, baked from version.json at build time, shown as a small "v<NNN>" badge
+// so signovivo.com always reveals which build it's on. Native injects its own version + overlay.
+const BUILD_NUMBER = "__BUILD_NUMBER__";
 const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
 const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
@@ -3529,8 +3532,20 @@ const initReader = async () => {
   });
 };
 
-if (appVersionLabel && window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION) {
-  appVersionLabel.textContent = `Versión ${window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION}`;
+// Resolve the build to display: native injects __SIGNO_VINO_NATIVE_BUNDLE_VERSION; web bakes
+// BUILD_NUMBER at build time. The `[0] !== "_"` guard rejects an un-replaced "__BUILD_NUMBER__" token.
+const resolvedBuild =
+  window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION ||
+  (BUILD_NUMBER && BUILD_NUMBER[0] !== "_" ? BUILD_NUMBER : "");
+if (appVersionLabel && resolvedBuild) {
+  appVersionLabel.textContent = `Versión ${resolvedBuild}`;
+}
+// Small always-visible build badge. WEB ONLY — native shows its own native overlay, so we don't
+// double up inside the WebView. Lets anyone confirm at a glance which build signovivo.com is on.
+const buildBadge = document.getElementById("build-badge");
+if (buildBadge && resolvedBuild && !NATIVE_FILE_MODE && !hasNativeBridge()) {
+  buildBadge.textContent = `v${resolvedBuild}`;
+  buildBadge.classList.add("is-shown");
 }
 
 clearInitialUrl();
