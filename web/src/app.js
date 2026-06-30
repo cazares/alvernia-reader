@@ -1110,6 +1110,7 @@ const openDrawer = () => {
 const closeDrawer = () => {
   state.drawerOpen = false;
   overlayControls.classList.remove("drawer-open");
+  navigationDrawer.classList.remove("as-dropdown");   // exit ⌕-dropdown mode if it was on
   drawerHandle.classList.remove("is-hidden");
   document.body.classList.remove("sv-drawer-open");
 };
@@ -2360,7 +2361,7 @@ const bindReaderEvents = () => {
   // Tapping the song title is the discoverable, deliberate entry to jump-to-song / browse.
   songStatus.addEventListener("click", () => { haptic(); openSongJump(); });
   const searchFab = document.getElementById("search-fab");
-  if (searchFab) searchFab.addEventListener("click", () => { haptic(); openDrawer(); activateTab("buscar"); });
+  if (searchFab) searchFab.addEventListener("click", () => { haptic(); navigationDrawer.classList.add("as-dropdown"); openDrawer(); activateTab("buscar"); });
 
   // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection.
   // Spin the icon for ~1.1s on tap so it's obvious it's reconnecting/refreshing.
@@ -2422,7 +2423,9 @@ const bindReaderEvents = () => {
   searchBackButton.addEventListener("click", () => {
     haptic();
     searchInput.blur();
-    activateTab(state.prevTab || "todas");
+    // ⌕-dropdown: "Volver" closes the dropdown. Full left drawer: return to the previous tab.
+    if (navigationDrawer.classList.contains("as-dropdown")) closeDrawer();
+    else activateTab(state.prevTab || "todas");
   });
 
   // Drawer handle tap → open
