@@ -193,7 +193,23 @@ function json(data: unknown, status: number, cors: Record<string, string>): Resp
   });
 }
 
-const ROUTE = /^\/r\/([A-Za-z0-9_-]{1,64})\/(subscribe|publish|state)$/;
+// The valid transmitter / director access codes — gates BOTH /publish (directing) and /unlock
+// (authorized access to the private standard manual). Single source of truth so the two paths
+// never drift. Override via env.TRANSMITTER_CODES (comma-separated).
+function validTransmitterCodes(env: Env): Set<string> {
+  return new Set(
+    (
+      env.TRANSMITTER_CODES ||
+      // legacy transmitter code + the four director codes (admin 8307343376 + 3 regular).
+      "12345678840,8307343376,8304533367,8307197000,8303130470"
+    )
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean),
+  );
+}
+
+const ROUTE = /^\/r\/([A-Za-z0-9_-]{1,64})\/(subscribe|publish|state|unlock)$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -313,6 +329,25 @@ export default {
         return json(snapshot, 200, cors);
       }
 
+      if (action === "unlock") {
+        // Authorized ACCESS unlock for the PRIVATE standard manual. A valid director code lets a
+        // parish device render standard from ANY network — including cellular / wrong-geo ISPs the
+        // IP-geo radius can't place in Del Rio. Read-only: it only VALIDATES the code (no publish,
+        // no DO state), so the public (no code) still can't reach standard. Codes are 10–11 digits,
+        // so the yes/no oracle isn't brute-forceable over HTTP, and they already gate /publish — no
+        // new secret is exposed here.
+        if (request.method !== "POST") {
+          return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+        }
+        const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
+        const codeOk = code.length > 0 && validTransmitterCodes(env).has(code);
+        return json(
+          { ok: codeOk, hymnal: codeOk ? "standard" : "nonstandard" },
+          codeOk ? 200 : 403,
+          cors,
+        );
+      }
+
       if (action === "publish") {
         if (request.method !== "POST") {
           return json({ ok: false, error: "method_not_allowed" }, 405, cors);
@@ -323,17 +358,7 @@ export default {
         const auth = request.headers.get("Authorization") || "";
         const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
         const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
-        const validCodes = new Set(
-          (
-            env.TRANSMITTER_CODES ||
-            // legacy transmitter code + the four director codes (admin 8307343376 + 3 regular).
-            // Legacy "12345678840" removed in Phase 7 once build 332 is confirmed on TestFlight.
-            "12345678840,8307343376,8304533367,8307197000,8303130470"
-          )
-            .split(",")
-            .map((c) => c.trim())
-            .filter(Boolean),
-        );
+        const validCodes = validTransmitterCodes(env);
         const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && token === env.RELAY_DIRECTOR_TOKEN;
         const codeOk = code.length > 0 && validCodes.has(code);
         if (!tokenOk && !codeOk) {
