@@ -111,6 +111,30 @@ export class SyncRoom extends DurableObject<Env> {
     return this.snapshot;
   }
 
+  /** RPC: append diagnostic breadcrumbs to a capped ring buffer (debug telemetry only — no sync
+   *  data). Devices POST their Multipeer sync lifecycle here so it can be read back remotely. */
+  async appendLog(entries: unknown[]): Promise<{ ok: true; total: number }> {
+    const existing = (await this.ctx.storage.get<unknown[]>("dbglog")) ?? [];
+    const rx = Math.floor(Date.now() / 1000);
+    const stamped = entries
+      .slice(0, 200)
+      .map((e) => (e && typeof e === "object" ? { rx, ...(e as object) } : { rx, v: e }));
+    const next = [...existing, ...stamped].slice(-600); // ring buffer: keep the last 600 entries
+    await this.ctx.storage.put("dbglog", next);
+    return { ok: true, total: next.length };
+  }
+
+  /** RPC: read the diagnostic ring buffer. */
+  async readLog(): Promise<unknown[]> {
+    return (await this.ctx.storage.get<unknown[]>("dbglog")) ?? [];
+  }
+
+  /** RPC: clear the diagnostic ring buffer. */
+  async clearLog(): Promise<{ ok: true }> {
+    await this.ctx.storage.put("dbglog", []);
+    return { ok: true };
+  }
+
   /** WebSocket subscribe — must go through fetch() for the upgrade. */
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
@@ -297,6 +321,37 @@ export default {
           200,
           cors,
         );
+      }
+
+      // Diagnostic telemetry sink. Devices POST their Multipeer sync lifecycle (role chosen, peer
+      // found, invite, connect/disconnect, page sent/received) here; GET reads the ring buffer back
+      // so the whole director↔follower handshake can be inspected remotely. DELETE clears it.
+      // A single fixed debug DO holds the buffer (separate from any sync room).
+      if (url.pathname === "/log") {
+        const dbg = env.SYNC_ROOM.getByName("__debug_log__");
+        if (request.method === "POST") {
+          let body: unknown = null;
+          try {
+            body = await request.json();
+          } catch {
+            body = null;
+          }
+          const entries = Array.isArray(body)
+            ? body
+            : body && typeof body === "object" && Array.isArray((body as { entries?: unknown[] }).entries)
+              ? (body as { entries: unknown[] }).entries
+              : body != null
+                ? [body]
+                : [];
+          const result = await dbg.appendLog(entries);
+          return json(result, 200, cors);
+        }
+        if (request.method === "DELETE") {
+          await dbg.clearLog();
+          return json({ ok: true, cleared: true }, 200, cors);
+        }
+        const entries = await dbg.readLog();
+        return json({ ok: true, count: (entries as unknown[]).length, entries }, 200, cors);
       }
 
       const m = url.pathname.match(ROUTE);
