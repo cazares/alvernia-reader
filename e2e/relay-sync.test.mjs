@@ -170,6 +170,18 @@ test("page value is clamped to at least 1", async () => {
   assert.ok(snap.page >= 1, "page 0 should be clamped to 1");
 });
 
+test("non-numeric page is coerced to a valid page >= 1 (no NaN leaks into state)", async () => {
+  // A native bridge or buggy director could POST a non-numeric page (e.g. "abc").
+  // The relay must coerce it to a sane page, never persist NaN/null — a NaN page
+  // would desync every follower. Ground truth (probed live): the worker clamps to 1.
+  const seq = freshSeq();
+  await publish({ v: 1, page: "abc", seq, mode: "standard", bookId: "alvernia" });
+  const snap = await get(STATE);
+  assert.equal(typeof snap.page, "number", "page must stay numeric after a non-numeric publish");
+  assert.ok(Number.isFinite(snap.page), "page must not be NaN/Infinity");
+  assert.ok(snap.page >= 1, "non-numeric page should be clamped to >= 1");
+});
+
 test("mode and bookId are persisted in state", async () => {
   const seq = freshSeq();
   await publish({ v: 1, page: 55, seq, mode: "nonStandard", bookId: "hymns-4" });

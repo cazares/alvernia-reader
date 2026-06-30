@@ -467,8 +467,14 @@ export default function App() {
             currentBookRef.current = msg.book;
             storedBookRef.current = msg.book;
             AsyncStorage.setItem(STORAGE_KEYS.activeBookId, msg.book).catch(() => {});
-            // A director switching books must move followers too.
-            broadcastPage(currentPageRef.current, msg.book);
+            // A director switching books must move followers too. The web now sends the new
+            // book's start page; adopt it so we don't broadcast the OLD book's page (e.g. 360)
+            // onto a 51-page book where it would clamp wrong. Fall back to our last page only
+            // when the web omitted it (non-finite).
+            const startPage = Number(msg.page);
+            const page = Number.isFinite(startPage) ? startPage : currentPageRef.current;
+            currentPageRef.current = page;
+            broadcastPage(page, msg.book);
           }
           break;
         }
@@ -500,20 +506,62 @@ export default function App() {
           break;
         }
         case "exit-director": {
-          // Director tapped the badge to step down → become a FOLLOWER (not "off") so the
-          // device immediately re-joins the mesh and follows the NEW director, and the ⟳
-          // resync stays live. Also forget the director code/time so a relaunch doesn't
-          // auto-restore director. (Using performSoftReset here left the device in "off" →
-          // stranded on the default page with a dead resync — the director-handoff bug.)
+          // Director tapped the badge to step down. Forget the director code/time so a relaunch
+          // doesn't auto-restore director.
           AsyncStorage.multiRemove([STORAGE_KEYS.lastDirectorAt, STORED_CODE_KEY]).catch(() => {});
-          becomeFollower();
+          if (syncAvailable) {
+            // Mesh device → become a FOLLOWER (not "off") so it immediately re-joins the mesh and
+            // follows the NEW director, and the ⟳ resync stays live. (Using performSoftReset here
+            // left the device in "off" → stranded on the default page with a dead resync — the
+            // director-handoff bug.)
+            becomeFollower();
+          } else {
+            // Transmitter-only device (no mesh): there is NO follower transport in the shell (the
+            // relay socket is off; native follows via the mesh, which this device lacks). Routing
+            // it through becomeFollower would show follower UI with a dead ⟳ that can never sync.
+            // Instead drop cleanly to standalone "off" — the reader still works locally, and the
+            // web shows no phantom follower UI. Re-entering a director/transmitter code re-arms it.
+            roleGenerationRef.current++; // supersede any in-flight become*
+            stopDirectorHeartbeat(); // stop publishing to the relay
+            roleRef.current = "off";
+            explicitTransmitterRef.current = false;
+            injectEvent({ type: "role", role: "none" });
+          }
+          break;
+        }
+        case "render-failed": {
+          // A follower's renderPage threw (offline / un-cached page). The mesh 'page' path
+          // optimistically set currentPageRef.current = page BEFORE the web confirmed the render,
+          // so currentPageRef now equals the FAILED page. The 2s mesh heartbeat would then de-dupe
+          // (page === currentPageRef.current) and never re-drive this follower → wedged forever.
+          // Reset the ref to an impossible-page sentinel (pages floor at 1) so the next heartbeat's
+          // page !== currentPageRef.current and re-fires. A sentinel keeps the ref a `number` so the
+          // many broadcastPage / `Number(...) || currentPageRef.current` consumers stay sound.
+          // FOLLOWERS ONLY (roleRef === "follower"): the sentinel re-drive exists purely for a mesh
+          // follower whose currentPageRef was optimistically set by the mesh 'page' path. ANY broadcaster
+          // must never reset to -1 — that includes BOTH a mesh director (roleRef "director") AND a
+          // transmitter-only director (roleRef "off" + explicitTransmitterRef, whose relay heartbeat is
+          // gated on explicitTransmitterRef, not roleRef). Resetting on a broadcaster would publish
+          // page -1 → clamped to 1 → yank the whole congregation to page 1. Gate positively on
+          // "follower" so every broadcaster role is excluded.
+          if (roleRef.current === "follower") {
+            currentPageRef.current = -1;
+          }
           break;
         }
         default:
           break;
       }
     },
-    [flushPendingInjects, injectEvent, syncAvailable, broadcastPage, onDirectorCode, becomeFollower],
+    [
+      flushPendingInjects,
+      injectEvent,
+      syncAvailable,
+      broadcastPage,
+      onDirectorCode,
+      becomeFollower,
+      stopDirectorHeartbeat,
+    ],
   );
 
   // ── Resolve the bundle URI (prefer a peer-pushed update in Documents) ───────
@@ -678,6 +726,12 @@ export default function App() {
   useEffect(() => {
     if (!booted) return;
     if (storedBookRef.current) return; // user/device already has a book preference
+    // The DIRECTOR'S book always wins over geo: if a director snapshot has already been adopted
+    // (a follower synced to the director's page+book over the mesh before this async fetch
+    // resolved), geo must NOT override it. storedBookRef stays null in that path (the mesh
+    // listener doesn't set it), so this snapshot guard is the only thing that prevents geo from
+    // ripping the follower onto the geo book's DEFAULT page mid-Mass.
+    if (lastDirectorSnapshotRef.current) return;
     let cancelled = false;
     (async () => {
       try {
@@ -685,7 +739,9 @@ export default function App() {
         const hymnal = res.headers.get("X-Hymnal");
         const geoBook: BookId | null =
           hymnal === "standard" ? "standard" : hymnal === "nonstandard" ? "hymns-4" : null;
-        if (cancelled || !geoBook || geoBook === currentBookRef.current) return;
+        // Re-check AFTER the await: a director snapshot can land while the fetch is in flight.
+        if (cancelled || lastDirectorSnapshotRef.current) return;
+        if (!geoBook || geoBook === currentBookRef.current) return;
         currentBookRef.current = geoBook;
         storedBookRef.current = geoBook;
         AsyncStorage.setItem(STORAGE_KEYS.activeBookId, geoBook).catch(() => {});

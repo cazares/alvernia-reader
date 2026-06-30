@@ -1090,6 +1090,28 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             return
           }
           self.refreshDiscovery()
+          // Split-brain re-convergence (periodic). broadcastDirectorAnnounce/handleDirectorConflict
+          // otherwise only fire on foreground, startDirector, and the one-shot foundPeer/.connected
+          // events — so a SINGLE dropped announce (MPC's fragile first-send-at-connected window) can
+          // leave two directors split forever, with followers obeying the wrong one. Re-announce our
+          // token to every connected peer each cycle so a dropped announce is retried, and re-run the
+          // token tiebreak against every still-discovered director so two directors that briefly lost
+          // sight of each other re-converge instead of staying split.
+          if self.currentRole == "director" {
+            self.broadcastDirectorAnnounce()
+            for (_, token) in self.discoveredDirectors where !token.isEmpty {
+              self.handleDirectorConflict(with: token)
+              // handleDirectorConflict may demote us (resetTransport → role "off"); stop if so.
+              guard self.currentRole == "director" else { break }
+            }
+          } else if self.currentRole == "follower", self.connectedDirectorPeer == nil {
+            // The refresh tick rebuilt discovery but, on its own, never re-drives target selection.
+            // A follower whose invite was silently rejected (sessions full / director refreshed its
+            // advertiser) would otherwise sit at "connecting" for a full inviteTimeout with no retry,
+            // since a steadily-visible director never re-fires foundPeer. Re-run selection here so a
+            // stale invite is retried (or a newly-best director adopted) every cycle.
+            self.reconsiderFollowerTarget()
+          }
           self.scheduleNextDiscoveryRefresh()
         }
       }
@@ -1315,8 +1337,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     guard currentRole == "follower", let session = mcSessions.first else { return }
     guard session.connectedPeers.isEmpty else { emitState(status: "connected"); return }
 
+    // Pick the HIGHEST token — the one that SURVIVES director-conflict resolution
+    // (handleDirectorConflict demotes the strictly-lower token). Selecting ascending here would
+    // make a follower target the loser during every split-brain/handoff window, then eat an extra
+    // reconnect cycle when that director demotes. Descending converges the follower directly onto
+    // the winning director. (Equal tokens are impossible — randomToken() carries a UUID suffix —
+    // but keep the deterministic displayName tiebreak for total ordering.)
     let sorted = discoveredDirectors.sorted {
-      $0.value == $1.value ? $0.key.displayName < $1.key.displayName : $0.value < $1.value
+      $0.value == $1.value ? $0.key.displayName < $1.key.displayName : $0.value > $1.value
     }
     guard let target = sorted.first?.key else {
       pendingInvitePeer = nil; emitState(status: "searching"); return
