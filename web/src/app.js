@@ -538,7 +538,15 @@ const getCachedPageSet = async (cache) => {
 
 const ensureCoreAssetsCached = async () => {
   const cache = await caches.open(STATIC_CACHE);
-  await cache.addAll(coreAssetsForBook(state.currentBook));
+  // Cache each core/book-manifest asset INDEPENDENTLY (Promise.allSettled), mirroring the SW
+  // install's resilience — NOT an atomic cache.addAll(). With addAll, a single transient drop
+  // or a 404 (e.g. search-index.json missing on a partially-deployed origin) rejects the whole
+  // batch, aborting the offline-bundle prep before ANY pages cache → the book never precaches
+  // and stays unusable offline, retry after retry hitting the same weak link. allSettled lets
+  // the run proceed past one bad asset so the page-precache step still gets to run.
+  await Promise.allSettled(
+    coreAssetsForBook(state.currentBook).map((asset) => cache.add(asset)),
+  );
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {
@@ -884,8 +892,12 @@ const preloadImage = (src, timeoutMs = PAGE_IMAGE_LOAD_TIMEOUT_MS) => new Promis
 
 const loadPageImage = async (pageNumber, retryToken = "") => {
   const url = resolvePageSrc(pageNumber, retryToken);
+  // Preload into an OFF-DOM Image only — never touch the live <img> here. Committing
+  // pageImage.src before renderPage's stale-request guard (the requestId check) ran would
+  // flash the older page when fast page-turns stack: a slow loadPageImage(A) resolving after
+  // renderPage(B) started would slam A onto the visible <img> even though B already won. The
+  // live <img> is committed exactly once, post-guard, in renderPage (pageImage.src = nextPageUrl).
   const loadState = await preloadImage(url);
-  pageImage.src = url;
   return { url, loadState };
 };
 
@@ -947,6 +959,17 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     console.error("No se pudo cargar la página solicitada", nextPage, error);
     setLoading(true, "No se pudo cargar esta página.");
     closeDrawer();
+    // Tell native the render did NOT take. The mesh de-dupe optimistically sets currentPageRef
+    // to P before injecting, so a director heartbeat re-sending P is dropped — leaving an offline
+    // follower wedged on the error overlay even though the heartbeat is faithfully re-sending the
+    // right page. A render-failed signal lets native clear its optimistic ref so the next
+    // heartbeat re-drives the render. (Native must handle this message for it to take effect —
+    // paired fix; harmless/no-op if unhandled.)
+    postNativeBridge({
+      type: "render-failed",
+      page: nextPage,
+      book: state.currentBook,
+    });
   }
 };
 
@@ -1029,7 +1052,12 @@ const switchBook = async (bookId, opts = {}) => {
   // (wait for the gate + settle) and guarded PER-BOOK so each distinct book pre-caches once.
   deferOfflinePrecache(state.totalPages, state.currentBook);
   if (!opts.fromNative) {
-    postNativeBridge({ type: "book-changed", book: bookId });
+    // Carry the NEW book's start page so native broadcasts the right page atomically with the
+    // book. Without it, the native book-changed handler broadcasts its stale currentPageRef (the
+    // OLD book's page, e.g. 360 on a 51-page book) before the async page-changed for the new
+    // book lands ~up to 3s later — followers briefly clamp to a wrong page. (Native must adopt
+    // msg.page in its book-changed handler for this to take full effect — paired fix.)
+    postNativeBridge({ type: "book-changed", book: bookId, page: startPage });
   }
 };
 
@@ -1960,12 +1988,23 @@ const registerServiceWorker = async () => {
   if (NATIVE_FILE_MODE) return;
   if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
   try {
+    // Was the page already controlled by a SW at boot? If so, ANY later controllerchange is a
+    // real UPDATE (a newer SW took over) — not a first install. We must reload to drop the stale
+    // app.js even when THIS tab didn't post SKIP_WAITING: a new SW can activate on its own (no
+    // other clients, or a sibling tab already skipped waiting), firing controllerchange with the
+    // SW_RELOAD_FLAG unset. The old flag-only guard then left the returning cached device — the
+    // one that matters most at a parish — running stale book/geo/relay logic against a newer
+    // worker until a manual reload. First install (no controller at boot) stays no-reload, and
+    // hasReloadedForUpdate prevents any reload loop.
+    const hadControllerAtBoot = Boolean(navigator.serviceWorker.controller);
     let hasReloadedForUpdate = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (hasReloadedForUpdate) return;
+      const flagged = sessionStorage.getItem(SW_RELOAD_FLAG) === "1";
+      // Reload on a flagged activation (this tab requested it) OR on any controller swap when a
+      // controller already existed at boot (a true update that activated without our flag).
+      if (!flagged && !hadControllerAtBoot) return;   // first install — nothing to refresh
       hasReloadedForUpdate = true;
-      const shouldReload = sessionStorage.getItem(SW_RELOAD_FLAG) === "1";
-      if (!shouldReload) return;
       sessionStorage.removeItem(SW_RELOAD_FLAG);
       window.location.reload();
     });
@@ -2831,19 +2870,58 @@ const relayIsFreshLive = (snap) =>
   snap && Number.isFinite(snap.seq) && snap.seq > 0 &&
   (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
 
+// Resolve the director's intended book from a relay snapshot, with the SAME mode fallback
+// the native shell uses (PdfReaderApp.bookFromSync): a valid canonical bookId wins; otherwise
+// a recognized legacy `mode` string ("standard" → standard, "nonStandard"/"nonstandard" →
+// hymns-4) is honored — this is the real wire shape (e2e publishes bookId:"alvernia" + mode:
+// "standard", and an early-publish transmitter can send an empty bookId). Returns null ONLY
+// when the director gave NO usable book signal at all (both fields empty/unrecognized) — in
+// that case the web keeps its geo-resolved book rather than guessing, unlike native whose book
+// authority IS the director.
+const bookFromSnap = (snap) => {
+  if (isBookId(snap.bookId)) return snap.bookId;
+  const m = String(snap.mode ?? "");
+  if (m === "standard") return "standard";
+  if (m === "nonStandard" || m === "nonstandard") return "hymns-4";
+  return null;
+};
+
 const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   // Number.isFinite rejects NaN (typeof NaN === "number" let it slip the old guard) →
   // a NaN page would clamp/render bogusly. Reject non-finite page outright.
   if (!snap || !Number.isFinite(snap.page)) return;
   // A director on a DIFFERENT book: switch first (mirrors the native set-book path) so
   // the page lands in the right book even if IP-geo was wrong/slow. Awaited so totalPages
-  // and pad width are correct before we renderPage below.
-  if (isBookId(snap.bookId) && snap.bookId !== state.currentBook) {
-    await switchBook(snap.bookId, { fromNative: true });
+  // and pad width are correct before we renderPage below. Honors the legacy `mode` fallback
+  // (bookFromSnap) so web and native resolve the SAME book from one broadcast (previously a
+  // legacy/unknown bookId made web silently render the page against its geo book while native
+  // fell back to mode — they diverged).
+  const snapBook = bookFromSnap(snap);
+  if (snapBook && snapBook !== state.currentBook) {
+    await switchBook(snapBook, { fromNative: true });
     // switchBook rolls back currentBook on a load failure (offline / 404 / bad JSON) and
     // returns silently. Bail BEFORE renderPage if the switch didn't take — otherwise we'd
     // render the director's page against the WRONG book (clamped / 404'd).
-    if (snap.bookId !== state.currentBook) return;
+    if (snapBook !== state.currentBook) {
+      // The director moved to a book we couldn't load (e.g. network dropped mid-switch). We're
+      // now stranded on the OLD book while the director is on another. Don't keep lying with a
+      // green "en vivo" pill — flip to the amber "resync" dot so the user sees the stall (and
+      // can tap to retry). relay.lastSeq was NOT advanced (we return before the seq guard), so
+      // the next forced poll / heartbeat re-attempts the switch automatically once reachable.
+      relay.hasDirector = true;
+      relay.following = false;
+      renderRelayPill();
+      return;
+    }
+  } else if (!snapBook && Number.isFinite(snap.page) && snap.page > state.totalPages) {
+    // The director sent NO usable book signal (empty bookId AND empty/unknown mode) and the
+    // page is out of range for the follower's current (geo) book — e.g. a standard-book page
+    // 200 arriving at an hymns-4 (51pp) follower. Clamping it (→ p.51) would silently show the
+    // WRONG song under a green "en vivo" pill. Skip this snapshot instead of clamping into the
+    // wrong book; a later push carrying a real bookId/mode (or a geo correction) re-homes us.
+    // We bail here BEFORE the seq guard advances relay.lastSeq, so a corrected re-publish (same
+    // or higher seq) can still apply rather than being de-duped away.
+    return;
   }
   // Ongoing pushes are de-duped / ordered by seq (Number.isFinite so a NaN seq can't
   // slip the guard). A FORCED resync (initial load, reconnect, foreground, or the safety
@@ -2853,10 +2931,14 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   if (Number.isFinite(snap.seq)) relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
 
   const hasPublished = Number.isFinite(snap.seq) && snap.seq > 0;
-  // No director has ever published, OR (ongoing only) the director has gone stale →
-  // behave like a normal songbook. A forced resync ignores the freshness window: a
-  // director lingering on a page is still the page the follower should be on.
-  if (!hasPublished || (!force && !relayIsFreshLive(snap))) {
+  // No director has ever published, OR the director's snapshot is older than the freshness
+  // window (RELAY_LIVE_MAX_AGE_S, ~90s) → behave like a normal songbook. The staleness check
+  // applies on the FORCED path too: a forced resync (boot poll, reconnect, foreground, polling
+  // fallback) fires exactly when the WS is dead and we're scraping /state — marking a 90s-stale
+  // director LIVE there (green pill + rendering its stale page) is the wrong call. force still
+  // bypasses the seq guard above for a FRESH director sitting still; it does NOT resurrect a
+  // stale one.
+  if (!hasPublished || !relayIsFreshLive(snap)) {
     relay.hasDirector = false;
     // No live director → the "Volver a en vivo" bar would lie about going live (there's
     // nowhere to go). Hide it and drop browsing state so bar, pill, and browse flag stay
@@ -2894,6 +2976,11 @@ const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.poll
 // Map the worker's X-Hymnal IP-geo header to a book id (web followers only).
 const bookFromHymnal = (h) => (h === "standard" ? "standard" : h === "nonstandard" ? "hymns-4" : null);
 let relayGeoBookApplied = false;
+// True while a geo-driven switchBook is actively mid-fetch. The 8s default-reveal backstop reads
+// this and HOLDS rather than revealing the default book out from under a slow-but-succeeding geo
+// switch (cold relay + a >2s pages.json fetch on incognito mobile is the exact race the gate was
+// built to prevent). The 12s liftGateNow remains the absolute anti-trap if the switch never lands.
+let relayGeoSwitchInProgress = false;
 const relayPollOnce = async (force = false) => {
   try {
     const r = await fetch(relayStateUrl(), { cache: "no-store" });
@@ -2906,7 +2993,11 @@ const relayPollOnce = async (force = false) => {
     if (!relayGeoBookApplied && !NATIVE_FILE_MODE && !hasNativeBridge()) {
       const geoBook = bookFromHymnal(r.headers.get("X-Hymnal"));
       if (geoBook) {
-        if (geoBook !== state.currentBook) await switchBook(geoBook, { fromNative: true });
+        if (geoBook !== state.currentBook) {
+          relayGeoSwitchInProgress = true;
+          try { await switchBook(geoBook, { fromNative: true }); }
+          finally { relayGeoSwitchInProgress = false; }
+        }
         // Only mark geo RESOLVED once the switch actually took. switchBook rolls back on a load
         // failure (cold cache / flaky network); marking it applied anyway would pin the wrong
         // book forever (no switcher to recover). Leaving the flag false lets the next poll retry,
@@ -2969,17 +3060,37 @@ const connectRelay = () => {
     // a resync that catches any missed push within ~4s. Tracked on `relay` and cleared first
     // so a stale heartbeat from a prior socket can't accumulate.
     if (relay.heartbeatTimer) clearInterval(relay.heartbeatTimer);
-    relay.heartbeatTimer = setInterval(() => {
-      if (ws.readyState !== WebSocket.OPEN) { clearInterval(relay.heartbeatTimer); relay.heartbeatTimer = 0; return; }
+    // Capture THIS socket's heartbeat id locally so neither the self-clear below nor the
+    // close handler can reap a DIFFERENT (newer) socket's heartbeat: on a flaky reconnect the
+    // new socket's open can fire BEFORE the old socket's close, so relay.heartbeatTimer may
+    // already point at the new timer by the time the old close (or a stale self-clear tick)
+    // runs. Always clearInterval(myHeartbeat); only null relay.heartbeatTimer when it's still us.
+    let myHeartbeat = 0;
+    myHeartbeat = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        clearInterval(myHeartbeat);
+        if (relay.heartbeatTimer === myHeartbeat) relay.heartbeatTimer = 0;
+        return;
+      }
       if (Date.now() - relay.lastMsgAt > 12000) { try { ws.close(); } catch {} return; }
       try { ws.send("ping"); } catch {}
     }, 4000);
+    relay.heartbeatTimer = myHeartbeat;
+    ws.__svHeartbeat = myHeartbeat;
   });
   ws.addEventListener("message", (ev) => { relay.lastMsgAt = Date.now(); try { applyRelaySnapshot(JSON.parse(ev.data)).catch(() => {}); } catch {} });
   ws.addEventListener("error", () => {});
   ws.addEventListener("close", () => {
     clearConnectTimer();
-    if (relay.heartbeatTimer) { clearInterval(relay.heartbeatTimer); relay.heartbeatTimer = 0; }
+    // Stop ONLY this socket's own heartbeat (ws.__svHeartbeat), never relay.heartbeatTimer
+    // blindly: if a newer socket already opened and installed its heartbeat, an unconditional
+    // clear here would kill the LIVE socket's heartbeat → zombie-socket detection silently lost.
+    // Only null relay.heartbeatTimer when it still points at the timer that just died.
+    if (ws.__svHeartbeat) {
+      clearInterval(ws.__svHeartbeat);
+      if (relay.heartbeatTimer === ws.__svHeartbeat) relay.heartbeatTimer = 0;
+      ws.__svHeartbeat = 0;
+    }
     // Only forget the socket if it's still the one that just closed — a newer connectRelay
     // may have already replaced relay.ws, and we must not clobber the live socket.
     if (relay.ws === ws) relay.ws = null;
@@ -3013,7 +3124,19 @@ const startRelayFollow = () => {
       connectRelay();
     }
   });
-  window.addEventListener("online", () => { relay.backoff = 500; connectRelay(); });
+  window.addEventListener("online", () => {
+    relay.backoff = 500;
+    // Symmetric with the visibilitychange recheck above: iOS can keep a DEAD socket at
+    // readyState OPEN with NO close event after a network drop. connectRelay's dupe-guard
+    // would then see the stale OPEN socket and return immediately — no new socket, no resync —
+    // leaving the follower frozen until the 12s heartbeat-silence check finally trips. Tear a
+    // stale/silent socket down FIRST so connectRelay opens a fresh one and force-resyncs.
+    if (!relay.ws || relay.ws.readyState !== WebSocket.OPEN || (Date.now() - relay.lastMsgAt > 12000)) {
+      try { relay.ws && relay.ws.close(); } catch {}
+      relay.ws = null;
+    }
+    connectRelay();
+  });
   relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
   if ("WebSocket" in window) connectRelay(); else startRelayPolling();
 };
@@ -3128,7 +3251,14 @@ initReader().catch((error) => {
 // flash the default Himnos de Sión before switchBook(standard) lands — exactly the flash a
 // user hit on incognito Chrome mobile. The gate stays white (with the spinner) until geo
 // resolves; only a LONG fallback reveals the default at 8s, for a genuinely dead/blocked relay.
-setTimeout(revealReader, 8000);
+// BUT: if a geo switch is actively mid-fetch when 8s elapses (cold relay + slow pages.json on
+// incognito mobile), revealing now would flash the default book the instant before standard
+// lands. Hold and re-check briefly; the 12s liftGateNow is the absolute backstop either way.
+const revealAfterGeoSettle = () => {
+  if (relayGeoSwitchInProgress) { setTimeout(revealAfterGeoSettle, 400); return; }
+  revealReader();
+};
+setTimeout(revealAfterGeoSettle, 8000);
 // Absolute anti-trap: if the image still hasn't become displayable (persistent failure), force
 // the gate down so the user is never stranded behind white. Rare degraded case — the retry
 // above recovers the common transient first-load failure long before this fires.
