@@ -88,6 +88,7 @@ const searchResults = document.getElementById("search-results");
 const searchClearButton = document.getElementById("search-clear");
 const searchIndexButton = document.getElementById("search-index");
 const searchColHeader = document.getElementById("search-col-header");
+const searchSortToggle = document.getElementById("search-sort-toggle");
 const helpButton = document.getElementById("help-button");
 const helpPanel = document.getElementById("help-panel");
 const helpCloseButton = document.getElementById("help-close");
@@ -149,6 +150,7 @@ const state = {
     keywords:   savedPrefs.keywords   || "freq",
     complexity: savedPrefs.complexity || "simple",
   },
+  searchSortMode: "best",  // search-result re-sort (restores native 277): best | num | az
   activeTab: "todas",
   prevTab: "todas",     // where to return when exiting search fullscreen
   drawerMode: "browse", // browse-only — jump-to-song is now a centered modal
@@ -1424,17 +1426,39 @@ const searchPages = (query) => {
   const normalizedQuery = normalizeText(query.trim());
   if (!normalizedQuery) return [];
   const words = normalizedQuery.split(/\s+/).filter(Boolean);
-  const results = [];
+  // Title lookup by song number (the raw search index only carries {page, text};
+  // song/title live in songIndex — same source renderSearchResults reads).
+  const titleBySong = new Map();
+  for (const s of state.songIndex) if (s.title) titleBySong.set(s.song, s.title);
+  // Decorate each text match with its resolved song # + title so we can rank/sort.
+  const decorated = [];
   for (const entry of state.searchIndexPages) {
     // Skip malformed entries with no string text — they can't match and downstream
     // snippet rendering (entry.text.slice) would otherwise throw.
     if (typeof entry?.text !== "string") continue;
     const normalizedText = normalizeText(entry.text);
-    if (words.every((word) => normalizedText.includes(word))) {
-      results.push(entry);
-    }
+    if (!words.every((word) => normalizedText.includes(word))) continue;
+    const song = getSongForPage(entry.page);
+    decorated.push({ entry, song: song > 0 ? song : Infinity, title: titleBySong.get(song) || "" });
   }
-  return results.slice(0, 30);
+  // Sort BEFORE the 30-cap so the best matches survive it. state.searchSortMode restores the old
+  // native search's re-sort: "best" (relevance: exact title → title-prefix → title-contains →
+  // lyric-only, then by song #), "num" (song number), "az" (title A→Z). Default "best".
+  const rank = (d) => {
+    const t = normalizeText(d.title);
+    if (!t) return 3;
+    if (t === normalizedQuery) return 0;
+    if (t.startsWith(normalizedQuery)) return 1;
+    if (words.every((w) => t.includes(w))) return 2;
+    return 3;
+  };
+  const mode = state.searchSortMode || "best";
+  decorated.sort((a, b) => {
+    if (mode === "num") return a.song - b.song;
+    if (mode === "az") return normalizeText(a.title).localeCompare(normalizeText(b.title)) || a.song - b.song;
+    return rank(a) - rank(b) || a.song - b.song; // "best"
+  });
+  return decorated.slice(0, 30).map((d) => d.entry);
 };
 
 const renderSearchResults = (results, query) => {
@@ -1528,7 +1552,14 @@ const renderThemeResults = (songs, themeLabel) => {
     searchResults.appendChild(p);
     return;
   }
-  for (const entry of songs) {
+  // Honor the search-result sort toggle here too (a theme set has no query-relevance
+  // ranking, so "best" and "num" both fall to song #; "az" sorts by title).
+  const mode = state.searchSortMode || "best";
+  const ordered = [...songs].sort((a, b) =>
+    mode === "az"
+      ? normalizeText(a.title || "").localeCompare(normalizeText(b.title || "")) || (a.song || 0) - (b.song || 0)
+      : (a.song || 0) - (b.song || 0));
+  for (const entry of ordered) {
     const item = document.createElement("button");
     item.className = "search-result-item";
     item.type = "button";
@@ -2687,6 +2718,19 @@ const bindReaderEvents = () => {
       clearSearch();
     }
   });
+
+  // Search-result re-sort toggle (restores the native 277 best/#/A–Z cycle).
+  const SEARCH_SORT_LABELS = { best: "⇅ Mejor", num: "⇅ Nº", az: "⇅ A–Z" };
+  if (searchSortToggle) {
+    searchSortToggle.addEventListener("click", () => {
+      haptic();
+      const order = ["best", "num", "az"];
+      const next = order[(order.indexOf(state.searchSortMode || "best") + 1) % order.length];
+      state.searchSortMode = next;
+      searchSortToggle.textContent = SEARCH_SORT_LABELS[next];
+      handleSearchInput(); // re-run the current query with the new sort
+    });
+  }
 
   searchClearButton.addEventListener("click", () => {
     haptic();
