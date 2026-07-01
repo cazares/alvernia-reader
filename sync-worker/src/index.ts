@@ -22,6 +22,10 @@ export interface Env {
    *  Gates who may publish (page numbers only). The legacy "12345678840" stays until
    *  native build 332 is confirmed live on TestFlight, then it is removed (Phase 7). */
   TRANSMITTER_CODES?: string;
+  /** Secret gating the /fleet readiness dashboard + roster (which expose choir phone numbers). Set
+   *  via `wrangler secret put FLEET_DASHBOARD_KEY`. Deliberately NOT a transmitter code — those are
+   *  hardcoded in this PUBLIC repo, so gating PII behind them would expose every number. */
+  FLEET_DASHBOARD_KEY?: string;
 }
 
 const PROTOCOL_VERSION = 1;
@@ -51,6 +55,34 @@ const EMPTY_SNAPSHOT: Snapshot = {
   bookId: "",
   seq: 0,
   ts: 0,
+};
+
+// ── Fleet readiness (device pre-Mass check-in) ───────────────────────────────
+// A device self-reports (personId/label + role + native build and/or web-cache status) so the
+// director can see, before Mass, which iPads are ready and who to poke. Kept in ONE fixed DO
+// instance ("__fleet__"), separate from any sync room. NO phone numbers ever come from a device —
+// devices send only a self-entered label; phones live server-side in the roster (seeded once,
+// gated dashboard only) so the PUBLIC repo never carries anyone's number.
+type FleetDevice = {
+  deviceId: string; // stable per-install id (localStorage / AsyncStorage uuid)
+  label: string; // self-entered name ("Rita")
+  role: string; // Cantor | Cantor/Guitarrista | Bajo/Guitarrón | Director
+  surface: "web" | "native";
+  nativeBuild?: number; // native only
+  webCached?: boolean; // web only — offline bundle fully cached
+  pagesCached?: number; // web only
+  totalPages?: number;
+  homeScreen?: boolean; // web only — added to Home Screen (iOS keeps the cache past 7 days)
+  cacheVersion?: string;
+  ts: number; // last check-in (unix seconds)
+};
+
+type RosterPerson = {
+  id: string;
+  name: string;
+  role: string;
+  phones: string[]; // server-side ONLY — never leaves the gated dashboard
+  director?: boolean;
 };
 
 // ────────────────────────────── Durable Object ──────────────────────────────
@@ -132,6 +164,83 @@ export class SyncRoom extends DurableObject<Env> {
   /** RPC: clear the diagnostic ring buffer. */
   async clearLog(): Promise<{ ok: true }> {
     await this.ctx.storage.put("dbglog", []);
+    return { ok: true };
+  }
+
+  // ── Fleet readiness RPCs (all on the fixed "__fleet__" instance) ──
+
+  /** RPC: seed/replace the roster (names + phones + roles). Gated at the worker layer. Phones are
+   *  stored ONLY here — the public repo and device pings never carry them. Sanitized + capped. */
+  async putRoster(people: unknown[]): Promise<{ ok: true; count: number }> {
+    const clean: RosterPerson[] = (Array.isArray(people) ? people : [])
+      .slice(0, 200)
+      .map((p) => {
+        const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+        return {
+          id: String(o.id ?? "").slice(0, 64),
+          name: String(o.name ?? "").slice(0, 80),
+          role: String(o.role ?? "").slice(0, 60),
+          phones: (Array.isArray(o.phones) ? o.phones : [])
+            .slice(0, 6)
+            .map((x) => String(x).slice(0, 40)),
+          director: Boolean(o.director),
+        };
+      })
+      .filter((p) => p.id || p.name);
+    await this.ctx.storage.put("roster", clean);
+    return { ok: true, count: clean.length };
+  }
+
+  /** RPC: a device reports its readiness. OPEN at the worker layer (devices hold no secret), so
+   *  every field is sanitized + length/range-capped here the same way publish() guards its input. */
+  async checkin(input: unknown): Promise<{ ok: true; total: number }> {
+    const o = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+    const deviceId = String(o.deviceId ?? "").slice(0, 64);
+    if (!deviceId) return { ok: true, total: 0 }; // can't key a device with no id — drop it
+    const devices =
+      (await this.ctx.storage.get<Record<string, FleetDevice>>("fleet_devices")) ?? {};
+    const prev = devices[deviceId] || ({} as Partial<FleetDevice>);
+    const surface: "web" | "native" =
+      o.surface === "native" ? "native" : o.surface === "web" ? "web" : prev.surface || "web";
+    const entry: FleetDevice = {
+      ...prev,
+      deviceId,
+      label: String(o.label ?? prev.label ?? "").slice(0, 60),
+      role: String(o.role ?? prev.role ?? "").slice(0, 60),
+      surface,
+      ts: Math.floor(Date.now() / 1000),
+    };
+    if (o.nativeBuild != null)
+      entry.nativeBuild = Math.max(0, Math.min(Number(o.nativeBuild) || 0, 1000000));
+    if (o.webCached != null) entry.webCached = Boolean(o.webCached);
+    if (o.pagesCached != null)
+      entry.pagesCached = Math.max(0, Math.min(Number(o.pagesCached) || 0, 100000));
+    if (o.totalPages != null)
+      entry.totalPages = Math.max(0, Math.min(Number(o.totalPages) || 0, 100000));
+    if (o.homeScreen != null) entry.homeScreen = Boolean(o.homeScreen);
+    if (o.cacheVersion != null) entry.cacheVersion = String(o.cacheVersion).slice(0, 40);
+    devices[deviceId] = entry;
+    // Ring-cap: keep the 300 most-recently-seen devices so storage can't grow unbounded.
+    const kept = Object.values(devices)
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 300);
+    const pruned: Record<string, FleetDevice> = {};
+    for (const d of kept) pruned[d.deviceId] = d;
+    await this.ctx.storage.put("fleet_devices", pruned);
+    return { ok: true, total: kept.length };
+  }
+
+  /** RPC: roster (with phones) + all device check-ins, newest first. Gated at the worker layer. */
+  async getFleet(): Promise<{ roster: RosterPerson[]; devices: FleetDevice[] }> {
+    const roster = (await this.ctx.storage.get<RosterPerson[]>("roster")) ?? [];
+    const devices =
+      (await this.ctx.storage.get<Record<string, FleetDevice>>("fleet_devices")) ?? {};
+    return { roster, devices: Object.values(devices).sort((a, b) => b.ts - a.ts) };
+  }
+
+  /** RPC: wipe device check-ins (roster kept). For testing / a fresh season. */
+  async resetFleet(): Promise<{ ok: true }> {
+    await this.ctx.storage.put("fleet_devices", {});
     return { ok: true };
   }
 
@@ -234,6 +343,159 @@ function validTransmitterCodes(env: Env): Set<string> {
 }
 
 const ROUTE = /^\/r\/([A-Za-z0-9_-]{1,64})\/(subscribe|publish|state|unlock)$/;
+
+// ── Fleet dashboard rendering (server-side; gated) ───────────────────────────
+// Followers must be ≥ this native build to sync reliably with a current director (357 = connect
+// fix, 361 = fast half-open recovery). The director must be on the FLEET-latest build.
+const MIN_SYNC_BUILD = 361;
+
+const escHtml = (s: unknown): string =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+// Normalize a name for matching a device's self-entered label to a roster person.
+const normName = (s: unknown): string =>
+  String(s ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+// Only digits survive into a tel: href (defensive — the value is server-side roster data).
+const telHref = (phone: string): string => "tel:" + String(phone).replace(/[^0-9+]/g, "");
+
+function renderFleetDashboard(
+  data: { roster: RosterPerson[]; devices: FleetDevice[] },
+  k: string,
+): string {
+  const roster = Array.isArray(data.roster) ? data.roster : [];
+  const devices = Array.isArray(data.devices) ? data.devices : [];
+  const nowSec = Math.floor(Date.now() / 1000);
+  const maxBuild = devices.reduce((m, d) => Math.max(m, Number(d.nativeBuild) || 0), 0);
+  const latest = Math.max(maxBuild, MIN_SYNC_BUILD);
+
+  const ago = (ts: number): string => {
+    const s = Math.max(0, nowSec - (Number(ts) || 0));
+    if (s < 90) return "ahora";
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    if (s < 86400) return `${Math.round(s / 3600)} h`;
+    return `${Math.round(s / 86400)} d`;
+  };
+  const devicesFor = (name: string): FleetDevice[] => {
+    const n = normName(name);
+    return n.length === 0 ? [] : devices.filter((d) => normName(d.label) === n);
+  };
+
+  type Row = { cls: "ok" | "warn" | "bad"; sort: number; html: string };
+  const rows: Row[] = roster.map((p) => {
+    const ds = devicesFor(p.name);
+    const bestBuild = ds.reduce((m, d) => Math.max(m, Number(d.nativeBuild) || 0), 0);
+    const webReady = ds.some((d) => d.webCached && d.homeScreen);
+    const webNoHome = ds.some((d) => d.webCached && !d.homeScreen);
+    const webPartial = ds.some((d) => !d.webCached && (Number(d.pagesCached) || 0) > 0);
+    const lastTs = ds.reduce((m, d) => Math.max(m, Number(d.ts) || 0), 0);
+
+    let cls: "ok" | "warn" | "bad" = "bad";
+    let action = "Onboarding pendiente";
+    if (ds.length === 0) {
+      cls = "bad";
+      action = "No se ha visto — invitar";
+    } else if (p.director) {
+      if (bestBuild >= latest) { cls = "ok"; action = `Listo — build ${bestBuild}`; }
+      else { cls = "bad"; action = `⚠ Director en build ${bestBuild || "—"} (debe ser ${latest})`; }
+    } else if (bestBuild >= MIN_SYNC_BUILD) {
+      cls = "ok"; action = `Listo — app ${bestBuild}`;
+    } else if (webReady) {
+      cls = "ok"; action = "Listo — web en caché";
+    } else if (webNoHome) {
+      cls = "warn"; action = "Agregar a inicio";
+    } else if (webPartial) {
+      cls = "warn"; action = "Reabrir para cachear";
+    } else if (bestBuild > 0) {
+      cls = "bad"; action = `Actualizar app (${bestBuild} &lt; ${MIN_SYNC_BUILD})`;
+    }
+    const sort = (cls === "bad" ? 0 : cls === "warn" ? 1 : 2) - (p.director ? 0.5 : 0);
+    const phoneHtml = (p.phones || [])
+      .map((ph) => `<a href="${escHtml(telHref(ph))}">${escHtml(ph)}</a>`)
+      .join(" ") || '<span class="muted">—</span>';
+    const nativeCell = bestBuild > 0 ? String(bestBuild) : '<span class="muted">—</span>';
+    const webCell = webReady
+      ? "✓ inicio"
+      : webNoHome
+        ? "caché, sin inicio"
+        : webPartial
+          ? "parcial"
+          : '<span class="muted">—</span>';
+    const html = `<tr class="${cls}">
+      <td>${escHtml(p.name)}${p.director ? ' <span class="tag">Director</span>' : ""}</td>
+      <td class="muted">${escHtml(p.role)}</td>
+      <td>${nativeCell}</td>
+      <td>${webCell}</td>
+      <td>${ds.length ? ago(lastTs) : '<span class="muted">nunca</span>'}</td>
+      <td>${phoneHtml}</td>
+      <td class="act">${action}</td>
+    </tr>`;
+    return { cls, sort, html };
+  });
+  rows.sort((a, b) => a.sort - b.sort);
+
+  const ready = rows.filter((r) => r.cls === "ok").length;
+  const warn = rows.filter((r) => r.cls === "warn").length;
+  const bad = rows.filter((r) => r.cls === "bad").length;
+
+  // Devices whose typed label matched no roster person (typo / guest) — surfaced so nobody is lost.
+  const rosterNames = new Set(roster.map((p) => normName(p.name)));
+  const orphans = devices.filter((d) => !rosterNames.has(normName(d.label)));
+  const orphanHtml = orphans.length
+    ? `<h3>Sin coincidencia en la lista (${orphans.length})</h3><table><thead><tr><th>Etiqueta</th><th>Rol</th><th>Origen</th><th>App</th><th>Web</th><th>Visto</th></tr></thead><tbody>${orphans
+        .map(
+          (d) =>
+            `<tr><td>${escHtml(d.label) || '<span class="muted">(sin nombre)</span>'}</td><td class="muted">${escHtml(d.role)}</td><td>${escHtml(d.surface)}</td><td>${d.nativeBuild ? escHtml(d.nativeBuild) : '<span class="muted">—</span>'}</td><td>${d.webCached ? (d.homeScreen ? "✓ inicio" : "caché") : '<span class="muted">—</span>'}</td><td>${ago(Number(d.ts) || 0)}</td></tr>`,
+        )
+        .join("")}</tbody></table>`
+    : "";
+
+  const kq = k ? `?k=${encodeURIComponent(k)}` : "";
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="20${kq ? `;url=/fleet-dashboard${kq}` : ""}">
+<title>Signo Vivo — estado del coro</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#0f1216;color:#e8edf2;font:15px/1.5 -apple-system,system-ui,sans-serif;padding:16px}
+h1{font-size:20px;font-weight:600;margin:0 0 2px}
+.sub{color:#8b96a3;font-size:13px;margin-bottom:14px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.chip{padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600}
+.chip.ok{background:#12351f;color:#5fd48a}.chip.warn{background:#3a2f10;color:#e0b64a}.chip.bad{background:#3a1518;color:#f0788a}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #1e252d;vertical-align:top}
+th{color:#8b96a3;font-weight:600}
+tr.bad td{background:rgba(240,120,138,.06)}tr.warn td{background:rgba(224,182,74,.06)}
+td.act{font-weight:600}
+tr.ok td.act{color:#5fd48a}tr.warn td.act{color:#e0b64a}tr.bad td.act{color:#f0788a}
+.muted{color:#5b6673}.tag{background:#243b57;color:#8fc0f0;padding:1px 6px;border-radius:4px;font-size:11px}
+a{color:#7fb3f0;text-decoration:none}
+h3{font-size:14px;color:#8b96a3;margin:18px 0 6px}
+</style></head><body>
+<h1>Estado del coro — Signo Vivo</h1>
+<div class="sub">Actualiza cada 20 s · el iPad reporta cuando tiene internet · orden: pendientes primero</div>
+<div class="chips">
+<span class="chip ok">${ready} listos</span>
+<span class="chip warn">${warn} por revisar</span>
+<span class="chip bad">${bad} por contactar</span>
+</div>
+<table><thead><tr><th>Persona</th><th>Rol</th><th>App</th><th>signovivo.com</th><th>Visto</th><th>Teléfono</th><th>Qué hacer</th></tr></thead>
+<tbody>${rows.map((r) => r.html).join("") || '<tr><td colspan="7" class="muted">Sin lista cargada todavía.</td></tr>'}</tbody></table>
+${orphanHtml}
+<div class="sub">Listo = app ≥ ${MIN_SYNC_BUILD} · o signovivo.com en caché + agregado a inicio (iOS conserva la caché). Director debe estar en ${latest}.</div>
+</body></html>`;
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -352,6 +614,86 @@ export default {
         }
         const entries = await dbg.readLog();
         return json({ ok: true, count: (entries as unknown[]).length, entries }, 200, cors);
+      }
+
+      // Fleet readiness — device pre-Mass check-in + gated director dashboard. Phones live ONLY in
+      // the fixed "__fleet__" DO + this dashboard; a device only ever POSTs a self-entered label.
+      if (
+        url.pathname === "/fleet" ||
+        url.pathname === "/fleet.json" ||
+        url.pathname === "/fleet-dashboard" ||
+        url.pathname.startsWith("/fleet/")
+      ) {
+        const fleet = env.SYNC_ROOM.getByName("__fleet__");
+
+        // Device check-in is OPEN (devices hold no secret). checkin() sanitizes + caps every field.
+        if (url.pathname === "/fleet/checkin") {
+          if (request.method !== "POST") {
+            return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+          }
+          if (Number(request.headers.get("content-length") || 0) > 16 * 1024) {
+            return json({ ok: false, error: "payload_too_large" }, 413, cors);
+          }
+          let body: unknown = null;
+          try {
+            body = await request.json();
+          } catch {
+            body = null;
+          }
+          return json(await fleet.checkin(body), 200, cors);
+        }
+
+        // Everything else under /fleet exposes choir phone numbers, so it is gated by the director
+        // bearer token OR a DEDICATED SECRET (?k=SECRET for a browser, X-Fleet-Key for a script).
+        // NOT the transmitter codes — those are hardcoded in this public repo, so gating PII behind
+        // them would expose every number to anyone reading the source.
+        const auth = request.headers.get("Authorization") || "";
+        const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const k = url.searchParams.get("k") || request.headers.get("X-Fleet-Key") || "";
+        const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && bearer === env.RELAY_DIRECTOR_TOKEN;
+        const keyOk = Boolean(env.FLEET_DASHBOARD_KEY) && k === env.FLEET_DASHBOARD_KEY;
+        const isDash = url.pathname === "/fleet-dashboard" || url.pathname === "/fleet/dashboard";
+        if (!tokenOk && !keyOk) {
+          if (isDash) {
+            return new Response(
+              `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="background:#0f1216;color:#e8edf2;font:16px system-ui;padding:24px"><h2>Estado del coro</h2><p>Agrega tu c&oacute;digo al final del enlace:</p><p><code>/fleet-dashboard?k=TU_C&Oacute;DIGO</code></p></body>`,
+              { status: 401, headers: { "Content-Type": "text/html; charset=utf-8", ...cors } },
+            );
+          }
+          return json({ ok: false, error: "unauthorized" }, 401, cors);
+        }
+
+        if (url.pathname === "/fleet/roster" && request.method === "POST") {
+          if (Number(request.headers.get("content-length") || 0) > 128 * 1024) {
+            return json({ ok: false, error: "payload_too_large" }, 413, cors);
+          }
+          let body: unknown = null;
+          try {
+            body = await request.json();
+          } catch {
+            body = null;
+          }
+          const people = Array.isArray(body)
+            ? body
+            : body && typeof body === "object"
+              ? (body as { people?: unknown[] }).people
+              : [];
+          return json(await fleet.putRoster(Array.isArray(people) ? people : []), 200, cors);
+        }
+        if (url.pathname === "/fleet/reset" && request.method === "POST") {
+          return json(await fleet.resetFleet(), 200, cors);
+        }
+        if (isDash) {
+          const data = await fleet.getFleet();
+          return new Response(renderFleetDashboard(data, k), {
+            status: 200,
+            headers: { "Content-Type": "text/html; charset=utf-8", ...cors },
+          });
+        }
+        if (url.pathname === "/fleet" || url.pathname === "/fleet.json") {
+          return json(await fleet.getFleet(), 200, cors);
+        }
+        return json({ ok: false, error: "not_found" }, 404, cors);
       }
 
       const m = url.pathname.match(ROUTE);

@@ -25,3 +25,6 @@ web/dist/
 assets-and-web.zip
 
 build/
+
+# Choir roster with phone numbers — PII, never commit (seeded into the gated DO instead)
+sync-worker/roster.private.json

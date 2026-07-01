@@ -15,7 +15,7 @@
 // web app's job. The old 3,536-line FlatList/PDF reader was replaced wholesale.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Platform, StatusBar, StyleSheet, View } from "react-native";
+import { Alert, AppState, Platform, StatusBar, StyleSheet, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useKeepAwake } from "expo-keep-awake";
 import * as FileSystem from "expo-file-system/legacy";
@@ -165,6 +165,30 @@ export default function App() {
     },
     [dbgFlush],
   );
+  // ── Fleet readiness check-in (native → the SAME /fleet dashboard as signovivo.com) ──
+  // Reports this iPad's native build + role so the director sees who's ready before Mass. Reuses
+  // the stable sv_devid; sends a self-entered label but NEVER a phone number. Best-effort.
+  const fleetLabelRef = useRef<string>("");
+  const fleetCheckin = useCallback((extra?: Record<string, unknown>) => {
+    const deviceId = dbgDeviceRef.current;
+    if (!deviceId || deviceId === "?") return;
+    fetch(`${RELAY_BASE}/fleet/checkin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceId,
+        surface: "native",
+        nativeBuild: Number(BUILD_VERSION) || 0,
+        label: fleetLabelRef.current || "",
+        // Native only knows director/follower — report "Director" or leave role blank so the
+        // dashboard fills it from the seeded roster (never a wrong "Cantor" for a Bajo/Guitarrista).
+        role: roleRef.current === "director" ? "Director" : "",
+        ...(extra || {}),
+      }),
+    }).catch(() => {
+      /* offline / relay unreachable — presence just isn't reported */
+    });
+  }, []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
     (async () => {
@@ -179,8 +203,50 @@ export default function App() {
         dbgDeviceRef.current = "?";
       }
       dbgLog("boot", { syncAvailable });
+      // Fleet identity: one-time name prompt (iOS), then report readiness to the dashboard.
+      try {
+        let label = await AsyncStorage.getItem("sv_fleet_label");
+        const skip = await AsyncStorage.getItem("sv_fleet_skip");
+        if (!label && !skip && Platform.OS === "ios") {
+          label = await new Promise<string>((resolve) => {
+            Alert.prompt(
+              "¿Quién usa este iPad?",
+              "Para el tablero del coro — una sola vez.",
+              [
+                {
+                  text: "Ahora no",
+                  style: "cancel",
+                  onPress: () => {
+                    AsyncStorage.setItem("sv_fleet_skip", "1").catch(() => {});
+                    resolve("");
+                  },
+                },
+                {
+                  text: "Guardar",
+                  onPress: (v?: string) => {
+                    const n = (v || "").trim().slice(0, 40);
+                    if (n) AsyncStorage.setItem("sv_fleet_label", n).catch(() => {});
+                    resolve(n);
+                  },
+                },
+              ],
+              "plain-text",
+            );
+          });
+        }
+        fleetLabelRef.current = label || "";
+      } catch {
+        /* ignore */
+      }
+      fleetCheckin();
     })();
-  }, [dbgLog, syncAvailable]);
+  }, [dbgLog, syncAvailable, fleetCheckin]);
+  // Re-report readiness every 90s while mounted — captures a follower who later becomes director
+  // without touching the liturgy-critical sync callbacks.
+  useEffect(() => {
+    const t = setInterval(() => fleetCheckin(), 90000);
+    return () => clearInterval(t);
+  }, [fleetCheckin]);
 
   // ── Native -> Web injection (queued until the web app signals bridge-ready) ──
   // Bound the pending-inject backlog: if the WebView never signals bridge-ready (broken/blank
