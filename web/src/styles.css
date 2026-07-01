@@ -1001,29 +1001,32 @@ button:disabled {
   padding: 0.85rem 1rem 1rem;
 }
 
-/* ── ⌕ opens search as a compact TOP-RIGHT DROPDOWN (reuses the search-fullscreen drawer
-   mode + all its existing search logic). Scoped to .as-dropdown so it applies ONLY when
-   launched from the ⌕ fab — the left-edge browse drawer's own Buscar tab is unaffected. ── */
+/* ── ⌕ opens search as a FULL-WIDTH DROPDOWN that drops down from the top (reuses the
+   search-fullscreen drawer mode + all its existing search logic). Scoped to .as-dropdown so it
+   applies ONLY when launched from the ⌕ fab — the left-edge browse drawer's Buscar tab is
+   unaffected. Spans the full width (minus tiny edge gutters) instead of the old skinny box. ── */
 .navigation-drawer.as-dropdown.search-fullscreen {
   /* !important + pinned height: the base drawer's full-height flex layout otherwise collapses
      the auto-height dropdown to nothing, and a cascade rule overrides plain width/max-height. */
   top: max(0.55rem, env(safe-area-inset-top, 0px)) !important;
   bottom: auto !important;
-  left: auto !important;
+  left: max(0.55rem, env(safe-area-inset-left, 0px)) !important;
   right: max(0.55rem, env(safe-area-inset-right, 0px)) !important;
-  width: min(380px, 92vw) !important;
+  width: auto !important; /* left + right pinned → spans (nearly) the full width */
   height: min(72vh, 560px) !important;
   min-height: min(42vh, 320px) !important;
   max-height: min(72vh, 560px) !important;
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
-  transform: translateY(-10px) scale(0.985);
+  /* Pin the transform at rest with !important so the base drawer's left-slide (translateX(-100%))
+     can't sweep this full-width panel in from the left edge. Open/close is a clean fade instead —
+     it reads as a dropdown, not a side-drawer. */
+  transform: translateY(0) !important;
   opacity: 0;
-  transition: transform 200ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 170ms ease;
+  transition: opacity 180ms ease;
 }
 .overlay-controls.drawer-open .navigation-drawer.as-dropdown.search-fullscreen {
-  transform: translateY(0) scale(1);
   opacity: 1;
 }
 /* Hide the full-drawer chrome — the dropdown shows only the search row + results */
