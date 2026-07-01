@@ -147,6 +147,7 @@ const TITLE_OVERRIDES = {
   115: "13ª Estación — Vía Crucis",
   198: "Señor quien puede entrar",
   249: "Solamente de la Santa Trinidad",
+  371: "Santo Español",
 };
 
 // Curated titles for the 22 hymns-4 (Himnos de Sión) songs. The source JSON is raw
