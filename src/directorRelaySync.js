@@ -13,9 +13,14 @@ const RELAY_BASE = "https://signovivo-sync.4j4982y8jp.workers.dev";
 const RELAY_ROOM = "alvernia-main";
 const PROTOCOL_VERSION = 1;
 
-// Memorable transmitter access code (same style as the director codes already in
-// the app). Sent as X-Director-Code; the relay authorizes publishes with it.
-export const TRANSMITTER_ACCESS_CODE = "12345678840";
+// The credential sent as X-Director-Code so the relay authorizes this device's publishes. It's set
+// to the code the director actually entered — the public Sión code on the Sión book, or a real
+// standard-director number on the Del Rio manual — via setRelayPublishCode() when they become
+// director. No code is hardcoded here, and a Sión director can only publish the public book.
+let relayPublishCode = "";
+export const setRelayPublishCode = (code) => {
+  relayPublishCode = String(code || "").replace(/[^0-9]/g, "");
+};
 
 // Hard ceiling on a single publish. On parish wifi that associates but doesn't
 // route (captive portal / black-holed TCP) a bare fetch() never settles, so
@@ -51,7 +56,7 @@ const doPublish = async (payload) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Director-Code": TRANSMITTER_ACCESS_CODE,
+        "X-Director-Code": relayPublishCode,
       },
       body: JSON.stringify(payload),
       signal: controller ? controller.signal : undefined,

@@ -329,14 +329,16 @@ function json(data: unknown, status: number, cors: Record<string, string>): Resp
 // The valid transmitter / director access codes — gates BOTH /publish (directing) and /unlock
 // (authorized access to the private standard manual). Single source of truth so the two paths
 // never drift. Override via env.TRANSMITTER_CODES (comma-separated).
+// The Sión (public book) director code — memorable + intentionally NOT secret. It may publish the
+// PUBLIC "hymns-4" book only (enforced at /publish), so it can never direct the private manual.
+const SION_DIRECTOR_CODE = "1234567890";
+
 function validTransmitterCodes(env: Env): Set<string> {
+  // Source of truth is the TRANSMITTER_CODES secret (`wrangler secret put`). NO plaintext fallback —
+  // the real phone-number director codes must never live in this PUBLIC repo. The public Sión code
+  // is always accepted (it's book-scoped to hymns-4 below). Fail-closed on the rest if unset.
   return new Set(
-    (
-      env.TRANSMITTER_CODES ||
-      // legacy transmitter code + the four director codes (admin 8307343376 + 3 regular).
-      "12345678840,8307343376,8304533367,8307197000,8303130470"
-    )
-      .split(",")
+    [SION_DIRECTOR_CODE, ...(env.TRANSMITTER_CODES || "").split(",")]
       .map((c) => c.trim())
       .filter(Boolean),
   );
@@ -737,7 +739,11 @@ export default {
           return json({ ok: false, error: "method_not_allowed" }, 405, cors);
         }
         const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
-        const codeOk = code.length > 0 && validTransmitterCodes(env).has(code);
+        // The PUBLIC Sión code (1234567890) is a director-entry code for the PUBLIC book — it must
+        // NEVER unlock the private manual, or an off-Del-Rio device could read standard by typing a
+        // code that's published in this repo. Only real (secret) director codes unlock standard.
+        const codeOk =
+          code.length > 0 && code !== SION_DIRECTOR_CODE && validTransmitterCodes(env).has(code);
         return json(
           { ok: codeOk, hymnal: codeOk ? "standard" : "nonstandard" },
           codeOk ? 200 : 403,
@@ -781,6 +787,16 @@ export default {
           parsed && typeof parsed === "object" && !Array.isArray(parsed)
             ? (parsed as Partial<Snapshot>)
             : {};
+        // Book-scope the PUBLIC Sión code: it may publish the public "hymns-4" book ONLY, never the
+        // private Del Rio manual. The bearer token and the real (secret) director codes are
+        // unrestricted. This is what keeps a well-known passwordless Sión director off standard.
+        if (codeOk && !tokenOk && code === SION_DIRECTOR_CODE) {
+          // Require an EXPLICIT hymns-4 — reject empty/missing/other bookId so the public Sión code
+          // can never publish into the standard room by simply omitting the book.
+          if (String(body.bookId ?? "") !== "hymns-4") {
+            return json({ ok: false, error: "sion_code_book_scoped" }, 403, cors);
+          }
+        }
         let result;
         try {
           result = await stub.publish(body);

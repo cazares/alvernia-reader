@@ -34,16 +34,29 @@ if [ "${SKIP_NATIVE:-0}" = "1" ]; then
 else
   echo "==> 4/6  Build native IPA (Release archive + export) — logging to $LOG"
   cp ios/Pods/Manifest.lock ios/Podfile.lock         # pod-guard workaround (Ruby 4.0.1 pod install is broken)
+  # Bake the REAL standard-director codes (gitignored PII) into the RN bundle for this archive only,
+  # then restore the empty committed file — keeps the numbers out of the public repo.
+  RESTORE_CODES=""
+  if [ -f director-codes.private.json ]; then
+    cp director-codes.json director-codes.committed.bak
+    cp director-codes.private.json director-codes.json
+    RESTORE_CODES="1"
+    echo "         baked director-codes.private.json into the bundle"
+  else
+    echo "         WARNING: director-codes.private.json missing — standard-director entry disabled in this build"
+  fi
+  restore_codes() { [ -n "$RESTORE_CODES" ] && mv -f director-codes.committed.bak director-codes.json; }
   rm -rf build
   if ! xcodebuild -workspace ios/SignoVivo.xcworkspace -scheme SignoVivo -configuration Release \
         -archivePath build/SignoVivo.xcarchive -sdk iphoneos -allowProvisioningUpdates clean archive >"$LOG" 2>&1; then
-    git checkout -- ios/Podfile.lock; echo "ARCHIVE FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1
+    git checkout -- ios/Podfile.lock; restore_codes; echo "ARCHIVE FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1
   fi
   if ! xcodebuild -exportArchive -archivePath build/SignoVivo.xcarchive -exportPath build/export \
         -exportOptionsPlist ios/exportOptions.app-store.plist -allowProvisioningUpdates >>"$LOG" 2>&1; then
-    git checkout -- ios/Podfile.lock; echo "EXPORT FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1
+    git checkout -- ios/Podfile.lock; restore_codes; echo "EXPORT FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1
   fi
   git checkout -- ios/Podfile.lock
+  restore_codes
   cp build/export/SignoVivo.ipa "$HOME/Desktop/SignoVivo-$BUILD.ipa"
   echo "         IPA -> ~/Desktop/SignoVivo-$BUILD.ipa"
 fi
