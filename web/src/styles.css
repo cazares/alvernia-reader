@@ -1009,13 +1009,13 @@ button:disabled {
   /* !important + pinned height: the base drawer's full-height flex layout otherwise collapses
      the auto-height dropdown to nothing, and a cascade rule overrides plain width/max-height. */
   top: max(0.55rem, env(safe-area-inset-top, 0px)) !important;
-  bottom: auto !important;
+  bottom: max(0.55rem, env(safe-area-inset-bottom, 0px)) !important;
   left: max(0.55rem, env(safe-area-inset-left, 0px)) !important;
   right: max(0.55rem, env(safe-area-inset-right, 0px)) !important;
   width: auto !important; /* left + right pinned → spans (nearly) the full width */
-  height: min(72vh, 560px) !important;
-  min-height: min(42vh, 320px) !important;
-  max-height: min(72vh, 560px) !important;
+  height: auto !important; /* top + bottom pinned → spans (nearly) the full HEIGHT (big search panel) */
+  min-height: 0 !important;
+  max-height: none !important;
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
@@ -1042,7 +1042,9 @@ button:disabled {
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-nav-row,
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-mode-switch { display: none; }
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-pane-content {
-  max-height: min(60vh, 540px);
+  max-height: none;   /* fill the now-tall panel; results scroll within */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── Back button: shown inside search fullscreen ────────────────────────────── */
