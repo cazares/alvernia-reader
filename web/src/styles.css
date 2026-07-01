@@ -1008,12 +1008,14 @@ button:disabled {
 .navigation-drawer.as-dropdown.search-fullscreen {
   /* !important + pinned height: the base drawer's full-height flex layout otherwise collapses
      the auto-height dropdown to nothing, and a cascade rule overrides plain width/max-height. */
-  top: max(0.55rem, env(safe-area-inset-top, 0px)) !important;
-  bottom: max(0.55rem, env(safe-area-inset-bottom, 0px)) !important;
-  left: max(0.55rem, env(safe-area-inset-left, 0px)) !important;
-  right: max(0.55rem, env(safe-area-inset-right, 0px)) !important;
-  width: auto !important; /* left + right pinned → spans (nearly) the full width */
-  height: auto !important; /* top + bottom pinned → spans (nearly) the full HEIGHT (big search panel) */
+  /* Minimal-but-tappable margins on every side: the #drawer-backdrop shows through this ring, and
+     tapping it closes search (drawerBackdrop → closeDrawer). Big panel, small exit border. */
+  top: max(1.75rem, calc(env(safe-area-inset-top, 0px) + 0.75rem)) !important;
+  bottom: max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem)) !important;
+  left: max(1.75rem, calc(env(safe-area-inset-left, 0px) + 0.75rem)) !important;
+  right: max(1.75rem, calc(env(safe-area-inset-right, 0px) + 0.75rem)) !important;
+  width: auto !important; /* left + right pinned → spans the width minus the tappable margin */
+  height: auto !important; /* top + bottom pinned → spans the height minus the tappable margin */
   min-height: 0 !important;
   max-height: none !important;
   border-radius: 16px;
