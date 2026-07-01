@@ -1019,15 +1019,23 @@ button:disabled {
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
-  /* Pin the transform at rest with !important so the base drawer's left-slide (translateX(-100%))
-     can't sweep this full-width panel in from the left edge. Open/close is a clean fade instead —
-     it reads as a dropdown, not a side-drawer. */
-  transform: translateY(0) !important;
+  /* Rest at translateY(0) (specificity beats the base drawer's translateX(-100%) slide), and put
+     ONLY opacity on the transition so the transform can't animate that left-slide diagonally. The
+     open SLIDE-DOWN is a keyframe animation (below): a keyframe plays from its own values regardless
+     of the base transform, so it drops straight down from the top — no left-sweep — every time. */
+  transform: translateY(0);
   opacity: 0;
   transition: opacity 180ms ease;
 }
 .overlay-controls.drawer-open .navigation-drawer.as-dropdown.search-fullscreen {
+  transform: translateY(0);
   opacity: 1;
+  animation: sv-search-drop 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Slide down + fade in from just above — reads as a dropdown unfurling from the top. */
+@keyframes sv-search-drop {
+  from { transform: translateY(-22px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
 }
 /* Hide the full-drawer chrome — the dropdown shows only the search row + results */
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-top-bar,
