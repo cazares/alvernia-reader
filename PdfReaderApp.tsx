@@ -241,9 +241,10 @@ export default function App() {
   }, []);
 
   // ── Director re-broadcast heartbeats ────────────────────────────────────────
-  // MESH every 2s: a tiny local Multipeer re-send. Followers DE-DUPE a same-page re-send
-  // (see the "page" case below), so this only does work when a page-turn packet was
-  // dropped — and then the follower recovers within ~2s. A fast cadence is free on a LAN.
+  // MESH every 1s: a tiny local Multipeer re-send. Followers DE-DUPE a same-page re-send
+  // (see the "page" case below), so this only does work when a page-turn packet was dropped —
+  // and then the follower recovers within ~1s. A fast cadence is free on a LAN, and it also
+  // feeds the follower's half-open watchdog (silence >3s ⇒ force reconnect).
   // RELAY every 12s: page CHANGES already publish to the relay immediately (broadcastPage),
   // so this only refreshes the snapshot's `ts` to keep signovivo.com followers "live"
   // (RELAY_LIVE_MAX_AGE_S=90). Kept slow so weak-cell web followers aren't pushed a frame
@@ -268,7 +269,7 @@ export default function App() {
         mode: modeForBook(book),
         bookId: book,
       }).catch(() => {});
-    }, 2000);
+    }, 1000);
     relayHeartbeatRef.current = setInterval(() => {
       if (roleRef.current !== "director" && !explicitTransmitterRef.current) return;
       const book = currentBookRef.current;

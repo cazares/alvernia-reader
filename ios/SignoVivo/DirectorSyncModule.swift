@@ -24,6 +24,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let inviteTimeout: TimeInterval = 30
   private static let followerRetryDelay: TimeInterval = 2
   private static let followerHelloInterval: TimeInterval = 8
+  /// Fast half-open watchdog. The director re-sends the current page every ~1s (mesh heartbeat), so
+  /// a CONNECTED follower that hasn't heard ANYTHING in this window is almost certainly on a
+  /// half-open link (the director dropped us on its side but MPC hasn't declared .notConnected yet —
+  /// which can otherwise take 30-90s, stranding the follower on the wrong song). At that point we
+  /// force an immediate reconnect. 3s = ~3 missed heartbeats: tight, but tolerant of 1-2 dropped
+  /// packets so a momentary blip doesn't churn the connection.
+  private static let followerStaleReconnectSeconds: TimeInterval = 3.0
+  private static let followerWatchdogInterval: TimeInterval = 1.0
   /// One-shot snapshot-recovery probe delay. MPC can drop the first reliable send right at
   /// .connected, so if the director's proactive snapshot AND the follower's first hello both
   /// land in that fragile window, the follower would otherwise wait a full followerHelloInterval
@@ -60,6 +68,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var earlyRefreshCyclesRemaining: Int = 0
   private var selfDirectedTimer: Timer?
   private var followerHelloTimer: Timer?
+  private var followerWatchdogTimer: Timer?
   private var lastFollowerHelloAt: TimeInterval = 0
   private var lastFollowerPageReceivedAt: TimeInterval = 0
   private var currentPageNumber: Int?
@@ -279,6 +288,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     discoveryRefreshTimer = nil
     cancelSelfDirectedTimer()
     stopFollowerHelloTimer()
+    stopFollowerWatchdog()
   }
 
   @objc private func handleAppDidBecomeActive() {
@@ -304,6 +314,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       if connectedDirectorPeer != nil {
         pauseDiscoveryRefreshWhileConnected()
         startFollowerHelloTimer()
+        // Fresh grace window: no heartbeats arrive while backgrounded, so reset the staleness clock
+        // before re-arming the watchdog (else it would fire instantly on foreground). The hello just
+        // sent + the director's foreground re-push will keep it fresh if the link is still alive; if
+        // it's dead, the watchdog reconnects ~3s later.
+        lastFollowerPageReceivedAt = Date().timeIntervalSince1970
+        startFollowerWatchdog()
         sendFollowerHelloIfNeeded()
       } else {
         startDiscoveryRefreshTimer()
@@ -1225,6 +1241,53 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     followerHelloTimer = nil
   }
 
+  /// Fast half-open watchdog — see followerStaleReconnectSeconds. Runs only while a follower is
+  /// connected; forces a reconnect the moment the director's heartbeat stream goes silent.
+  private func startFollowerWatchdog() {
+    followerWatchdogTimer?.invalidate()
+    let generation = resetGeneration
+    followerWatchdogTimer = Timer.scheduledTimer(withTimeInterval: Self.followerWatchdogInterval, repeats: true) { [weak self] _ in
+      DispatchQueue.main.async {
+        autoreleasepool {
+          guard let self = self, self.resetGeneration == generation, self.appIsActive,
+                self.currentRole == "follower", self.connectedDirectorPeer != nil,
+                self.lastFollowerPageReceivedAt > 0 else { return }
+          let stale = Date().timeIntervalSince1970 - self.lastFollowerPageReceivedAt
+          if stale > Self.followerStaleReconnectSeconds {
+            self.forceFollowerReconnect(staleFor: stale)
+          }
+        }
+      }
+    }
+  }
+
+  private func stopFollowerWatchdog() {
+    followerWatchdogTimer?.invalidate()
+    followerWatchdogTimer = nil
+  }
+
+  /// Half-open recovery: MPC still thinks we're connected, but the director stopped sending (it
+  /// dropped us on its side). Recreate our MCSession so allConnectedPeers no longer contains the
+  /// dead director — otherwise reconsiderFollowerTarget's "already connected" guard would block the
+  /// re-invite. The advertiser/browser keep running (the director is usually still discovered), so
+  /// we re-invite and reconnect within ~1-2s instead of sitting stale for 30-90s.
+  private func forceFollowerReconnect(staleFor: Double) {
+    guard currentRole == "follower", let peerID = localPeerID else { return }
+    dbgLog("watchdog:half-open-reconnect", ["staleFor": Int(staleFor)])
+    for s in mcSessions { s.delegate = nil; s.disconnect() }
+    let fresh = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .none)
+    fresh.delegate = self
+    mcSessions = [fresh]
+    connectedDirectorPeer = nil
+    pendingInvitePeer = nil
+    lastFollowerPageReceivedAt = 0
+    stopFollowerHelloTimer()
+    stopFollowerWatchdog() // restarts cleanly on the next .connected
+    startSelfDirectedTimer()
+    emitState(status: "searching", message: "Reconectando con el director...")
+    reconsiderFollowerTarget()
+  }
+
   private func sendFollowerHelloIfNeeded() {
     guard currentRole == "follower", let session = mcSessions.first else { return }
     guard let directorPeer = connectedDirectorPeer else { return }
@@ -1314,6 +1377,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     discoveryRefreshTimer?.invalidate(); discoveryRefreshTimer = nil
     cancelSelfDirectedTimer()
     stopFollowerHelloTimer()
+    stopFollowerWatchdog()
     advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
     browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
     for s in mcSessions { s.disconnect(); s.delegate = nil }
@@ -1639,6 +1703,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.cancelSelfDirectedTimer()
           self.pauseDiscoveryRefreshWhileConnected()
           self.startFollowerHelloTimer()
+          self.startFollowerWatchdog()
           self.sendFollowerHelloIfNeeded()
           self.scheduleFollowerSnapshotProbe()
         } else if self.currentRole == "director" {
@@ -1672,6 +1737,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           }
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
+          self.stopFollowerWatchdog()
           self.resumeDiscoveryRefreshAfterDisconnect()
           // Give the director a grace window to reconnect before going self-directed.
           self.startSelfDirectedTimer()
