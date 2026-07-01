@@ -652,6 +652,7 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
 
   await Promise.all(workers);
   localStorage.setItem(OFFLINE_READY_KEY, "ready");
+  fleetCheckin({ webCached: true }); // tell the readiness dashboard this iPad is fully cached
   await writeOfflineMetadata({
     version: CACHE_VERSION,
     totalPages,
@@ -3019,6 +3020,142 @@ const RELAY_BASE = RELAY_BASE_RAW.startsWith("__RELAY")
 const RELAY_ROOM = "alvernia-main";
 const RELAY_LIVE_MAX_AGE_S = 90; // a director counts as "live" if its last update is this recent
 
+// ── Fleet readiness check-in (signovivo.com PWA only — the native app reports itself) ─────────
+// A device self-reports its cache + home-screen state so the director's gated /fleet-dashboard
+// shows who's ready before Mass. A device sends ONLY a self-entered label — NEVER a phone number
+// (phones live server-side in the gated roster). Fire-and-forget; failures are swallowed so this
+// can never block or slow the reader.
+const FLEET_LABEL_KEY = "svFleetLabel";
+const FLEET_ROLE_KEY = "svFleetRole";
+const FLEET_DEVICE_KEY = "svFleetDeviceId";
+const FLEET_SKIP_KEY = "svFleetSkip";
+
+const fleetDeviceId = () => {
+  try {
+    let id = localStorage.getItem(FLEET_DEVICE_KEY);
+    if (!id) {
+      id = window.crypto?.randomUUID?.()
+        || "d-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+      localStorage.setItem(FLEET_DEVICE_KEY, id);
+    }
+    return id;
+  } catch {
+    return "anon-" + Math.random().toString(36).slice(2);
+  }
+};
+
+// Rough count of cached page images across all page caches (immutable, so max across versions).
+const countCachedPageImages = async () => {
+  if (!("caches" in window)) return 0;
+  try {
+    const names = await caches.keys();
+    let max = 0;
+    for (const nm of names) {
+      if (!nm.includes("pages")) continue;
+      const c = await caches.open(nm);
+      const keys = await c.keys();
+      max = Math.max(max, keys.filter((r) => r.url.includes("/pages/")).length);
+    }
+    return max;
+  } catch {
+    return 0;
+  }
+};
+
+let fleetCheckinInFlight = false;
+const fleetCheckin = async (extra = {}) => {
+  if (NATIVE_FILE_MODE) return; // the native app does its own check-in
+  if (fleetCheckinInFlight) return;
+  fleetCheckinInFlight = true;
+  try {
+    let label = "";
+    let role = "";
+    let webCached = false;
+    try {
+      label = localStorage.getItem(FLEET_LABEL_KEY) || "";
+      role = localStorage.getItem(FLEET_ROLE_KEY) || "";
+      webCached = localStorage.getItem(OFFLINE_READY_KEY) === "ready";
+    } catch {}
+    const totalPages = Number(bookRegistry.books?.[state.currentBook]?.totalPages) || 0;
+    const pagesCached = await countCachedPageImages();
+    const payload = {
+      deviceId: fleetDeviceId(),
+      label,
+      role,
+      surface: "web",
+      webCached: webCached || (totalPages > 0 && pagesCached >= totalPages),
+      pagesCached,
+      totalPages,
+      homeScreen: isStandaloneApp,
+      cacheVersion: String(CACHE_VERSION || ""),
+      ...extra,
+    };
+    await fetch(RELAY_BASE + "/fleet/checkin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    });
+  } catch {
+    /* offline / relay unreachable — presence just isn't reported; reader is unaffected */
+  } finally {
+    fleetCheckinInFlight = false;
+  }
+};
+
+// One-time "¿Quién usa este iPad?" prompt. Choir members self-identify (name + role) for the
+// dashboard; a Skip still checks in anonymously so the device count stays real.
+const fleetPicker = document.getElementById("fleet-picker");
+const fleetPickerName = document.getElementById("fleet-picker-name");
+const fleetPickerRole = document.getElementById("fleet-picker-role");
+const fleetPickerSave = document.getElementById("fleet-picker-save");
+const fleetPickerSkip = document.getElementById("fleet-picker-skip");
+
+const hideFleetPicker = () => fleetPicker?.classList.add("is-hidden");
+const maybeShowFleetPicker = () => {
+  if (NATIVE_FILE_MODE || !fleetPicker) return;
+  try {
+    if (localStorage.getItem(FLEET_LABEL_KEY) || localStorage.getItem(FLEET_SKIP_KEY) === "1") return;
+  } catch {}
+  fleetPicker.classList.remove("is-hidden");
+  setTimeout(() => fleetPickerName?.focus(), 200);
+};
+fleetPickerSave?.addEventListener("click", () => {
+  const name = (fleetPickerName?.value || "").trim().slice(0, 40);
+  const role = fleetPickerRole?.value || "Cantor";
+  if (!name) {
+    fleetPickerName?.focus();
+    return;
+  }
+  try {
+    localStorage.setItem(FLEET_LABEL_KEY, name);
+    localStorage.setItem(FLEET_ROLE_KEY, role);
+  } catch {}
+  hideFleetPicker();
+  fleetCheckin({ label: name, role });
+});
+fleetPickerSkip?.addEventListener("click", () => {
+  try {
+    localStorage.setItem(FLEET_SKIP_KEY, "1");
+  } catch {}
+  hideFleetPicker();
+  fleetCheckin(); // anonymous — device still appears on the dashboard, just unlabeled
+});
+
+// Report presence + cache state on load, then (once the gate has lifted) offer the picker.
+const scheduleFleetCheckin = () => {
+  if (NATIVE_FILE_MODE) return;
+  fleetCheckin();
+  const tryPicker = (n = 0) => {
+    if (gateLifted) {
+      maybeShowFleetPicker();
+    } else if (n < 20) {
+      setTimeout(() => tryPicker(n + 1), 1000);
+    }
+  };
+  setTimeout(() => tryPicker(0), 2500);
+};
+
 const relay = {
   backoff: 500,
   manualClose: false,
@@ -3607,6 +3744,7 @@ const initReader = async () => {
   // guarded-once; no-op on native and once the floor IS the active book.
   precachePublicFloor();
   startRelayFollow();
+  scheduleFleetCheckin(); // report readiness to the director's dashboard + offer the one-time picker
   // Search index is loaded lazily on first search-open (see activateTab) so it
   // never weighs down the follower's first paint.
   renderActiveTab();
