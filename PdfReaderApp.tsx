@@ -33,7 +33,7 @@ import {
   startNearbyDirector,
   startNearbyFollower,
 } from "./src/nearbyDirectorSync";
-import { publishPageToRelay, setRelayPublishCode } from "./src/directorRelaySync";
+import { publishPageToRelay, setRelayPublishCode, setRelayAuthErrorHandler } from "./src/directorRelaySync";
 import directorCodes from "./director-codes.json";
 import { STORAGE_KEYS, type BookId } from "./src/offlineBooks";
 import versionJson from "./version.json";
@@ -289,6 +289,18 @@ export default function App() {
       }
     }
   }, []);
+
+  // ── Relay-auth warning bridge ────────────────────────────────────────────────
+  // The relay silently rejects a publish when the director's X-Director-Code is bad (401) or the
+  // public Sión code aims at the private manual (403). directorRelaySync latches it to one shot;
+  // here we forward that single event into the WebView so the director SEES that every signovivo.com
+  // follower has gone dark, instead of the app looking fine while the web congregation is frozen.
+  useEffect(() => {
+    setRelayAuthErrorHandler((status: number) => {
+      injectEvent({ type: "relay-auth-error", status });
+    });
+    return () => setRelayAuthErrorHandler(null);
+  }, [injectEvent]);
 
   // ── Page broadcast: mesh (director) + relay (director or explicit transmitter) ──
   const broadcastPage = useCallback((page: number, book: BookId) => {

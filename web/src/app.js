@@ -1002,6 +1002,55 @@ const setSyncWorking = (status) => {
   el.classList.toggle("is-on", working);
 };
 
+// ── Relay-auth warning banner ─────────────────────────────────────────────────
+// Shown to the DIRECTOR (inside the native WebView) when the relay rejects their publish: a bad or
+// retired director code (401) or the public Sión code aimed at the private manual (403). This is the
+// ONLY signal that the web congregation on signovivo.com has gone dark — without it the failure is
+// invisible. Fixed, dismissible, idempotent (a re-fire re-shows the same banner, never stacks). The
+// native shell latches upstream so this can't fire on every page turn.
+let relayAuthWarningEl = null;
+const showRelayAuthWarning = (status) => {
+  if (relayAuthWarningEl) {
+    // Already built — a later re-fire (recovery → re-failure) just re-reveals it without stacking.
+    relayAuthWarningEl.classList.add("is-on");
+    return;
+  }
+  const style = document.createElement("style");
+  style.textContent =
+    "#sv-relay-warn{position:fixed;top:max(0.7rem,env(safe-area-inset-top,0px));left:50%;" +
+    "transform:translateX(-50%);z-index:70;display:none;max-width:min(92vw,34rem);" +
+    "align-items:flex-start;gap:0.55rem;padding:0.8rem 0.9rem;border-radius:0.85rem;" +
+    "background:#b91c1c;color:#fff;font:600 0.92rem/1.35 system-ui,-apple-system,sans-serif;" +
+    "box-shadow:0 6px 22px rgba(0,0,0,.45);-webkit-tap-highlight-color:transparent}" +
+    "#sv-relay-warn.is-on{display:flex;animation:sv-relaywarn-in .2s ease}" +
+    "@keyframes sv-relaywarn-in{from{opacity:0;transform:translate(-50%,-8px)}" +
+    "to{opacity:1;transform:translate(-50%,0)}}" +
+    "#sv-relay-warn .sv-rw-x{flex:0 0 auto;margin-left:0.25rem;width:1.6rem;height:1.6rem;border:0;" +
+    "border-radius:50%;background:rgba(255,255,255,0.22);color:#fff;font-size:1.05rem;line-height:1;" +
+    "cursor:pointer;-webkit-tap-highlight-color:transparent}";
+  document.head.appendChild(style);
+  relayAuthWarningEl = document.createElement("div");
+  relayAuthWarningEl.id = "sv-relay-warn";
+  relayAuthWarningEl.setAttribute("role", "alert");
+  relayAuthWarningEl.setAttribute("aria-live", "assertive");
+  const msg = document.createElement("span");
+  msg.textContent = Number(status) === 403
+    ? "Este código de director no puede transmitir este libro. Los seguidores en signovivo.com NO están sincronizados."
+    : "El relé rechazó el código de director. Los seguidores en signovivo.com NO están sincronizados.";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "sv-rw-x";
+  closeBtn.setAttribute("aria-label", "Cerrar aviso");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", () => relayAuthWarningEl.classList.remove("is-on"));
+  relayAuthWarningEl.appendChild(msg);
+  relayAuthWarningEl.appendChild(closeBtn);
+  document.body.appendChild(relayAuthWarningEl);
+  // Add the reveal class synchronously (not via rAF alone, which can be throttled in a backgrounded
+  // WebView): guarantees the banner is displayed even if the slide-in keyframe is skipped.
+  relayAuthWarningEl.classList.add("is-on");
+};
+
 const applyNativeSyncEvent = async (payload) => {
   if (!payload || typeof payload !== "object") return;
 
@@ -1026,6 +1075,15 @@ const applyNativeSyncEvent = async (payload) => {
         renderDirectorModeBadge();
       }
     }
+    return;
+  }
+
+  // The relay REJECTED the director's publish (401 bad/retired code, 403 Sión code aimed at the
+  // private manual). The native shell bridges it here as a one-time signal so the director sees a
+  // visible warning — otherwise the publish fails silently and every signovivo.com follower freezes
+  // for the whole Mass. (Native latches it, so this never fires on every page turn.)
+  if (payload.type === "relay-auth-error") {
+    showRelayAuthWarning(payload.status);
     return;
   }
 

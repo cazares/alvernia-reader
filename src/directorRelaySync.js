@@ -18,8 +18,27 @@ const PROTOCOL_VERSION = 1;
 // standard-director number on the Del Rio manual — via setRelayPublishCode() when they become
 // director. No code is hardcoded here, and a Sión director can only publish the public book.
 let relayPublishCode = "";
+
+// One-time bridge to the director's UI when the relay REJECTS this device's publish. A resolved
+// fetch() is NOT proof of success: the relay authorizes every publish by X-Director-Code, so an
+// unknown/retired code (HTTP 401) or the public Sión code aimed at the private manual (HTTP 403)
+// comes back !ok WITHOUT throwing. Left unchecked that failure is swallowed silently — the director's
+// app shows nothing while EVERY signovivo.com follower freezes on the last page for the whole Mass
+// (the relay is the only sync path to web phones; the Multipeer mesh doesn't reach them). The native
+// shell registers a handler here that surfaces a visible warning in the WebView. Latched so a burst
+// of page turns — each re-publishing and re-failing — can't spam it; the latch clears on the next
+// successful publish (or a new code entry) so a genuine later failure can warn again.
+let relayAuthErrorHandler = null;
+export const setRelayAuthErrorHandler = (fn) => {
+  relayAuthErrorHandler = typeof fn === "function" ? fn : null;
+};
+let authErrorNotified = false;
+
 export const setRelayPublishCode = (code) => {
   relayPublishCode = String(code || "").replace(/[^0-9]/g, "");
+  // A fresh code entry is a NEW attempt: re-arm the one-time auth warning so, if this code is
+  // also rejected, the director is told again (and a corrected code that now works never warns).
+  authErrorNotified = false;
 };
 
 // Hard ceiling on a single publish. On parish wifi that associates but doesn't
@@ -52,7 +71,7 @@ const doPublish = async (payload) => {
     ? setTimeout(() => controller.abort(), PUBLISH_TIMEOUT_MS)
     : null;
   try {
-    await fetch(`${RELAY_BASE}/r/${RELAY_ROOM}/publish`, {
+    const res = await fetch(`${RELAY_BASE}/r/${RELAY_ROOM}/publish`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -61,6 +80,21 @@ const doPublish = async (payload) => {
       body: JSON.stringify(payload),
       signal: controller ? controller.signal : undefined,
     });
+    // A resolved fetch only means the round-trip completed — inspect the status. Auth rejections
+    // (401 unauthorized code / 403 book-scoped Sión code) are exactly the "followers silently frozen"
+    // showstopper: persistent, the director's fault to fix, and never self-healing. Warn ONCE. Other
+    // non-ok statuses (5xx server blips, 429) are transient and already covered by the re-publish
+    // loop, so we don't cry wolf on them.
+    if (res && res.ok) {
+      authErrorNotified = false; // recovered — re-arm so a future failure can warn again
+    } else if (res && (res.status === 401 || res.status === 403) && !authErrorNotified) {
+      authErrorNotified = true;
+      try {
+        if (relayAuthErrorHandler) relayAuthErrorHandler(res.status);
+      } catch {
+        // The warning bridge must never break the publish/coalesce loop.
+      }
+    }
   } catch {
     // Network flaps and aborts are expected (weak signal / timeout); the next
     // page change — or the heartbeat — re-publishes once inFlight clears below.
