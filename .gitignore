@@ -28,3 +28,7 @@ build/
 
 # Choir roster with phone numbers — PII, never commit (seeded into the gated DO instead)
 sync-worker/roster.private.json
+
+# Real standard-director codes (phone numbers) — PII, baked at build via release.sh, never committed
+director-codes.private.json
+director-codes.committed.bak

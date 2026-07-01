@@ -33,7 +33,8 @@ import {
   startNearbyDirector,
   startNearbyFollower,
 } from "./src/nearbyDirectorSync";
-import { publishPageToRelay, TRANSMITTER_ACCESS_CODE } from "./src/directorRelaySync";
+import { publishPageToRelay, setRelayPublishCode } from "./src/directorRelaySync";
+import directorCodes from "./director-codes.json";
 import { STORAGE_KEYS, type BookId } from "./src/offlineBooks";
 import versionJson from "./version.json";
 
@@ -47,18 +48,18 @@ const GEO_STATE_URL = `${RELAY_BASE}/r/${RELAY_ROOM}/state`;
 // Fixed Multipeer session for the parish mesh (unchanged from the native reader).
 const DIRECTOR_SESSION = "1234";
 
-// Director codes — admin can force-takeover; the three regular codes start a director
-// session (the Swift conflict logic lets the most-recent director win on contention).
-const ADMIN_CODE = "8307343376";
-const DIRECTOR_ACCESS_CODES = new Set<string>([
-  ADMIN_CODE,
-  "8304533367",
-  "8307197000",
-  "8303130470",
-]);
-// Secret numpad codes carried over from the native reader.
+// Book-scoped director entry. Sión (public book) = the public code 1234567890 (fine in-repo).
+// Standard (private Del Rio manual) = a real director number, baked at build from the gitignored
+// director-codes.private.json — the committed director-codes.json is EMPTY, so no phone numbers
+// live in this public repo. A code valid for one book is rejected on the other.
+const SION_DIRECTOR_CODE = "1234567890";
+const STANDARD_DIRECTOR_CODES = new Set<string>(
+  ((directorCodes as { standardDirectorCodes?: string[] }).standardDirectorCodes || []).map((c) =>
+    String(c).replace(/[^0-9]/g, ""),
+  ),
+);
+// Secret numpad code carried over from the native reader.
 const SOFT_RESET_CODE = "744668486";
-const FORCE_DIRECTOR_CODE = "50711";
 // Last-director restore window: become director again on relaunch if we were one recently.
 const DIRECTOR_RESTORE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -387,6 +388,9 @@ export default function App() {
     async (code: string) => {
       // Claim this role transition; a later flip bumps the generation and supersedes us.
       const myGen = ++roleGenerationRef.current;
+      // The relay authorizes this director's publishes with the exact code they entered (Sión code
+      // → public book only; a standard number → the Del Rio manual). Set BEFORE any broadcast.
+      setRelayPublishCode(code);
       dbgLog("become:director", { wasFollower: roleRef.current === "follower", syncAvailable });
       if (!syncAvailable) {
         // No mesh on this device — still act as an online transmitter to the relay.
@@ -502,18 +506,19 @@ export default function App() {
         performSoftReset();
         return;
       }
-      if (code === FORCE_DIRECTOR_CODE || DIRECTOR_ACCESS_CODES.has(code)) {
+      // Book-scoped director entry: the public Sión code ONLY on the Sión book; a real
+      // standard-director number ONLY on the private Del Rio manual. A code valid for the OTHER
+      // book (or unknown) is rejected — so the passwordless Sión code can never direct standard.
+      const activeBook = currentBookRef.current;
+      if (activeBook === "hymns-4" && code === SION_DIRECTOR_CODE) {
         becomeDirector(code);
         return;
       }
-      if (code === digitsOnly(TRANSMITTER_ACCESS_CODE)) {
-        explicitTransmitterRef.current = true;
-        injectEvent({ type: "role", role: "director" });
-        broadcastPage(currentPageRef.current, currentBookRef.current);
-        startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
+      if (activeBook === "standard" && STANDARD_DIRECTOR_CODES.has(code)) {
+        becomeDirector(code);
         return;
       }
-      // Unrecognized → tell the web it was wrong so it can surface "código incorrecto".
+      // Unrecognized (or valid for the other book) → tell the web so it surfaces "código incorrecto".
       injectEvent({ type: "role", role: "none" });
     },
     [injectEvent, performSoftReset, becomeDirector, broadcastPage, startDirectorHeartbeat],
@@ -753,9 +758,11 @@ export default function App() {
           const lastAt = Number(lastAtRaw) || 0;
           const recentlyDirector =
             lastRole === "director" && Date.now() - lastAt < DIRECTOR_RESTORE_WINDOW_MS;
-          if (recentlyDirector) {
-            const code = (await AsyncStorage.getItem(STORED_CODE_KEY)) || ADMIN_CODE;
-            await becomeDirector(code);
+          const storedCode = recentlyDirector
+            ? (await AsyncStorage.getItem(STORED_CODE_KEY)) || ""
+            : "";
+          if (recentlyDirector && storedCode) {
+            await becomeDirector(storedCode);
           } else {
             await becomeFollower();
           }
