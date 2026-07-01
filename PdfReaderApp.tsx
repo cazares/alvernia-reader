@@ -15,7 +15,7 @@
 // web app's job. The old 3,536-line FlatList/PDF reader was replaced wholesale.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Platform, StatusBar, StyleSheet, Text, View } from "react-native";
+import { AppState, Platform, StatusBar, StyleSheet, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useKeepAwake } from "expo-keep-awake";
 import * as FileSystem from "expo-file-system/legacy";
@@ -920,15 +920,6 @@ export default function App() {
         style={styles.web}
         {...(Platform.OS === "ios" ? { allowsBackForwardNavigationGestures: false } : {})}
       />
-      {/* Always-visible build badge — a NATIVE overlay (not web UI) so the running build number is
-          legible on every screen and even survives a broken/blank WebView. Lets us confirm BOTH
-          devices are on the SAME build (a build mismatch silently breaks director↔follower sync).
-          pointerEvents="none" so it never intercepts a tap. */}
-      {BUILD_VERSION ? (
-        <Text style={styles.buildBadge} pointerEvents="none" allowFontScaling={false}>
-          {`#${BUILD_VERSION}`}
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -937,18 +928,4 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   blank: { flex: 1, backgroundColor: "#000" },
   web: { flex: 1, backgroundColor: "#000" },
-  // Tiny dim build badge, bottom-right. Dark backing keeps it legible over white book pages.
-  buildBadge: {
-    position: "absolute",
-    bottom: 6,
-    right: 8,
-    fontSize: 10,
-    color: "rgba(255,255,255,0.5)",
-    backgroundColor: "rgba(0,0,0,0.4)",
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 6,
-    overflow: "hidden",
-    fontVariant: ["tabular-nums"],
-  },
 });

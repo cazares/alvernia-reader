@@ -961,6 +961,44 @@ const renderDirectorModeBadge = () => {
   directorModeBadge.classList.toggle("is-hidden", !isDirector);
 };
 
+// ── Sync "working" spinner ──────────────────────────────────────────────────────
+// A small top-center pill with a spinner, shown whenever the native mesh is actively trying to
+// connect (searching / connecting) — so the ~4s handshake and any reconnect read as "working," not
+// "frozen." Hidden the instant we're connected (or idle / self-directed). Native-only: it's driven
+// by the mesh's state events; web relay followers use the relay pill instead.
+let syncSpinnerEl = null;
+const ensureSyncSpinner = () => {
+  if (syncSpinnerEl) return syncSpinnerEl;
+  const style = document.createElement("style");
+  style.textContent =
+    "#sv-sync-spinner{position:fixed;top:max(0.7rem,env(safe-area-inset-top,0px));left:50%;" +
+    "transform:translateX(-50%);z-index:60;display:none;align-items:center;gap:0.5rem;" +
+    "padding:0.5rem 0.95rem;border-radius:999px;background:rgba(26,26,46,0.9);color:#fff;" +
+    "font:600 0.85rem/1 system-ui,-apple-system,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.4);" +
+    "pointer-events:none;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}" +
+    "#sv-sync-spinner.is-on{display:flex}" +
+    "#sv-sync-spinner .sv-dot{width:14px;height:14px;border-radius:50%;" +
+    "border:2px solid rgba(255,255,255,0.25);border-top-color:#fff;animation:sv-syncspin .7s linear infinite}" +
+    "@keyframes sv-syncspin{to{transform:rotate(360deg)}}";
+  document.head.appendChild(style);
+  syncSpinnerEl = document.createElement("div");
+  syncSpinnerEl.id = "sv-sync-spinner";
+  syncSpinnerEl.setAttribute("role", "status");
+  syncSpinnerEl.setAttribute("aria-live", "polite");
+  syncSpinnerEl.innerHTML = '<span class="sv-dot"></span><span class="sv-label"></span>';
+  document.body.appendChild(syncSpinnerEl);
+  return syncSpinnerEl;
+};
+const setSyncWorking = (status) => {
+  const working = status === "searching" || status === "connecting" || status === "resolving-conflict";
+  const el = ensureSyncSpinner();
+  if (working) {
+    el.querySelector(".sv-label").textContent =
+      status === "searching" ? "Buscando director…" : "Conectando…";
+  }
+  el.classList.toggle("is-on", working);
+};
+
 const applyNativeSyncEvent = async (payload) => {
   if (!payload || typeof payload !== "object") return;
 
@@ -991,6 +1029,12 @@ const applyNativeSyncEvent = async (payload) => {
   if (payload.type !== "sync-event") return;
 
   const event = payload.event || {};
+
+  // Connection lifecycle from the native mesh → drive the "working" spinner.
+  if (event.type === "state") {
+    setSyncWorking(String(event.status || ""));
+    return;
+  }
 
   if (event.type === "page" && Number.isFinite(event.page)) {
     // A director on a different book: switch first so the page lands in the right book.
@@ -3540,11 +3584,12 @@ const resolvedBuild =
 if (appVersionLabel && resolvedBuild) {
   appVersionLabel.textContent = `Versión ${resolvedBuild}`;
 }
-// Small always-visible build badge. WEB ONLY — native shows its own native overlay, so we don't
-// double up inside the WebView. Lets anyone confirm at a glance which build signovivo.com is on.
+// Small always-visible build badge — shown on BOTH web and native (rendered in the WebView, so it
+// respects env(safe-area-inset-bottom) via viewport-fit=cover and never tucks under the iPhone home
+// indicator). Just the number — the only person who reads it already knows what it means.
 const buildBadge = document.getElementById("build-badge");
-if (buildBadge && resolvedBuild && !NATIVE_FILE_MODE && !hasNativeBridge()) {
-  buildBadge.textContent = `#${resolvedBuild}`;
+if (buildBadge && resolvedBuild) {
+  buildBadge.textContent = resolvedBuild;
   buildBadge.classList.add("is-shown");
 }
 
