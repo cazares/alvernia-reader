@@ -8,8 +8,11 @@
 //   2. Bridge the offline iPad-to-iPad Multipeer mesh <-> the web app (page sync).
 //   3. Validate director codes entered on the web numpad and drive director/follower role.
 //   4. Publish the director's page to the Cloudflare relay so signovivo.com followers sync.
-//   5. Pick the starting hymnal book from IP geolocation (Del Rio -> standard manual,
-//      everywhere else -> hymns-4) and keep the screen awake.
+//   5. Keep the screen awake. (The native app is SINGLE-BOOK: hard-pinned to the standard
+//      Alvernia manual — DEFAULT_BOOK, boot, and bookFromSync all force "standard" so a cold/
+//      offline device can never strand the choir on Sión, and the standard director code is
+//      always accepted. The two-book IP-geo split lives only on signovivo.com. The geo book
+//      effect below is now an inert early-return on native.)
 //
 // Everything else — rendering, paging, zoom, search, browse, song navigation — is the
 // web app's job. The old 3,536-line FlatList/PDF reader was replaced wholesale.
@@ -64,7 +67,11 @@ const SOFT_RESET_CODE = "744668486";
 const DIRECTOR_RESTORE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const STORED_CODE_KEY = "director_access_code";
-const DEFAULT_BOOK: BookId = "hymns-4";
+// Native app is single-book: the parish only sings from the standard (Alvernia) manual. Pinning
+// standard everywhere keeps a cold/offline device off the Sión default — that book-mismatch made
+// the standard director code get rejected and left the whole choir "searching for a director"
+// (Mass 2026-07-01). The two-book geo split still lives on signovivo.com; only native is pinned.
+const DEFAULT_BOOK: BookId = "standard";
 
 type SyncRole = "off" | "director" | "follower";
 
@@ -72,10 +79,9 @@ const isBookId = (value: unknown): value is BookId => value === "standard" || va
 const digitsOnly = (value: unknown) => String(value ?? "").replace(/[^0-9]/g, "");
 const modeForBook = (book: BookId) => (book === "standard" ? "standard" : "nonStandard");
 // Multipeer/relay carry both a canonical bookId and a legacy mode string; prefer bookId.
-const bookFromSync = (bookId: unknown, mode: unknown): BookId => {
-  if (isBookId(bookId)) return bookId;
-  return String(mode ?? "") === "standard" ? "standard" : "hymns-4";
-};
+// Native is pinned to the standard manual (see DEFAULT_BOOK): clamp every incoming mesh/relay sync
+// to standard so no director's broadcast can ever pull a native follower onto Sión.
+const bookFromSync = (_bookId: unknown, _mode: unknown): BookId => "standard";
 
 // ──────────────────────────────── App ───────────────────────────────────────
 
@@ -728,15 +734,12 @@ export default function App() {
     let cancelled = false;
     (async () => {
       breadcrumb("boot");
-      let stored: BookId | null = null;
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEYS.activeBookId);
-        if (isBookId(raw)) stored = raw;
-      } catch {
-        /* ignore */
-      }
-      storedBookRef.current = stored;
-      const startBook: BookId = stored ?? DEFAULT_BOOK;
+      // Native app is single-book (standard/Alvernia). Pin it regardless of any previously-stored
+      // book so a cold or offline device can never boot on Sión — that stranded the director code
+      // last Mass. Setting storedBookRef also short-circuits the IP-geo book effect below (its
+      // `if (storedBookRef.current) return` guard), so geo can never flip a native device to Sión.
+      const startBook: BookId = "standard";
+      storedBookRef.current = startBook;
       currentBookRef.current = startBook;
 
       const uri = await resolveBundleUri();
