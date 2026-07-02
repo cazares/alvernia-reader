@@ -527,17 +527,36 @@ export default function App() {
       // Book-scoped director entry: the public Sión code ONLY on the Sión book; a real
       // standard-director number ONLY on the private Del Rio manual. A code valid for the OTHER
       // book (or unknown) is rejected — so the passwordless Sión code can never direct standard.
+      // A valid director code no longer promotes SILENTLY — confirm first, so entering your code at
+      // Mass/practice never yanks the role from a director who is already live (Miguel, 2026-07-02).
       const activeBook = currentBookRef.current;
-      if (activeBook === "hymns-4" && code === SION_DIRECTOR_CODE) {
-        becomeDirector(code);
+      const isDirectorCode =
+        (activeBook === "hymns-4" && code === SION_DIRECTOR_CODE) ||
+        (activeBook === "standard" && STANDARD_DIRECTOR_CODES.has(code));
+      if (!isDirectorCode) {
+        // Unrecognized (or valid for the other book) → tell the web so it surfaces "código incorrecto".
+        injectEvent({ type: "role", role: "none" });
         return;
       }
-      if (activeBook === "standard" && STANDARD_DIRECTOR_CODES.has(code)) {
-        becomeDirector(code);
-        return;
-      }
-      // Unrecognized (or valid for the other book) → tell the web so it surfaces "código incorrecto".
-      injectEvent({ type: "role", role: "none" });
+      // Best-effort heads-up: lastDirectorSnapshotRef is set whenever a director's page has arrived
+      // over the mesh, so if it's set another device is (or was just) directing — warn before takeover.
+      const liveDirector =
+        Boolean(lastDirectorSnapshotRef.current) && roleRef.current !== "director";
+      Alert.alert(
+        liveDirector ? "⚠️ Ya hay un director activo" : "¿Dirigir el coro?",
+        liveDirector
+          ? "Otro dispositivo está dirigiendo AHORA. Si continúas, tú tomas el control y todos te seguirán a ti."
+          : "Los demás dispositivos seguirán tu página. Si otro director ya está activo, le quitarás el control.",
+        [
+          // Cancel: do nothing — stay exactly as you were (a follower keeps following the real director).
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: liveDirector ? "Tomar el control" : "Sí, dirigir",
+            style: liveDirector ? "destructive" : "default",
+            onPress: () => becomeDirector(code),
+          },
+        ],
+      );
     },
     [injectEvent, performSoftReset, becomeDirector, broadcastPage, startDirectorHeartbeat],
   );
