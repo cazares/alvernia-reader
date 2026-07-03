@@ -61,12 +61,16 @@ const STANDARD_DIRECTOR_CODES = new Set<string>(
     String(c).replace(/[^0-9]/g, ""),
   ),
 );
+// Super-admin codes (Miguel) — a SUBSET of the standard codes, baked from the gitignored
+// director-codes.private.json. Same power as any director code; the confirm dialog just labels it
+// "super admin" so it's clear this number is taking the director role (never promoted silently).
+const SUPER_ADMIN_CODES = new Set<string>(
+  ((directorCodes as { superAdminCodes?: string[] }).superAdminCodes || []).map((c) =>
+    String(c).replace(/[^0-9]/g, ""),
+  ),
+);
 // Secret numpad code carried over from the native reader.
 const SOFT_RESET_CODE = "744668486";
-// Last-director restore window: become director again on relaunch if we were one recently.
-const DIRECTOR_RESTORE_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-const STORED_CODE_KEY = "director_access_code";
 // Native app is single-book: the parish only sings from the standard (Alvernia) manual. Pinning
 // standard everywhere keeps a cold/offline device off the Sión default — that book-mismatch made
 // the standard director code get rejected and left the whole choir "searching for a director"
@@ -445,11 +449,9 @@ export default function App() {
         }
         if (myGen !== roleGenerationRef.current) return; // superseded while the mesh was starting
         roleRef.current = "director";
-        await AsyncStorage.multiSet([
-          [STORAGE_KEYS.lastSyncRole, "director"],
-          [STORAGE_KEYS.lastDirectorAt, String(Date.now())],
-          [STORED_CODE_KEY, code],
-        ]);
+        // Record the role (breadcrumb only). We deliberately do NOT persist the director code or a
+        // timestamp — there is no auto-restore, so a credential must never sit in storage.
+        await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director");
         if (myGen !== roleGenerationRef.current) return; // superseded while persisting
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
@@ -494,11 +496,7 @@ export default function App() {
       /* ignore */
     }
     try {
-      await AsyncStorage.multiRemove([
-        STORAGE_KEYS.lastSyncRole,
-        STORAGE_KEYS.lastDirectorAt,
-        STORED_CODE_KEY,
-      ]);
+      await AsyncStorage.removeItem(STORAGE_KEYS.lastSyncRole);
     } catch {
       /* ignore */
     }
@@ -538,25 +536,32 @@ export default function App() {
         injectEvent({ type: "role", role: "none" });
         return;
       }
+      // ALWAYS ask — a valid code never promotes silently (Miguel: "always ask, always").
+      // Super-admin codes (Miguel) get a labeled prompt; everyone else is a plain director.
       // Best-effort heads-up: lastDirectorSnapshotRef is set whenever a director's page has arrived
       // over the mesh, so if it's set another device is (or was just) directing — warn before takeover.
+      const isSuperAdmin = SUPER_ADMIN_CODES.has(code);
       const liveDirector =
         Boolean(lastDirectorSnapshotRef.current) && roleRef.current !== "director";
-      Alert.alert(
-        liveDirector ? "⚠️ Ya hay un director activo" : "¿Dirigir el coro?",
-        liveDirector
-          ? "Otro dispositivo está dirigiendo AHORA. Si continúas, tú tomas el control y todos te seguirán a ti."
-          : "Los demás dispositivos seguirán tu página. Si otro director ya está activo, le quitarás el control.",
-        [
-          // Cancel: do nothing — stay exactly as you were (a follower keeps following the real director).
-          { text: "Cancelar", style: "cancel" },
-          {
-            text: liveDirector ? "Tomar el control" : "Sí, dirigir",
-            style: liveDirector ? "destructive" : "default",
-            onPress: () => becomeDirector(code),
-          },
-        ],
-      );
+      const title = liveDirector
+        ? "⚠️ Ya hay un director activo"
+        : isSuperAdmin
+          ? "Super admin — ¿dirigir?"
+          : "¿Dirigir el coro?";
+      const body = liveDirector
+        ? `Otro dispositivo está dirigiendo AHORA. Si continúas${isSuperAdmin ? " (super admin)" : ""}, tú tomas el control y todos te seguirán a ti.`
+        : isSuperAdmin
+          ? "Entrarás como director (super admin). Los demás dispositivos seguirán tu página."
+          : "Los demás dispositivos seguirán tu página. Si otro director ya está activo, le quitarás el control.";
+      Alert.alert(title, body, [
+        // Cancel: do nothing — stay exactly as you were (a follower keeps following the real director).
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: liveDirector ? "Tomar el control" : "Sí, dirigir",
+          style: liveDirector ? "destructive" : "default",
+          onPress: () => becomeDirector(code),
+        },
+      ]);
     },
     [injectEvent, performSoftReset, becomeDirector, broadcastPage, startDirectorHeartbeat],
   );
@@ -674,9 +679,8 @@ export default function App() {
           break;
         }
         case "exit-director": {
-          // Director tapped the badge to step down. Forget the director code/time so a relaunch
-          // doesn't auto-restore director.
-          AsyncStorage.multiRemove([STORAGE_KEYS.lastDirectorAt, STORED_CODE_KEY]).catch(() => {});
+          // Director tapped the badge to step down → become a FOLLOWER. (There is no auto-restore
+          // anymore, so there is no stored director code/time to forget.)
           if (syncAvailable) {
             // Mesh device → become a FOLLOWER (not "off") so it immediately re-joins the mesh and
             // follows the NEW director, and the ⟳ resync stays live. (Using performSoftReset here
@@ -783,27 +787,11 @@ export default function App() {
     // The listener below still re-registers on every run; only this restore is one-shot.
     if (!didBootstrapRef.current) {
       didBootstrapRef.current = true;
-      (async () => {
-        try {
-          const [lastRole, lastAtRaw] = await Promise.all([
-            AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole),
-            AsyncStorage.getItem(STORAGE_KEYS.lastDirectorAt),
-          ]);
-          const lastAt = Number(lastAtRaw) || 0;
-          const recentlyDirector =
-            lastRole === "director" && Date.now() - lastAt < DIRECTOR_RESTORE_WINDOW_MS;
-          const storedCode = recentlyDirector
-            ? (await AsyncStorage.getItem(STORED_CODE_KEY)) || ""
-            : "";
-          if (recentlyDirector && storedCode) {
-            await becomeDirector(storedCode);
-          } else {
-            await becomeFollower();
-          }
-        } catch {
-          becomeFollower();
-        }
-      })();
+      // NO auto-director: a device ALWAYS boots as a follower. Becoming director requires explicitly
+      // entering a director code, which then ASKS for confirmation (onDirectorCode). We never
+      // silently restore a stale director role — that would step on whoever is actually directing
+      // right now. (Miguel, 2026-07-02: "don't just auto-make anyone director — always ask, always.")
+      becomeFollower();
     }
 
     const sub = addNearbyDirectorSyncListener((event: Record<string, unknown>) => {

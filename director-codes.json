@@ -1,4 +1,5 @@
 {
   "_comment": "Standard/Del-Rio director codes. This COMMITTED file is intentionally EMPTY — the real numbers live in the gitignored director-codes.private.json, which release.sh copies over this file at build time (like the Podfile.lock workaround) and then restores. Never put real phone numbers here.",
-  "standardDirectorCodes": []
+  "standardDirectorCodes": [],
+  "superAdminCodes": []
 }
