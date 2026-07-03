@@ -18,9 +18,7 @@ export interface Env {
   /** Comma-separated allow-list for CORS on /state. "*" allows all (fine — no credentials). */
   ALLOWED_ORIGINS?: string;
   /** Comma-separated transmitter access codes accepted via the `X-Director-Code` header.
-   *  Defaults to the legacy transmitter code plus the four director codes if unset.
-   *  Gates who may publish (page numbers only). The legacy "12345678840" stays until
-   *  native build 332 is confirmed live on TestFlight, then it is removed (Phase 7). */
+   *  Gates who may publish (page numbers only). Any listed code may publish. */
   TRANSMITTER_CODES?: string;
   /** Secret gating the /fleet readiness dashboard + roster (which expose choir phone numbers). Set
    *  via `wrangler secret put FLEET_DASHBOARD_KEY`. Deliberately NOT a transmitter code — those are
@@ -312,8 +310,6 @@ function corsHeaders(origin: string | null, env: Env): Record<string, string> {
     // X-Director-Code is required so the web app (inside the native file:// WebView, or
     // signovivo.com) can POST /publish without the preflight stripping the auth header.
     "Access-Control-Allow-Headers": "Authorization,Content-Type,X-Director-Code",
-    // Expose X-Hymnal so browser fetch() can READ it cross-origin (otherwise it's hidden).
-    "Access-Control-Expose-Headers": "X-Hymnal",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -326,19 +322,14 @@ function json(data: unknown, status: number, cors: Record<string, string>): Resp
   });
 }
 
-// The valid transmitter / director access codes — gates BOTH /publish (directing) and /unlock
-// (authorized access to the private standard manual). Single source of truth so the two paths
-// never drift. Override via env.TRANSMITTER_CODES (comma-separated).
-// The Sión (public book) director code — memorable + intentionally NOT secret. It may publish the
-// PUBLIC "hymns-4" book only (enforced at /publish), so it can never direct the private manual.
-const SION_DIRECTOR_CODE = "1234567890";
-
+// The valid transmitter / director access codes — gate /publish (directing). Override via
+// env.TRANSMITTER_CODES (comma-separated). Any listed code may publish page numbers.
 function validTransmitterCodes(env: Env): Set<string> {
   // Source of truth is the TRANSMITTER_CODES secret (`wrangler secret put`). NO plaintext fallback —
-  // the real phone-number director codes must never live in this PUBLIC repo. The public Sión code
-  // is always accepted (it's book-scoped to hymns-4 below). Fail-closed on the rest if unset.
+  // the real phone-number director codes must never live in this PUBLIC repo. Fail-closed if unset.
   return new Set(
-    [SION_DIRECTOR_CODE, ...(env.TRANSMITTER_CODES || "").split(",")]
+    (env.TRANSMITTER_CODES || "")
+      .split(",")
       .map((c) => c.trim())
       .filter(Boolean),
   );
@@ -505,86 +496,16 @@ export default {
     const origin = request.headers.get("Origin");
     const cors = corsHeaders(origin, env);
 
-    // IP geolocation → which hymnal book the follower should default to.
-    // The parish is Del Rio, TX + its cross-border sister city Ciudad Acuña, Coahuila
-    // (our families straddle the border), so BOTH sides — plus the immediate surroundings
-    // within a radius — get the standard manual (alvernia_manual_2). Everywhere else
-    // defaults to hymns-4 ("Himnos de Sión"), which is PUBLIC. The standard manual is
-    // PRIVATE to Del Rio / our church, so this gate stays tight to the border region
-    // (radius is well short of Eagle Pass ≈80 km and San Antonio ≈234 km). IP geo is
-    // approximate & ISP-dependent, so we OR several signals: physical radius (primary),
-    // exact ZIP, city name, and the Acuña MX postal block. Sent on every response; the
-    // web app reads X-Hymnal on its first /state fetch. Tune STANDARD_RADIUS_KM to taste.
-    const postal = String((request.cf?.postalCode as string) || "");
-    const cityLc = String((request.cf?.city as string) || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, ""); // strip accents: "acuña" → "acuna"
-    const country = String((request.cf?.country as string) || "").toUpperCase();
-    const lat = Number(request.cf?.latitude ?? NaN);
-    const lon = Number(request.cf?.longitude ?? NaN);
-
-    // Haversine distance from Del Rio center; Ciudad Acuña's center is ≈7 km away, so a
-    // single radius covers both sides of the border without reaching the next parishes.
-    const DR_LAT = 29.3627;
-    const DR_LON = -100.8968;
-    const STANDARD_RADIUS_KM = 45;
-    const kmFromDelRio = (la: number, lo: number): number => {
-      const R = 6371;
-      const toRad = (d: number) => (d * Math.PI) / 180;
-      const dLat = toRad(la - DR_LAT);
-      const dLon = toRad(lo - DR_LON);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(DR_LAT)) * Math.cos(toRad(la)) * Math.sin(dLon / 2) ** 2;
-      return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
-    };
-    const distKm =
-      Number.isFinite(lat) && Number.isFinite(lon) ? kmFromDelRio(lat, lon) : Infinity;
-
-    const isStandard =
-      distKm <= STANDARD_RADIUS_KM || // primary: physical radius (both sides of the border)
-      postal === "78840" ||
-      postal === "78841" || // Del Rio, TX ZIPs (fallback if coords missing)
-      cityLc === "del rio" ||
-      cityLc === "ciudad acuna" ||
-      cityLc === "acuna" || // Ciudad Acuña, MX
-      (country === "MX" && /^262\d\d$/.test(postal)); // Acuña postal block 26200–26299
-    cors["X-Hymnal"] = isStandard ? "standard" : "nonstandard";
-
-    // Outer guard: by here `cors` (incl. X-Hymnal) is fully built off request geo and never
-    // touches a Durable Object, so it's safe to emit no matter what the routing/DO logic does.
-    // Any unexpected throw below (DO eviction, RPC transport error, runtime hiccup) must STILL
-    // return CORS + X-Hymnal — otherwise the web client's fetch() rejects, geo never resolves,
-    // and a fresh / geo-failed device bricks on the loader instead of falling to the Sión floor.
+    // Single-book, fully-public app: everyone gets the standard manual. No IP-geo, no book
+    // selection. Outer guard: any unexpected throw below (DO eviction, RPC transport error,
+    // runtime hiccup) must STILL return CORS — otherwise the web client's fetch() rejects.
     try {
       if (request.method === "OPTIONS") {
         return new Response(null, { status: 204, headers: cors });
       }
 
       if (url.pathname === "/" || url.pathname === "/health") {
-        // Echo the REQUESTER's own geo + the resulting book decision. Lets a device hit
-        // this URL in a browser and see precisely why it got standard vs nonstandard
-        // (diagnoses ISP geo-routing that lands a Del Rio device outside the radius).
-        return json(
-          {
-            ok: true,
-            service: "signovivo-sync",
-            v: PROTOCOL_VERSION,
-            geo: {
-              city: String((request.cf?.city as string) || ""),
-              region: String((request.cf?.region as string) || ""),
-              postal,
-              country,
-              lat: Number.isFinite(lat) ? lat : null,
-              lon: Number.isFinite(lon) ? lon : null,
-              kmFromDelRio: Number.isFinite(distKm) ? Math.round(distKm * 10) / 10 : null,
-              hymnal: cors["X-Hymnal"],
-            },
-          },
-          200,
-          cors,
-        );
+        return json({ ok: true, service: "signovivo-sync", v: PROTOCOL_VERSION }, 200, cors);
       }
 
       // Diagnostic telemetry sink. Devices POST their Multipeer sync lifecycle (role chosen, peer
@@ -713,12 +634,9 @@ export default {
       }
 
       if (action === "state") {
-        // The web client's geo resolution lives ENTIRELY in this response's X-Hymnal header
-        // (read off /state). If getState() throws — DO eviction mid-call, storage hiccup,
-        // RPC transport error — a bare throw would surface as a runtime 500 with NO CORS and
-        // NO X-Hymnal, so the browser's fetch() rejects, geo never resolves, and a fresh /
-        // geo-failed device bricks on the loader. Degrade to an empty (no-director) snapshot
-        // but ALWAYS keep CORS + X-Hymnal so geo still resolves and the Sión floor holds.
+        // If getState() throws — DO eviction mid-call, storage hiccup, RPC transport error — a
+        // bare throw would surface as a runtime 500 with NO CORS, so the browser's fetch()
+        // rejects. Degrade to an empty (no-director) snapshot but ALWAYS keep CORS.
         let snapshot: Snapshot;
         try {
           snapshot = await stub.getState();
@@ -729,26 +647,10 @@ export default {
       }
 
       if (action === "unlock") {
-        // Authorized ACCESS unlock for the PRIVATE standard manual. A valid director code lets a
-        // parish device render standard from ANY network — including cellular / wrong-geo ISPs the
-        // IP-geo radius can't place in Del Rio. Read-only: it only VALIDATES the code (no publish,
-        // no DO state), so the public (no code) still can't reach standard. Codes are 10–11 digits,
-        // so the yes/no oracle isn't brute-forceable over HTTP, and they already gate /publish — no
-        // new secret is exposed here.
-        if (request.method !== "POST") {
-          return json({ ok: false, error: "method_not_allowed" }, 405, cors);
-        }
-        const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
-        // The PUBLIC Sión code (1234567890) is a director-entry code for the PUBLIC book — it must
-        // NEVER unlock the private manual, or an off-Del-Rio device could read standard by typing a
-        // code that's published in this repo. Only real (secret) director codes unlock standard.
-        const codeOk =
-          code.length > 0 && code !== SION_DIRECTOR_CODE && validTransmitterCodes(env).has(code);
-        return json(
-          { ok: codeOk, hymnal: codeOk ? "standard" : "nonstandard" },
-          codeOk ? 200 : 403,
-          cors,
-        );
+        // The app is now single-book and fully public — there is nothing to unlock. This endpoint
+        // once bypassed IP-geo for the private manual; kept as a trivial always-ok so old clients
+        // that still call it don't error. No geo, no code check needed.
+        return json({ ok: true, hymnal: "standard" }, 200, cors);
       }
 
       if (action === "publish") {
@@ -787,16 +689,7 @@ export default {
           parsed && typeof parsed === "object" && !Array.isArray(parsed)
             ? (parsed as Partial<Snapshot>)
             : {};
-        // Book-scope the PUBLIC Sión code: it may publish the public "hymns-4" book ONLY, never the
-        // private Del Rio manual. The bearer token and the real (secret) director codes are
-        // unrestricted. This is what keeps a well-known passwordless Sión director off standard.
-        if (codeOk && !tokenOk && code === SION_DIRECTOR_CODE) {
-          // Require an EXPLICIT hymns-4 — reject empty/missing/other bookId so the public Sión code
-          // can never publish into the standard room by simply omitting the book.
-          if (String(body.bookId ?? "") !== "hymns-4") {
-            return json({ ok: false, error: "sion_code_book_scoped" }, 403, cors);
-          }
-        }
+        // Single book: any valid transmitter code may publish page numbers. No book-scoping.
         let result;
         try {
           result = await stub.publish(body);
@@ -809,9 +702,8 @@ export default {
       return json({ ok: false, error: "not_found" }, 404, cors);
     } catch {
       // Last-resort guard for anything the per-branch try/catch above didn't cover (an
-      // unexpected throw in routing, header reads, or RPC transport). NEVER strip CORS /
-      // X-Hymnal — return a usable no-director snapshot shape so the web client's geo still
-      // resolves off X-Hymnal and falls to the public Sión floor instead of bricking.
+      // unexpected throw in routing, header reads, or RPC transport). NEVER strip CORS —
+      // return a usable no-director snapshot shape so the web client doesn't brick.
       return json(EMPTY_SNAPSHOT, 200, cors);
     }
   },

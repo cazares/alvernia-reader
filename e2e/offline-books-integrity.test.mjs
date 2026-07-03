@@ -23,18 +23,6 @@ test("offline standard book bundle has sentinel metadata", () => {
   assert.ok(fs.existsSync(indexPath), `Missing standard song-search-index.json: ${indexPath}`);
 });
 
-test("offline non-standard book metadata exists (hymns-4)", () => {
-  const pagesJsonPath = path.join(ROOT, "assets", "standard", "hymns-4-pages.json");
-  assert.ok(fs.existsSync(pagesJsonPath), `missing hymns-4 pages json: ${pagesJsonPath}`);
-});
-
-test("offline hymns-4 has OCR-derived song titles and search index", () => {
-  const titles = readJson(path.join(ROOT, "assets", "standard", "hymns-4-song-titles.json"));
-  const index = readJson(path.join(ROOT, "assets", "standard", "hymns-4-song-search-index.json"));
-  assert.ok(Object.keys(titles).length >= 20, "hymns-4 song-titles.json should have entries");
-  assert.ok(Array.isArray(index) && index.length >= 20, "hymns-4 song-search-index.json should have entries");
-});
-
 test("standard book pages.json carries a valid totalPages integer", () => {
   const pagesJson = readJson(path.join(ROOT, "assets", "standard", "pages.json"));
   assert.ok(Number.isFinite(Number(pagesJson.totalPages)), "standard totalPages must be numeric");

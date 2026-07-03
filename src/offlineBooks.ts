@@ -7,15 +7,9 @@ import STANDARD_TITLES_JSON from "../assets/standard/song-titles.json";
 // @ts-ignore
 import STANDARD_SEARCH_JSON from "../assets/standard/song-search-index.json";
 
-// @ts-ignore
-import H4_PAGES_JSON from "../assets/standard/hymns-4-pages.json";
-// @ts-ignore
-import H4_TITLES_JSON from "../assets/standard/hymns-4-song-titles.json";
-// @ts-ignore
-import H4_SEARCH_JSON from "../assets/standard/hymns-4-song-search-index.json";
-
-export type AppMode = "standard" | "nonStandard";
-export type BookId = "standard" | "hymns-4";
+// Single-book app: the only book is the Alvernia manual ("standard").
+export type AppMode = "standard";
+export type BookId = "standard";
 
 export type OfflineBook = {
   id: BookId;
@@ -38,21 +32,9 @@ export const BOOKS: OfflineBook[] = [
     songTitles: (STANDARD_TITLES_JSON as any) ?? {},
     songSearchIndex: (STANDARD_SEARCH_JSON as any) ?? [],
   },
-  {
-    id: "hymns-4",
-    title: "Himnos de Sión",
-    assets: {},
-    pdfSource: "hymns-4",
-    totalPages: Number((H4_PAGES_JSON as any).totalPages ?? 0),
-    songTitles: (H4_TITLES_JSON as any) ?? {},
-    songSearchIndex: (H4_SEARCH_JSON as any) ?? [],
-  },
 ];
 
-export const getBook = (id: BookId): OfflineBook => {
-  const found = BOOKS.find((b) => b.id === id);
-  return found ?? BOOKS[0];
-};
+export const getBook = (_id?: BookId): OfflineBook => BOOKS[0];
 
 export type OfflineBookAssetsValidation = {
   ok: boolean;
@@ -77,9 +59,6 @@ export const validateOfflineBookAssets = (book: OfflineBook): OfflineBookAssetsV
   check(`pages/page-${String(totalPages).padStart(3, "0")}.jpg`);
   return { ok: missing.length === 0, missingCount: missing.length, sampleMissingKeys: missing.slice(0, 3) };
 };
-
-// App Store submission hardening: keep non-standard mode to the single high-res book we ship.
-export const NON_STANDARD_BOOK_IDS: BookId[] = ["hymns-4"];
 
 export const STORAGE_KEYS = {
   onboardingComplete: "sv.onboarding.complete",

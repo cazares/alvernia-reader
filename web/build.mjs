@@ -150,35 +150,6 @@ const TITLE_OVERRIDES = {
   371: "Santo Español",
 };
 
-// Curated titles for the 22 hymns-4 (Himnos de Sión) songs. The source JSON is raw
-// OCR from the original hymnal and often contains garbage (section headers, chord marks,
-// continuation lines). These hand-verified titles replace the OCR text so the Index
-// "Todas" tab and search results show real song names instead of "Canción N".
-const HYMNS4_TITLE_OVERRIDES = {
-  1:   "Aparte del Mundo",
-  3:   "Estando Allí",
-  4:   "Con Humilde Oración",
-  6:   "Hoy es Día de Reposo",
-  7:   "La Expiación Necesaria",
-  9:   "¡Oh, Qué Amigo Nos es Cristo!",
-  14:  "¡De la Ley Libre!",
-  15:  "Solo a Ti, Dios y Señor",
-  17:  "Todos Juntos Tributemos",
-  26:  "Alabemos al Eterno",
-  33:  "En el Curso de Este Día",
-  42:  "Grato es Decir la Historia",
-  45:  "Aunque Soy Pequeñuelo",
-  86:  "De la Vida Eterna Luz",
-  89:  "¡Gloria a Ti, Jesús Divino!",
-  106: "Ven, Santo Espíritu de Amor",
-  108: "Precepto es del Señor",
-  110: "Andaba Yo en Males Mil",
-  119: "Yo Acudo a Mi Rey",
-  125: "De Tal Manera Dios Amó",
-  127: "De la Cumbre del Calvario",
-  133: "Volveos, Volveos",
-};
-
 // ─── Song Title Extraction ───────────────────────────────────────────────────
 // Titles are always on the first non-empty line in format "N. Title [Rev ...]"
 
@@ -663,141 +634,36 @@ const buildStandardManifests = ({ pageFiles, pdfPath, bookOutDir }) => {
   return pageFiles.length;
 };
 
-// Prebuilt manifests for hymns-4: we do NOT re-OCR this book. We reuse the
-// pre-generated JSON in assets/standard/ and adapt it into the per-book layout.
-//
-// Source shapes (read from assets/standard/):
-//   hymns-4-pages.json          → { totalPages, songIndex:[{song,page}], themeIndex:[] }
-//   hymns-4-song-titles.json    → { "<song>": "Title" }   (already target shape)
-//   hymns-4-song-search-index.json → [ { song, page, title, normalized, lyrics } ]  (a LIST)
-const buildHymns4Manifests = ({ pageFiles, bookOutDir }) => {
-  const prebuiltDir = path.join(rootDir, "assets", "standard");
-
-  const prebuiltPages = JSON.parse(
-    fs.readFileSync(path.join(prebuiltDir, "hymns-4-pages.json"), "utf8"),
-  );
-  const songTitles = JSON.parse(
-    fs.readFileSync(path.join(prebuiltDir, "hymns-4-song-titles.json"), "utf8"),
-  );
-  const searchList = JSON.parse(
-    fs.readFileSync(path.join(prebuiltDir, "hymns-4-song-search-index.json"), "utf8"),
-  );
-
-  // pages.json — { totalPages, songIndex, themeIndex }. totalPages is the ACTUAL
-  // rendered page count; reuse the prebuilt songIndex enriched with curated titles;
-  // no per-song themes for hymns.
-  const songIndex = (Array.isArray(prebuiltPages.songIndex) ? prebuiltPages.songIndex : [])
-    .map((entry) => ({
-      ...entry,
-      title: HYMNS4_TITLE_OVERRIDES[entry.song] ?? songTitles[String(entry.song)] ?? null,
-    }));
-  fs.writeFileSync(
-    path.join(bookOutDir, "pages.json"),
-    JSON.stringify({ totalPages: pageFiles.length, songIndex, themeIndex: [] }),
-  );
-
-  // song-titles.json — already in the { "<song>": "Title" } target shape; augment
-  // with curated overrides so the title lookup is consistent with songIndex.
-  const mergedTitles = { ...songTitles };
-  for (const [song, title] of Object.entries(HYMNS4_TITLE_OVERRIDES)) {
-    mergedTitles[String(song)] = title;
-  }
-  fs.writeFileSync(path.join(bookOutDir, "song-titles.json"), JSON.stringify(mergedTitles));
-
-  // song-search-index.json — target shape is { "<song>": "ocr blob" }. The prebuilt
-  // file is a LIST, so fold it into a dict keyed by song, using title + lyrics as the
-  // searchable blob.
-  const songSearchIndex = {};
-  for (const item of searchList) {
-    if (item?.song == null) continue;
-    const blob = [item.title || "", item.lyrics || ""].filter(Boolean).join(" ").trim();
-    songSearchIndex[String(item.song)] = blob;
-  }
-  fs.writeFileSync(path.join(bookOutDir, "song-search-index.json"), JSON.stringify(songSearchIndex));
-
-  // search-index.json — { pages:[{page,text}] }. CRITICAL: the prebuilt searchList uses
-  // ORIGINAL-book page numbers (the full hymnal, songs 1..3300, pages up to 228), but this
-  // rendered book is only `pageFiles.length` pages and contains a SUBSET of songs. Emitting
-  // item.page verbatim made every lyric-search result navigate to a wrong/clamped page.
-  // Remap each entry's page to the RENDERED page via songIndex (song -> rendered page), and
-  // DROP entries whose song isn't in this rendered book.
-  const songRenderedPage = new Map(songIndex.map((s) => [s.song, s.page]));
-  const searchIndexPages = [];
-  for (const item of searchList) {
-    const renderedPage = songRenderedPage.get(item?.song);
-    if (renderedPage == null) continue; // song not present in this rendered book — skip
-    const text = [item.title || "", item.lyrics || ""]
-      .filter(Boolean)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 800);
-    if (text.length > 5) {
-      searchIndexPages.push({ page: renderedPage, text });
-    }
-  }
-  // Build-time safety net: a search result must never point outside the rendered range.
-  for (const e of searchIndexPages) {
-    if (!Number.isInteger(e.page) || e.page < 1 || e.page > pageFiles.length) {
-      throw new Error(`hymns-4 search-index page ${e.page} out of range [1, ${pageFiles.length}]`);
-    }
-  }
-
-  fs.writeFileSync(
-    path.join(bookOutDir, "search-index.json"),
-    JSON.stringify({ pages: searchIndexPages }),
-  );
-
-  return pageFiles.length;
-};
-
-// Render a book's pages and emit its manifests. `mode` selects the manifest
-// pipeline ("standard" → full OCR; "prebuilt-hymns4" → reuse assets/standard JSON).
-const buildBook = ({ id, label, pdfPath, mode }) => {
+// Render the book's pages and emit its manifests via the full OCR pipeline.
+const buildBook = ({ id, label, pdfPath }) => {
   console.log(`\n── Building book "${id}" (${label}) ──`);
   const bookOutDir = path.join(booksDir, id);
   fs.mkdirSync(bookOutDir, { recursive: true });
   const pagesOutDir = path.join(bookOutDir, "pages");
 
   const pageFiles = renderPagesToWebp(pdfPath, pagesOutDir);
-
-  let totalPages;
-  if (mode === "standard") {
-    totalPages = buildStandardManifests({ pageFiles, pdfPath, bookOutDir });
-  } else if (mode === "prebuilt-hymns4") {
-    totalPages = buildHymns4Manifests({ pageFiles, bookOutDir });
-  } else {
-    throw new Error(`Unknown build mode "${mode}" for book "${id}"`);
-  }
+  const totalPages = buildStandardManifests({ pageFiles, pdfPath, bookOutDir });
 
   console.log(`Book "${id}" done — ${totalPages} pages.`);
   return { id, label, totalPages };
 };
 
-// ─── Build both books ────────────────────────────────────────────────────────
+// ─── Build the single book ───────────────────────────────────────────────────
+
+const DEFAULT_BOOK = "standard";
 
 const standard = buildBook({
-  id: "standard",
+  id: DEFAULT_BOOK,
   label: "Manual Alvernia",
   pdfPath: path.join(rootDir, "assets", "alvernia_manual_2.pdf"),
-  mode: "standard",
 });
 
-const hymns4 = buildBook({
-  id: "hymns-4",
-  label: "Himnos de Sión",
-  pdfPath: path.join(rootDir, "assets", "hymns-4.pdf"),
-  mode: "prebuilt-hymns4",
-});
+// ─── books.json — single-book registry ───────────────────────────────────────
 
-// ─── books.json — top-level book registry ────────────────────────────────────
-
-const DEFAULT_BOOK = "hymns-4";
 const booksManifest = {
   default: DEFAULT_BOOK,
   books: {
     [standard.id]: { label: standard.label, totalPages: standard.totalPages },
-    [hymns4.id]: { label: hymns4.label, totalPages: hymns4.totalPages },
   },
 };
 fs.writeFileSync(path.join(distDir, "books.json"), JSON.stringify(booksManifest));
@@ -807,10 +673,10 @@ const defaultTotalPages = booksManifest.books[DEFAULT_BOOK].totalPages;
 // ─── Shell HTML with inlined book registry + default-book page count ──────────
 //
 // Inline TWO script tags in <head>:
-//   #books-data  — the full books.json registry (label + totalPages per book)
-//   #pages-data  — { totalPages } for the DEFAULT book (hymns-4), the bare minimum
-//                  to paint first frame. Per-book song/search indexes are fetched
-//                  lazily from /books/<id>/{pages,search-index}.json.
+//   #books-data  — the (single-book) books.json registry (label + totalPages)
+//   #pages-data  — { totalPages } for the standard book, the bare minimum to paint
+//                  first frame. The song/search indexes are fetched lazily from
+//                  /books/standard/{pages,search-index}.json.
 const inlineScripts =
   `  <script id="books-data" type="application/json">${JSON.stringify(booksManifest)}</script>\n` +
   `  <script id="pages-data" type="application/json">${JSON.stringify({ totalPages: defaultTotalPages })}</script>\n`;

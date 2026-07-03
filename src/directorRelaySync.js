@@ -14,15 +14,14 @@ const RELAY_ROOM = "alvernia-main";
 const PROTOCOL_VERSION = 1;
 
 // The credential sent as X-Director-Code so the relay authorizes this device's publishes. It's set
-// to the code the director actually entered — the public Sión code on the Sión book, or a real
-// standard-director number on the Del Rio manual — via setRelayPublishCode() when they become
-// director. No code is hardcoded here, and a Sión director can only publish the public book.
+// to the code the director actually entered — a real director number — via setRelayPublishCode()
+// when they become director. No code is hardcoded here; any valid transmitter code may publish.
 let relayPublishCode = "";
 
 // One-time bridge to the director's UI when the relay REJECTS this device's publish. A resolved
 // fetch() is NOT proof of success: the relay authorizes every publish by X-Director-Code, so an
-// unknown/retired code (HTTP 401) or the public Sión code aimed at the private manual (HTTP 403)
-// comes back !ok WITHOUT throwing. Left unchecked that failure is swallowed silently — the director's
+// unknown/retired code (HTTP 401) comes back !ok WITHOUT throwing. Left unchecked that failure is
+// swallowed silently — the director's
 // app shows nothing while EVERY signovivo.com follower freezes on the last page for the whole Mass
 // (the relay is the only sync path to web phones; the Multipeer mesh doesn't reach them). The native
 // shell registers a handler here that surfaces a visible warning in the WebView. Latched so a burst
@@ -81,8 +80,8 @@ const doPublish = async (payload) => {
       signal: controller ? controller.signal : undefined,
     });
     // A resolved fetch only means the round-trip completed — inspect the status. Auth rejections
-    // (401 unauthorized code / 403 book-scoped Sión code) are exactly the "followers silently frozen"
-    // showstopper: persistent, the director's fault to fix, and never self-healing. Warn ONCE. Other
+    // (401 unauthorized code, or a 403) are exactly the "followers silently frozen" showstopper:
+    // persistent, the director's fault to fix, and never self-healing. Warn ONCE. Other
     // non-ok statuses (5xx server blips, 429) are transient and already covered by the re-publish
     // loop, so we don't cry wolf on them.
     if (res && res.ok) {
@@ -115,7 +114,10 @@ export const publishPageToRelay = (page, totalPages = 0, context = {}) => {
     page: Math.max(1, Number(page) || 1),
     totalPages: Math.max(0, Number(totalPages) || 0),
     mode: String(context.mode || ""),
-    bookId: String(context.bookId || ""),
+    // Single-book app: always "standard". Kept in the payload for relay Snapshot
+    // backward-compat ({v,page,totalPages,mode,bookId,seq,ts}) — old clients still
+    // read this field. No longer sourced from a per-book context.
+    bookId: "standard",
     seq: nextSeq(),
     ts: Math.floor(Date.now() / 1000),
   };

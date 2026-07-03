@@ -16,10 +16,9 @@ const PAGE_CACHES_TO_KEEP = 2;
 // precache can't populate these (e.g. install ran on the last bar of signal, then the network
 // died), we must NOT let this half-baked SW take over from a fully-cached older one.
 const CRITICAL_SHELL_ASSETS = ["/", "/index.html", "/styles.css", "/app.js"];
-// NOTE: per-book manifests (/books/<id>/pages.json, /books/<id>/search-index.json) are NOT
-// listed here — they don't exist at the root in the multi-book build and are cached by
-// app.js coreAssetsForBook() at their real /books/<id>/ paths. Listing the old single-book
-// root paths here previously risked aborting the atomic install precache (404 → addAll rejects).
+// NOTE: the book manifests (/books/standard/pages.json, /books/standard/search-index.json) are NOT
+// listed here — they live under /books/standard/ and are cached by app.js at their real paths.
+// Listing them here would risk aborting the atomic install precache if a fetch 404s.
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -38,10 +37,9 @@ const NETWORK_FIRST_PATHS = new Set([
   "/manifest.webmanifest",
 ]);
 
-// NOTE: bulk offline precaching lives in app.js (ensureOfflineBundle), which is
-// multi-book-aware (caches /books/<book>/pages/... into PAGE_CACHE per book). The old
-// SW-side single-book backgroundCacheAllPages() helper was dead code with stale
-// /pages.json + /pages/ paths and has been removed to avoid confusion.
+// NOTE: bulk offline precaching lives in app.js (ensureOfflineBundle), which caches
+// /books/standard/pages/... into PAGE_CACHE. The old SW-side backgroundCacheAllPages()
+// helper was dead code with stale /pages/ paths and has been removed to avoid confusion.
 
 // True when every CRITICAL_SHELL_ASSET is present in the NEW static cache — i.e. this SW could
 // actually serve an offline reload. Used to gate activation so we never replace a complete old
@@ -138,8 +136,7 @@ self.addEventListener("message", (event) => {
   }
 });
 
-// Matches both the legacy single-book "/pages/page-NNN.webp" and the multi-book
-// "/books/<book>/pages/page-NNN.webp" so page images use the dedicated PAGE_CACHE
+// Matches "/books/standard/pages/page-NNN.webp" so page images use the dedicated PAGE_CACHE
 // (consistent with app.js ensureOfflineBundle + the isOfflineBundleReady page count).
 const isPageImageRequest = (requestUrl) => requestUrl.pathname.includes("/pages/");
 const shouldCacheResponse = (response) => {

@@ -8,11 +8,9 @@
 //   2. Bridge the offline iPad-to-iPad Multipeer mesh <-> the web app (page sync).
 //   3. Validate director codes entered on the web numpad and drive director/follower role.
 //   4. Publish the director's page to the Cloudflare relay so signovivo.com followers sync.
-//   5. Keep the screen awake. (The native app is SINGLE-BOOK: hard-pinned to the standard
-//      Alvernia manual — DEFAULT_BOOK, boot, and bookFromSync all force "standard" so a cold/
-//      offline device can never strand the choir on Sión, and the standard director code is
-//      always accepted. The two-book IP-geo split lives only on signovivo.com. The geo book
-//      effect below is now an inert early-return on native.)
+//   5. Keep the screen awake. (The app is SINGLE-BOOK and FULLY PUBLIC: there is exactly one book,
+//      id="standard" (Manual Alvernia), served to everyone with no IP-geo gate. Any valid director
+//      code is accepted. There is no second book, no book switching, and no geo selection anywhere.)
 //
 // Everything else — rendering, paging, zoom, search, browse, song navigation — is the
 // web app's job. The old 3,536-line FlatList/PDF reader was replaced wholesale.
@@ -45,17 +43,13 @@ import versionJson from "./version.json";
 
 const BUILD_VERSION = String((versionJson as { buildNumber?: number }).buildNumber ?? "");
 const RELAY_BASE = "https://signovivo-sync.4j4982y8jp.workers.dev";
-const RELAY_ROOM = "alvernia-main";
-const GEO_STATE_URL = `${RELAY_BASE}/r/${RELAY_ROOM}/state`;
 
 // Fixed Multipeer session for the parish mesh (unchanged from the native reader).
 const DIRECTOR_SESSION = "1234";
 
-// Book-scoped director entry. Sión (public book) = the public code 1234567890 (fine in-repo).
-// Standard (private Del Rio manual) = a real director number, baked at build from the gitignored
+// Director entry. A real director number, baked at build from the gitignored
 // director-codes.private.json — the committed director-codes.json is EMPTY, so no phone numbers
-// live in this public repo. A code valid for one book is rejected on the other.
-const SION_DIRECTOR_CODE = "1234567890";
+// live in this public repo. Any code in this set may take the director role (after confirming).
 const STANDARD_DIRECTOR_CODES = new Set<string>(
   ((directorCodes as { standardDirectorCodes?: string[] }).standardDirectorCodes || []).map((c) =>
     String(c).replace(/[^0-9]/g, ""),
@@ -71,21 +65,16 @@ const SUPER_ADMIN_CODES = new Set<string>(
 );
 // Secret numpad code carried over from the native reader.
 const SOFT_RESET_CODE = "744668486";
-// Native app is single-book: the parish only sings from the standard (Alvernia) manual. Pinning
-// standard everywhere keeps a cold/offline device off the Sión default — that book-mismatch made
-// the standard director code get rejected and left the whole choir "searching for a director"
-// (Mass 2026-07-01). The two-book geo split still lives on signovivo.com; only native is pinned.
+// The app is single-book: the only book is the standard (Alvernia) manual. Its id is pinned
+// everywhere so the mesh/relay Snapshot's bookId stays a stable "standard" for backward compat.
 const DEFAULT_BOOK: BookId = "standard";
 
 type SyncRole = "off" | "director" | "follower";
 
-const isBookId = (value: unknown): value is BookId => value === "standard" || value === "hymns-4";
+const isBookId = (value: unknown): value is BookId => value === "standard";
 const digitsOnly = (value: unknown) => String(value ?? "").replace(/[^0-9]/g, "");
-const modeForBook = (book: BookId) => (book === "standard" ? "standard" : "nonStandard");
-// Multipeer/relay carry both a canonical bookId and a legacy mode string; prefer bookId.
-// Native is pinned to the standard manual (see DEFAULT_BOOK): clamp every incoming mesh/relay sync
-// to standard so no director's broadcast can ever pull a native follower onto Sión.
-const bookFromSync = (_bookId: unknown, _mode: unknown): BookId => "standard";
+// The relay/mesh Snapshot carries a legacy `mode` string alongside bookId; it is always "standard".
+const modeForBook = (_book: BookId): "standard" => "standard";
 
 // ──────────────────────────────── App ───────────────────────────────────────
 
@@ -110,7 +99,6 @@ export default function App() {
   const currentBookRef = useRef<BookId>(DEFAULT_BOOK);
   const webReadyRef = useRef(false);
   const pendingInjectRef = useRef<string[]>([]);
-  const storedBookRef = useRef<BookId | null>(null);
   // Last page/book the DIRECTOR broadcast to us over the mesh (distinct from the web's own
   // page). Drives resync after a WebView reload / foreground for followers. Null until a
   // director snapshot has actually been received (a fresh-boot follower must keep its own page).
@@ -301,10 +289,10 @@ export default function App() {
   }, []);
 
   // ── Relay-auth warning bridge ────────────────────────────────────────────────
-  // The relay silently rejects a publish when the director's X-Director-Code is bad (401) or the
-  // public Sión code aims at the private manual (403). directorRelaySync latches it to one shot;
-  // here we forward that single event into the WebView so the director SEES that every signovivo.com
-  // follower has gone dark, instead of the app looking fine while the web congregation is frozen.
+  // The relay silently rejects a publish when the director's X-Director-Code is bad (401).
+  // directorRelaySync latches it to one shot; here we forward that single event into the WebView so
+  // the director SEES that every signovivo.com follower has gone dark, instead of the app looking
+  // fine while the web congregation is frozen.
   useEffect(() => {
     setRelayAuthErrorHandler((status: number) => {
       injectEvent({ type: "relay-auth-error", status });
@@ -410,8 +398,8 @@ export default function App() {
     async (code: string) => {
       // Claim this role transition; a later flip bumps the generation and supersedes us.
       const myGen = ++roleGenerationRef.current;
-      // The relay authorizes this director's publishes with the exact code they entered (Sión code
-      // → public book only; a standard number → the Del Rio manual). Set BEFORE any broadcast.
+      // The relay authorizes this director's publishes with the exact code they entered.
+      // Set BEFORE any broadcast.
       setRelayPublishCode(code);
       dbgLog("become:director", { wasFollower: roleRef.current === "follower", syncAvailable });
       if (!syncAvailable) {
@@ -522,17 +510,12 @@ export default function App() {
         performSoftReset();
         return;
       }
-      // Book-scoped director entry: the public Sión code ONLY on the Sión book; a real
-      // standard-director number ONLY on the private Del Rio manual. A code valid for the OTHER
-      // book (or unknown) is rejected — so the passwordless Sión code can never direct standard.
-      // A valid director code no longer promotes SILENTLY — confirm first, so entering your code at
-      // Mass/practice never yanks the role from a director who is already live (Miguel, 2026-07-02).
-      const activeBook = currentBookRef.current;
-      const isDirectorCode =
-        (activeBook === "hymns-4" && code === SION_DIRECTOR_CODE) ||
-        (activeBook === "standard" && STANDARD_DIRECTOR_CODES.has(code));
+      // Any valid director code may take the role. A valid code does NOT promote SILENTLY — confirm
+      // first, so entering your code at Mass/practice never yanks the role from a director who is
+      // already live (Miguel, 2026-07-02).
+      const isDirectorCode = STANDARD_DIRECTOR_CODES.has(code);
       if (!isDirectorCode) {
-        // Unrecognized (or valid for the other book) → tell the web so it surfaces "código incorrecto".
+        // Unrecognized → tell the web so it surfaces "código incorrecto".
         injectEvent({ type: "role", role: "none" });
         return;
       }
@@ -563,7 +546,7 @@ export default function App() {
         },
       ]);
     },
-    [injectEvent, performSoftReset, becomeDirector, broadcastPage, startDirectorHeartbeat],
+    [injectEvent, performSoftReset, becomeDirector],
   );
 
   // ── Web -> Native message router ───────────────────────────────────────────
@@ -635,22 +618,6 @@ export default function App() {
         case "director-code":
           onDirectorCode(msg.code);
           break;
-        case "book-changed": {
-          if (isBookId(msg.book)) {
-            currentBookRef.current = msg.book;
-            storedBookRef.current = msg.book;
-            AsyncStorage.setItem(STORAGE_KEYS.activeBookId, msg.book).catch(() => {});
-            // A director switching books must move followers too. The web now sends the new
-            // book's start page; adopt it so we don't broadcast the OLD book's page (e.g. 360)
-            // onto a 51-page book where it would clamp wrong. Fall back to our last page only
-            // when the web omitted it (non-finite).
-            const startPage = Number(msg.page);
-            const page = Number.isFinite(startPage) ? startPage : currentPageRef.current;
-            currentPageRef.current = page;
-            broadcastPage(page, msg.book);
-          }
-          break;
-        }
         case "resync": {
           // A follower tapped the ⟳ button in the web UI. The web relay is off in the shell,
           // so do the NATIVE resync: re-request the director's current snapshot over the mesh
@@ -757,12 +724,8 @@ export default function App() {
     let cancelled = false;
     (async () => {
       breadcrumb("boot");
-      // Native app is single-book (standard/Alvernia). Pin it regardless of any previously-stored
-      // book so a cold or offline device can never boot on Sión — that stranded the director code
-      // last Mass. Setting storedBookRef also short-circuits the IP-geo book effect below (its
-      // `if (storedBookRef.current) return` guard), so geo can never flip a native device to Sión.
+      // Single-book app: the only book is standard (Alvernia).
       const startBook: BookId = "standard";
-      storedBookRef.current = startBook;
       currentBookRef.current = startBook;
 
       const uri = await resolveBundleUri();
@@ -799,7 +762,7 @@ export default function App() {
       switch (type) {
         case "page": {
           if (roleRef.current === "director") break; // ignore our own echoes
-          const book = bookFromSync(event.bookId, event.mode);
+          const book: BookId = "standard"; // single-book app; incoming bookId/mode is always standard
           const page = Number(event.page) || currentPageRef.current;
           dbgLog("mesh:page-recv", {
             page,
@@ -888,39 +851,6 @@ export default function App() {
     resolveBundleUri,
     stopDirectorHeartbeat,
   ]);
-
-  // ── IP-geo book selection (first launch only; stored pref wins thereafter) ──
-  useEffect(() => {
-    if (!booted) return;
-    if (storedBookRef.current) return; // user/device already has a book preference
-    // The DIRECTOR'S book always wins over geo: if a director snapshot has already been adopted
-    // (a follower synced to the director's page+book over the mesh before this async fetch
-    // resolved), geo must NOT override it. storedBookRef stays null in that path (the mesh
-    // listener doesn't set it), so this snapshot guard is the only thing that prevents geo from
-    // ripping the follower onto the geo book's DEFAULT page mid-Mass.
-    if (lastDirectorSnapshotRef.current) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(GEO_STATE_URL, { cache: "no-store" });
-        const hymnal = res.headers.get("X-Hymnal");
-        const geoBook: BookId | null =
-          hymnal === "standard" ? "standard" : hymnal === "nonstandard" ? "hymns-4" : null;
-        // Re-check AFTER the await: a director snapshot can land while the fetch is in flight.
-        if (cancelled || lastDirectorSnapshotRef.current) return;
-        if (!geoBook || geoBook === currentBookRef.current) return;
-        currentBookRef.current = geoBook;
-        storedBookRef.current = geoBook;
-        AsyncStorage.setItem(STORAGE_KEYS.activeBookId, geoBook).catch(() => {});
-        injectEvent({ type: "set-book", book: geoBook });
-      } catch {
-        /* offline: keep the default/stored book */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [booted, injectEvent]);
 
   // ── Foreground: nudge mesh rediscovery + pull a fresh snapshot ──────────────
   // Always registered: a transmitter-only device (no mesh, syncAvailable false) becomes a

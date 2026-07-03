@@ -38,12 +38,9 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <!-- Full-page loading screen / gate: covers the reader until the book is resolved (geo IP
-         on the web, injected on native) so signovivo.com never flashes the wrong manual. Visible
-         by default; app.js reveals it via revealReader() once the CORRECT book's image decodes.
-         The exact reveal/decode timing is preserved — this is purely a clearer loader, no earlier
-         reveal. The "offline" class surfaces a subtle "Sin conexión — reintentando…" state when a
-         first-ever visit can't reach the geo relay (set by app.js). -->
+    <!-- Full-page loading screen: covers the reader for the brief moment before the first page
+         paints. Visible by default; app.js reveals it via revealReader() in initReader. (Legacy id
+         "geo-gate" kept to avoid churn across app.js/CSS — the app is single-book now, no geo.) -->
     <div id="geo-gate" role="status" aria-live="polite" aria-label="Cargando Signo Vivo">
       <div class="geo-gate-inner" aria-hidden="true">
         <div class="geo-gate-spinner"></div>
@@ -54,7 +51,7 @@
     <div class="build-badge" id="build-badge" aria-hidden="true"></div>
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
-        <img id="page-image" src="books/hymns-4/pages/page-02.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
+        <img id="page-image" src="books/standard/pages/page-001.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
         <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button" aria-label="Salir del modo director">
           <strong class="director-mode-badge-title">DIRECTOR</strong>
           <span class="director-mode-badge-exit" aria-hidden="true">✕ Salir</span>
