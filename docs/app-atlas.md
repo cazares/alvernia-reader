@@ -2,6 +2,21 @@
 
 _Generated 2026-07-01 from a 6-agent deep-read of every subsystem (build 370). Companion to `app-hardening-plan.md`. This is a navigation map: dense per-subsystem architecture, key flows, and invariants with file:line anchors. Treat line numbers as of HEAD 309a9afa — verify before editing._
 
+> ⚠️ **BUILD-374 CORRECTION BANNER (2026-07-04).** This atlas describes **build 370** and is partly
+> stale. Between 370 and the current build 374, a single-book refactor (commits
+> `f34d2bb0`/`9473e596`/`38132dd3`/`318d6f39`/`39b60313`) **removed the entire two-book, Sión, IP-geo,
+> geo-gate, `/unlock`, and auto-director system**. When this atlas mentions any of the following, it
+> is describing DELETED code: the "hymns-4"/"Sión" floor book, `switchBook`/book registry/
+> `hydrateBookData`, the blank-white **geo-gate reveal state machine** (now a vestigial element hidden
+> immediately), the **X-Hymnal / IP-geo** book resolution, `/unlock` and `unlockStandard`
+> (now a no-op stub), and **auto-director restore** (boot now always `becomeFollower`). The app is now
+> a **single public "standard" book** (371pp) served to everyone; `bookId`/`mode` remain only as
+> vestigial relay-wire fields. NEW since this atlas: the director-role state machine
+> (no-auto-director + always-confirm + super-admin). For the precise 370→374 delta, the per-file
+> current shapes, and every finding's build-374 line numbers, see **`audit-reconciliation-374.md`**.
+> The unchanged subsystems (Swift Multipeer mesh, relay wire protocol, SW/offline internals, release
+> pipeline) are still accurately described here.
+
 ## web-reader-core
 
 **Web reader (web/src/app.js + web/src/index.html) — boot, geo-gate, book resolution, page rendering/prefetch, song navigation, search/browse drawer, offline precache, localStorage persistence, relay-follower UI surfaces**
