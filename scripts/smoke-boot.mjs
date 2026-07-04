@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+/**
+ * smoke-boot.mjs — the "would this have caught Wednesday?" boot smoke test.
+ *
+ * Part of the Release Safety System (M0). Purpose: on every PR, prove that the
+ * BUILT web bundle can actually boot and render — the exact class of failure that
+ * left the app "busted for everyone" at practice. It inspects the real build
+ * artifacts (deterministic, no fragile browser emulation) and asserts the
+ * invariants that must hold for a device to open the reader and follow along.
+ *
+ * By default it runs a fresh `node web/build.mjs` and then checks web/dist.
+ * Set SMOKE_SKIP_BUILD=1 to inspect an already-built web/dist (fast local runs;
+ * CI always builds fresh).
+ *
+ * Exit code 0 = all invariants hold. Non-zero = at least one failed; every
+ * failure is printed (we do not stop at the first) so one CI run shows the whole
+ * picture.
+ *
+ * This script is intentionally dependency-free and defensive (Murphy's Law): any
+ * unexpected throw is caught and reported as a failure rather than crashing the
+ * gate ambiguously.
+ */
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// SMOKE_DIST overrides the inspected directory (used to self-test the gate against
+// a deliberately-broken copy). Defaults to the real build output.
+const DIST = process.env.SMOKE_DIST ? path.resolve(process.env.SMOKE_DIST) : path.join(ROOT, "web", "dist");
+const BOOK_ID = "standard";
+
+const failures = [];
+const notes = [];
+
+/** Record a check. `ok` truthy = pass; otherwise `detail` explains the failure. */
+function check(label, ok, detail) {
+  if (ok) {
+    console.log(`  ok   ${label}`);
+  } else {
+    console.log(`  FAIL ${label}${detail ? ` — ${detail}` : ""}`);
+    failures.push(label + (detail ? ` — ${detail}` : ""));
+  }
+}
+
+function read(rel) {
+  return fs.readFileSync(path.join(DIST, rel), "utf8");
+}
+function exists(rel) {
+  return fs.existsSync(path.join(DIST, rel));
+}
+function sizeOf(rel) {
+  try {
+    return fs.statSync(path.join(DIST, rel)).size;
+  } catch {
+    return -1;
+  }
+}
+
+// ── 1. Build (unless told to inspect an existing dist) ────────────────────────
+if (process.env.SMOKE_SKIP_BUILD === "1") {
+  notes.push("SMOKE_SKIP_BUILD=1 — inspecting existing web/dist without rebuilding");
+} else {
+  console.log("→ building web bundle (node web/build.mjs)…");
+  const build = spawnSync("node", ["web/build.mjs"], { cwd: ROOT, stdio: "inherit" });
+  if (build.status !== 0) {
+    console.error(`\n✖ web/build.mjs failed (exit ${build.status ?? "?"}). The bundle did not build — that IS a "busted for everyone" state.`);
+    process.exit(1);
+  }
+}
+
+console.log(`\n→ smoke-checking ${DIST}\n`);
+
+try {
+  // ── 2. Core shell files exist and are non-trivial ──────────────────────────
+  for (const f of ["index.html", "app.js", "sw.js", "styles.css", "manifest.webmanifest", "books.json"]) {
+    check(`shell file present + non-empty: ${f}`, exists(f) && sizeOf(f) > 32, exists(f) ? `only ${sizeOf(f)} bytes` : "missing");
+  }
+
+  // ── 3. Boot data: #pages-data must parse to a positive-integer totalPages ───
+  // This is exactly what web/src/app.js:initReader reads to paint page 1 on boot
+  // (native + web). A missing/garbage tag is a white-screen-on-boot.
+  const html = exists("index.html") ? read("index.html") : "";
+  const pagesTag = html.match(/<script id="pages-data" type="application\/json">([^<]*)<\/script>/);
+  let inlineTotal = null;
+  if (!pagesTag) {
+    check("#pages-data script tag present in index.html", false, "tag not found — boot has no page count");
+  } else {
+    check("#pages-data script tag present in index.html", true);
+    try {
+      const parsed = JSON.parse(pagesTag[1]);
+      inlineTotal = parsed.totalPages;
+      check(
+        "#pages-data totalPages is a positive integer",
+        Number.isInteger(inlineTotal) && inlineTotal > 0,
+        `got ${JSON.stringify(inlineTotal)}`
+      );
+    } catch (e) {
+      check("#pages-data JSON parses", false, String(e && e.message));
+    }
+  }
+
+  // ── 4. Page images: first + last page render, and count is consistent ──────
+  // The single most important "can a device actually show the songbook?" check.
+  const pagesDir = path.join(DIST, "books", BOOK_ID, "pages");
+  let renderedCount = 0;
+  let webpFiles = [];
+  try {
+    webpFiles = fs.readdirSync(pagesDir).filter((n) => /^page-\d+\.webp$/.test(n));
+    renderedCount = webpFiles.length;
+  } catch {
+    /* handled below */
+  }
+  check("rendered page images exist", renderedCount > 0, renderedCount === 0 ? `no page-*.webp in ${pagesDir}` : undefined);
+
+  // page 1 must exist and be a real (non-empty) image
+  check("page 1 renders: page-001.webp present + non-empty", exists(`books/${BOOK_ID}/pages/page-001.webp`) && sizeOf(`books/${BOOK_ID}/pages/page-001.webp`) > 512, undefined);
+
+  // TRIPLE CONSISTENCY: inline totalPages === rendered count === manifest totalPages.
+  // This is the guard against the "song N unreachable / a page is missing" class
+  // (the build-325 / song-370 fire drill): the app believes in N pages but fewer
+  // were rendered, so jumping to a high song 404s a page that never renders.
+  let manifestTotal = null;
+  const manifestRel = `books/${BOOK_ID}/pages.json`;
+  if (exists(manifestRel)) {
+    try {
+      manifestTotal = JSON.parse(read(manifestRel)).totalPages;
+    } catch (e) {
+      check("book manifest pages.json parses", false, String(e && e.message));
+    }
+  } else {
+    check("book manifest pages.json present", false, `${manifestRel} missing`);
+  }
+
+  if (inlineTotal != null && renderedCount > 0) {
+    check(
+      `page count consistent: inline #pages-data (${inlineTotal}) === rendered images (${renderedCount})`,
+      inlineTotal === renderedCount,
+      "book believes in more/fewer pages than were rendered — high songs would 404"
+    );
+  }
+  if (manifestTotal != null && renderedCount > 0) {
+    check(
+      `page count consistent: manifest pages.json (${manifestTotal}) === rendered images (${renderedCount})`,
+      manifestTotal === renderedCount
+    );
+  }
+
+  // last page must actually exist at the padded filename the app will request
+  if (inlineTotal != null && inlineTotal > 0) {
+    const pad = String(renderedCount || inlineTotal).length;
+    const lastName = `page-${String(inlineTotal).padStart(pad, "0")}.webp`;
+    check(`last page renders: ${lastName} present + non-empty`, exists(`books/${BOOK_ID}/pages/${lastName}`) && sizeOf(`books/${BOOK_ID}/pages/${lastName}`) > 512, undefined);
+  }
+
+  // ── 5. Native bridge markers survived the build ────────────────────────────
+  // If the bundle can't talk to the native shell, the iPad reader is a dead page.
+  const appJs = exists("app.js") ? read("app.js") : "";
+  check('app.js contains the native bridge channel "signovivo-native"', appJs.includes("signovivo-native"), "bridge channel missing — native shell can't drive the WebView");
+  check('app.js contains the "bridge-ready" handshake', appJs.includes("bridge-ready"), "bridge handshake missing");
+
+  // ── 6. No unreplaced build-time tokens (a half-built bundle catcher) ────────
+  for (const tok of ["__CACHE_VERSION__", "__RELAY_BASE__", "__BUILD_NUMBER__"]) {
+    check(`app.js has no unreplaced token ${tok}`, !appJs.includes(tok), "build-time replacement did not run — bundle is half-built");
+  }
+  const swJs = exists("sw.js") ? read("sw.js") : "";
+  check("sw.js has no unreplaced token __CACHE_VERSION__", !swJs.includes("__CACHE_VERSION__"), "service worker cache version not stamped");
+} catch (e) {
+  // Defensive: never let the smoke test itself crash ambiguously.
+  check("smoke test ran without an unexpected error", false, `threw: ${e && e.stack ? e.stack.split("\n")[0] : e}`);
+}
+
+// ── Summary ───────────────────────────────────────────────────────────────────
+console.log("");
+for (const n of notes) console.log(`  note: ${n}`);
+if (failures.length === 0) {
+  console.log(`\n✓ boot smoke PASSED — the built bundle boots, page 1 (and the last page) render, page counts are consistent, and the native bridge survived.\n`);
+  process.exit(0);
+}
+console.error(`\n✖ boot smoke FAILED — ${failures.length} problem(s):`);
+for (const f of failures) console.error(`   • ${f}`);
+console.error(`\nThis bundle would risk a "busted for everyone" boot. Do NOT ship it.\n`);
+process.exit(1);
