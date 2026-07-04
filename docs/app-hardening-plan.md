@@ -16,6 +16,10 @@
 > by the refactor (a whole new director-role state machine that had never been audited).
 >
 > **Companion docs (all in `docs/`):**
+> - `major-update-2026-07.md` — **the forward-looking feature spec** built ON this plan: the Release
+>   Safety System (A0/P0.5) that gates everything, plus super-admin PDF upload, book-out-of-bundle
+>   distribution, sync robustness, a typed bridge, and crash-proofing — sequenced so a change is
+>   caught on one canary device before the group, born from the "busted-for-everyone" practice failure.
 > - `audit-reconciliation-374.md` — **the receipts for THIS reconciliation**: the full disposition
 >   ledger (every original finding → SURVIVES/MOVED/CHANGED/PARTIALLY_MOOT/MOOT with build-374
 >   line numbers) and the complete EVIDENCE/FIX text for all 14 new findings.
@@ -42,6 +46,7 @@
 
 | # | Item | Sev | Surface | Ships via |
 |---|------|-----|---------|-----------|
+| **A0** | **Release Safety System** — the anti-"busted-for-everyone" gate: staging room + CI boot-smoke test + one-command rollback + additive version-compat. **Gates every other item** — nothing below ships to the group until this skeleton exists. Full spec: [`major-update-2026-07.md`](major-update-2026-07.md) | 🔴 crit (process) | dev + web + worker | P0.5 (§1) |
 | **A1** | Committed director code `12345678840` (public master credential; now **fully unrestricted** — book-scoping is gone) | 🔴 crit | worker + repo | secret rotation + git |
 | **A2** | Relay has zero rate limiting + `seq=0` bypass + one shared room → anyone can hijack/freeze the live Mass | 🔴 crit | worker | `wrangler deploy` |
 | **A3** | Director WebView content-process reload broadcasts boot **page 2** to the whole congregation (mesh half survives the refactor) | 🔴 crit | native | TestFlight |
@@ -63,7 +68,10 @@ this or you will "fix" a Mass-critical bug that never reaches the devices that m
 ## 1. Order of execution (recommended)
 
 ```
-P0  Stop-the-bleeding      → A1 A2 A4 A5 now; A3 + director-role regressions in the next build
+P0   Stop-the-bleeding     → A1 A2 A4 A5 now; A3 + director-role regressions in the next build
+P0.5 Release safety skeleton→ CI + scripts/smoke-boot.mjs + staging-room resolver + rollback-web.sh — the
+                             GATE P1-P8 ship through (= P1-CI + P-STAGING made concrete + pulled earlier).
+                             Full spec: major-update-2026-07.md. Do this alongside/just after P0.
 P1  Safe test harness + CI → kill the prod-mutating test, go green, add a unit seam (single-book matrix)
 P2  Relay / sync robustness→ seq-guard demotion, transmitter identity, poll gap, clock skew  (web + worker + native)
 P3  Offline / PWA update   → cacheVersion, immutable pages, SW lifecycle                      (web + build)
