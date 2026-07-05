@@ -19,6 +19,10 @@ if [ -z "${CODE:-}" ]; then
   exit 1
 fi
 
+# Fleet dashboard key gates GET/DELETE /log (P6-LOG). Passed to the test so it can prove the
+# gate accepts the key and rejects without it. Never printed.
+FLEET_KEY=$(grep -E '^FLEET_DASHBOARD_KEY=' .dev.vars 2>/dev/null | head -1 | cut -d= -f2-)
+
 echo "→ starting wrangler dev on :${PORT} (local)…"
 npx wrangler dev --port "${PORT}" >/tmp/sv-a2-wrangler.log 2>&1 &
 WPID=$!
@@ -38,7 +42,7 @@ if [ "${up}" != "1" ]; then
 fi
 echo "→ relay up at ${BASE}; running A2 tests…"
 
-RELAY_TEST_BASE="${BASE}" RELAY_TEST_CODE="${CODE}" node --test test/a2.test.mjs
+RELAY_TEST_BASE="${BASE}" RELAY_TEST_CODE="${CODE}" RELAY_TEST_FLEET_KEY="${FLEET_KEY}" node --test test/a2.test.mjs
 RC=$?
 echo "→ A2 harness exit code: ${RC}"
 exit "${RC}"
