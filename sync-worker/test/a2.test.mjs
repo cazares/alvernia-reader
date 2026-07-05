@@ -1,0 +1,75 @@
+/**
+ * A2 worker tests — rate limiting + the seq=0 gate.
+ *
+ * Runs against a LOCAL `wrangler dev` (never production). Disabled by default: it
+ * throws at load unless RELAY_TEST_BASE + RELAY_TEST_TOKEN point at a local relay.
+ * Run via: bash sync-worker/test/run-a2.sh
+ */
+import test from "node:test";
+import assert from "node:assert/strict";
+
+const BASE = process.env.RELAY_TEST_BASE || "";
+const CODE = process.env.RELAY_TEST_CODE || "";
+if (!BASE || !CODE) {
+  throw new Error(
+    "a2.test.mjs is disabled by default — set RELAY_TEST_BASE + RELAY_TEST_CODE to a LOCAL wrangler dev relay.",
+  );
+}
+if (/signovivo|workers\.dev/.test(BASE)) {
+  throw new Error(`a2.test.mjs refuses to run against a non-local base: ${BASE}`);
+}
+
+const pub = (room, body) =>
+  fetch(`${BASE}/r/${room}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Director-Code": CODE },
+    body: JSON.stringify(body),
+  });
+const state = (room) => fetch(`${BASE}/r/${room}/state`).then((r) => r.json());
+
+test("baseline: a valid publish is accepted and sets the page/seq", async () => {
+  const room = "a2-baseline";
+  const r = await pub(room, { v: 1, page: 42, totalPages: 371, seq: 1000 });
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.ignored, undefined);
+  const s = await state(room);
+  assert.equal(s.page, 42);
+  assert.equal(s.seq, 1000);
+});
+
+test("A2 seq=0 gate: seq=0 is rejected while a director is live (no page override)", async () => {
+  const room = "a2-seqzero";
+  await pub(room, { v: 1, page: 10, totalPages: 371, seq: 5000 }); // live director on page 10
+  const r = await pub(room, { v: 1, page: 99, totalPages: 371, seq: 0 }); // seq=0 override attempt
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.ignored, true, "seq=0 must be ignored while a director is live");
+  const s = await state(room);
+  assert.equal(s.page, 10, "the live director's page must NOT be moved by a seq=0 publish");
+  assert.equal(s.seq, 5000, "seq must not advance on an ignored publish");
+});
+
+test("A2 seq=0 gate: seq=0 IS honored as a reset when the room is stale (no director)", async () => {
+  const room = "a2-seqzero-stale";
+  // Fresh/empty room → snapshot stale → a seq=0 (or invalid) publish is a legit first/reset publish.
+  const r = await pub(room, { v: 1, page: 7, totalPages: 371, seq: 0 });
+  assert.equal(r.status, 200);
+  const s = await state(room);
+  assert.equal(s.page, 7, "a seq=0 publish to a stale/empty room IS accepted (takeover/reset)");
+  assert.ok(s.seq >= 1, "stale seq=0 gets assigned the next monotonic seq");
+});
+
+test("A2 rate limit: a publish flood is throttled (429s after the burst; some allowed)", async () => {
+  const room = "a2-flood";
+  const statuses = await Promise.all(
+    Array.from({ length: 40 }, (_, i) =>
+      pub(room, { v: 1, page: 1, totalPages: 371, seq: 20000 + i }).then((r) => r.status),
+    ),
+  );
+  const limited = statuses.filter((s) => s === 429).length;
+  const notLimited = statuses.filter((s) => s !== 429).length;
+  assert.ok(limited >= 10, `a 40-request flood must produce 429s; got ${limited}`);
+  assert.ok(notLimited >= 10, `the burst (~15) must be allowed through; got ${notLimited} not-limited`);
+});
