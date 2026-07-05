@@ -3303,9 +3303,22 @@ const initReader = async () => {
   // present we paint inline now and hydrate the song index in the background; otherwise we fetch
   // the manifest before first paint so totalPages/pages match.
   const inlinedPages = document.getElementById("pages-data");
-  const manifest = inlinedPages
-    ? JSON.parse(inlinedPages.textContent)
-    : await fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`), { cache: "no-store" }).then((r) => r.json());
+  let manifest;
+  if (inlinedPages) {
+    // Inlined by build.mjs — parse defensively; a malformed blob must not abort boot.
+    try { manifest = JSON.parse(inlinedPages.textContent); } catch (_) { manifest = {}; }
+  } else {
+    // No inlined page count (unusual — build.mjs inlines it). Fetch it, but on a non-ok
+    // response / network error / bad JSON, degrade to the known standard count and keep
+    // booting rather than aborting the whole reader (the totalPages fallback below
+    // turns {} into STANDARD_TOTAL_PAGES, and the song index hydrates in the background).
+    try {
+      const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`), { cache: "no-store" });
+      manifest = response.ok ? await response.json() : {};
+    } catch (_) {
+      manifest = {};
+    }
+  }
   // Only adopt a positive-integer totalPages — a missing / NaN / string value would NaN-stick the
   // whole reader. Fall back to the known standard count; never assign NaN/undefined.
   const manifestTotal = Number(manifest.totalPages);
