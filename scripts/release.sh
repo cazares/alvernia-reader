@@ -10,24 +10,50 @@
 #
 # DO NOT bump/build/deploy one surface by hand — that's exactly how the numbers drift.
 #
-# Usage:  bash scripts/release.sh            # bump + build web + build native IPA + deploy web
+# Usage:  bash scripts/release.sh            # bump + build web + build native IPA + deploy web (PROD)
 #         SKIP_NATIVE=1 bash scripts/release.sh   # web-only refresh (still rebuilds+deploys web at the bumped version)
+#         STAGING=1 bash scripts/release.sh   # CANARY: build web at the CURRENT version + deploy to the
+#                                             #   isolated Pages preview branch 'staging'. NO version bump,
+#                                             #   NO native archive, NEVER touches production ('main') or
+#                                             #   TestFlight. Prove a build here (signovivo.com?env=staging)
+#                                             #   before promoting to prod.
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LANG=en_US.UTF-8
 LOG=/tmp/release-native.log
 
-echo "==> 1/6  Bump version.json (+ native CFBundleVersion / Info.plist / app.json / offlineWebBundle)"
-node scripts/bump-build.mjs
-BUILD=$(node -e "process.stdout.write(String(require('./version.json').buildNumber))")
-echo "         build = $BUILD"
+# STAGING is the canary path — physically incapable of touching prod: it implies
+# no-native + no-bump and flips the Pages deploy to the preview branch. With STAGING
+# unset, everything below is byte-for-byte the production flow.
+STAGING="${STAGING:-0}"
+if [ "$STAGING" = "1" ]; then
+  SKIP_NATIVE=1
+  DEPLOY_BRANCH="staging"
+else
+  DEPLOY_BRANCH="main"
+fi
+
+if [ "$STAGING" = "1" ]; then
+  echo "==> 1/6  STAGING/CANARY -> skip bump; build web at the CURRENT version (prod untouched)"
+  BUILD=$(node -e "process.stdout.write(String(require('./version.json').buildNumber))")
+  echo "         build = $BUILD (unchanged)"
+else
+  echo "==> 1/6  Bump version.json (+ native CFBundleVersion / Info.plist / app.json / offlineWebBundle)"
+  node scripts/bump-build.mjs
+  BUILD=$(node -e "process.stdout.write(String(require('./version.json').buildNumber))")
+  echo "         build = $BUILD"
+fi
 
 echo "==> 2/6  Rebuild web bundle (bakes v$BUILD into the badge + a content-hashed cache version)"
 node web/build.mjs >/dev/null
 
-echo "==> 3/6  Sync web/dist -> ios/WebBundle (native wraps the SAME bundle)"
-rm -rf ios/WebBundle && cp -R web/dist ios/WebBundle
+if [ "$STAGING" = "1" ]; then
+  echo "==> 3/6  STAGING -> skip ios/WebBundle sync (web-only canary; native untouched)"
+else
+  echo "==> 3/6  Sync web/dist -> ios/WebBundle (native wraps the SAME bundle)"
+  rm -rf ios/WebBundle && cp -R web/dist ios/WebBundle
+fi
 
 if [ "${SKIP_NATIVE:-0}" = "1" ]; then
   echo "==> 4/6  SKIP_NATIVE=1 -> skipping the native archive"
@@ -61,11 +87,22 @@ else
   echo "         IPA -> ~/Desktop/SignoVivo-$BUILD.ipa"
 fi
 
-echo "==> 5/6  Deploy web to signovivo.com (production = Pages branch 'main')"
-npx wrangler pages deploy web/dist --project-name alvernia-reader --branch main --commit-dirty=true
+if [ "$STAGING" = "1" ]; then
+  echo "==> 5/6  Deploy web to the ISOLATED Pages preview branch '$DEPLOY_BRANCH' (NOT signovivo.com)"
+else
+  echo "==> 5/6  Deploy web to signovivo.com (production = Pages branch '$DEPLOY_BRANCH')"
+fi
+npx wrangler pages deploy web/dist --project-name alvernia-reader --branch "$DEPLOY_BRANCH" --commit-dirty=true
 
-echo "==> 6/6  DONE — signovivo.com == native == v$BUILD"
-if [ "${SKIP_NATIVE:-0}" != "1" ]; then
-  echo "         Final manual step (native to TestFlight):"
-  echo "           open -a Transporter ~/Desktop/SignoVivo-$BUILD.ipa   then click DELIVER"
+if [ "$STAGING" = "1" ]; then
+  echo "==> 6/6  DONE — staging preview deployed. Prove it on the canary iPad (open the preview URL"
+  echo "         printed above, or signovivo.com?env=staging once promoted), THEN promote to prod:"
+  echo "           bash scripts/release.sh          # full prod (bump + native + deploy main)"
+  echo "         Production (branch 'main' / signovivo.com) and TestFlight were NOT touched."
+else
+  echo "==> 6/6  DONE — signovivo.com == native == v$BUILD"
+  if [ "${SKIP_NATIVE:-0}" != "1" ]; then
+    echo "         Final manual step (native to TestFlight):"
+    echo "           open -a Transporter ~/Desktop/SignoVivo-$BUILD.ipa   then click DELIVER"
+  fi
 fi
