@@ -53,6 +53,35 @@ Never run the bare `node --test e2e/*.test.mjs` glob or `e2e/relay-sync.test.mjs
 
 ## Log (newest first)
 
+### P0 criticals — repo-side ones knocked out (2026-07-04, branch `dev-a4-a5-repo-p0s`)
+- ✅ **A4 + B-RESTORE** (`scripts/release.sh`): crash-safe `trap cleanup_release EXIT INT TERM` around
+  the director-codes PII swap — a Ctrl-C/crash/error mid-archive can no longer leave real phone numbers
+  in the tracked file; restore always returns 0 (no more `set -e` abort). **Proven** in an isolated
+  temp-dir sim (normal exit / `exit 1` / SIGINT all restore the file). Dev tool, no runtime surface.
+- ✅ **A5 + A1-repo** (`e2e/relay-sync.test.mjs`): env-gated + disabled-by-default (throws at import
+  unless RELAY_TEST_BASE/ROOM/CODE set), hard-refuses the live `alvernia-main` room, and the committed
+  `12345678840` credential removed (gone from all runnable code; docs-only now).
+- **Status of the 5 criticals:** A3 (pending native M7), A4 ✅, A5 ✅, **A1** repo-half ✅ / secret-half
+  ⏳ needs Miguel (`wrangler secret put` to rotate 12345678840 out, once no device depends on it),
+  **A2** (relay rate-limit) ⏳ worker change — build+test against P1 local harness, then a worker
+  **deploy** that reaches every follower → do on a green weekday with Miguel's ok on timing.
+
+### M2 — Web crash-proofing — ✅ Slice A DONE (2026-07-04, PR #238 → `c22af07d`)
+- Guarded the two unguarded module-eval `localStorage` reads (`app.js` haptic + tip) — **the likely
+  Wednesday white-screen cause** (they throw in a storage-disabled browser → whole script aborts).
+- **Boot-guard net** (first executable code): an uncaught boot-time crash → "Reintentar" recovery card,
+  never a white screen; gated on `__svBooted` so it never hijacks a working reader. Browser-verified on
+  all 3 paths (normal / crash-not-booted / benign-post-boot).
+- Resilient `pages.json` boot fetch (degrades to known page count, doesn't fail the reader).
+- Remaining M2: Slice C (defensive-guard mop-up, web, safe), Slice D (crash telemetry → /log + fleet
+  panel — **needs the P6-LOG `X-Fleet-Key` gate first + a worker deploy**), Slice B (native error
+  boundary + WebView recovery → M7 2-device day).
+
+### M1 — Staging channel — ✅ COMPLETE (2026-07-04, PRs #234/#235/#237)
+Resolver (`?env=staging`) + `STAGING=1` deploy + `rollback-web.sh` + `?selftest` card + checklist.
+Staging room live-proven against the real worker (`?env=staging&selftest` → relay conectado on
+alvernia-staging), zero worker changes. All browser-verified.
+
 ### Decisions locked (2026-07-04, Miguel delegated to my recommendation)
 1. **Cadence** → **autonomous on safe work**: build + merge web/worker/dev milestones on green CI,
    pause only for steps needing Miguel's hands (Cloudflare R2/secrets, physical devices) or genuine
