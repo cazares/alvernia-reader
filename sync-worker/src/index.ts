@@ -706,7 +706,12 @@ export default {
         } catch {
           snapshot = EMPTY_SNAPSHOT;
         }
-        return json(snapshot, 200, cors);
+        // Additive `now` (server epoch seconds) so a follower can calibrate its clock
+        // offset against the server's wall clock (P2-CLOCKSKEW). The /state fetch is
+        // cross-origin, and `Date` is not a CORS-safelisted response header, so the
+        // client can't read the HTTP Date — a body field is the reliable channel. Purely
+        // additive: it is NOT persisted, NOT on the WS wire, and old clients ignore it.
+        return json({ ...snapshot, now: Math.floor(Date.now() / 1000) }, 200, cors);
       }
 
       if (action === "unlock") {

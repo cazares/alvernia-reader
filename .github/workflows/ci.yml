@@ -64,6 +64,9 @@ jobs:
           e2e/offline-books-integrity.test.mjs
           e2e/nearby-sync-contract.test.mjs
           e2e/permission-flow.test.mjs
+          e2e/svRelayRoom.test.mjs
+          e2e/svSelftest.test.mjs
+          e2e/svSyncDecision.test.mjs
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
         run: node scripts/smoke-boot.mjs

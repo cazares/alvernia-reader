@@ -61,6 +61,20 @@ test("A2 seq=0 gate: seq=0 IS honored as a reset when the room is stale (no dire
   assert.ok(s.seq >= 1, "stale seq=0 gets assigned the next monotonic seq");
 });
 
+test("P2-CLOCKSKEW: /state includes a server `now` (epoch seconds) for clock calibration", async () => {
+  const room = "p2-now";
+  await pub(room, { v: 1, page: 5, totalPages: 371, seq: 3000 });
+  const s = await state(room);
+  assert.equal(typeof s.now, "number", "/state must expose a numeric `now`");
+  assert.ok(Number.isInteger(s.now) && s.now > 1_600_000_000, `now must be epoch seconds; got ${s.now}`);
+  // Sanity: server now is within a wide window of the test host's clock (both ~real time).
+  const localNow = Math.floor(Date.now() / 1000);
+  assert.ok(Math.abs(s.now - localNow) < 3600, `server now (${s.now}) should be near local (${localNow})`);
+  // Existing fields must be untouched by the additive `now`.
+  assert.equal(s.page, 5);
+  assert.equal(s.seq, 3000);
+});
+
 test("A2 rate limit: a publish flood is throttled (429s after the burst; some allowed)", async () => {
   const room = "a2-flood";
   const statuses = await Promise.all(

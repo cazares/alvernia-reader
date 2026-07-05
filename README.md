@@ -32,7 +32,8 @@ npm run typecheck
 node --test e2e/repo-minimal-footprint.test.mjs e2e/native-entrypoint.test.mjs \
   e2e/native-stability-config.test.mjs e2e/offline-books-integrity.test.mjs \
   e2e/nearby-sync-contract.test.mjs e2e/permission-flow.test.mjs \
-  e2e/svRelayRoom.test.mjs e2e/svSelftest.test.mjs        # the SAFE test subset
+  e2e/svRelayRoom.test.mjs e2e/svSelftest.test.mjs \
+  e2e/svSyncDecision.test.mjs                             # the SAFE test subset
 node scripts/smoke-boot.mjs                                # build + boot smoke test
 ```
 
