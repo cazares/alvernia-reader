@@ -3410,10 +3410,35 @@ if (buildBadge && resolvedBuild) {
   buildBadge.classList.add("is-shown");
 }
 
+// Screen wake lock (P7): keep the screen awake while the reader is open, so a follower's
+// phone/iPad doesn't sleep and go dark mid-Mass (the native shell has expo-keep-awake;
+// web followers on signovivo.com had nothing). Fully guarded — unsupported browsers and
+// rejected requests are silent no-ops, and the lock is re-acquired when the tab returns
+// to the foreground (the platform auto-releases it when the page is hidden). A nicety;
+// it must never affect boot.
+const initScreenWakeLock = () => {
+  try {
+    if (!("wakeLock" in navigator) || !navigator.wakeLock || typeof navigator.wakeLock.request !== "function") return;
+    let sentinel = null;
+    const acquire = async () => {
+      try {
+        if (document.visibilityState !== "visible" || sentinel) return;
+        sentinel = await navigator.wakeLock.request("screen");
+        sentinel.addEventListener("release", () => { sentinel = null; });
+      } catch (_) { sentinel = null; /* not focused / not allowed — harmless */ }
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") acquire();
+    });
+    acquire();
+  } catch (_) { /* never let a wake-lock hiccup affect boot */ }
+};
+
 clearInitialUrl();
 registerServiceWorker();
 bindViewportMetrics();
 bindReaderEvents();
+initScreenWakeLock();
 initReader().catch((error) => {
   console.error("No se pudo iniciar el lector", error);
   setLoading(true, "No se pudo cargar Signo Vivo.");
