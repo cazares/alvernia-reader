@@ -1,0 +1,203 @@
+# Verified rows from agent batches 01,02,03,05,06 (197 songs). Format: NUM|STATUS|HOLDER|REGIME|CONF|BASIS
+# batch 01
+2|PD|traditional|Traditional/None|High|Classic traditional Spanish call-response praise hymn
+10|UNKNOWN|?|Unknown|Low|Incipit "Entraré" too generic
+18|COPYRIGHT|Unconfirmed (Maranatha-style)|CCLI|Low|Contemporary praise song, not traditional
+26|COPYRIGHT|Jorge Luis Bohorquez|CanZion/Indie|High|Named living composer, eucharistic song
+34|UNKNOWN|Juan Diego (parish credit)|Unknown|Low|Parish-attributed, not a published work
+42|COPYRIGHT|Parish member (unnamed)|Parish-local|High|Title names Alvernia — parish-written
+50|UNKNOWN|?|Unknown|Low|Quinceañera song, no author found
+58|COPYRIGHT|Martin Verde Barajas|OCP|Med|El Alfarero/Vaso Nuevo, Flor y Canto composer
+66|UNKNOWN|?|Unknown|Low|Chord fragment only, no match
+74|COPYRIGHT|Isa Villalobos (attrib)|CanZion/Indie|Med|Lenten processional credited to Isa Villalobos
+82|COPYRIGHT|Kairy Marquez (setting)|OCP|Med|Psalm 18/19 setting credited to Kairy Marquez
+91|COPYRIGHT|Rafael Moreno|OCP|Med|Saname healing song, named composer
+99|UNKNOWN|?|Unknown|Low|Multiple same-title songs
+107|COPYRIGHT|Ruben Gimenez (possible)|CCLI|Low|Possible match, uncertain
+115|COPYRIGHT|Martin Valverde|OCP|Med|Passion narrative, named composer
+123|NOTASONG|-|-|-|Rubric/section header, not a song
+131|COPYRIGHT|Jesed (band)|CanZion/Indie|Low|Contemporary faith song tied to Jesed
+140|COPYRIGHT|Unconfirmed (Kairoi-assoc)|CCLI|Med|Contemporary praise song, not traditional
+148|COPYRIGHT|Modern setting (unnamed)|OCP|Low|Senor ten piedad, modern setting
+157|UNKNOWN|?|Unknown|Low|Multiple Regalo de Dios songs
+165|COPYRIGHT|Barak (band)|CCLI|Low|Contemporary Espiritu Santo Ven
+174|COPYRIGHT|Tercer Cielo (assoc)|CCLI|Med|Contemporary ballad
+182|COPYRIGHT|Athenas Venica|CanZion/Indie|High|Named group, matches title credit
+191|PD|traditional|Traditional/None|High|Traditional Spanish villancico
+199|COPYRIGHT|Unconfirmed|Unknown|Low|Contemporary praise, no author
+208|UNKNOWN|?|Unknown|Low|No specific song located
+216|UNKNOWN|Parish/regional Sabinas|Parish-local|Low|Place-name suggests regional origin
+225|COPYRIGHT|Kairy Marquez|OCP|High|Composer named in title
+233|COPYRIGHT|Isa Villalobos|CanZion/Indie|High|Composer named in title
+242|COPYRIGHT|Marco Barrientos (assoc)|CCLI|Med|Contemporary worship song
+253|COPYRIGHT|P. Nestor Gallego|Parish-local|Med|Named priest-composer
+270|COPYRIGHT|Cesareo Gabarain|OCP|High|Famous Lenten hymn
+294|COPYRIGHT|Wilfran Castillo|CanZion/Indie|High|Named composer
+304|COPYRIGHT|Brotes de Olivo (assoc)|CanZion/Indie|Med|Contemporary worship song
+317|COPYRIGHT|Jesus Adrian Romero|CanZion/Indie|High|Famous CCM composer
+330|PD|traditional (folk)|Traditional/None|High|Iconic traditional folk song
+340|COPYRIGHT|Cesareo Gabarain|OCP|High|Named OCP composer
+349|UNKNOWN|?|Unknown|Low|Ambiguous fragment
+358|COPYRIGHT|Padre Rafael Chavez|OCP|Med|Named priest-composer, 2005
+369|COPYRIGHT|Unconfirmed|Unknown|Low|Modern Gloria setting
+# batch 02
+3|COPYRIGHT|?|Unknown|Med|Contemporary charismatic style
+11|COPYRIGHT|?|CanZion/Indie|Med|Contemporary charismatic song
+19|COPYRIGHT|Jesus Chuy Olivares|CanZion/Indie|Med|Popularized by Marcos Witt
+27|UNKNOWN|?|Unknown|Low|Modern Via Crucis hymn
+35|COPYRIGHT|Martin Valverde|CanZion/Indie|High|Composer named in title
+43|PD|traditional|Traditional/None|Med|Anonymous communal action-song/folk
+51|COPYRIGHT|?|Unknown|Low|Contemporary entrance hymn
+59|UNKNOWN|?|Unknown|Low|Not identified
+67|UNKNOWN|?|Unknown|Low|Not identified
+75|UNKNOWN|?|Unknown|Low|Common title, not identified
+84|COPYRIGHT|Palito Ortega|Secular|High|1973 pop hit, repurposed devotionally
+92|UNKNOWN|?|Unknown|Low|Contemporary devotional, no author
+100|COPYRIGHT|Danni Driggs|CanZion/Indie|Med|Contemporary song
+108|COPYRIGHT|?|Unknown|Med|Modern Jeremiah-based devotional
+116|UNKNOWN|?|Unknown|Low|Modern Via Crucis hymn
+124|UNKNOWN|?|Unknown|Low|Generic title
+132|COPYRIGHT|?|CanZion/Indie|Med|Contemporary charismatic song
+141|UNKNOWN|?|Unknown|Low|Act-of-Faith style, no origin
+150|COPYRIGHT|?|Unknown|Med|Si conocieras el Don de Dios
+158|COPYRIGHT|Pedro Favini/Ragone|Secular|Med|Popularized by Wilkins
+166|UNKNOWN|?|Unknown|Low|Generic Aleluya
+175|COPYRIGHT|Cesareo Gabarain|OCP|High|Famous OCP hymn, composer in title
+183|UNKNOWN|?|Unknown|Low|Generic Pentecost title
+192|COPYRIGHT|Katherine K. Davis|Secular|High|Carol of the Drum 1941
+200|COPYRIGHT|Alfareros|CanZion/Indie|Med|Named group in title
+209|UNKNOWN|?|Unknown|Low|Generic Pentecost title
+218|COPYRIGHT|Rafael Moreno (uncertain)|Unknown|Low|Possible match, unconfirmed
+226|COPYRIGHT|Luis Castillo|CanZion/Indie|Med|Composer named in title
+235|COPYRIGHT|?|Unknown|Med|Jeremiah 20:7-based devotional
+243|UNKNOWN|?|Unknown|Low|Generic praise chorus
+254|UNKNOWN|?|Unknown|Low|Generic Marian title
+271|UNKNOWN|?|Unknown|Low|Generic offertory title
+295|UNKNOWN|?|Unknown|Low|Generic title
+306|COPYRIGHT|?|Unknown|Med|Contemporary surrender song
+318|UNKNOWN|?|Unknown|Low|Generic Eucharistic title
+332|UNKNOWN|?|Unknown|Low|Generic praise chorus
+341|UNKNOWN|?|Unknown|Low|Agnus Dei setting unidentified
+350|UNKNOWN|?|Unknown|Low|Generic title
+359|PD|traditional|Traditional/None|High|Traditional Ave Maria prayer text
+370|UNKNOWN|?|Unknown|Low|Generic Eucharistic title
+# batch 03
+4|COPYRIGHT|Unknown contemporary|Unknown|Low|Modern title, no traditional basis
+12|UNKNOWN|?|Unknown|Low|Generic Aleluya
+20|UNKNOWN|?|Unknown|Low|Common contemporary title
+28|UNKNOWN|Tono (surname unknown)|Unknown|Low|Gloria setting nicknamed Tono
+36|COPYRIGHT|Unknown modern setting|Unknown|Med|Padre Nuestro modern setting
+44|UNKNOWN|?|Unknown|Low|David bailaba, children's song
+52|COPYRIGHT|Traditional CCM|CCLI|Med|Spanish children's worship, modern
+60|UNKNOWN|?|Unknown|Low|Not identified
+68|COPYRIGHT|Unknown|Unknown|Low|Generic offertory hymn
+76|COPYRIGHT|Unknown|Unknown|Med|Psalm 8 modern setting
+85|COPYRIGHT|Unknown|Unknown|Med|Gloria modern arrangement
+93|PARISH-LOCAL|Alvernia parish|Parish-local|Med|Himno Alvernia, parish anthem
+101|PD|traditional|Traditional/None|High|Children's action folk song
+109|UNKNOWN|?|Unknown|Low|Not identified
+117|COPYRIGHT|Unknown|CanZion/Indie|Med|Widely covered CCM song
+125|COPYRIGHT|Unknown modern|Unknown|Med|Contemporary confession-themed
+133|COPYRIGHT|Martin Valverde (attrib)|CanZion/Indie|Low|Attributed to Valverde
+142|UNKNOWN|?|Unknown|Low|Wedding-vow song
+151|COPYRIGHT|Hermana Glenda|CanZion/Indie|High|Tu mi Alfarero, Jeremiah 18
+159|COPYRIGHT|Cesareo Gabarain|OCP|High|Famous Holy Week hymn
+167|COPYRIGHT|Unknown|CCLI|Low|CCM Pentecost variant
+176|COPYRIGHT|Jesed (band)|CanZion/Indie|Med|Christmas song by Jesed
+184|COPYRIGHT|Athenas Venica|CanZion/Indie|High|Confirmed composer
+193|COPYRIGHT|Jose Rafael Torrealba|Secular|High|Famous Venezuelan Christmas song 1970s
+201|COPYRIGHT|Joan Sanchez|CanZion/Indie|Med|Composer in title
+210|UNKNOWN|?|Unknown|Low|Not identified
+219|COPYRIGHT|Jesus Adrian Romero|CanZion/Indie|High|Famous CanZion composer
+227|COPYRIGHT|Aldo Blanco|CanZion/Indie|Med|Composer in title
+236|COPYRIGHT|Athenas Venica & Nico Cabrera|CanZion/Indie|High|Confirmed, Pieta/Dulce Madre
+244|COPYRIGHT|Nora Nelly Rodriguez|CanZion/Indie|Med|Attributed composer
+255|UNKNOWN|?|Unknown|Low|Generic Pan y Vino title
+272|COPYRIGHT|Marcela Gandara|CanZion/Indie|High|Confirmed composer
+296|COPYRIGHT|Marcela Gandara|CanZion/Indie|High|Confirmed composer (Vine a Adorarte)
+307|COPYRIGHT|Unknown|CCLI|Low|Hay una uncion, variant
+319|UNKNOWN|?|Unknown|Low|Not identified
+333|COPYRIGHT|Unknown|Unknown|Med|Penitential rite modern setting
+342|COPYRIGHT|Unknown|Unknown|Med|Gloria/Agnus Dei modern setting
+351|UNKNOWN|?|Unknown|Low|Distinct from Juan Gabriel song
+362|COPYRIGHT|Marco Frisina (commonly used)|OCP|Med|Alma de Cristo medieval text, modern setting
+# batch 05
+6|UNKNOWN|?|Unknown|Low|Legend/key line, not a song
+14|COPYRIGHT|Cesareo Gabarain|OCP|High|Francisco Evangelio Vivo 1981
+22|COPYRIGHT|Federico Carranza|Unknown|Med|Confirmed author
+30|COPYRIGHT|Unknown|Unknown|Low|Agnus Dei Rosita version unidentified
+38|COPYRIGHT|Unknown|Unknown|Low|Sanctus setting, generic
+46|PD|traditional|Traditional/None|High|Latin American folk/campfire song
+54|COPYRIGHT|Alberto Taule|OCP|High|Confirmed OCP entrance hymn
+62|COPYRIGHT|Miguel Cassina|CanZion/Indie|Med|Argentine contemporary parish song
+70|UNKNOWN|?|Unknown|Low|Multiple Amigo Fiel songs
+78|COPYRIGHT|Cesareo Gabarain|OCP|High|Famous Psalm 42 setting
+87|UNKNOWN|?|Unknown|Low|No author found
+95|UNKNOWN|?|Unknown|Low|Unconfirmed match
+103|COPYRIGHT|Misioneros Servidores de la Palabra|CanZion/Indie|Med|Confirmed composer group
+111|COPYRIGHT|Padre Zezinho|GIA|High|Brazilian priest-composer
+119|COPYRIGHT|Padre Zezinho|GIA|High|Confirmed Marian hymn
+127|COPYRIGHT|Unknown modern setting|OCP|Med|St Francis prayer text, modern setting
+135|COPYRIGHT|Unknown|OCP|Low|Psalm setting, unidentified
+144|UNKNOWN|?|Unknown|Low|Generic communion song
+153|COPYRIGHT|Jesed|CanZion/Indie|High|Confirmed Mexican Catholic ministry
+161|COPYRIGHT|Osvaldo Catena|OCP|Med|Likely Esta es el agua baptismal hymn
+169|UNKNOWN|?|Unknown|Low|No match
+178|UNKNOWN|?|Unknown|Low|Altisimo Senor variant unmatched
+187|COPYRIGHT|Veronica Sanfilippo|CanZion/Indie|High|Confirmed Christmas composer
+195|COPYRIGHT|Padre Edgar Larrea|Parish-local|High|Named local priest, confirmed
+204|COPYRIGHT|Miguel Angel Pujol (Kairoi)|OCP|High|Confirmed Vive 1988
+212|COPYRIGHT|Mayra Alejandra Barajas|CanZion/Indie|High|Confirmed, named in title
+221|COPYRIGHT|Jesus Adrian Romero|CanZion/Indie|High|Famous CanZion artist
+229|COPYRIGHT|Ericson Alexander Molano|CanZion/Indie|High|Confirmed, named in title
+238|COPYRIGHT|Juan Salinas/Juan Carlos Alvarado|CanZion/Indie|Med|Likely Quien nos separara
+247|COPYRIGHT|Alfarero|CanZion/Indie|High|Confirmed Christian band
+262|COPYRIGHT|Abba Padre Band|CanZion/Indie|High|Confirmed exact title
+277|COPYRIGHT|Rafael Espinoza|CanZion/Indie|Med|Likely Tomado de la mano
+300|COPYRIGHT|Unknown (multiple candidates)|CanZion/Indie|Med|Several same-titled, all contemporary
+309|COPYRIGHT|Unknown|Unknown|Low|Gloria setting generic
+323|COPYRIGHT|Marcela de la Garza|CanZion/Indie|High|Confirmed composer
+335|COPYRIGHT|Primitivo Baltazar|OCP|Med|Confirmed entrance hymn author
+344|COPYRIGHT|Rene Bautista|CanZion/Indie|High|Confirmed offertory
+353|COPYRIGHT|Manuel Davila|Unknown|Med|Best incipit match
+364|COPYRIGHT|Eleazar Cortes|OCP|Med|Salmo 102/103 setting
+# batch 06
+7|COPYRIGHT|Jason Morris|CCLI|High|Contemporary worship, popularized by Marcos Witt
+15|PARISH-LOCAL|Alvernia parish (St Francis/Monte Alverna)|Parish-local|Med|Likely parish theme song
+23|COPYRIGHT|Carmelo Erdozain|OCP|High|Famous OCP entrance hymn
+31|COPYRIGHT|Unknown contemporary|Unknown|Low|Modern praise chorus
+39|COPYRIGHT|Unknown contemporary|Unknown|Med|Modern Kyrie setting, not chant
+47|COPYRIGHT|Unknown|Unknown|Low|Contemporary children's Catholic song
+55|COPYRIGHT|Unknown contemporary|Unknown|Med|Modern Psalm 116 setting
+63|UNKNOWN|?|Unknown|Low|Chord notation only, generic
+71|PD|Franz Schubert|Traditional/None|High|Ave Maria 1825, PD by age
+79|UNKNOWN|?|Unknown|Low|Via Crucis station, unidentified
+88|COPYRIGHT|John Wimber|CCLI|High|Spirit Song by Vineyard founder
+96|COPYRIGHT|Cesareo Gabarain|OCP|High|Confirmed OCP composer
+104|COPYRIGHT|Sandy Caldera|CanZion/Indie|High|Confirmed contemporary composer
+112|COPYRIGHT|Padre Zezinho|GIA|Med|Brazilian priest-composer
+120|COPYRIGHT|Lourdes C. Montgomery|OCP|High|Confirmed, copyright 2002
+128|PD|traditional|Traditional/None|High|Traditional Mexican folk birthday song
+136|COPYRIGHT|Unknown (Palau songbook)|Unknown|Low|Likely Luis Palau crusade songbook
+145|COPYRIGHT|Alfredo Morales/Benjamin Nunez|Unknown|High|Confirmed Advent hymn authors
+154|COPYRIGHT|Bernardo Velado|OCP|High|Confirmed liturgical composer 1992
+162|COPYRIGHT|Rafael Moreno|CanZion/Indie|High|Confirmed composer
+171|COPYRIGHT|Suzanne Toolan|GIA|High|Confirmed 1964 GIA Eucharistic hymn
+179|COPYRIGHT|Bravo|Unknown|Med|Confirmed author surname
+188|COPYRIGHT|Athenas Venica|CanZion/Indie|High|Confirmed Argentine duo
+196|COPYRIGHT|Unknown contemporary|Unknown|Low|Modern praise chorus
+205|COPYRIGHT|Omar Jonatan Narvaez (Athenas)|CanZion/Indie|High|Confirmed composer
+213|UNKNOWN|?|Parish-local|Low|Parish-specific announcement song
+222|COPYRIGHT|Edgar Varela|CanZion/Indie|High|Confirmed communion hymn composer
+230|COPYRIGHT|Thomas Wilkes/David Stevenson|Secular|High|From 1965 musical Up With People
+239|COPYRIGHT|Marcela Gandara|CanZion/Indie|High|Confirmed composer/performer
+248|COPYRIGHT|Antonio Valdoni (text St Augustine)|Unknown|High|PD text, modern setting
+263|COPYRIGHT|Miguel Horacio|Unknown|Med|Confirmed composer
+282|UNKNOWN|?|Unknown|Low|Generic Easter title
+301|COPYRIGHT|Jesus Adrian Romero|CanZion/Indie|High|Confirmed major CanZion artist
+312|COPYRIGHT|Athenas/Tobias Buteler|CanZion/Indie|High|Confirmed Guadalupe song
+324|UNKNOWN|?|Unknown|Low|Multiple El Buen Pastor settings
+336|COPYRIGHT|Eduardo Meana|Unknown|Med|Likely composer, title variant
+345|COPYRIGHT|Unknown contemporary|Unknown|Med|Modern Agnus Dei setting
+354|PD|traditional (prayer text)|Traditional/None|Med|Ave Maria prayer text
+365|UNKNOWN|?|Parish-local|Low|No commercial work found, likely local
