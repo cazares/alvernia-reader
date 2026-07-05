@@ -70,19 +70,37 @@ local wrangler dev relay (`sync-worker/test/a2.test.mjs` + `run-a2.sh`). **All 5
 code-side.** DEPLOY = Miguel's `cd sync-worker && npx wrangler deploy` (reaches everyone) — pair with the
 A1 secret rotation.
 
+**✅ P2 sync robustness DONE (2026-07-05, PR #248 → `7b3eda4c`) — git-only, NOT deployed.** All three,
+all WEB relay path (native/mesh untouched — `startRelayFollow` early-returns for native, so
+`applyRelaySnapshot` never runs in the iPad app → zero native regression risk):
+- **P2-SEQ** (the Wednesday green-pill freeze): the seq de-dup guard ran BEFORE the freshness check, so a
+  silent director's same-seq WS heartbeat reply was dropped at the guard and never demoted → pill frozen
+  green on a dead director forever. Now **freshness-first**: stale ⇒ demote regardless of seq. Decision
+  extracted to `web/src/lib/svSyncDecision.js` (pure UMD, node-tested); `applyRelaySnapshot` is a thin
+  executor + inline fallback if the lib fails to load.
+- **P2-CLOCKSKEW**: a device clock fast by >90s judged every fresh snapshot stale → never followed anyone.
+  Worker `/state` now returns additive `now` (server epoch s); client calibrates a clock offset from it
+  (Date-header fallback; old worker w/o `now` ⇒ offset 0 = pre-P2 behavior). **Worker half needs deploy.**
+- **P2-POLL-GAP**: `connectRelay` went blind (no /state poll) for up to 6s during a reconnect's CONNECTING
+  window. Poll now runs THROUGH connecting, retired on WS-open.
+- Tests: `e2e/svSyncDecision.test.mjs` 19/19; a2 harness gains a `/state now` check (5/5 local wrangler-dev);
+  CI safe subset now also runs the 3 lib tests (svRelayRoom/svSelftest had drifted out of ci.yml). Gate:
+  RN+worker typecheck, 91/91 e2e, boot smoke, browser-verified.
+
 **▶ NEXT (in priority order):**
-1. **P2 sync robustness** (web; wants the same harness pattern): P2-SEQ (freshness-before-seq so a dead
-   director is demoted + the green-pill freeze ends), P2-CLOCKSKEW, P2-POLL-GAP. Extract the seq/freshness
-   decision into a unit-tested lib (like svRelayRoom/svSelftest), then apply + browser-verify.
-2. **M2 Slice C/D** (defensive guards mop-up; crash telemetry → needs P6-LOG X-Fleet-Key gate + worker deploy).
+1. **M2 Slice C/D** (defensive guards mop-up; crash telemetry → needs P6-LOG X-Fleet-Key gate + worker deploy).
 
 **⚠ NEEDS MIGUEL (I won't assume the timing/hardware):**
 - ✅ Web deployed to signovivo.com + **build 375 cut & Delivered to TestFlight** (2026-07-05 ~00:43 CDT).
+  ⚠ NOTE: signovivo.com now LAGS main — it predates P2 (#248). A `wrangler pages deploy` (Miguel) ships the
+  P2-SEQ freeze fix + P2-POLL-GAP to congregation phones; P2-CLOCKSKEW's client half also ships but stays
+  inert until the worker `now` field deploys too.
 - **2-device day** to verify the native batch (build 375 / #243) BEFORE the choir updates — 4 repros in the
   PR body; target Wednesday practice.
-- **A2 worker deploy** (`cd sync-worker && npx wrangler deploy`) + **A1 secret rotation**
-  (`wrangler secret put TRANSMITTER_CODES` to drop `12345678840`, once no device depends on it) — both
-  reach every follower; do on a green (non-Mass) day.
+- **A2 + P2-CLOCKSKEW worker deploy** (`cd sync-worker && npx wrangler deploy`) — one deploy now lands BOTH
+  A2 (rate-limit + seq=0 gate) AND the additive `/state now` field (activates clock-skew correction) — plus
+  **A1 secret rotation** (`wrangler secret put TRANSMITTER_CODES` to drop `12345678840`, once no device
+  depends on it). All reach every follower; do on a green (non-Mass) day.
 
 ---
 
