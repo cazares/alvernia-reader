@@ -66,9 +66,6 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "web/src/index.html",
     "web/src/app.js",
     "web/src/styles.css",
-    "assets/standard/pages.json",
-    "assets/standard/song-titles.json",
-    "assets/standard/song-search-index.json",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected web path missing: ${relativePath}`);
   }
@@ -88,6 +85,11 @@ test("repo keeps the restored web source but removes old cloud upload entrypoint
     "src/offlinePageAssets.js",
     "src/offlinePageAssets.d.ts",
     "web/build-offline.mjs",
+    // Retired: stale committed song JSON that fed only dead offlineBooks exports.
+    // The web build generates the live index from src/alverniaManual2SongIndex.js + the PDF.
+    "assets/standard/pages.json",
+    "assets/standard/song-titles.json",
+    "assets/standard/song-search-index.json",
   ]) {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), false, `Unexpected leftover path: ${relativePath}`);
   }
