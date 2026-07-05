@@ -2,14 +2,15 @@
 /**
  * Guard against the build-325/327 "song N unreachable" bug class.
  *
- * The app renders `Array.from({ length: totalPages })` and clamps navigation to
- * `totalPages` (PdfReaderApp.tsx). So if assets/standard/pages.json#totalPages is
- * LESS than the actual bundled PDF page count, every page beyond it is invisible
- * AND unreachable by song number — no matter what's in the PDF or the song index.
+ * The app renders one page slot up to totalPages and clamps navigation to it.
+ * totalPages is derived at build time from the actual rendered page count
+ * (web/build.mjs: `totalPages: pageFiles.length`), so it cannot drift from the PDF.
+ * The remaining risk is the SONG INDEX pointing a song at a page the PDF does not
+ * have — then jump-by-number strands a user on a blank/clamped page during Mass.
  *
- * This check FAILS the build when the page count drifts from the PDF, forcing the
- * data (pages.json / song-titles.json / song-search-index.json / alverniaManual2SongIndex)
- * to be updated whenever the songbook PDF changes.
+ * This validates the canonical song index (src/alverniaManual2SongIndex.js) — the
+ * single source web/build.mjs reads — against the shipped PDF, and FAILS the build
+ * if any song points beyond the last page.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -17,13 +18,17 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const pagesJsonPath = path.join(root, "assets/standard/pages.json");
+const songIndexPath = path.join(root, "src/alverniaManual2SongIndex.js");
 const pdfPath = path.join(root, "assets/alvernia_manual_2.pdf");
 
-const pages = JSON.parse(fs.readFileSync(pagesJsonPath, "utf8"));
-const declared = Number(pages.totalPages);
-const songIndex = Array.isArray(pages.songIndex) ? pages.songIndex : [];
-const maxIndexedPage = songIndex.reduce((m, e) => Math.max(m, Number(e?.page) || 0), 0);
+const src = fs.readFileSync(songIndexPath, "utf8");
+const pairs = [...src.matchAll(/\[(\d+),\s*(\d+)\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
+if (!pairs.length) {
+  console.error(`❌ check-book-consistency: no [song, page] pairs found in ${path.basename(songIndexPath)}.`);
+  process.exit(1);
+}
+const songCount = pairs.length;
+const maxIndexedPage = pairs.reduce((m, [, p]) => Math.max(m, Number(p) || 0), 0);
 
 const info = spawnSync("pdfinfo", [pdfPath], { encoding: "utf8" });
 if (info.status !== 0) {
@@ -32,26 +37,21 @@ if (info.status !== 0) {
 }
 const match = info.stdout.match(/^Pages:\s+(\d+)/m);
 const actual = match ? Number(match[1]) : NaN;
-
-let ok = true;
 if (!Number.isFinite(actual)) {
   console.warn("⚠️  check-book-consistency: could not read PDF page count — skipping.");
   process.exit(0);
 }
-if (declared !== actual) {
-  console.error(`❌ pages.json totalPages=${declared} but ${path.basename(pdfPath)} has ${actual} pages.`);
-  console.error("   Pages beyond totalPages are NOT rendered and NOT jump-reachable.");
-  console.error("   Fix: set assets/standard/pages.json totalPages to " + actual + " and add any new song(s)");
-  console.error("   to song-titles.json, song-search-index.json, and src/alverniaManual2SongIndex.js.");
+
+let ok = true;
+if (maxIndexedPage > actual) {
+  console.error(`❌ song index references page ${maxIndexedPage} but ${path.basename(pdfPath)} has only ${actual} pages.`);
+  console.error("   That song is not rendered and not jump-reachable by number.");
+  console.error("   Fix: correct the page in src/alverniaManual2SongIndex.js, or update the PDF.");
   ok = false;
 }
-if (maxIndexedPage > declared) {
-  console.error(`❌ pages.json songIndex references page ${maxIndexedPage} > totalPages ${declared}.`);
-  ok = false;
-}
-if (Number.isFinite(actual) && maxIndexedPage && maxIndexedPage < actual) {
+if (maxIndexedPage && maxIndexedPage < actual) {
   console.warn(`⚠️  Last indexed song is on page ${maxIndexedPage} but the PDF has ${actual} pages — the final page(s) may not be jump-reachable by song number.`);
 }
 
 if (!ok) process.exit(1);
-console.log(`✅ book consistency OK — pages.json totalPages=${declared} matches the PDF (${actual} pages); songIndex maxPage=${maxIndexedPage}.`);
+console.log(`✅ book consistency OK — ${songCount} songs, max indexed page ${maxIndexedPage} ≤ PDF pages ${actual}.`);
