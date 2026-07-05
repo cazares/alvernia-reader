@@ -53,7 +53,25 @@ Never run the bare `node --test e2e/*.test.mjs` glob or `e2e/relay-sync.test.mjs
 
 ## Log (newest first)
 
-### M0 — Release Safety skeleton — IN PROGRESS (2026-07-04, branch `dev-m0-release-safety`)
+### Decisions locked (2026-07-04, Miguel delegated to my recommendation)
+1. **Cadence** → **autonomous on safe work**: build + merge web/worker/dev milestones on green CI,
+   pause only for steps needing Miguel's hands (Cloudflare R2/secrets, physical devices) or genuine
+   product/UX forks.
+2. **Director restart (NEW-DIR-1)** → **boot resume-prompt** ("¿Continuar como director?"). Lands in M7.
+3. **Staging isolation** → **same worker + `alvernia-staging` room** (separate DO, zero worker change).
+
+### M1 — Staging channel — IN PROGRESS (2026-07-04, branch `dev-m1-staging-channel`)
+- ✅ **Relay-room resolver** (`?env=staging` → `alvernia-staging`, else `alvernia-main`). New
+  `web/src/lib/svRelayRoom.js` (UMD, unit-tested), loaded as `<script defer>` before app.js;
+  `build.mjs` copies `web/src/lib/*` → `dist/lib/`; `app.js:2765` uses it triple-guarded (lib-presence
+  + whitelist + try/catch) so it can NEVER white-screen — defaults to `alvernia-main`. Native
+  transmitter (`directorRelaySync.js`) intentionally unchanged (native staging = M7).
+  **Verified:** unit 4/4, safe subset 65/65, typecheck clean, smoke extended+green, and the real built
+  bundle **boots + renders page 2 in a browser** with default room `alvernia-main`, zero console errors.
+- ⬜ Remaining M1: `STAGING=1` release.sh path (deploy `--branch staging`), `?selftest` GREEN/RED card,
+  `scripts/rollback-web.sh`, `docs/pre-mass-checklist.md`.
+
+### M0 — Release Safety skeleton — ✅ DONE + MERGED (2026-07-04, PR #233 → main `da523294`)
 The one part of the plan with **zero product forks and zero runtime risk** — dev/CI-only, cannot affect
 any device. It is the gate every later milestone ships through, and the thing that would have caught the
 Wednesday failure.
