@@ -87,8 +87,31 @@ all WEB relay path (native/mesh untouched — `startRelayFollow` early-returns f
   CI safe subset now also runs the 3 lib tests (svRelayRoom/svSelftest had drifted out of ci.yml). Gate:
   RN+worker typecheck, 91/91 e2e, boot smoke, browser-verified.
 
+**✅ M2 Slice C DONE (2026-07-05, PR #250 → `1c27425e`) — git-only, NOT deployed.** Defensive-guard
+mop-up. Audit found the codebase already well-guarded by M2-A (module-top localStorage, relay/manifest
+JSON.parse, the whole fleet region, search-index inline+network). Three unguarded load-bearing sites fixed:
+`applyNativeSyncEvent` (the iPad inbound bridge handler — a throw was propagating back into the native
+`evaluateJavaScript` and dropping sync events) now has a whole-body try/catch + `__SV_LAST_ERROR`
+breadcrumb; the two offline-ready localStorage calls now best-effort/safe-default. Web-unreachable bridge
+guard ⇒ zero web regression; browser-verified (9 malformed payloads → 0 throws, valid page renders).
+Deliberately did NOT do a `safeLS`/`safeFetchJson` sweep across already-guarded code (gold-plating +
+regression risk — §10/§13).
+
+**✅ SESSION RE-HUNT CLEAN (2026-07-05):** fresh adversarial pass over P2 + Slice C found no regressions.
+Checks: open handler always retires the P2-POLL-GAP bridge poll (no steady-state poll leak); the P2-SEQ
+executor only holds-or-advances `relay.lastSeq` (never regresses); P2-CLOCKSKEW freshness is computed
+server-vs-server (client clock factored out entirely — freshness = server-now − server-publish-ts); the
+Slice C bridge guard has no `await` before its guarded calls, so every synchronous throw is caught.
+
 **▶ NEXT (in priority order):**
-1. **M2 Slice C/D** (defensive guards mop-up; crash telemetry → needs P6-LOG X-Fleet-Key gate + worker deploy).
+1. **M2 Slice D** (crash telemetry) — NOT started; **needs a design/deploy decision from Miguel first**
+   (§9/rule-2): it (a) needs the **P6-LOG worker gate** (gate `GET`/`DELETE /log` behind `X-Fleet-Key`,
+   cap `POST`, strip device names) which is a **worker change + deploy**, AND touches **PII** (the /log ring
+   buffer). Ordering is fixed: P6-LOG gate FIRST, then client `reportCrash()` → `/log`, then a fleet
+   "Recent crashes" panel. Buildable inert-until-deploy like A2/P2-CLOCKSKEW, but the PII gate + a new
+   telemetry channel is an ASK, not an assume.
+2. **M2 Slice B** (native `onContentProcessDidTerminate` / `ErrorUtils` hardening) — native, **device-gated**;
+   batches to the 2-device day with the #243 native batch.
 
 **⚠ NEEDS MIGUEL (I won't assume the timing/hardware):**
 - ✅ Web deployed to signovivo.com + **build 375 cut & Delivered to TestFlight** (2026-07-05 ~00:43 CDT).
