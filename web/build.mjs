@@ -43,6 +43,23 @@ fs.mkdirSync(distDir, { recursive: true });
 fs.mkdirSync(booksDir, { recursive: true });
 
 fs.copyFileSync(path.join(srcDir, "styles.css"), path.join(distDir, "styles.css"));
+
+// Copy web/src/lib/*.js verbatim into dist/lib/. These are tiny, dependency-free
+// helpers loaded as <script defer> BEFORE app.js (e.g. svRelayRoom, the relay-room
+// resolver for the staging/canary channel). Kept as separate files so they are
+// unit-testable in node and, if one ever fails to load, app.js's own guards still
+// fall back to safe defaults.
+const libSrcDir = path.join(srcDir, "lib");
+if (fs.existsSync(libSrcDir)) {
+  const libOutDir = path.join(distDir, "lib");
+  fs.mkdirSync(libOutDir, { recursive: true });
+  for (const libFile of fs.readdirSync(libSrcDir)) {
+    if (libFile.endsWith(".js")) {
+      fs.copyFileSync(path.join(libSrcDir, libFile), path.join(libOutDir, libFile));
+    }
+  }
+}
+
 const relayBase = (process.env.ALVERNIA_RELAY_BASE || "https://signovivo-sync.4j4982y8jp.workers.dev").replace(/\/+$/, "");
 const appSource = fs
   .readFileSync(path.join(srcDir, "app.js"), "utf8")

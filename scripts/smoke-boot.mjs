@@ -166,6 +166,15 @@ try {
   }
   const swJs = exists("sw.js") ? read("sw.js") : "";
   check("sw.js has no unreplaced token __CACHE_VERSION__", !swJs.includes("__CACHE_VERSION__"), "service worker cache version not stamped");
+
+  // ── 7. Pre-app lib helpers loaded before app.js (M1 relay-room resolver) ───
+  // If the lib isn't copied or isn't referenced, app.js still defaults safely to
+  // the production room — but we assert it here so a broken build is caught.
+  check("relay-room helper present: lib/svRelayRoom.js", exists("lib/svRelayRoom.js") && sizeOf("lib/svRelayRoom.js") > 32, exists("lib/svRelayRoom.js") ? undefined : "missing — staging channel resolver not shipped");
+  check("index.html loads lib/svRelayRoom.js before app.js", html.includes("lib/svRelayRoom.js"), "resolver script tag missing from shell");
+  const libJs = exists("lib/svRelayRoom.js") ? read("lib/svRelayRoom.js") : "";
+  check("relay-room helper defaults to alvernia-main (production)", libJs.includes('"alvernia-main"'), "production room constant missing from resolver");
+  check("app.js wires the relay-room resolver", appJs.includes("svRelayRoom") && appJs.includes("alvernia-main"), "app.js not using the resolver / production fallback");
 } catch (e) {
   // Defensive: never let the smoke test itself crash ambiguously.
   check("smoke test ran without an unexpected error", false, `threw: ${e && e.stack ? e.stack.split("\n")[0] : e}`);
