@@ -178,6 +178,12 @@ try {
   check("selftest helper present: lib/svSelftest.js", exists("lib/svSelftest.js") && sizeOf("lib/svSelftest.js") > 32, "readiness card not shipped");
   check("index.html loads lib/svSelftest.js", html.includes("lib/svSelftest.js"), "selftest script tag missing from shell");
   check("app.js wires the ?selftest card (gated on the query param)", appJs.includes("svSelftest") && appJs.includes("selftest"), "app.js not wiring the readiness card");
+  // P2 sync robustness: the freshness-before-seq decision must ship + be wired.
+  check("sync-decision helper present: lib/svSyncDecision.js", exists("lib/svSyncDecision.js") && sizeOf("lib/svSyncDecision.js") > 32, "follower-sync decision not shipped");
+  check("index.html loads lib/svSyncDecision.js before app.js", html.includes("lib/svSyncDecision.js"), "sync-decision script tag missing from shell");
+  const syncJs = exists("lib/svSyncDecision.js") ? read("lib/svSyncDecision.js") : "";
+  check("sync-decision exposes decideRelaySnapshot", syncJs.includes("decideRelaySnapshot"), "decision entrypoint missing");
+  check("app.js wires the sync-decision lib", appJs.includes("svSyncDecision") && appJs.includes("decideRelaySnapshot"), "app.js not using the sync-decision lib");
 } catch (e) {
   // Defensive: never let the smoke test itself crash ambiguously.
   check("smoke test ran without an unexpected error", false, `threw: ${e && e.stack ? e.stack.split("\n")[0] : e}`);

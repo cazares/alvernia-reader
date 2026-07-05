@@ -2992,6 +2992,7 @@ const relay = {
   appliedPage: null, // last page WE applied from the relay
   livePage: null,    // latest page the director is on (tracked even while browsing)
   hasDirector: false,
+  clockOffsetMs: 0,  // (serverClock - deviceClock), calibrated from /state Date header (P2-CLOCKSKEW)
 };
 
 let relayPill = null;
@@ -3092,63 +3093,63 @@ const reconnectRelay = () => {
   renderRelayPill();
 };
 
-const relayIsFreshLive = (snap) =>
-  snap && Number.isFinite(snap.seq) && snap.seq > 0 &&
-  (!snap.ts || (Date.now() / 1000) - snap.ts <= RELAY_LIVE_MAX_AGE_S);
-
+// The follower-sync decision (freshness-before-seq, clock-skew correction) lives in the
+// unit-tested svSyncDecision lib. applyRelaySnapshot is a thin executor of its verdict:
+// no ordering logic here, so the load-bearing "does a dead director stay live?" question
+// is decided by node-tested code, identical in the browser and CI.
 const applyRelaySnapshot = async (snap, { force = false } = {}) => {
-  // Number.isFinite rejects NaN (typeof NaN === "number" let it slip the old guard) →
-  // a NaN page would clamp/render bogusly. Reject non-finite page outright.
-  if (!snap || !Number.isFinite(snap.page)) return;
-  // Single-book app: snap.bookId (kept on the wire for build-373 compat) is effectively always
-  // "standard", so there is no book to switch — the director's page renders straight against the
-  // one book. renderPage clamps any out-of-range page into range.
-  // Ongoing pushes are de-duped / ordered by seq (Number.isFinite so a NaN seq can't
-  // slip the guard). A FORCED resync (initial load, reconnect, foreground, or the safety
-  // poll) must re-apply the director's CURRENT page even when the seq isn't newer — the
-  // director may be sitting still — so it skips the seq guard.
-  if (!force && Number.isFinite(snap.seq) && snap.seq > 0 && snap.seq <= relay.lastSeq) return;
-  if (Number.isFinite(snap.seq)) relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
-
-  const hasPublished = Number.isFinite(snap.seq) && snap.seq > 0;
-  // No director has ever published, OR the director's snapshot is older than the freshness
-  // window (RELAY_LIVE_MAX_AGE_S, ~90s) → behave like a normal songbook. The staleness check
-  // applies on the FORCED path too: a forced resync (boot poll, reconnect, foreground, polling
-  // fallback) fires exactly when the WS is dead and we're scraping /state — marking a 90s-stale
-  // director LIVE there (green pill + rendering its stale page) is the wrong call. force still
-  // bypasses the seq guard above for a FRESH director sitting still; it does NOT resurrect a
-  // stale one.
-  if (!hasPublished || !relayIsFreshLive(snap)) {
-    relay.hasDirector = false;
-    // No live director → the "Volver a en vivo" bar would lie about going live (there's
-    // nowhere to go). Hide it and drop browsing state so bar, pill, and browse flag stay
-    // consistent: the user reverts to a normal songbook they can freely navigate.
-    relay.browsing = false;
-    hideGoLiveBar();
-    renderRelayPill();
+  const lib = globalThis.svSyncDecision;
+  // If the lib somehow failed to load, fall back to a conservative inline check so a
+  // relay message can never throw at boot: reject bad pages, honor the seq de-dup, and
+  // treat a snapshot as live only if fresh. (The lib is smoke-checked into every build.)
+  if (!lib || typeof lib.decideRelaySnapshot !== "function") {
+    if (!snap || !Number.isFinite(snap.page)) return;
+    const hasPub = Number.isFinite(snap.seq) && snap.seq > 0;
+    const fresh = hasPub && (!Number.isFinite(snap.ts) ||
+      (Date.now() + (relay.clockOffsetMs || 0)) / 1000 - snap.ts <= RELAY_LIVE_MAX_AGE_S);
+    if (!fresh) { relay.hasDirector = false; relay.browsing = false; hideGoLiveBar(); renderRelayPill(); return; }
+    if (!force && snap.seq <= relay.lastSeq) { relay.hasDirector = true; renderRelayPill(); return; }
+    relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
+    relay.hasDirector = true; relay.livePage = snap.page;
+    if (relay.browsing) { renderRelayPill(); revealReader(); return; }
+    relay.following = true; relay.appliedPage = snap.page;
+    if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
+    renderRelayPill(); revealReader();
     return;
   }
-  relay.hasDirector = true;
-  relay.livePage = snap.page;
 
-  // The user is intentionally browsing the songbook (tapped the title → jumped). Track the
-  // director's latest page so "Volver a en vivo" lands on the current spot, but DON'T yank
-  // them off their page.
-  if (relay.browsing) { renderRelayPill(); revealReader(); return; }
+  const d = lib.decideRelaySnapshot(snap, {
+    lastSeq: relay.lastSeq,
+    hasDirector: relay.hasDirector,
+    browsing: relay.browsing,
+    currentPage: state.currentPage,
+    force,
+    nowMs: Date.now(),
+    clockOffsetMs: relay.clockOffsetMs || 0,
+    maxAgeS: RELAY_LIVE_MAX_AGE_S,
+  });
+  if (d.action === "reject") return;
 
-  // A congregation follower should ALWAYS track the director. We only reach here for a
-  // NEW director position (same-seq heartbeat pings are seq-guarded above), so the director
-  // just moved — snap to it and (re-)engage following, EVEN IF a stray Safari swipe/scroll
-  // had nudged the page off and "browsed away". The old behavior stranded followers on the
-  // amber "tap to resync" dot, permanently out of sync (seen on video: director on 367,
-  // follower frozen on 365). You can still peek between the director's moves — the next
-  // move pulls you home; tap the dot to resync immediately.
-  relay.following = true;
-  relay.appliedPage = snap.page;
-  if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
-  renderRelayPill();
-  // Reveal once a follower is homed onto the director's page. Idempotent — safe to call anytime.
-  revealReader();
+  // Apply the decided sync state. Single-book app: snap.bookId (kept on the wire for
+  // build-373 compat) is always "standard", so the director's page renders straight
+  // against the one book; renderPage clamps any out-of-range page.
+  relay.hasDirector = d.hasDirector;
+  relay.lastSeq = d.lastSeq;
+  relay.browsing = d.browsing;
+  if (d.livePage != null) relay.livePage = d.livePage;
+  if (d.hideGoLiveBar) hideGoLiveBar();
+
+  if (d.action === "follow") {
+    // A congregation follower ALWAYS tracks the director on a new position, EVEN IF a
+    // stray Safari swipe had nudged the page off (the old behavior stranded followers on
+    // the amber dot — director on 367, follower frozen on 365). Peeking between moves is
+    // fine; the next move pulls you home, or tap the dot to resync now.
+    relay.following = true;
+    relay.appliedPage = snap.page;
+    if (d.renderPage != null) renderPage(d.renderPage, { pushToHistory: false });
+  }
+  if (d.renderPill) renderRelayPill();
+  if (d.reveal) revealReader();  // idempotent — safe to call anytime
 };
 
 const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) + "/state";
@@ -3169,7 +3170,29 @@ const relayPollOnce = async (force = false) => {
     } finally {
       if (abortTimer) clearTimeout(abortTimer);
     }
-    if (r.ok) await applyRelaySnapshot(await r.json(), { force });
+    if (r.ok) {
+      const recvMs = Date.now();
+      const dateHeader = r.headers.get("date");
+      const snap = await r.json();
+      // P2-CLOCKSKEW: calibrate the client<->server clock offset BEFORE judging snapshot
+      // freshness. A follower whose device clock is fast by >90s would otherwise treat
+      // EVERY fresh snapshot as stale and never follow any director. Prefer the body `now`
+      // field (server epoch seconds) — it's the reliable cross-origin channel; the HTTP
+      // Date header is NOT CORS-safelisted, so it's a same-origin/dev fallback only.
+      // Fail-safe: if neither is usable the previous offset is kept (0 by default →
+      // identical to the pre-P2 behavior, so an old worker without `now` never regresses).
+      const lib = globalThis.svSyncDecision;
+      if (lib) {
+        try {
+          if (snap && Number.isFinite(snap.now) && typeof lib.clockOffsetFromServerNow === "function") {
+            relay.clockOffsetMs = lib.clockOffsetFromServerNow(snap.now, recvMs, relay.clockOffsetMs || 0);
+          } else if (typeof lib.clockOffsetFromDateHeader === "function") {
+            relay.clockOffsetMs = lib.clockOffsetFromDateHeader(dateHeader, recvMs, relay.clockOffsetMs || 0);
+          }
+        } catch {}
+      }
+      await applyRelaySnapshot(snap, { force });
+    }
   } catch {}
 };
 // Fallback polling (when the WS won't hold): force every tick so a stationary director
@@ -3183,7 +3206,14 @@ const connectRelay = () => {
   // another live socket, each with its own 4s heartbeat + message handler.
   if (relay.ws && (relay.ws.readyState === 0 || relay.ws.readyState === 1)) return;
   relay.manualClose = false;
-  stopRelayPolling();
+  // P2-POLL-GAP: keep a /state safety poll running THROUGH the connecting window instead
+  // of going blind until the socket opens (or the 6s zombie-timeout fires). On a flaky
+  // reconnect mid-Mass the socket can take seconds to open; without this the follower had
+  // no sync source in that gap and could miss a director move. The open handler stops this
+  // poll the instant the WS is confirmed live, so a healthy network pays only ~1 extra
+  // /state fetch during the sub-second connect. startRelayPolling() self-clears first, so
+  // it never stacks a second interval.
+  startRelayPolling();
   // A reconnect is firing now (or was requested) — cancel any pending backoff timer so it
   // can't schedule a second connect on top of this one.
   if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
@@ -3205,6 +3235,10 @@ const connectRelay = () => {
   const clearConnectTimer = () => { if (connectTimer) { clearTimeout(connectTimer); connectTimer = 0; } };
   ws.addEventListener("open", () => {
     clearConnectTimer();
+    // P2-POLL-GAP: the WS is live now — retire the connecting-window bridge poll so we
+    // don't run BOTH a socket and a 4s /state poll. The heartbeat below + WS pushes take
+    // over; if the socket later dies, connectRelay restarts the bridge poll again.
+    stopRelayPolling();
     relay.backoff = 500;
     relay.lastMsgAt = Date.now();
     relayPollOnce(true);   // force-resync to the director's current page on (re)connect
