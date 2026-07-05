@@ -15,6 +15,7 @@ test("package.json keeps the offline web-host dependency footprint lean", () => 
   assert.deepEqual(Object.keys(packageJson.scripts).sort(), [
     "android",
     "build:web",
+    "deploy:web",
     "ios",
     "ios:local",
     "ios:mpad",
