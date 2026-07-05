@@ -596,7 +596,10 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
   });
 
   await Promise.all(workers);
-  localStorage.setItem(OFFLINE_READY_KEY, "ready");
+  // Best-effort: a storage-disabled browser must not fail an otherwise-successful cache. The
+  // pages ARE cached; a missing "ready" flag just means isOfflineBundleReady re-verifies next
+  // load (cache-hit, so cheap) — no data loss, no thrown rejection out of a finished download.
+  try { localStorage.setItem(OFFLINE_READY_KEY, "ready"); } catch (_) {}
   fleetCheckin({ webCached: true }); // tell the readiness dashboard this iPad is fully cached
   await writeOfflineMetadata({
     version: CACHE_VERSION,
@@ -633,7 +636,11 @@ const deferOfflinePrecache = (totalPages) => {
 
 const isOfflineBundleReady = async (totalPages) => {
   if (!("caches" in window)) return false;
-  if (localStorage.getItem(OFFLINE_READY_KEY) !== "ready") return false;
+  // Guarded read: localStorage throws in a storage-disabled browser. Treat any failure as
+  // "not ready" (safe default → re-verify/re-cache), never let it reject this check.
+  let readyFlag = false;
+  try { readyFlag = localStorage.getItem(OFFLINE_READY_KEY) === "ready"; } catch (_) {}
+  if (!readyFlag) return false;
   try {
     const metadata = await readOfflineMetadata();
     if (!metadata) return false;
@@ -926,51 +933,67 @@ const showRelayAuthWarning = (status) => {
 };
 
 const applyNativeSyncEvent = async (payload) => {
-  if (!payload || typeof payload !== "object") return;
+  // Whole-body guard (M2 Slice C): the native shell calls this via evaluateJavaScript on
+  // EVERY mesh sync event. A throw from any branch (a malformed payload, or a downstream
+  // renderPage / badge / warning call) would propagate back into the bridge — dropping that
+  // sync event and risking a wedged channel on the choir's iPads. Swallow + record a
+  // breadcrumb (like the boot guard's __SV_LAST_ERROR) so the NEXT event is always handled
+  // cleanly. The happy path below is unchanged.
+  try {
+    if (!payload || typeof payload !== "object") return;
 
-  if (payload.type === "bridge-state") {
-    state.nativeBridgeAvailable = Boolean(payload.available);
-    return;
-  }
-
-  // Single-book app: a legacy "set-book" message from an older native shell is a no-op.
-  if (payload.type === "set-book") return;
-
-  // Role changes after a code / conflict / takeover. Store it and surface the tiny
-  // director badge — never throw.
-  if (payload.type === "role") {
-    if (typeof payload.role === "string") {
-      state.syncRole = payload.role;
-      if (payload.role === "director" || payload.role === "follower" || payload.role === "none") {
-        state.nativeSyncRole = payload.role === "none" ? "off" : payload.role;
-        renderDirectorModeBadge();
-      }
+    if (payload.type === "bridge-state") {
+      state.nativeBridgeAvailable = Boolean(payload.available);
+      return;
     }
-    return;
-  }
 
-  // The relay REJECTED the director's publish (401 bad/retired code). The native shell bridges it
-  // here as a one-time signal so the director sees a visible warning — otherwise the publish fails
-  // silently and every signovivo.com follower freezes for the whole Mass. (Native latches it, so
-  // this never fires on every page turn.)
-  if (payload.type === "relay-auth-error") {
-    showRelayAuthWarning(payload.status);
-    return;
-  }
+    // Single-book app: a legacy "set-book" message from an older native shell is a no-op.
+    if (payload.type === "set-book") return;
 
-  if (payload.type !== "sync-event") return;
+    // Role changes after a code / conflict / takeover. Store it and surface the tiny
+    // director badge — never throw.
+    if (payload.type === "role") {
+      if (typeof payload.role === "string") {
+        state.syncRole = payload.role;
+        if (payload.role === "director" || payload.role === "follower" || payload.role === "none") {
+          state.nativeSyncRole = payload.role === "none" ? "off" : payload.role;
+          renderDirectorModeBadge();
+        }
+      }
+      return;
+    }
 
-  const event = payload.event || {};
+    // The relay REJECTED the director's publish (401 bad/retired code). The native shell bridges it
+    // here as a one-time signal so the director sees a visible warning — otherwise the publish fails
+    // silently and every signovivo.com follower freezes for the whole Mass. (Native latches it, so
+    // this never fires on every page turn.)
+    if (payload.type === "relay-auth-error") {
+      showRelayAuthWarning(payload.status);
+      return;
+    }
 
-  // Connection lifecycle from the native mesh → drive the "working" spinner.
-  if (event.type === "state") {
-    setSyncWorking(String(event.status || ""));
-    return;
-  }
+    if (payload.type !== "sync-event") return;
 
-  if (event.type === "page" && Number.isFinite(event.page)) {
-    // Single-book app: ignore any event.book and just render the director's page.
-    renderPage(event.page, { pushToHistory: false });
+    const event = payload.event || {};
+
+    // Connection lifecycle from the native mesh → drive the "working" spinner.
+    if (event.type === "state") {
+      setSyncWorking(String(event.status || ""));
+      return;
+    }
+
+    if (event.type === "page" && Number.isFinite(event.page)) {
+      // Single-book app: ignore any event.book and just render the director's page.
+      renderPage(event.page, { pushToHistory: false });
+    }
+  } catch (err) {
+    try {
+      window.__SV_LAST_ERROR = {
+        where: "native-sync-event",
+        msg: String((err && err.message) || err || ""),
+        t: Date.now(),
+      };
+    } catch (_) {}
   }
 };
 
