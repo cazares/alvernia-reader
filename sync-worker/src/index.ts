@@ -88,6 +88,36 @@ type RosterPerson = {
 export class SyncRoom extends DurableObject<Env> {
   private snapshot: Snapshot = EMPTY_SNAPSHOT;
 
+  // ── Per-IP rate limiting (A2) ──────────────────────────────────────────────
+  // A token bucket per client IP, held in THIS DO instance's memory. A room DO is a
+  // singleton, so this bucket sees EVERY request to that room/resource → a real global
+  // limit (unlike a per-Worker-isolate Map, which each isolate would see only a slice of).
+  // FAIL-OPEN by contract: a real director/device runs far below these limits, and blocking
+  // a legit director mid-Mass is far worse than an attacker slipping a few requests through,
+  // so ANY error (or a missing IP) → allowed.
+  private rateBuckets = new Map<string, { tokens: number; last: number }>();
+  private rateLimited(ip: string, capacity: number, refillPerSec: number): boolean {
+    try {
+      if (!ip) return false; // no IP to bucket on — never block
+      const now = Date.now();
+      // Bound memory against an IP-spray flood: if the map grows huge, reset it. Buckets refill in
+      // seconds, so the per-IP sustained limit re-applies at once; only a transient burst could slip.
+      if (this.rateBuckets.size > 20000) this.rateBuckets.clear();
+      let b = this.rateBuckets.get(ip);
+      if (!b) {
+        b = { tokens: capacity, last: now };
+        this.rateBuckets.set(ip, b);
+      }
+      b.tokens = Math.min(capacity, b.tokens + ((now - b.last) / 1000) * refillPerSec);
+      b.last = now;
+      if (b.tokens < 1) return true; // no tokens → limited
+      b.tokens -= 1;
+      return false;
+    } catch {
+      return false; // fail-open: never block a real director on a rate-limiter bug
+    }
+  }
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Restore the latest page on wake (covers hibernation / eviction).
@@ -98,7 +128,16 @@ export class SyncRoom extends DurableObject<Env> {
   }
 
   /** RPC: director publishes a new page state. Latest-wins, stale-guarded. */
-  async publish(input: Partial<Snapshot>): Promise<{ ok: true; seq: number; ignored?: boolean }> {
+  async publish(
+    input: Partial<Snapshot>,
+    ip = "",
+  ): Promise<{ ok: true; seq: number; ignored?: boolean; rateLimited?: boolean }> {
+    // A2 rate limit: a real director publishes ~1 page turn every few seconds plus a 12s heartbeat —
+    // far under 2/sec. Cap 15 (burst) + 2/sec sustained stops a flood (page-hijack) without ever
+    // touching a legitimate director. Checked first so a flood is cheap to reject.
+    if (this.rateLimited(ip, 15, 2)) {
+      return { ok: true, seq: this.snapshot.seq, rateLimited: true };
+    }
     // Sanitize seq before it touches the guard. A non-finite (Infinity/NaN), negative, or
     // unreachably-high seq would poison the room: Infinity serializes as null and, since every
     // finite seq is <= Infinity, would block every future director for the whole live window.
@@ -117,6 +156,15 @@ export class SyncRoom extends DurableObject<Env> {
     const nowSec = Math.floor(Date.now() / 1000);
     const snapshotStale =
       this.snapshot.seq === 0 || nowSec - this.snapshot.ts > RELAY_LIVE_MAX_AGE_S;
+    // A2 seq=0 gate: seq=0 must NOT bypass the monotonic guard while a director is live. A legit live
+    // director always sends a real (>0) monotonic seq (native transmitters use wall-clock ms); a
+    // seq=0 — or an invalid seq we collapsed to 0 above — arriving while a FRESH director is
+    // broadcasting is malformed or an override attempt, so reject it. seq=0 is only honored as a
+    // takeover/reset when the snapshot is already stale (no active director), which the branch below
+    // and the next-seq assignment already handle.
+    if (!snapshotStale && incomingSeq === 0) {
+      return { ok: true, seq: this.snapshot.seq, ignored: true };
+    }
     if (!snapshotStale && incomingSeq > 0 && incomingSeq <= this.snapshot.seq) {
       return { ok: true, seq: this.snapshot.seq, ignored: true };
     }
@@ -143,7 +191,15 @@ export class SyncRoom extends DurableObject<Env> {
 
   /** RPC: append diagnostic breadcrumbs to a capped ring buffer (debug telemetry only — no sync
    *  data). Devices POST their Multipeer sync lifecycle here so it can be read back remotely. */
-  async appendLog(entries: unknown[]): Promise<{ ok: true; total: number }> {
+  async appendLog(
+    entries: unknown[],
+    ip = "",
+  ): Promise<{ ok: true; total: number; rateLimited?: boolean }> {
+    // A2: cap /log spam per IP (devices batch-append breadcrumbs). Generous (20 burst, 3/sec) so real
+    // devices never hit it; stops an unauthenticated /log flood from churning DO storage.
+    if (this.rateLimited(ip, 20, 3)) {
+      return { ok: true, total: 0, rateLimited: true };
+    }
     const existing = (await this.ctx.storage.get<unknown[]>("dbglog")) ?? [];
     const rx = Math.floor(Date.now() / 1000);
     const stamped = entries
@@ -191,7 +247,11 @@ export class SyncRoom extends DurableObject<Env> {
 
   /** RPC: a device reports its readiness. OPEN at the worker layer (devices hold no secret), so
    *  every field is sanitized + length/range-capped here the same way publish() guards its input. */
-  async checkin(input: unknown): Promise<{ ok: true; total: number }> {
+  async checkin(input: unknown, ip = ""): Promise<{ ok: true; total: number; rateLimited?: boolean }> {
+    // A2: cap check-in spam per IP so an attacker can't churn/evict real device readiness entries.
+    if (this.rateLimited(ip, 10, 1)) {
+      return { ok: true, total: 0, rateLimited: true };
+    }
     const o = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
     const deviceId = String(o.deviceId ?? "").slice(0, 64);
     if (!deviceId) return { ok: true, total: 0 }; // can't key a device with no id — drop it
@@ -528,7 +588,8 @@ export default {
               : body != null
                 ? [body]
                 : [];
-          const result = await dbg.appendLog(entries);
+          const result = await dbg.appendLog(entries, request.headers.get("CF-Connecting-IP") || "");
+          if (result.rateLimited) return json({ ok: false, error: "rate_limited" }, 429, cors);
           return json(result, 200, cors);
         }
         if (request.method === "DELETE") {
@@ -563,7 +624,9 @@ export default {
           } catch {
             body = null;
           }
-          return json(await fleet.checkin(body), 200, cors);
+          const result = await fleet.checkin(body, request.headers.get("CF-Connecting-IP") || "");
+          if (result.rateLimited) return json({ ok: false, error: "rate_limited" }, 429, cors);
+          return json(result, 200, cors);
         }
 
         // Everything else under /fleet exposes choir phone numbers, so it is gated by the director
@@ -692,10 +755,11 @@ export default {
         // Single book: any valid transmitter code may publish page numbers. No book-scoping.
         let result;
         try {
-          result = await stub.publish(body);
+          result = await stub.publish(body, request.headers.get("CF-Connecting-IP") || "");
         } catch {
           return json({ ok: false, error: "publish_failed" }, 500, cors);
         }
+        if (result.rateLimited) return json({ ok: false, error: "rate_limited" }, 429, cors);
         return json(result, 200, cors);
       }
 
