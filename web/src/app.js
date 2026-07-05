@@ -2762,7 +2762,23 @@ const RELAY_BASE_RAW = "__RELAY_BASE__";
 const RELAY_BASE = RELAY_BASE_RAW.startsWith("__RELAY")
   ? "https://signovivo-sync.4j4982y8jp.workers.dev"
   : RELAY_BASE_RAW.replace(/\/+$/, "");
-const RELAY_ROOM = "alvernia-main";
+// Relay room: production "alvernia-main" by default; the isolated canary channel
+// "alvernia-staging" only for ?env=staging (Release Safety System, M1). Resolved by
+// the pre-loaded svRelayRoom helper. Triple-guarded — lib present? known room? any
+// throw? — so a resolver problem can never white-screen boot; it defaults to the
+// live room, and only the exact "alvernia-staging" value is ever allowed through.
+const RELAY_ROOM = (function resolveRelayRoomSafely() {
+  try {
+    const resolve =
+      typeof globalThis !== "undefined" &&
+      globalThis.svRelayRoom &&
+      globalThis.svRelayRoom.resolveRelayRoom;
+    const room = resolve ? resolve(location.search) : "alvernia-main";
+    return room === "alvernia-staging" ? "alvernia-staging" : "alvernia-main";
+  } catch (_) {
+    return "alvernia-main";
+  }
+})();
 const RELAY_LIVE_MAX_AGE_S = 90; // a director counts as "live" if its last update is this recent
 
 // ── Fleet readiness check-in (signovivo.com PWA only — the native app reports itself) ─────────
