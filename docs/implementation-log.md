@@ -63,26 +63,26 @@ run their pre-session code.**
   crash-proofing (#238) · **A4** release PII trap (#239) · **A5/A1-repo** (#239) · **P8** README (#240)
   · **P7** wake-lock (#241) · **native A3+NEW-DIR-1/2/3** device-gated (#243).
 
+**✅ A2 DONE (2026-07-05, PR #246 → `b9cc44b4`) — deploy-ready, NOT deployed.** Worker rate-limit
+(per-IP token bucket on /publish 15/2·s, /fleet/checkin 10/1·s, /log 20/3·s → 429, fail-open) + seq=0
+gate (reject seq=0 while a fresh director is live; honor it only as a stale reset). PROVEN 4/4 against a
+local wrangler dev relay (`sync-worker/test/a2.test.mjs` + `run-a2.sh`). **All 5 criticals now handled
+code-side.** DEPLOY = Miguel's `cd sync-worker && npx wrangler deploy` (reaches everyone) — pair with the
+A1 secret rotation.
+
 **▶ NEXT (in priority order):**
-1. **A2 — worker rate-limit + seq=0 gate (last critical).** `sync-worker/src/index.ts`: publish auth at
-   `:656`; the `seq=0` bypass at `:107-120` (invalid/zero seq → `incomingSeq=0` → skips the monotonic
-   guard at `:120` `incomingSeq > 0` → always accepted as `snapshot.seq+1`). Fixes: (a) per-IP + per-room
-   token-bucket (a few writes/sec) on `/publish`, `/fleet/checkin`, `/log` → 429; (b) reject `seq=0`
-   publishes when a FRESH live director exists (only allow seq=0-as-reset when the snapshot is already
-   stale). **Build + test against a local `wrangler dev` harness (the P1-HARNESS — point the neutralized
-   `relay-sync.test.mjs` at `RELAY_TEST_BASE=http://127.0.0.1:8787`); merge to git deploy-ready.**
-   **DEPLOY reaches every follower → Miguel's timing (green weekday).**
-2. **P2 sync robustness** (web; also wants the harness): P2-SEQ (freshness-before-seq so a dead director
-   is demoted + the green-pill freeze ends), P2-CLOCKSKEW, P2-POLL-GAP. Extract the seq/freshness decision
-   into a unit-tested lib (like svRelayRoom/svSelftest), then apply + browser-verify.
-3. **M2 Slice C/D** (defensive guards mop-up; crash telemetry → needs P6-LOG X-Fleet-Key gate + worker deploy).
+1. **P2 sync robustness** (web; wants the same harness pattern): P2-SEQ (freshness-before-seq so a dead
+   director is demoted + the green-pill freeze ends), P2-CLOCKSKEW, P2-POLL-GAP. Extract the seq/freshness
+   decision into a unit-tested lib (like svRelayRoom/svSelftest), then apply + browser-verify.
+2. **M2 Slice C/D** (defensive guards mop-up; crash telemetry → needs P6-LOG X-Fleet-Key gate + worker deploy).
 
 **⚠ NEEDS MIGUEL (I won't assume the timing/hardware):**
-- **Deploy the shipped web fixes** to signovivo.com + cut a **TestFlight build** — via `docs/pre-mass-checklist.md`,
-  on a Wed/Sat practice day (canary the oldest iPad first).
-- **2-device day** to verify the native batch (#243) before it ships — repros in the PR body.
-- **A2 worker deploy** (`wrangler deploy`) + **A1 secret rotation** (`wrangler secret put TRANSMITTER_CODES`
-  to drop `12345678840`, once no device depends on it).
+- ✅ Web deployed to signovivo.com + **build 375 cut & Delivered to TestFlight** (2026-07-05 ~00:43 CDT).
+- **2-device day** to verify the native batch (build 375 / #243) BEFORE the choir updates — 4 repros in the
+  PR body; target Wednesday practice.
+- **A2 worker deploy** (`cd sync-worker && npx wrangler deploy`) + **A1 secret rotation**
+  (`wrangler secret put TRANSMITTER_CODES` to drop `12345678840`, once no device depends on it) — both
+  reach every follower; do on a green (non-Mass) day.
 
 ---
 
