@@ -1,0 +1,14 @@
+# Batch-08 follow-up resolution pass — 2026-07-05 (nice-kepler session)
+# The 5 songs batch-08 left UNKNOWN/Low-confidence, resolved via targeted
+# Spanish-language web research (incipit + letra + autor/compositor; OCP;
+# Flor y Canto; Hymnary.org). Full evidence + URLs: batch-08-unknowns-resolved.md
+#
+# Kept SEPARATE from verified-rows.txt (which covers batches 01,02,03,05,06) to
+# preserve provenance — this is a different pass, in a different session.
+# Same schema: NUM|STATUS|HOLDER|REGIME|CONF|BASIS
+# Bottom line: all 5 => EXCLUDE from a public listing.
+33|COPYRIGHT|Misioneros Servidores de la Palabra|CanZion/Indie|High|Gloria from MSP "Misa Pascual"; "MSP"=the religious order (est. 2008), NOT "Misa Pascual"; all-rights-reserved, monetized on Spotify. Corroborates verified-rows #103.
+41|COPYRIGHT|Unknown (orphan/untraceable)|Unknown|Med|"Con estas ofrendas yo te pido Señor"; canto de ofertorio, no author on any source (letras/musica/LaCuerda); "(RE)"=key of D major, not part of the title
+73|COPYRIGHT|Unknown (orphan/untraceable)|Unknown|High|"Pon tu luz en nuestros ojos oh Señor"; lyrics confirmed, no identifiable author; absent from OCP/Flor y Canto/Hymnary; contemporary post-1960 style
+224|COPYRIGHT|Osiris Preciado|CanZion/Indie|Med|"Había olvidado como era mi alma"; Cantantes Católicos Gdl (Guadalajara); attribution from video titles (not a registration) — firm on ©, med on exact holder
+328|UNKNOWN|?|Unknown|Low|"El Señor Resucitó" — bare title shared by a PD hymn (Cabrera/Wesley/Lyra Davidica) + 3+ copyrighted songs (Brotes de Olivo / "Hoy el Señor resucitó" / OCP arrangement); NO incipit captured to disambiguate. Needs first printed line.
