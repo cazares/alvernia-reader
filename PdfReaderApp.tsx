@@ -65,6 +65,10 @@ const SUPER_ADMIN_CODES = new Set<string>(
 );
 // Secret numpad code carried over from the native reader.
 const SOFT_RESET_CODE = "744668486";
+// NEW-DIR-3: a director's mesh page arrives on a ~2s heartbeat. Treat a director as "live right now"
+// only if we've heard from them within this window — otherwise the destructive "take control" confirm
+// false-fires forever after any director ever broadcast (the ref used to be set-once-never-cleared).
+const LIVE_DIRECTOR_WINDOW_MS = 8000;
 // The app is single-book: the only book is the standard (Alvernia) manual. Its id is pinned
 // everywhere so the mesh/relay Snapshot's bookId stays a stable "standard" for backward compat.
 const DEFAULT_BOOK: BookId = "standard";
@@ -102,7 +106,7 @@ export default function App() {
   // Last page/book the DIRECTOR broadcast to us over the mesh (distinct from the web's own
   // page). Drives resync after a WebView reload / foreground for followers. Null until a
   // director snapshot has actually been received (a fresh-boot follower must keep its own page).
-  const lastDirectorSnapshotRef = useRef<{ page: number; book: BookId } | null>(null);
+  const lastDirectorSnapshotRef = useRef<{ page: number; book: BookId; at: number } | null>(null);
   // Director re-broadcast heartbeats. Two cadences: a FAST mesh re-send (local, free) so a
   // dropped page-turn recovers in ~2s, and a SLOW relay keepalive that only refreshes the
   // Cloudflare snapshot's freshness (page CHANGES publish to the relay immediately anyway).
@@ -498,9 +502,12 @@ export default function App() {
   // ── Director-code dispatch (codes entered on the web numpad) ────────────────
   const onDirectorCode = useCallback(
     (rawCode: unknown) => {
-      // A fresh code entry is a new role-entry path: supersede any in-flight become* up front.
-      // (The become*/performSoftReset paths below re-bump and capture their own generation.)
-      roleGenerationRef.current++;
+      // NEW-DIR-2: do NOT bump roleGenerationRef here. A code entry is not yet a committed role
+      // change — becomeDirector (:400), becomeFollower (:370), and performSoftReset (:479) each bump
+      // on their OWN commit. Bumping up front superseded an in-flight boot becomeFollower: if the
+      // confirm dialog below was CANCELLED while becomeFollower was in its retry-sleep, the follower
+      // saw its generation superseded and returned WITHOUT establishing the mesh link → the device
+      // was stranded as a link-less follower. With no bump, a Cancel leaves the follower intact.
       const code = digitsOnly(rawCode);
       if (!code) {
         injectEvent({ type: "role", role: "none" });
@@ -524,8 +531,15 @@ export default function App() {
       // Best-effort heads-up: lastDirectorSnapshotRef is set whenever a director's page has arrived
       // over the mesh, so if it's set another device is (or was just) directing — warn before takeover.
       const isSuperAdmin = SUPER_ADMIN_CODES.has(code);
+      // NEW-DIR-3: only warn about taking over a director who is live RIGHT NOW (a fresh mesh
+      // snapshot within the heartbeat window) — not one who directed earlier this session and left.
+      // Previously this was `Boolean(lastDirectorSnapshotRef.current)`, a set-once-never-cleared flag,
+      // so the scary red "Ya hay un director activo / Tomar el control" warning false-fired forever.
+      const snap = lastDirectorSnapshotRef.current;
       const liveDirector =
-        Boolean(lastDirectorSnapshotRef.current) && roleRef.current !== "director";
+        roleRef.current !== "director" &&
+        Boolean(snap) &&
+        Date.now() - (snap?.at ?? 0) < LIVE_DIRECTOR_WINDOW_MS;
       const title = liveDirector
         ? "⚠️ Ya hay un director activo"
         : isSuperAdmin
@@ -563,7 +577,14 @@ export default function App() {
       switch (msg.type) {
         case "bridge-ready": {
           webReadyRef.current = true;
-          if (typeof msg.page === "number") currentPageRef.current = msg.page;
+          // A3: a DIRECTOR/transmitter is authoritative for the page across a WebView reload. A
+          // content-process reload boots the web to its DEFAULT page (2) and reports it here; adopting
+          // that (and re-broadcasting below) would yank the WHOLE congregation to the boot page — the
+          // single worst live-Mass bug. So a director/transmitter does NOT adopt the web's page here;
+          // it re-asserts its OWN currentPageRef. Only a follower adopts the web's reported page.
+          const isDirectorAuthority =
+            roleRef.current === "director" || explicitTransmitterRef.current;
+          if (!isDirectorAuthority && typeof msg.page === "number") currentPageRef.current = msg.page;
           if (typeof msg.totalPages === "number") totalPagesRef.current = msg.totalPages;
           if (isBookId(msg.book)) currentBookRef.current = msg.book;
           flushPendingInjects();
@@ -579,8 +600,14 @@ export default function App() {
                 ? "none"
                 : roleRef.current;
           injectEvent({ type: "role", role: assertedRole });
-          if (roleRef.current === "director") {
-            // The director's own page is authoritative — just re-broadcast it.
+          if (isDirectorAuthority) {
+            // A3 FIX: re-drive the freshly-reloaded web to the director's/transmitter's REAL page
+            // (currentPageRef, which we did NOT let the boot page clobber above), then (re)broadcast
+            // THAT — never the web's boot page. This is what stops a reload from moving the congregation.
+            injectEvent({
+              type: "sync-event",
+              event: { type: "page", page: currentPageRef.current, book: currentBookRef.current },
+            });
             broadcastPage(currentPageRef.current, currentBookRef.current);
           } else if (roleRef.current === "follower" && lastDirectorSnapshotRef.current) {
             // A RELOADED follower (we already have a director snapshot) must resync to the
@@ -598,6 +625,14 @@ export default function App() {
           break;
         }
         case "page-changed": {
+          // A3: a director/transmitter must never broadcast the web's unsolicited BOOT render. On a
+          // WebView (re)load the web boots to its default page and posts page-changed BEFORE bridge-ready
+          // — i.e. while webReadyRef is still false. For a director/transmitter, ignore that pre-ready
+          // boot render (bridge-ready re-asserts the real page). Followers are unaffected (they don't
+          // broadcast) and a director's REAL page turns, which happen after bridge-ready, work normally.
+          if ((roleRef.current === "director" || explicitTransmitterRef.current) && !webReadyRef.current) {
+            break;
+          }
           // Clamp: a buggy/tampered web bundle must not push a wild page to mesh followers.
           // Floor at 1; cap at totalPages when we have a positive count.
           let page = Math.max(1, Number(msg.page) || currentPageRef.current);
@@ -754,7 +789,26 @@ export default function App() {
       // entering a director code, which then ASKS for confirmation (onDirectorCode). We never
       // silently restore a stale director role — that would step on whoever is actually directing
       // right now. (Miguel, 2026-07-02: "don't just auto-make anyone director — always ask, always.")
-      becomeFollower();
+      //
+      // NEW-DIR-1: but a SILENT demotion is its own hazard — if a DIRECTOR's app restarts mid-Mass it
+      // drops to follower with no signal and nobody is directing (the 2026-07-01 outage class). Read the
+      // prior role BEFORE becomeFollower() overwrites it; if this device was directing, surface a visible
+      // prompt so the operator knows to RE-ENTER their code (the code is deliberately never stored, so we
+      // cannot auto-resume). Intentional exit clears lastSyncRole, so this only fires after a crash/kill.
+      AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole)
+        .then((prev) => {
+          if (prev === "director") {
+            Alert.alert(
+              "Estabas dirigiendo",
+              "La app se reinició y ahora sigues al director como los demás. Para volver a dirigir, reingresa tu código en el teclado (♪).",
+              [{ text: "Entendido" }],
+            );
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          becomeFollower();
+        });
     }
 
     const sub = addNearbyDirectorSyncListener((event: Record<string, unknown>) => {
@@ -769,8 +823,9 @@ export default function App() {
             book,
             dup: page === currentPageRef.current && book === currentBookRef.current,
           });
-          // Remember the director's latest snapshot so a reloaded/foregrounded follower resyncs.
-          lastDirectorSnapshotRef.current = { page, book };
+          // Remember the director's latest snapshot (with a timestamp — NEW-DIR-3) so a reloaded/
+          // foregrounded follower resyncs, and so "is a director live RIGHT NOW?" can be judged by recency.
+          lastDirectorSnapshotRef.current = { page, book, at: Date.now() };
           // De-dupe the 2s mesh heartbeat: if we're already on this page+book it's just a
           // keepalive re-send — do nothing (no redundant renderPage). A genuinely new page, a
           // book switch, or a recovered dropped packet (page differs from ours) still syncs.
