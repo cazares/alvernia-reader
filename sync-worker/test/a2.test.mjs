@@ -19,6 +19,8 @@ if (/signovivo|workers\.dev/.test(BASE)) {
   throw new Error(`a2.test.mjs refuses to run against a non-local base: ${BASE}`);
 }
 
+const FLEET_KEY = process.env.RELAY_TEST_FLEET_KEY || "";
+
 const pub = (room, body) =>
   fetch(`${BASE}/r/${room}/publish`, {
     method: "POST",
@@ -73,6 +75,64 @@ test("P2-CLOCKSKEW: /state includes a server `now` (epoch seconds) for clock cal
   // Existing fields must be untouched by the additive `now`.
   assert.equal(s.page, 5);
   assert.equal(s.seq, 3000);
+});
+
+test("P6-LOG: POST /log stays OPEN (devices post breadcrumbs without a secret)", async () => {
+  const r = await fetch(`${BASE}/log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([{ kind: "crash", where: "test", msg: "hello", t: Date.now() }]),
+  });
+  assert.equal(r.status, 200, "POST /log must remain open for device telemetry");
+  const b = await r.json();
+  assert.equal(b.ok, true);
+});
+
+test("P6-LOG: GET /log is 401 WITHOUT the fleet key, 200 WITH it", async () => {
+  const noKey = await fetch(`${BASE}/log`);
+  assert.equal(noKey.status, 401, "GET /log must be gated — the buffer is not world-readable");
+  const nb = await noKey.json();
+  assert.equal(nb.ok, false);
+
+  if (!FLEET_KEY) return; // key not provided to the harness — the positive case is skipped
+  const withKey = await fetch(`${BASE}/log?k=${encodeURIComponent(FLEET_KEY)}`);
+  assert.equal(withKey.status, 200, "the fleet key must unlock GET /log");
+  const wb = await withKey.json();
+  assert.equal(wb.ok, true);
+  assert.ok(Array.isArray(wb.entries), "GET /log returns the entries array when authorized");
+});
+
+test("P6-LOG: GET /log accepts the fleet key via X-Fleet-Key header too", async () => {
+  if (!FLEET_KEY) return;
+  const r = await fetch(`${BASE}/log`, { headers: { "X-Fleet-Key": FLEET_KEY } });
+  assert.equal(r.status, 200, "X-Fleet-Key header must also authorize");
+});
+
+test("P6-LOG: DELETE /log is 401 WITHOUT the key, 200 WITH it", async () => {
+  const noKey = await fetch(`${BASE}/log`, { method: "DELETE" });
+  assert.equal(noKey.status, 401, "DELETE /log must be gated — the buffer is not world-wipeable");
+
+  if (!FLEET_KEY) return;
+  const withKey = await fetch(`${BASE}/log?k=${encodeURIComponent(FLEET_KEY)}`, { method: "DELETE" });
+  assert.equal(withKey.status, 200, "the fleet key must unlock DELETE /log");
+  const b = await withKey.json();
+  assert.equal(b.cleared, true);
+});
+
+test("Slice D: a posted crash appears on the gated fleet dashboard", async () => {
+  if (!FLEET_KEY) return;
+  const marker = "boom-" + Math.floor(Date.now() / 1000);
+  const post = await fetch(`${BASE}/log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([{ kind: "crash", dev: "testdev", build: "999", where: "unit", msg: marker, t: Date.now() }]),
+  });
+  assert.equal(post.status, 200);
+  const dash = await fetch(`${BASE}/fleet-dashboard?k=${encodeURIComponent(FLEET_KEY)}`);
+  assert.equal(dash.status, 200, "dashboard must render for an authorized key");
+  const html = await dash.text();
+  assert.match(html, /Fallos recientes/, "dashboard shows the recent-crashes panel");
+  assert.ok(html.includes(marker), "the posted crash message appears on the dashboard");
 });
 
 test("A2 rate limit: a publish flood is throttled (429s after the burst; some allowed)", async () => {

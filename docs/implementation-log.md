@@ -103,15 +103,25 @@ executor only holds-or-advances `relay.lastSeq` (never regresses); P2-CLOCKSKEW 
 server-vs-server (client clock factored out entirely — freshness = server-now − server-publish-ts); the
 Slice C bridge guard has no `await` before its guarded calls, so every synchronous throw is caught.
 
+**✅ M2 Slice D DONE (2026-07-05, Miguel approved "all" → built inert-until-deploy) — git-only, NOT deployed.**
+Two PRs, in the plan's fixed order:
+- **P6-LOG gate ([PR #252](https://github.com/cazares/alvernia-reader/pull/252) → `6d58baf8`):** `GET`/`DELETE /log`
+  were UNGATED (the diagnostic buffer was world-readable/wipeable). Now gated behind the fleet credential
+  (director bearer token OR `FLEET_DASHBOARD_KEY` via `?k=`/`X-Fleet-Key`); `POST` stays open (devices) +
+  64 KB cap. Check-before-break: nothing reads `GET /log` programmatically, so gating broke no client.
+- **Crash telemetry ([PR #253](https://github.com/cazares/alvernia-reader/pull/253) → `348d3d6f`):** web
+  `reportCrash()` → best-effort `POST /log {kind:"crash",…}` (debounced by signature, session-capped 20,
+  `url`=pathname-only so a `?k=` can't leak); the boot guard calls it + flushes a pre-register boot crash
+  once. Worker: the gated dashboard renders a **"Fallos recientes"** panel (`escHtml`-escaped — POST is open,
+  so crash text is untrusted). Harness 10/10; browser-verified reporter + boot-guard path + no screen hijack.
+- **Native half of P6-LOG** (stop sending device names, `DirectorSyncModule.swift:177`) is device-gated →
+  batches to the 2-device day; note: the web `dev` id is already an opaque 6-char id, not a name.
+
 **▶ NEXT (in priority order):**
-1. **M2 Slice D** (crash telemetry) — NOT started; **needs a design/deploy decision from Miguel first**
-   (§9/rule-2): it (a) needs the **P6-LOG worker gate** (gate `GET`/`DELETE /log` behind `X-Fleet-Key`,
-   cap `POST`, strip device names) which is a **worker change + deploy**, AND touches **PII** (the /log ring
-   buffer). Ordering is fixed: P6-LOG gate FIRST, then client `reportCrash()` → `/log`, then a fleet
-   "Recent crashes" panel. Buildable inert-until-deploy like A2/P2-CLOCKSKEW, but the PII gate + a new
-   telemetry channel is an ASK, not an assume.
-2. **M2 Slice B** (native `onContentProcessDidTerminate` / `ErrorUtils` hardening) — native, **device-gated**;
+1. **M2 Slice B** (native `onContentProcessDidTerminate` / `ErrorUtils` hardening) — native, **device-gated**;
    batches to the 2-device day with the #243 native batch.
+2. All remaining P-items are either deploy-gated or native/device-gated — see **`docs/green-day-deploy-runbook.md`**
+   (created 2026-07-05) for the exact one-shot deploy sequence + canary walk + verify + rollback.
 
 **⚠ NEEDS MIGUEL (I won't assume the timing/hardware):**
 - ✅ Web deployed to signovivo.com + **build 375 cut & Delivered to TestFlight** (2026-07-05 ~00:43 CDT).

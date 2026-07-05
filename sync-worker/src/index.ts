@@ -425,6 +425,7 @@ const telHref = (phone: string): string => "tel:" + String(phone).replace(/[^0-9
 function renderFleetDashboard(
   data: { roster: RosterPerson[]; devices: FleetDevice[] },
   k: string,
+  crashes: Array<Record<string, unknown>> = [],
 ): string {
   const roster = Array.isArray(data.roster) ? data.roster : [];
   const devices = Array.isArray(data.devices) ? data.devices : [];
@@ -513,6 +514,22 @@ function renderFleetDashboard(
         .join("")}</tbody></table>`
     : "";
 
+  // Recent crashes panel (M2 Slice D) — "device X crashed at 12:05 on build Y" at a glance.
+  // Newest first, capped. `rx` (server receive epoch-seconds, stamped by appendLog) is used for
+  // the timestamp so a skewed device clock can't misplace it; falls back to the client `t` (ms).
+  const crashList = (Array.isArray(crashes) ? crashes : [])
+    .filter((c) => c && typeof c === "object")
+    .sort((a, b) => (Number(b.rx) || Number(b.t) / 1000 || 0) - (Number(a.rx) || Number(a.t) / 1000 || 0))
+    .slice(0, 25);
+  const crashHtml = crashList.length
+    ? `<h3>Fallos recientes (${crashList.length})</h3><table><thead><tr><th>Cuándo</th><th>Dispositivo</th><th>Origen</th><th>Build</th><th>Dónde</th><th>Mensaje</th></tr></thead><tbody>${crashList
+        .map((c) => {
+          const whenSec = Number(c.rx) || Math.floor(Number(c.t) / 1000) || 0;
+          return `<tr class="bad"><td>${ago(whenSec)}</td><td class="muted">${escHtml(c.dev) || "—"}</td><td>${escHtml(c.surface) || "web"}</td><td>${escHtml(c.build) || '<span class="muted">—</span>'}</td><td>${escHtml(c.where) || "—"}</td><td class="muted">${escHtml(c.msg) || "—"}</td></tr>`;
+        })
+        .join("")}</tbody></table>`
+    : "";
+
   const kq = k ? `?k=${encodeURIComponent(k)}` : "";
   return `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -546,6 +563,7 @@ h3{font-size:14px;color:#8b96a3;margin:18px 0 6px}
 <table><thead><tr><th>Persona</th><th>Rol</th><th>App</th><th>signovivo.com</th><th>Visto</th><th>Teléfono</th><th>Qué hacer</th></tr></thead>
 <tbody>${rows.map((r) => r.html).join("") || '<tr><td colspan="7" class="muted">Sin lista cargada todavía.</td></tr>'}</tbody></table>
 ${orphanHtml}
+${crashHtml}
 <div class="sub">Listo = app ≥ ${MIN_SYNC_BUILD} · o signovivo.com en caché + agregado a inicio (iOS conserva la caché). Director debe estar en ${latest}.</div>
 </body></html>`;
 }
@@ -575,6 +593,12 @@ export default {
       if (url.pathname === "/log") {
         const dbg = env.SYNC_ROOM.getByName("__debug_log__");
         if (request.method === "POST") {
+          // POST stays OPEN — devices hold no secret and post sync/crash breadcrumbs. It is
+          // A2-rate-limited per IP; add a hard payload cap (P6-LOG) so a giant body can't churn
+          // DO storage. 64 KB is generous: a 200-entry batch of small breadcrumbs is far under it.
+          if (Number(request.headers.get("content-length") || 0) > 64 * 1024) {
+            return json({ ok: false, error: "payload_too_large" }, 413, cors);
+          }
           let body: unknown = null;
           try {
             body = await request.json();
@@ -591,6 +615,20 @@ export default {
           const result = await dbg.appendLog(entries, request.headers.get("CF-Connecting-IP") || "");
           if (result.rateLimited) return json({ ok: false, error: "rate_limited" }, 429, cors);
           return json(result, 200, cors);
+        }
+        // P6-LOG: GET (read the whole diagnostic buffer) and DELETE (wipe it) were UNGATED — the
+        // buffer holds sync breadcrumbs (opaque device ids, roles, page numbers) and must not be
+        // world-readable or world-wipeable. Gate both behind the SAME credential as the fleet
+        // dashboard (director bearer token OR the FLEET_DASHBOARD_KEY via ?k= / X-Fleet-Key). POST
+        // above stays open. Nothing reads GET /log programmatically (it's a manual debug curl), so
+        // gating breaks no client — Miguel just appends ?k=SECRET.
+        const auth = request.headers.get("Authorization") || "";
+        const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const k = url.searchParams.get("k") || request.headers.get("X-Fleet-Key") || "";
+        const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && bearer === env.RELAY_DIRECTOR_TOKEN;
+        const keyOk = Boolean(env.FLEET_DASHBOARD_KEY) && k === env.FLEET_DASHBOARD_KEY;
+        if (!tokenOk && !keyOk) {
+          return json({ ok: false, error: "unauthorized" }, 401, cors);
         }
         if (request.method === "DELETE") {
           await dbg.clearLog();
@@ -671,7 +709,18 @@ export default {
         }
         if (isDash) {
           const data = await fleet.getFleet();
-          return new Response(renderFleetDashboard(data, k), {
+          // Recent crashes (M2 Slice D): read the gated debug buffer and surface kind:"crash"
+          // entries on the dashboard. Best-effort — a debug-log hiccup must not break the roster.
+          let crashes: Array<Record<string, unknown>> = [];
+          try {
+            const log = await env.SYNC_ROOM.getByName("__debug_log__").readLog();
+            crashes = (Array.isArray(log) ? log : [])
+              .filter((e) => Boolean(e) && typeof e === "object" && (e as { kind?: unknown }).kind === "crash")
+              .map((e) => e as Record<string, unknown>);
+          } catch {
+            crashes = [];
+          }
+          return new Response(renderFleetDashboard(data, k, crashes), {
             status: 200,
             headers: { "Content-Type": "text/html; charset=utf-8", ...cors },
           });
