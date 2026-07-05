@@ -602,6 +602,12 @@ const isOfflineBundleReady = async (totalPages) => {
 // ── History helpers ───────────────────────────────────────────────────────────
 const clearInitialUrl = () => {
   if (!initialUrl.search) return;
+  // Keep the Release-Safety params visible: ?env=staging pins the device to the
+  // isolated staging relay room and ?selftest shows the readiness card. Stripping
+  // them would make a RELOAD silently fall back to the LIVE Mass room mid-canary-walk
+  // — the exact silent-mode-switch the operator must never hit. Normal visitors never
+  // carry these params, so their URL is cleaned exactly as before.
+  if (/(?:^|[?&])(env=staging|selftest)(?:=|&|$)/.test(initialUrl.search)) return;
   window.history.replaceState({}, "", initialUrl.pathname || "/");
 };
 
@@ -3350,3 +3356,43 @@ initReader().catch((error) => {
 // somehow bypasses that reveal — force the (legacy) loading gate down so the user is never stranded
 // behind a blank screen. Idempotent.
 setTimeout(liftGateNow, 4000);
+
+// ?selftest — the operator's GREEN/RED readiness card (Release Safety System, M1).
+// Read-only (loads one image + GETs the relay /state on the CURRENT room) and gated
+// strictly on the query param: without ?selftest this block is a no-op, and every
+// layer swallows its own errors so a broken selftest can never break the reader it
+// is testing. Runs after boot settles so it reads the real hydrated state.
+// NOTE: gate on initialUrl.search (captured at line ~149), NOT live location.search —
+// clearInitialUrl() strips the query via history.replaceState before this runs.
+try {
+  const selftestSearch = (typeof initialUrl !== "undefined" && initialUrl && initialUrl.search) || window.location.search || "";
+  if (/(?:^|[?&])selftest(?:=|&|$)/.test(selftestSearch)) {
+    setTimeout(() => {
+      try {
+        const st = globalThis.svSelftest;
+        if (!st || typeof st.computeChecks !== "function") return;
+        st.computeChecks({
+          loadImage: (url) => new Promise((resolve) => {
+            try {
+              const im = new Image();
+              im.onload = () => resolve(true);
+              im.onerror = () => resolve(false);
+              im.src = url;
+            } catch (_) { resolve(false); }
+          }),
+          fetchImpl: (url) => fetch(url, { cache: "no-store" }),
+          pageUrl: resolvePageSrc(1),
+          totalPages: state.totalPages,
+          relayBase: RELAY_BASE,
+          relayRoom: RELAY_ROOM,
+          buildNumber: BUILD_NUMBER,
+          cacheVersion: CACHE_VERSION,
+          isNativeFileMode: NATIVE_FILE_MODE,
+          bridgeAvailable: state.nativeBridgeAvailable,
+        }).then((result) => {
+          try { st.renderCard(result, document); } catch (_) {}
+        });
+      } catch (_) { /* selftest must never break the reader */ }
+    }, 1800);
+  }
+} catch (_) { /* selftest must never break the reader */ }
