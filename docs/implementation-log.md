@@ -60,16 +60,25 @@ Never run the bare `node --test e2e/*.test.mjs` glob or `e2e/relay-sync.test.mjs
 2. **Director restart (NEW-DIR-1)** → **boot resume-prompt** ("¿Continuar como director?"). Lands in M7.
 3. **Staging isolation** → **same worker + `alvernia-staging` room** (separate DO, zero worker change).
 
-### M1 — Staging channel — IN PROGRESS (2026-07-04, branch `dev-m1-staging-channel`)
-- ✅ **Relay-room resolver** (`?env=staging` → `alvernia-staging`, else `alvernia-main`). New
-  `web/src/lib/svRelayRoom.js` (UMD, unit-tested), loaded as `<script defer>` before app.js;
-  `build.mjs` copies `web/src/lib/*` → `dist/lib/`; `app.js:2765` uses it triple-guarded (lib-presence
-  + whitelist + try/catch) so it can NEVER white-screen — defaults to `alvernia-main`. Native
-  transmitter (`directorRelaySync.js`) intentionally unchanged (native staging = M7).
-  **Verified:** unit 4/4, safe subset 65/65, typecheck clean, smoke extended+green, and the real built
-  bundle **boots + renders page 2 in a browser** with default room `alvernia-main`, zero console errors.
-- ⬜ Remaining M1: `STAGING=1` release.sh path (deploy `--branch staging`), `?selftest` GREEN/RED card,
-  `scripts/rollback-web.sh`, `docs/pre-mass-checklist.md`.
+### M1 — Staging channel — ✅ MOSTLY DONE (2026-07-04)
+- ✅ **Relay-room resolver** (`?env=staging` → `alvernia-staging`, else `alvernia-main`) — PR #234 →
+  `3d230c44`. `web/src/lib/svRelayRoom.js` (UMD, unit-tested), `<script defer>` before app.js; `build.mjs`
+  copies `web/src/lib/*` → `dist/lib/`; `app.js:2765` triple-guarded (lib-presence + whitelist +
+  try/catch) → can NEVER white-screen, defaults to `alvernia-main`. Native `directorRelaySync.js`
+  intentionally unchanged (native staging = M7). Verified: unit 4/4, safe subset 65/65, typecheck,
+  smoke, **browser boot renders page 2**, zero console errors.
+- ✅ **`STAGING=1` release path + rollback helper + checklist** — PR #235 → `c900cc4a`.
+  `STAGING=1 bash scripts/release.sh` = canary deploy to the isolated preview branch (no bump, no
+  native, never prod); guarded so the default prod flow is byte-for-byte unchanged (`bash -n` + branch
+  logic verified). `scripts/rollback-web.sh` = read-only break-glass undo. `docs/pre-mass-checklist.md`
+  = the operator ritual. Dev/doc only, zero runtime surface.
+- ⬜ **Remaining M1: the `?selftest` GREEN/RED readiness card** (touches the boot path → do it with the
+  same browser-boot verification the resolver got; guard it so the normal `?`-less boot is 100%
+  untouched). Then M1 is complete.
+
+**Net: the staging + rollback safety loop is live** — deploy to an isolated channel (`STAGING=1`), prove
+on the canary (`?env=staging`), promote only if green, undo in one step (`rollback-web.sh`). This is the
+wall that was missing on Wednesday.
 
 ### M0 — Release Safety skeleton — ✅ DONE + MERGED (2026-07-04, PR #233 → main `da523294`)
 The one part of the plan with **zero product forks and zero runtime risk** — dev/CI-only, cannot affect
