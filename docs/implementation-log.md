@@ -53,6 +53,39 @@ Never run the bare `node --test e2e/*.test.mjs` glob or `e2e/relay-sync.test.mjs
 
 ## Log (newest first)
 
+### NEXT BATCH — native director-role fixes (specced, ready to execute; DEVICE-GATED)
+All in `PdfReaderApp.tsx`. Interlocked (shared role state machine) + device-gated (only *provable* on a
+2-device practice day + a TestFlight build). Implement carefully as ONE batch, typecheck-verify, ship on
+a device day. **BLOCKED on one Miguel decision (NEW-DIR-1 mechanics) — see below.**
+
+- **A3 (crit)** `~:566` bridge-ready: a director's WebView content-process reload makes the web boot to
+  page 2 and native re-broadcasts it → whole congregation yanked to page 2. Fix: when `roleRef==='director'`
+  (or `explicitTransmitterRef`), do NOT adopt `msg.page` from bridge-ready/first post-reload page-changed;
+  re-assert native's own `currentPageRef` (inject a page sync-event + broadcast THAT). Guard the first
+  post-reload page-changed with a `webReloadPendingRef`.
+- **NEW-DIR-2 (high)** `:503` `onDirectorCode` bumps `roleGenerationRef` on EVERY code entry, before the
+  confirm. If a boot `becomeFollower()` is mid-retry-sleep (`becomeDirector` retry at `:434`; becomeFollower
+  has the symmetric pattern) and the user enters a code then Cancels, the in-flight becomeFollower sees its
+  gen superseded and returns WITHOUT establishing the mesh link → stranded link-less follower. Fix: REMOVE
+  the `:503` bump; `becomeDirector` (bumps at `:400`), `performSoftReset` (`:479`), and becomeFollower each
+  already bump on commit, so a Cancel no longer supersedes an in-flight follower. (Verify becomeFollower's
+  bump before removing.)
+- **NEW-DIR-3 (med, SAFEST)** `:527-528` `liveDirector = Boolean(lastDirectorSnapshotRef.current) && ...` —
+  the ref is set-once (mesh 'page' at `~:763`) and NEVER cleared, so the destructive red "⚠️ Ya hay un
+  director activo / Tomar el control" warning false-fires forever after any director ever broadcast (e.g.
+  Braulio directs then exits; 20 min later the real director enters their code and sees a scary phantom-
+  takeover warning). Fix: store a timestamp with the snapshot and gate `liveDirector` on recency (~mesh
+  heartbeat window), and/or clear it on DIRECTOR_CONFLICT / exit-director. Lowest-risk (only the confirm
+  dialog's label/style, not the role transition).
+- **NEW-DIR-1 (high) — ⛔ NEEDS MIGUEL'S DECISION** `:757` boot unconditionally `becomeFollower()` → a
+  director whose app restarts silently drops to follower with no signal (re-opens the July-1 outage class).
+  Miguel chose a **boot resume-prompt**. CONSTRAINT: the director code is DELIBERATELY not stored
+  (`:440-442` "a credential must never sit in storage"), so the prompt CANNOT auto-re-become director. The
+  fork: (a) boot prompt "Estabas dirigiendo — reingresa tu código para continuar" that reopens the code
+  numpad (re-enter code; safest, keeps the no-stored-credential rule); (b) persist the code (encrypted,
+  expo-secure-store) so the prompt can one-tap resume (more convenient, but stores a credential — violates
+  the current principle); (c) a persistent visible banner only. **Ask Miguel before implementing.**
+
 ### P0 criticals — repo-side ones knocked out (2026-07-04, branch `dev-a4-a5-repo-p0s`)
 - ✅ **A4 + B-RESTORE** (`scripts/release.sh`): crash-safe `trap cleanup_release EXIT INT TERM` around
   the director-codes PII swap — a Ctrl-C/crash/error mid-archive can no longer leave real phone numbers
