@@ -119,6 +119,22 @@ test("P6-LOG: DELETE /log is 401 WITHOUT the key, 200 WITH it", async () => {
   assert.equal(b.cleared, true);
 });
 
+test("Slice D: a posted crash appears on the gated fleet dashboard", async () => {
+  if (!FLEET_KEY) return;
+  const marker = "boom-" + Math.floor(Date.now() / 1000);
+  const post = await fetch(`${BASE}/log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([{ kind: "crash", dev: "testdev", build: "999", where: "unit", msg: marker, t: Date.now() }]),
+  });
+  assert.equal(post.status, 200);
+  const dash = await fetch(`${BASE}/fleet-dashboard?k=${encodeURIComponent(FLEET_KEY)}`);
+  assert.equal(dash.status, 200, "dashboard must render for an authorized key");
+  const html = await dash.text();
+  assert.match(html, /Fallos recientes/, "dashboard shows the recent-crashes panel");
+  assert.ok(html.includes(marker), "the posted crash message appears on the dashboard");
+});
+
 test("A2 rate limit: a publish flood is throttled (429s after the burst; some allowed)", async () => {
   const room = "a2-flood";
   const statuses = await Promise.all(
