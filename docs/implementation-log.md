@@ -53,7 +53,40 @@ Never run the bare `node --test e2e/*.test.mjs` glob or `e2e/relay-sync.test.mjs
 
 ## Log (newest first)
 
-### NEXT BATCH — native director-role fixes (specced, ready to execute; DEVICE-GATED)
+### ⛳ SESSION WRAP (2026-07-04→05) — where a fresh tab picks up
+
+**Shipped to `main` this session (11 PRs, all CI-gated; runtime changes browser-verified). NOTHING is
+deployed yet — all in git, ready for the release ritual. signovivo.com / the worker / the iPads still
+run their pre-session code.**
+- Global rules (commit-often + never-assume) → `~/.claude/CLAUDE.md` §7/§9.
+- **M0** CI + boot-smoke (#233) · **M1** staging channel complete (#234/#235/#237) · **M2-A** web
+  crash-proofing (#238) · **A4** release PII trap (#239) · **A5/A1-repo** (#239) · **P8** README (#240)
+  · **P7** wake-lock (#241) · **native A3+NEW-DIR-1/2/3** device-gated (#243).
+
+**▶ NEXT (in priority order):**
+1. **A2 — worker rate-limit + seq=0 gate (last critical).** `sync-worker/src/index.ts`: publish auth at
+   `:656`; the `seq=0` bypass at `:107-120` (invalid/zero seq → `incomingSeq=0` → skips the monotonic
+   guard at `:120` `incomingSeq > 0` → always accepted as `snapshot.seq+1`). Fixes: (a) per-IP + per-room
+   token-bucket (a few writes/sec) on `/publish`, `/fleet/checkin`, `/log` → 429; (b) reject `seq=0`
+   publishes when a FRESH live director exists (only allow seq=0-as-reset when the snapshot is already
+   stale). **Build + test against a local `wrangler dev` harness (the P1-HARNESS — point the neutralized
+   `relay-sync.test.mjs` at `RELAY_TEST_BASE=http://127.0.0.1:8787`); merge to git deploy-ready.**
+   **DEPLOY reaches every follower → Miguel's timing (green weekday).**
+2. **P2 sync robustness** (web; also wants the harness): P2-SEQ (freshness-before-seq so a dead director
+   is demoted + the green-pill freeze ends), P2-CLOCKSKEW, P2-POLL-GAP. Extract the seq/freshness decision
+   into a unit-tested lib (like svRelayRoom/svSelftest), then apply + browser-verify.
+3. **M2 Slice C/D** (defensive guards mop-up; crash telemetry → needs P6-LOG X-Fleet-Key gate + worker deploy).
+
+**⚠ NEEDS MIGUEL (I won't assume the timing/hardware):**
+- **Deploy the shipped web fixes** to signovivo.com + cut a **TestFlight build** — via `docs/pre-mass-checklist.md`,
+  on a Wed/Sat practice day (canary the oldest iPad first).
+- **2-device day** to verify the native batch (#243) before it ships — repros in the PR body.
+- **A2 worker deploy** (`wrangler deploy`) + **A1 secret rotation** (`wrangler secret put TRANSMITTER_CODES`
+  to drop `12345678840`, once no device depends on it).
+
+---
+
+### NEXT BATCH — native director-role fixes ✅ DONE (2026-07-05, PR #243 → `77de2a7c`) — DEVICE-GATED, unshipped
 All in `PdfReaderApp.tsx`. Interlocked (shared role state machine) + device-gated (only *provable* on a
 2-device practice day + a TestFlight build). Implement carefully as ONE batch, typecheck-verify, ship on
 a device day. **BLOCKED on one Miguel decision (NEW-DIR-1 mechanics) — see below.**
