@@ -1,3 +1,47 @@
+// ── Boot guard: global fail-soft net (crash-proofing, M2) ─────────────────────
+// The FIRST executable code, so it is armed before anything below can throw. A throw
+// during module evaluation — e.g. a storage-disabled / private-mode browser hitting an
+// unguarded localStorage read — would otherwise abort the whole script, so the reader
+// never boots and every device shows a permanent WHITE SCREEN at once (the exact
+// "busted for everyone" failure). This converts that into a visible "Reintentar" card.
+// Self-contained (depends on nothing below), never throws itself, and only takes over
+// the screen when the reader never confirmed a boot (window.__svBooted) — so a benign
+// error AFTER the app is up is recorded, never a spurious hijack of a working reader.
+// Uses non-capturing window "error" so it catches uncaught SCRIPT errors, not benign
+// image/resource 404s (the reader handles those itself).
+(function bootGuard() {
+  function showRecovery(where, err) {
+    try {
+      try { window.__SV_LAST_ERROR = { where: where, msg: String((err && err.message) || err || ""), t: Date.now() }; } catch (_) {}
+      if (window.__svBooted === true) return;            // app is up — record only, never take over
+      if (window.__svRecoveryShown === true) return;     // idempotent
+      window.__svRecoveryShown = true;
+      try {
+        var g = document.getElementById("geo-gate"); if (g) g.classList.add("is-hidden");
+        var o = document.getElementById("offline-gate"); if (o) o.classList.add("is-hidden");
+      } catch (_) {}
+      var host = document.body || document.documentElement;
+      if (!host) return;
+      var wrap = document.createElement("div");
+      wrap.id = "sv-crash-banner";
+      wrap.setAttribute("role", "alert");
+      wrap.style.cssText = "position:fixed;inset:0;z-index:2147483600;display:flex;align-items:center;justify-content:center;background:#0d0d1a;color:#fff;font:16px/1.5 -apple-system,system-ui,sans-serif;padding:24px;text-align:center;";
+      var box = document.createElement("div"); box.style.cssText = "max-width:340px;";
+      var h = document.createElement("div"); h.textContent = "Signo Vivo se está recuperando"; h.style.cssText = "font-size:20px;font-weight:700;margin-bottom:8px;";
+      var p = document.createElement("div"); p.textContent = "Algo no cargó bien. Toca para reintentar."; p.style.cssText = "color:#c8c8dc;margin-bottom:18px;";
+      var btn = document.createElement("button"); btn.type = "button"; btn.textContent = "Reintentar";
+      btn.style.cssText = "padding:13px 28px;border:0;border-radius:12px;background:#3b6df6;color:#fff;font:600 17px -apple-system,system-ui,sans-serif;";
+      btn.onclick = function () { try { window.location.reload(); } catch (_) {} };
+      box.appendChild(h); box.appendChild(p); box.appendChild(btn); wrap.appendChild(box); host.appendChild(wrap);
+    } catch (_) { /* recovery must never throw */ }
+  }
+  try {
+    window.__svRecover = showRecovery;
+    window.addEventListener("error", function (e) { showRecovery("error", e && (e.error || e.message)); });
+    window.addEventListener("unhandledrejection", function (e) { showRecovery("unhandledrejection", e && e.reason); });
+  } catch (_) { /* arming the net must never break boot */ }
+})();
+
 // ── DOM references ────────────────────────────────────────────────────────────
 const viewerShell = document.getElementById("viewer-shell");
 const pageImage = document.getElementById("page-image");
@@ -12,6 +56,9 @@ const liftGateNow = () => {
   if (gateLifted) return;
   gateLifted = true;
   geoGate?.classList.add("is-hidden");
+  // Signal a successful boot: content (or a handled boot-error message) is now shown,
+  // so the bootGuard should no longer treat later errors as a white-screen state.
+  try { window.__svBooted = true; } catch (_) {}
 };
 const revealReader = () => liftGateNow();
 // Recover a transient first-load image failure (cold cache / flaky network) by retrying the src
@@ -328,7 +375,11 @@ const writeOfflineMetadata = async (payload) => {
 
 // ── Haptic feedback ───────────────────────────────────────────────────────────
 const HAPTIC_PREF_KEY = "sv-haptic";
-let hapticEnabled = localStorage.getItem(HAPTIC_PREF_KEY) !== "off";
+// Guarded: localStorage.getItem THROWS in a storage-disabled / private-mode browser,
+// and this runs at module-eval — an unguarded throw here aborts the whole script and
+// white-screens every device (the Wednesday failure). Default to enabled on failure.
+let hapticEnabled = true;
+try { hapticEnabled = localStorage.getItem(HAPTIC_PREF_KEY) !== "off"; } catch (_) {}
 const haptic = (ms = 10) => {
   if (!hapticEnabled) return;
   try { navigator.vibrate?.(ms); } catch {}
@@ -336,10 +387,14 @@ const haptic = (ms = 10) => {
 
 // ── Tip dismissal ─────────────────────────────────────────────────────────────
 const TIP_KEY = "sv-tip";
-if (localStorage.getItem(TIP_KEY) === "dismissed") {
-  numpadTipWrap.classList.add("is-hidden");
-  tipDismissButton.classList.add("is-hidden");
-}
+// Guarded for the same reason as HAPTIC above — an unguarded module-eval localStorage
+// read white-screens every device in a storage-disabled browser.
+try {
+  if (localStorage.getItem(TIP_KEY) === "dismissed") {
+    numpadTipWrap.classList.add("is-hidden");
+    tipDismissButton.classList.add("is-hidden");
+  }
+} catch (_) {}
 
 // ── Recientes (recently viewed songs) ────────────────────────────────────────
 const RECIENTES_KEY = "sv-recientes";
