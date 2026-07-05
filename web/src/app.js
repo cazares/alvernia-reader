@@ -12,7 +12,11 @@
 (function bootGuard() {
   function showRecovery(where, err) {
     try {
-      try { window.__SV_LAST_ERROR = { where: where, msg: String((err && err.message) || err || ""), t: Date.now() }; } catch (_) {}
+      try { window.__SV_LAST_ERROR = { where: where, msg: String((err && err.message) || err || ""), stack: String((err && err.stack) || ""), t: Date.now() }; } catch (_) {}
+      // Best-effort crash telemetry (M2 Slice D). The reporter is registered by app.js once it
+      // loads; if a crash beats it, app.js flushes __SV_LAST_ERROR on register. Guarded — a
+      // reporting failure must never interfere with recovery.
+      try { if (typeof window.__svReportCrash === "function") window.__svReportCrash(where, String((err && err.message) || err || ""), (err && err.stack) || ""); } catch (_) {}
       if (window.__svBooted === true) return;            // app is up — record only, never take over
       if (window.__svRecoveryShown === true) return;     // idempotent
       window.__svRecoveryShown = true;
@@ -2888,6 +2892,57 @@ const fleetDeviceId = () => {
     return "anon-" + Math.random().toString(36).slice(2);
   }
 };
+
+// ── Crash telemetry → /log (M2 Slice D) ──────────────────────────────────────
+// So a crash is a GLANCE on the dashboard, not a guess. The boot guard (top of file)
+// already catches window "error"/"unhandledrejection" and records __SV_LAST_ERROR; it
+// calls this reporter (via window.__svReportCrash) when present. Best-effort POST to the
+// OPEN /log endpoint (A2-rate-limited + 64 KB-capped; reads are gated by P6-LOG). NEVER
+// throws, debounced by signature, and session-capped so a crash LOOP can't hammer /log.
+// PII hygiene: only an opaque device id, build, error text, and location.pathname (no
+// query — a ?k= dashboard secret must never ride along).
+const CRASH_REPORT_MAX = 20;      // hard session cap (crash-loop backstop)
+const CRASH_DEDUP_MS = 30000;     // same signature within 30s → skip
+let crashReportCount = 0;
+const crashReportedAt = new Map();
+const reportCrash = (where, msg, stack) => {
+  try {
+    if (crashReportCount >= CRASH_REPORT_MAX) return;
+    const sig = String(where || "").slice(0, 60) + "|" + String(msg || "").slice(0, 80);
+    const now = Date.now();
+    if (now - (crashReportedAt.get(sig) || 0) < CRASH_DEDUP_MS) return;
+    crashReportedAt.set(sig, now);
+    crashReportCount += 1;
+    const build = (BUILD_NUMBER && BUILD_NUMBER[0] !== "_")
+      ? BUILD_NUMBER
+      : (window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION || (CACHE_VERSION && CACHE_VERSION[0] !== "_" ? CACHE_VERSION : ""));
+    const payload = {
+      kind: "crash",
+      dev: fleetDeviceId(),
+      surface: NATIVE_FILE_MODE || hasNativeBridge() ? "native-web" : "web",
+      build: String(build || ""),
+      where: String(where || "").slice(0, 60),
+      msg: String(msg || "").slice(0, 300),
+      stack: String(stack || "").slice(0, 600),
+      // pathname ONLY — deliberately drops query/hash so a ?k= secret can't leak into /log.
+      url: (typeof location === "object" && location && location.pathname) || "",
+      t: now,
+    };
+    fetch(RELAY_BASE + "/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([payload]),
+      keepalive: true,   // still sends if the crash is about to unload the page
+    }).catch(() => { /* best-effort telemetry — never affects the reader */ });
+  } catch (_) { /* reporting a crash must never itself crash */ }
+};
+// Register so the boot guard's error handlers can call us. Then flush any error the guard
+// already recorded BEFORE we registered (a boot-time crash) exactly once.
+try {
+  window.__svReportCrash = reportCrash;
+  const boot = window.__SV_LAST_ERROR;
+  if (boot && typeof boot === "object") reportCrash(boot.where || "boot", boot.msg || "", boot.stack || "");
+} catch (_) {}
 
 // Rough count of cached page images across all page caches (immutable, so max across versions).
 const countCachedPageImages = async () => {
