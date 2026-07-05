@@ -59,30 +59,42 @@ if [ "${SKIP_NATIVE:-0}" = "1" ]; then
   echo "==> 4/6  SKIP_NATIVE=1 -> skipping the native archive"
 else
   echo "==> 4/6  Build native IPA (Release archive + export) — logging to $LOG"
+  # Crash-safe cleanup (audit A4 + B-RESTORE). The archive swaps gitignored PII (real
+  # director phone numbers) into the TRACKED director-codes.json and overwrites the
+  # TRACKED ios/Podfile.lock. cleanup_release restores BOTH; it is idempotent (keyed on
+  # the backup's existence) and ALWAYS returns 0, so it can never abort the script under
+  # `set -e`. It is armed via `trap ... EXIT INT TERM` BEFORE any mutation, so a Ctrl-C,
+  # crash, or error at ANY point — including the ~10-minute archive — can never leave real
+  # phone numbers in the committable file (the previous version had no trap: a mid-archive
+  # Ctrl-C left PII staged for the next `git add`).
+  cleanup_release() {
+    if [ -f director-codes.committed.bak ]; then
+      mv -f director-codes.committed.bak director-codes.json
+    fi
+    git checkout -- ios/Podfile.lock 2>/dev/null || true
+    return 0
+  }
+  trap cleanup_release EXIT INT TERM
+
   cp ios/Pods/Manifest.lock ios/Podfile.lock         # pod-guard workaround (Ruby 4.0.1 pod install is broken)
-  # Bake the REAL standard-director codes (gitignored PII) into the RN bundle for this archive only,
-  # then restore the empty committed file — keeps the numbers out of the public repo.
-  RESTORE_CODES=""
+  # Bake the REAL standard-director codes (gitignored PII) into the RN bundle for this archive only.
   if [ -f director-codes.private.json ]; then
     cp director-codes.json director-codes.committed.bak
     cp director-codes.private.json director-codes.json
-    RESTORE_CODES="1"
     echo "         baked director-codes.private.json into the bundle"
   else
     echo "         WARNING: director-codes.private.json missing — standard-director entry disabled in this build"
   fi
-  restore_codes() { [ -n "$RESTORE_CODES" ] && mv -f director-codes.committed.bak director-codes.json; }
   rm -rf build
   if ! xcodebuild -workspace ios/SignoVivo.xcworkspace -scheme SignoVivo -configuration Release \
         -archivePath build/SignoVivo.xcarchive -sdk iphoneos -allowProvisioningUpdates clean archive >"$LOG" 2>&1; then
-    git checkout -- ios/Podfile.lock; restore_codes; echo "ARCHIVE FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1
+    echo "ARCHIVE FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1   # trap restores codes + Podfile.lock
   fi
   if ! xcodebuild -exportArchive -archivePath build/SignoVivo.xcarchive -exportPath build/export \
         -exportOptionsPlist ios/exportOptions.app-store.plist -allowProvisioningUpdates >>"$LOG" 2>&1; then
-    git checkout -- ios/Podfile.lock; restore_codes; echo "EXPORT FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1
+    echo "EXPORT FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1     # trap restores codes + Podfile.lock
   fi
-  git checkout -- ios/Podfile.lock
-  restore_codes
+  cleanup_release   # restore ASAP to minimize the PII window; the EXIT trap is the crash-safety net
   cp build/export/SignoVivo.ipa "$HOME/Desktop/SignoVivo-$BUILD.ipa"
   echo "         IPA -> ~/Desktop/SignoVivo-$BUILD.ipa"
 fi
