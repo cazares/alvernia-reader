@@ -1,10 +1,18 @@
 /**
- * Relay sync tests — live against the deployed Cloudflare Worker.
- * Covers: health, state, auth, publish, seq guard, dual-director clash,
- * WebSocket subscription, heartbeat/ping, and staleness detection.
+ * Relay sync tests — run against a NON-PRODUCTION relay (a local `wrangler dev`
+ * harness or a throwaway staging room). Covers: health, state, auth, publish, seq
+ * guard, dual-director clash, WebSocket subscription, heartbeat/ping, staleness.
  *
- * Run: node --test e2e/relay-sync.test.mjs
- * Requires internet access to signovivo-sync.4j4982y8jp.workers.dev
+ * ⚠️ DISABLED BY DEFAULT. This suite PUBLISHES (mutates room state), so it must never
+ * touch production — it throws at load unless you point it at a non-prod room:
+ *
+ *   RELAY_TEST_BASE=http://127.0.0.1:8787 \
+ *   RELAY_TEST_ROOM=test-room \
+ *   RELAY_TEST_CODE=<code-valid-on-your-test-relay> \
+ *   node --test e2e/relay-sync.test.mjs
+ *
+ * It also hard-refuses RELAY_TEST_ROOM='alvernia-main' (the live Mass room). NEVER run
+ * this against the production worker — it would flip live followers' pages.
  */
 
 import test from "node:test";
@@ -13,12 +21,31 @@ import assert from "node:assert/strict";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const BASE = "https://signovivo-sync.4j4982y8jp.workers.dev";
-const ROOM = "alvernia-main";
+// SAFETY (audit A5 + A1): this suite PUBLISHES to a relay room — it mutates room state
+// and would flip live followers' pages mid-Mass. It must NEVER run against production.
+// It is DISABLED by default and only runs when explicitly pointed at a NON-prod room via
+// env vars (a local `wrangler dev` harness or a throwaway staging room); it also
+// hard-refuses the live Mass room. No director code is committed here anymore — set
+// RELAY_TEST_CODE to a code valid on your test relay.
+const BASE = process.env.RELAY_TEST_BASE || "";
+const ROOM = process.env.RELAY_TEST_ROOM || "";
+const CODE = process.env.RELAY_TEST_CODE || "";
+if (ROOM === "alvernia-main") {
+  throw new Error(
+    "relay-sync.test.mjs refuses to run against the live Mass room 'alvernia-main'. " +
+    "Point RELAY_TEST_ROOM at a throwaway/local test room.",
+  );
+}
+if (!BASE || !ROOM || !CODE) {
+  throw new Error(
+    "relay-sync.test.mjs is DISABLED by default because it publishes to a relay room. " +
+    "To run it against a local/staging harness, set RELAY_TEST_BASE, RELAY_TEST_ROOM " +
+    "(not 'alvernia-main'), and RELAY_TEST_CODE.",
+  );
+}
 const PUB = `${BASE}/r/${ROOM}/publish`;
 const STATE = `${BASE}/r/${ROOM}/state`;
-const SUB = `${BASE}/r/${ROOM}/subscribe`.replace("https://", "wss://");
-const CODE = "12345678840";
+const SUB = `${BASE}/r/${ROOM}/subscribe`.replace(/^http/, "ws");
 const BAD_CODE = "0000000000";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
