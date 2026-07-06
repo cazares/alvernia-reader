@@ -347,7 +347,12 @@ export default function App() {
   }, [injectEvent]);
 
   // ── Page broadcast: mesh (director) + relay (director or explicit transmitter) ──
-  const broadcastPage = useCallback((page: number, book: BookId) => {
+  const broadcastPage = useCallback((rawPage: number, book: BookId) => {
+    // H4: never broadcast a non-positive page. The follower render-failed sentinel sets
+    // currentPageRef to -1; if this device then becomes director before a real page lands, a raw
+    // broadcast of -1 would clamp to page 1 on every follower — yanking the whole congregation.
+    // Floor to a real page at the single choke point that feeds BOTH transports.
+    const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
     const mode = modeForBook(book);
     const total = totalPagesRef.current;
     if (roleRef.current === "director") {
@@ -418,6 +423,11 @@ export default function App() {
     roleRef.current = "follower";
     explicitTransmitterRef.current = false;
     stopDirectorHeartbeat(); // a follower must never re-broadcast
+    // C3: clear the relay publish code on step-down. directorRelaySync coalesces publishes and an
+    // in-flight one can drain a final straggler frame AFTER we've stepped down; with no code it 401s
+    // (rejected, never applied) instead of shoving the ex-director's stale page onto web followers.
+    // becomeDirector re-sets the code, so a legit re-direct is unaffected.
+    setRelayPublishCode("");
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower");
       if (myGen !== roleGenerationRef.current) return; // superseded while persisting
@@ -670,6 +680,10 @@ export default function App() {
             // renders atomically. A separate set-book first made the web jump to the book DEFAULT
             // page, then the page event raced it — followers could flash the default or wedge.
             injectEvent({ type: "sync-event", event: { type: "page", page, book } });
+            // H1: the cached snapshot can be stale if the director moved during the reload window.
+            // Actively pull the director's CURRENT page (like the foreground path does) instead of
+            // waiting for the next 1s heartbeat. Best-effort.
+            if (syncAvailable) requestCurrentSnapshot().catch(() => {});
           }
           break;
         }
@@ -912,6 +926,12 @@ export default function App() {
           if (String(event.code ?? "") === "DIRECTOR_CONFLICT") {
             stopDirectorHeartbeat(); // a newer director won; stop re-broadcasting
             becomeFollower(); // step down
+            // C2: a demoted director never recorded a director snapshot (it WAS the director), so
+            // its follower-resync fallbacks would no-op and it would keep showing its OWN stale page
+            // until the winner next turns. Actively pull the winner's current page + re-scan so it
+            // re-homes immediately. Best-effort.
+            requestCurrentSnapshot().catch(() => {});
+            refreshNearbyDiscovery().catch(() => {});
           }
           break;
         }
