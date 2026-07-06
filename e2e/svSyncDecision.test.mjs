@@ -81,6 +81,28 @@ test("P2-SEQ: a dead director's duplicate-seq heartbeat DEMOTES (does not freeze
   assert.equal(d.hasDirector, false);
 });
 
+test("F4: demote resets lastSeq to -1 (so a restarted low-seq director can be followed)", () => {
+  const d = decideRelaySnapshot(
+    { page: 42, seq: 5000, ts: NOW_S - 120 }, // stale → demote
+    ctx({ hasDirector: true, lastSeq: 5000, currentPage: 42 }),
+  );
+  assert.equal(d.action, "demote");
+  assert.equal(d.lastSeq, -1, "demote must reset the seq de-dup floor");
+});
+
+test("F4: after a demote (lastSeq=-1), a director that RESTARTED at a low seq is FOLLOWED", () => {
+  // Director session A reached seq 5000; A is killed; the follower demoted (lastSeq now -1).
+  // Session B relaunches and publishes fresh at seq 1. Without the F4 reset, 1 <= 5000 would
+  // classify B as a stale duplicate ("live-dup") forever. With the reset, B is followed.
+  const d = decideRelaySnapshot(
+    { page: 7, seq: 1, ts: NOW_S - 1 },
+    ctx({ hasDirector: false, lastSeq: -1, currentPage: 42 }),
+  );
+  assert.equal(d.action, "follow", "a restarted low-seq director must be followable after demote");
+  assert.equal(d.renderPage, 7);
+  assert.equal(d.lastSeq, 1);
+});
+
 test("P2-SEQ: a FRESH duplicate-seq heartbeat keeps the director live (no re-render)", () => {
   // Same seq, but ts is fresh → the director is alive and sitting still. Must stay
   // live (pill green) but NOT re-render the page.
