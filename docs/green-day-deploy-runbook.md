@@ -7,8 +7,10 @@
 >   377 descends from #255, so the P2/SliceC/SliceD web fixes are live — verified `svSyncDecision.js`/
 >   `reportCrash` served). **Do NOT re-run** the pages deploy.
 > - **Step 4 (native/TestFlight) — build 377 already Delivered** with the fixes baked in. **Do NOT cut a new
->   build** — just update the iPads to 377 and run the 2-device day (#243 repros) at Wednesday practice.
-> - **Step 5 (A1 rotation) — still pending.**
+>   build** — just update the iPads to 377 and run the 2-device day (#243 repros + Slice B crash floor) at
+>   Wednesday practice.
+> - **Step 5 (A1 rotation) — DONE 2026-07-05** (Miguel confirmed all directors on 375+). Legacy `12345678840`
+>   dropped from prod `TRANSMITTER_CODES`; real code → 200, legacy → 401 verified. Reversible.
 >
 > The steps below are retained as the record + for future deploys.
 

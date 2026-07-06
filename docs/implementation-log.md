@@ -117,11 +117,20 @@ Two PRs, in the plan's fixed order:
 - **Native half of P6-LOG** (stop sending device names, `DirectorSyncModule.swift:177`) is device-gated →
   batches to the 2-device day; note: the web `dev` id is already an opaque 6-char id, not a name.
 
+**✅ M2 Slice B DONE (2026-07-05, PR #261 → `d5da899f`) — git-only, DEVICE-GATED verify.** Native WebView
+crash floor in `PdfReaderApp.tsx`: a bridge-ready watchdog (armed on every (re)load, cleared on the
+handshake) escalates a WebView that never boots → up to 2 bounded remounts → a native "Reintentar"
+fallback View (never a silent black screen — the web boot-guard can't run when the WKWebView PROCESS is
+gone). 6s window so a slow device won't false-fire; remount budget resets on bridge-ready. Zero-regression
+on the happy path (re-hunt: `breadcrumb` is a `[]`-dep callback so the mount effect only re-arms on real
+remounts; watchdog clears any prior timer). RN typecheck + native e2e 15/15 + subset 92/92. Verify on the
+2-device day: force a crash-loop → the Reintentar view appears + recovers.
+
 **▶ NEXT (in priority order):**
-1. **M2 Slice B** (native `onContentProcessDidTerminate` / `ErrorUtils` hardening) — native, **device-gated**;
-   batches to the 2-device day with the #243 native batch.
-2. All remaining P-items are either deploy-gated or native/device-gated — see **`docs/green-day-deploy-runbook.md`**
-   (created 2026-07-05) for the exact one-shot deploy sequence + canary walk + verify + rollback.
+1. **2-device day** (Wednesday practice): verify build 377's #243 native batch (4 repros) + Slice B crash
+   floor. Nothing else is codeable without a device or a decision.
+2. See **`docs/green-day-deploy-runbook.md`** for the deploy sequence (Steps 1-3 + A1 now DONE; native +
+   2-device day remain).
 
 **🚀 DEPLOY STATUS (2026-07-05) — the batch is LIVE (with a multi-tab twist):**
 - **✅ WORKER DEPLOYED by me — 2026-07-05 10:20 PM CDT** (`wrangler deploy`, version `b2f67748`). Lands A2
@@ -135,10 +144,14 @@ Two PRs, in the plan's fixed order:
   Verified LIVE on signovivo.com: `svSyncDecision.js`, `decideRelaySnapshot`, `reportCrash` all served. So the
   `pages deploy` + native build I had queued were ALREADY DONE — do NOT re-run them (would double-ship). Caught
   by the §4 multi-tab HEAD check (HEAD was f800acfe/#258/b377, not my 1d2f04b0).
-- **⏳ 2-device day** — verify build 377's native batch (#243 director-role fixes, still device-unverified) —
-  4 repros in the #243 body; target Wednesday practice. Build 377 ALSO carries the hymnal cleanup.
-- **⏳ A1 secret rotation** (`wrangler secret put TRANSMITTER_CODES` to drop `12345678840`, once no device
-  depends on it) — still pending; reversible.
+- **✅ A1 SECRET ROTATED — 2026-07-05** (Miguel confirmed all directors on build 375+). Dropped the legacy
+  master code `12345678840` from prod `TRANSMITTER_CODES` (now the 4 real codes only, from
+  director-codes.private.json — the source of truth build 377 bakes). `wrangler secret put` → `✨ Success`.
+  Verified against prod on throwaway rooms: a real director code → **200**, `12345678840` → **401**, garbage
+  → **401**. Local `.dev.vars` synced. Reversible (re-put with the old value). No current build sent the
+  legacy code (verified: not in app.js / PdfReaderApp.tsx), so real directors are unaffected.
+- **⏳ 2-device day** — verify build 377's native batch (#243, still device-unverified) + Slice B crash floor
+  — 4 repros in the #243 body; target Wednesday practice. Build 377 ALSO carries the hymnal cleanup.
 
 ---
 

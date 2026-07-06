@@ -47,7 +47,7 @@
 | # | Item | Sev | Surface | Ships via |
 |---|------|-----|---------|-----------|
 | **A0** | **Release Safety System** — the anti-"busted-for-everyone" gate: staging room + CI boot-smoke test + one-command rollback + additive version-compat. **Gates every other item** — nothing below ships to the group until this skeleton exists. Full spec: [`major-update-2026-07.md`](major-update-2026-07.md) | 🔴 crit (process) | dev + web + worker | P0.5 (§1) |
-| **A1** | Committed director code `12345678840` (public master credential; now **fully unrestricted** — book-scoping is gone) | 🔴 crit | worker + repo | secret rotation + git |
+| **A1** | ✅ **DONE 2026-07-05** — legacy master code `12345678840` rotated out of prod `TRANSMITTER_CODES` (real code → 200, legacy → 401, verified) | ✅ resolved | worker + repo | secret rotation + git |
 | **A2** | Relay has zero rate limiting + `seq=0` bypass + one shared room → anyone can hijack/freeze the live Mass | 🔴 crit | worker | `wrangler deploy` |
 | **A3** | Director WebView content-process reload broadcasts boot **page 2** to the whole congregation (mesh half survives the refactor) | 🔴 crit | native | TestFlight |
 | **A4** | `release.sh` PII swap has no crash-safe cleanup → a Ctrl-C can git-commit real phone numbers | 🔴 crit | dev/release | git |
@@ -147,9 +147,14 @@ have a safety net (right now there is effectively none: the only behavioral test
 > native and ride the next build (their server-side blunting is P2-SEQ).
 
 ### A1 — Committed director code is a public master credential  🔴 `[verified]`
+- **✅ RESOLVED 2026-07-05:** Miguel confirmed all directors on build 375+ (real baked codes); rotated
+  prod `TRANSMITTER_CODES` to the 4 real codes only (from `director-codes.private.json`), dropping
+  `12345678840`. Verified against prod (throwaway rooms): real code → 200, `12345678840` → 401, garbage →
+  401. `e2e/relay-sync.test.mjs` was already de-hardcoded (reads `RELAY_TEST_CODE` from env). Reversible.
+  Remaining committed `12345678840` mentions are historical doc references (this plan + app-contracts/atlas).
 - **Surface:** worker (secret) + repo. **Files:** `e2e/relay-sync.test.mjs:21`, `TRANSMITTER_CODES`
   secret, `sync-worker/src/index.ts:327` (`validTransmitterCodes`).
-- **Problem:** `const CODE = "12345678840"` is committed and still in the live `TRANSMITTER_CODES`
+- **Problem (historical):** `const CODE = "12345678840"` is committed and still in the live `TRANSMITTER_CODES`
   secret (build-367 back-compat). **Post-refactor this is now MORE dangerous, not less:** book-scoping
   was deleted, so any valid code may publish anything into the single room — the old "only Sión-book
   pages" limit is gone. Anyone who reads the public repo has a full-privilege director code.
