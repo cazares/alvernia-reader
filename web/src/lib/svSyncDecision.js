@@ -89,6 +89,12 @@
         out.action = "demote";
         out.hasDirector = false;
         out.browsing = false;
+        // F4: reset the seq de-dup floor when the director is demoted (stale / gone). A director
+        // that RESTARTS its app re-publishes from a LOW seq; once the old snapshot ages out of the
+        // freshness window, that low seq must be followable. Without this reset, `lowSeq <= lastSeq`
+        // would classify the restarted director as a duplicate ("live-dup") forever on a healthy
+        // socket, stranding every follower until a manual ⟳ (which is the only other lastSeq reset).
+        out.lastSeq = -1;
         out.hideGoLiveBar = true;
         out.renderPill = true;
         return out;

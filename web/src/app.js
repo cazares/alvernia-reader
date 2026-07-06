@@ -3071,6 +3071,7 @@ const relay = {
   livePage: null,    // latest page the director is on (tracked even while browsing)
   hasDirector: false,
   clockOffsetMs: 0,  // (serverClock - deviceClock), calibrated from /state Date header (P2-CLOCKSKEW)
+  healthTimer: 0,    // F3: independent time-driven relay-health watchdog (started once)
 };
 
 let relayPill = null;
@@ -3185,7 +3186,7 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
     const hasPub = Number.isFinite(snap.seq) && snap.seq > 0;
     const fresh = hasPub && (!Number.isFinite(snap.ts) ||
       (Date.now() + (relay.clockOffsetMs || 0)) / 1000 - snap.ts <= RELAY_LIVE_MAX_AGE_S);
-    if (!fresh) { relay.hasDirector = false; relay.browsing = false; hideGoLiveBar(); renderRelayPill(); return; }
+    if (!fresh) { relay.hasDirector = false; relay.browsing = false; relay.lastSeq = -1; hideGoLiveBar(); renderRelayPill(); return; }
     if (!force && snap.seq <= relay.lastSeq) { relay.hasDirector = true; renderRelayPill(); return; }
     relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
     relay.hasDirector = true; relay.livePage = snap.page;
@@ -3278,6 +3279,12 @@ const relayPollOnce = async (force = false) => {
 const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
 
 const connectRelay = () => {
+  // F5: cancel any pending backoff reconnect on EVERY entry — BEFORE the dupe-guard return —
+  // so an `online`/foreground/manual connect that finds a healthy socket doesn't leave a stale
+  // reconnect scheduled to fire a redundant connect later. (Previously this ran only past the
+  // guard, so the early-return path leaked the timer.) Keeps the "only ONE reconnect scheduled"
+  // invariant on all paths.
+  if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
   // Idempotent: if a socket is already CONNECTING (0) or OPEN (1), don't open a duplicate.
   // iOS fires `online` on network changes even while a socket is healthy, and the close-
   // handler's backoff reconnect can race with it — without this guard each call would stack
@@ -3292,9 +3299,6 @@ const connectRelay = () => {
   // /state fetch during the sub-second connect. startRelayPolling() self-clears first, so
   // it never stacks a second interval.
   startRelayPolling();
-  // A reconnect is firing now (or was requested) — cancel any pending backoff timer so it
-  // can't schedule a second connect on top of this one.
-  if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
   let ws;
   try { ws = new WebSocket(relayWsUrl()); } catch { startRelayPolling(); return; }
   relay.ws = ws;
@@ -3339,8 +3343,20 @@ const connectRelay = () => {
         if (relay.heartbeatTimer === myHeartbeat) relay.heartbeatTimer = 0;
         return;
       }
-      if (Date.now() - relay.lastMsgAt > 12000) { try { ws.close(); } catch {} return; }
+      // F2: silent past the window → zombie socket; close it. ALSO start /state polling as a
+      // fallback — on iOS a dead socket's `close` event may NEVER fire, so relying on
+      // close→reconnect alone can strand the follower. Polling keeps sync alive until a fresh
+      // socket (re)connects; the open handler stops polling again once live.
+      if (Date.now() - relay.lastMsgAt > 12000) { try { ws.close(); } catch {} startRelayPolling(); return; }
       try { ws.send("ping"); } catch {}
+      // F1: a stray swipe / next-prev / arrow moved us off the director's page while still
+      // "following" (ONLY the numpad jump sets relay.browsing). A STATIONARY director's ping-reply
+      // is a duplicate seq → not re-rendered → the follower silently strands on the wrong page with
+      // a green "en vivo" pill and no cue, until the director's NEXT move. Force a re-home poll so a
+      // drifted follower snaps back within a heartbeat. No-op for an on-page follower (the common case).
+      if (!relay.browsing && relay.hasDirector && relay.livePage != null && state.currentPage !== relay.livePage) {
+        relayPollOnce(true);
+      }
     }, 4000);
     relay.heartbeatTimer = myHeartbeat;
     ws.__svHeartbeat = myHeartbeat;
@@ -3404,6 +3420,25 @@ const startRelayFollow = () => {
     }
     connectRelay();
   });
+  // F3: an independent, TIME-DRIVEN health floor. Every other recovery is EVENT-driven (heartbeat,
+  // `online`, `visibilitychange`) and iOS guarantees NONE of them fire — a socket can die silently on
+  // a propped-up, foregrounded iPad whose wifi shows "connected" but is dropping packets. This
+  // guaranteed 10s tick is the backstop: if the WS is gone / closing / closed, or OPEN-but-silent
+  // past the window, tear it down and reconnect while keeping /state polling alive. Idempotent
+  // (no-op when healthy); leaves a CONNECTING socket alone (the 6s connectTimer owns that case).
+  if (!relay.healthTimer) {
+    relay.healthTimer = setInterval(() => {
+      if (relay.manualClose) return;
+      const s = relay.ws;
+      const dead = !s || s.readyState >= 2 || (s.readyState === WebSocket.OPEN && Date.now() - relay.lastMsgAt > 15000);
+      if (!dead) return;
+      try { s && s.close(); } catch {}
+      relay.ws = null;
+      relay.backoff = 500;
+      startRelayPolling();   // sync stays alive while a fresh socket re-establishes
+      connectRelay();
+    }, 10000);
+  }
   relayPollOnce(true);   // snap to the director's current page (backup to initReader's awaited poll)
   if ("WebSocket" in window) connectRelay(); else startRelayPolling();
 };
