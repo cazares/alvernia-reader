@@ -22,6 +22,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export LANG=en_US.UTF-8
 LOG=/tmp/release-native.log
+TF_UPLOADED=0
 
 # STAGING is the canary path — physically incapable of touching prod: it implies
 # no-native + no-bump and flips the Pages deploy to the preview branch. With STAGING
@@ -97,6 +98,23 @@ else
   cleanup_release   # restore ASAP to minimize the PII window; the EXIT trap is the crash-safety net
   cp build/export/SignoVivo.ipa "$HOME/Desktop/SignoVivo-$BUILD.ipa"
   echo "         IPA -> ~/Desktop/SignoVivo-$BUILD.ipa"
+
+  # Hands-off TestFlight upload when App Store Connect API creds are configured.
+  # scripts/asc-credentials.env is gitignored (copy scripts/asc-credentials.env.example);
+  # the .p8 stays outside the repo. Without creds, fall back to the manual Transporter step.
+  [ -f scripts/asc-credentials.env ] && . scripts/asc-credentials.env
+  if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
+    echo "         Uploading build $BUILD to TestFlight via App Store Connect API..."
+    ALT=(xcrun altool --upload-app --type ios --file build/export/SignoVivo.ipa
+         --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID")
+    [ -n "${ASC_P8_PATH:-}" ] && ALT+=(--p8-file-path "$ASC_P8_PATH")
+    if "${ALT[@]}"; then
+      TF_UPLOADED=1
+      echo "         ✅ Uploaded to TestFlight (build $BUILD). Add it to the choir group in App Store Connect when ready."
+    else
+      echo "         ⚠️  altool upload failed — fall back: open -a Transporter ~/Desktop/SignoVivo-$BUILD.ipa  then click DELIVER"
+    fi
+  fi
 fi
 
 if [ "$STAGING" = "1" ]; then
@@ -113,8 +131,11 @@ if [ "$STAGING" = "1" ]; then
   echo "         Production (branch 'main' / signovivo.com) and TestFlight were NOT touched."
 else
   echo "==> 6/6  DONE — signovivo.com == native == v$BUILD"
-  if [ "${SKIP_NATIVE:-0}" != "1" ]; then
+  if [ "$TF_UPLOADED" = "1" ]; then
+    echo "         TestFlight: build $BUILD uploaded automatically. Add it to the choir group when ready."
+  elif [ "${SKIP_NATIVE:-0}" != "1" ]; then
     echo "         Final manual step (native to TestFlight):"
     echo "           open -a Transporter ~/Desktop/SignoVivo-$BUILD.ipa   then click DELIVER"
+    echo "         (Configure scripts/asc-credentials.env to make this automatic — see .env.example.)"
   fi
 fi

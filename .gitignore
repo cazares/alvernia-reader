@@ -32,3 +32,7 @@ sync-worker/roster.private.json
 # Real standard-director codes (phone numbers) — PII, baked at build via release.sh, never committed
 director-codes.private.json
 director-codes.committed.bak
+
+# App Store Connect API creds for TestFlight upload (never commit)
+scripts/asc-credentials.env
+*.p8
