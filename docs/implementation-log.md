@@ -126,11 +126,20 @@ on the happy path (re-hunt: `breadcrumb` is a `[]`-dep callback so the mount eff
 remounts; watchdog clears any prior timer). RN typecheck + native e2e 15/15 + subset 92/92. Verify on the
 2-device day: force a crash-loop → the Reintentar view appears + recovers.
 
+**✅ SYNC RELIABILITY HUNT + WAVES 1-2 DONE (2026-07-05) — full map: `docs/sync-reliability-audit-2026-07.md`.**
+3-agent adversarial hunt of connect/disconnect/reconnect/sync/resync across web relay + bridge + mesh (~19
+findings). Shipped: **Wave 1** web relay (PR #263 `d7fc0938`, browser-verified, 5 fixes incl. the CRITICAL
+stray-swipe silent-strand — ships on `pages deploy`); **Wave 2** native bridge/role (PR #264 `d688b926`,
+typecheck + contract e2e, 4 disaster-class fixes — next native build). **Wave 3 (Swift mesh + structural
+bridge) is PENDING Miguel's decision** — the Swift mesh can't be compiled here (uncompiled = build-break
+risk) + it's the disaster surface; see the audit doc's Wave-3 table.
+
 **▶ NEXT (in priority order):**
-1. **2-device day** (Wednesday practice): verify build 377's #243 native batch (4 repros) + Slice B crash
-   floor. Nothing else is codeable without a device or a decision.
-2. See **`docs/green-day-deploy-runbook.md`** for the deploy sequence (Steps 1-3 + A1 now DONE; native +
-   2-device day remain).
+1. **Wave 3 decision** (Miguel): how far into the Swift mesh + structural bridge fixes — see the audit doc.
+2. **2-device day** (Wednesday practice): verify build 377's #243 native batch (4 repros) + Slice B crash
+   floor + Wave 2 (C2/H4/C3/H1 — conflict re-home, no page-1 yank, no straggler, reloaded-follower resync).
+3. See **`docs/green-day-deploy-runbook.md`** for the deploy sequence (Steps 1-3 + A1 DONE; native + Wave 1
+   `pages deploy` + 2-device day remain).
 
 **🚀 DEPLOY STATUS (2026-07-05) — the batch is LIVE (with a multi-tab twist):**
 - **✅ WORKER DEPLOYED by me — 2026-07-05 10:20 PM CDT** (`wrangler deploy`, version `b2f67748`). Lands A2
