@@ -16,7 +16,7 @@
 // web app's job. The old 3,536-line FlatList/PDF reader was replaced wholesale.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, AppState, Platform, StatusBar, StyleSheet, View } from "react-native";
+import { Alert, AppState, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useKeepAwake } from "expo-keep-awake";
 import * as FileSystem from "expo-file-system/legacy";
@@ -91,6 +91,13 @@ export default function App() {
   // Bumped to force a fresh WebView mount (e.g. after a peer-pushed bundle update / soft reset).
   const [bundleUri, setBundleUri] = useState<string | null>(null);
   const [mountKey, setMountKey] = useState(0);
+  // Slice B (native crash recovery): when the WebView is confirmed dead — a (re)load that never
+  // reaches `bridge-ready` after bounded remount attempts — show a NATIVE "Reintentar" view
+  // instead of a black screen. The web's own boot-guard card can't run if the WebView PROCESS
+  // itself is gone, so this is the native-layer floor: the app is ALWAYS recoverable.
+  const [webDead, setWebDead] = useState(false);
+  const bridgeWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remountAttemptsRef = useRef(0);
 
   const roleRef = useRef<SyncRole>("off");
   // Bumped at the top of every role-entry path. A become*() captures this at entry and bails
@@ -291,6 +298,41 @@ export default function App() {
       }
     }
   }, []);
+
+  // Slice B: watchdog for the bridge-ready handshake. Armed on every WebView (re)load; cleared
+  // when bridge-ready arrives. If it fires, the bundle never booted (broken/blank/crash-loop) →
+  // escalate: up to 2 bounded remounts (cheap; fixes a transient WKWebView wedge), then the
+  // native fallback view. 6s is generous vs a ~1s local-bundle boot, so a slow device won't
+  // false-fire into a spurious remount.
+  const armBridgeWatchdog = useCallback(() => {
+    if (bridgeWatchdogRef.current) clearTimeout(bridgeWatchdogRef.current);
+    bridgeWatchdogRef.current = setTimeout(() => {
+      bridgeWatchdogRef.current = null;
+      if (webReadyRef.current) return; // bridge-ready arrived in time — healthy boot
+      breadcrumb(`bridge-timeout:${remountAttemptsRef.current}`);
+      if (remountAttemptsRef.current < 2) {
+        remountAttemptsRef.current += 1;
+        pendingInjectRef.current = []; // stale injects must not flush into the fresh page
+        setMountKey((k) => k + 1); // bounded remount from scratch (re-arms via the mount effect)
+      } else {
+        setWebDead(true); // exhausted → native "Reintentar" floor (never a black screen)
+      }
+    }, 6000);
+  }, [breadcrumb]);
+
+  // Arm the watchdog whenever a WebView (re)mounts (initial boot + every mountKey remount). A
+  // fresh mount hasn't handshaked yet, so reset webReadyRef; bridge-ready clears the timer.
+  useEffect(() => {
+    if (!booted || !bundleUri || webDead) return;
+    webReadyRef.current = false;
+    armBridgeWatchdog();
+    return () => {
+      if (bridgeWatchdogRef.current) {
+        clearTimeout(bridgeWatchdogRef.current);
+        bridgeWatchdogRef.current = null;
+      }
+    };
+  }, [mountKey, booted, bundleUri, webDead, armBridgeWatchdog]);
 
   // ── Relay-auth warning bridge ────────────────────────────────────────────────
   // The relay silently rejects a publish when the director's X-Director-Code is bad (401).
@@ -577,6 +619,13 @@ export default function App() {
       switch (msg.type) {
         case "bridge-ready": {
           webReadyRef.current = true;
+          // Slice B: the web booted — disarm the watchdog and reset the remount budget so a
+          // LATER crash gets its full escalation ladder again.
+          if (bridgeWatchdogRef.current) {
+            clearTimeout(bridgeWatchdogRef.current);
+            bridgeWatchdogRef.current = null;
+          }
+          remountAttemptsRef.current = 0;
           // A3: a DIRECTOR/transmitter is authoritative for the page across a WebView reload. A
           // content-process reload boots the web to its DEFAULT page (2) and reports it here; adopting
           // that (and re-broadcasting below) would yank the WHOLE congregation to the boot page — the
@@ -968,6 +1017,33 @@ export default function App() {
     return <View style={styles.blank} />;
   }
 
+  // Slice B: the WebView is confirmed dead (never handshaked after bounded remounts). Show a
+  // native recovery screen — the web's own boot-guard card can't run when the WebView process
+  // is gone, so this native floor guarantees the app is never a silent black rectangle.
+  if (webDead) {
+    return (
+      <View style={styles.fallback}>
+        <StatusBar hidden />
+        <Text style={styles.fallbackTitle}>Signo Vivo se está recuperando</Text>
+        <Text style={styles.fallbackMsg}>La app no cargó bien. Toca para reintentar.</Text>
+        <TouchableOpacity
+          style={styles.fallbackBtn}
+          accessibilityRole="button"
+          onPress={() => {
+            breadcrumb("native-fallback-retry");
+            remountAttemptsRef.current = 0;
+            webReadyRef.current = false;
+            pendingInjectRef.current = [];
+            setWebDead(false);
+            setMountKey((k) => k + 1); // fresh WebView; the mount effect re-arms the watchdog
+          }}
+        >
+          <Text style={styles.fallbackBtnText}>Reintentar</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar hidden />
@@ -987,6 +1063,7 @@ export default function App() {
           webReadyRef.current = false;
           pendingInjectRef.current = []; // drop stale queued injects so they don't flush into the fresh page
           webViewRef.current?.reload();
+          armBridgeWatchdog(); // Slice B: if the reload also never handshakes, escalate to remount/fallback
         }}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
@@ -1009,4 +1086,10 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   blank: { flex: 1, backgroundColor: "#000" },
   web: { flex: 1, backgroundColor: "#000" },
+  // Slice B native recovery floor.
+  fallback: { flex: 1, backgroundColor: "#0d0d1a", alignItems: "center", justifyContent: "center", padding: 24 },
+  fallbackTitle: { color: "#fff", fontSize: 20, fontWeight: "700", textAlign: "center", marginBottom: 8 },
+  fallbackMsg: { color: "#c8c8dc", fontSize: 16, textAlign: "center", marginBottom: 20 },
+  fallbackBtn: { backgroundColor: "#3b6df6", paddingVertical: 13, paddingHorizontal: 28, borderRadius: 12 },
+  fallbackBtnText: { color: "#fff", fontSize: 17, fontWeight: "600" },
 });
