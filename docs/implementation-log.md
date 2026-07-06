@@ -123,17 +123,22 @@ Two PRs, in the plan's fixed order:
 2. All remaining P-items are either deploy-gated or native/device-gated — see **`docs/green-day-deploy-runbook.md`**
    (created 2026-07-05) for the exact one-shot deploy sequence + canary walk + verify + rollback.
 
-**⚠ NEEDS MIGUEL (I won't assume the timing/hardware):**
-- ✅ Web deployed to signovivo.com + **build 375 cut & Delivered to TestFlight** (2026-07-05 ~00:43 CDT).
-  ⚠ NOTE: signovivo.com now LAGS main — it predates P2 (#248). A `wrangler pages deploy` (Miguel) ships the
-  P2-SEQ freeze fix + P2-POLL-GAP to congregation phones; P2-CLOCKSKEW's client half also ships but stays
-  inert until the worker `now` field deploys too.
-- **2-device day** to verify the native batch (build 375 / #243) BEFORE the choir updates — 4 repros in the
-  PR body; target Wednesday practice.
-- **A2 + P2-CLOCKSKEW worker deploy** (`cd sync-worker && npx wrangler deploy`) — one deploy now lands BOTH
-  A2 (rate-limit + seq=0 gate) AND the additive `/state now` field (activates clock-skew correction) — plus
-  **A1 secret rotation** (`wrangler secret put TRANSMITTER_CODES` to drop `12345678840`, once no device
-  depends on it). All reach every follower; do on a green (non-Mass) day.
+**🚀 DEPLOY STATUS (2026-07-05) — the batch is LIVE (with a multi-tab twist):**
+- **✅ WORKER DEPLOYED by me — 2026-07-05 10:20 PM CDT** (`wrangler deploy`, version `b2f67748`). Lands A2
+  (rate-limit + seq=0 gate) + P2-CLOCKSKEW `/state now` + P6-LOG `/log` gate + Slice D dashboard panel.
+  Verified live: `/state` returns `now` (+ page/seq/totalPages intact); `GET`/`DELETE /log` → 401 (were 200);
+  `POST /log` still 200. Re-ran the harness 10/10 against main immediately before deploying. Rollback if
+  needed: `cd sync-worker && npx wrangler rollback`.
+- **✅ WEB + NATIVE already shipped by ANOTHER TAB via build 377** — a concurrent tab did the hymnal
+  header-box cleanup (#256/#257), bumped to **build 377**, and deployed it to **signovivo.com + TestFlight**
+  (`843f97c1`, which is a descendant of my #255 → my P2/SliceC/SliceD **web fixes are baked into 377**).
+  Verified LIVE on signovivo.com: `svSyncDecision.js`, `decideRelaySnapshot`, `reportCrash` all served. So the
+  `pages deploy` + native build I had queued were ALREADY DONE — do NOT re-run them (would double-ship). Caught
+  by the §4 multi-tab HEAD check (HEAD was f800acfe/#258/b377, not my 1d2f04b0).
+- **⏳ 2-device day** — verify build 377's native batch (#243 director-role fixes, still device-unverified) —
+  4 repros in the #243 body; target Wednesday practice. Build 377 ALSO carries the hymnal cleanup.
+- **⏳ A1 secret rotation** (`wrangler secret put TRANSMITTER_CODES` to drop `12345678840`, once no device
+  depends on it) — still pending; reversible.
 
 ---
 

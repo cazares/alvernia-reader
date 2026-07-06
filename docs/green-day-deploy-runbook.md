@@ -1,5 +1,20 @@
 # Green-day deploy runbook — ship the 2026-07-05 batch
 
+> ## ✅ STATUS: DEPLOYED (2026-07-05)
+> - **Step 1 (worker) — DONE 10:20 PM CDT** by `wrangler deploy` (version `b2f67748`). Verified: `/state now`
+>   present, `/log` gated (401), POST /log open. A2 + P2-CLOCKSKEW + P6-LOG + crash panel are LIVE.
+> - **Steps 2-3 (web → signovivo.com) — DONE via build 377** (a concurrent tab bumped to 377 and deployed;
+>   377 descends from #255, so the P2/SliceC/SliceD web fixes are live — verified `svSyncDecision.js`/
+>   `reportCrash` served). **Do NOT re-run** the pages deploy.
+> - **Step 4 (native/TestFlight) — build 377 already Delivered** with the fixes baked in. **Do NOT cut a new
+>   build** — just update the iPads to 377 and run the 2-device day (#243 repros) at Wednesday practice.
+> - **Step 5 (A1 rotation) — still pending.**
+>
+> The steps below are retained as the record + for future deploys.
+
+---
+
+
 **What this ships** (all merged to `main`, all currently **git-only — NOT live**):
 
 | Change | PR | Surface | Reaches |
