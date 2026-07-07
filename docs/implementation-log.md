@@ -130,16 +130,19 @@ remounts; watchdog clears any prior timer). RN typecheck + native e2e 15/15 + su
 3-agent adversarial hunt of connect/disconnect/reconnect/sync/resync across web relay + bridge + mesh (~19
 findings). Shipped: **Wave 1** web relay (PR #263 `d7fc0938`, browser-verified, 5 fixes incl. the CRITICAL
 stray-swipe silent-strand — ships on `pages deploy`); **Wave 2** native bridge/role (PR #264 `d688b926`,
-typecheck + contract e2e, 4 disaster-class fixes — next native build). **Wave 3 (Swift mesh + structural
-bridge) is PENDING Miguel's decision** — the Swift mesh can't be compiled here (uncompiled = build-break
-risk) + it's the disaster surface; see the audit doc's Wave-3 table.
+typecheck + contract e2e, 4 disaster-class fixes — next native build). **Wave 3** (Miguel: "do all now"):
+shipped the clearly-safe subset git-only — **M-F1/M-F5/M-F7** mesh (PR #266 `d06b4617`) + **H3** bridge (PR
+#267 `5b66b724`); **HELD M-F2/M-F3/M-F6 (mesh) + C1/H2 (bridge)** with ready-to-implement designs — they're
+uncompileable-Swift / flicker-risk / structural-refactor, best done WITH a local build + devices (Wednesday).
+⚠️ ALL Wave-2/3 native is git-only + UNCOMPILED here — **MIGUEL must run `xcodebuild` locally** before trusting.
 
 **▶ NEXT (in priority order):**
-1. **Wave 3 decision** (Miguel): how far into the Swift mesh + structural bridge fixes — see the audit doc.
-2. **2-device day** (Wednesday practice): verify build 377's #243 native batch (4 repros) + Slice B crash
-   floor + Wave 2 (C2/H4/C3/H1 — conflict re-home, no page-1 yank, no straggler, reloaded-follower resync).
-3. See **`docs/green-day-deploy-runbook.md`** for the deploy sequence (Steps 1-3 + A1 DONE; native + Wave 1
-   `pages deploy` + 2-device day remain).
+1. **MIGUEL: local `xcodebuild`** to confirm the native/Swift fixes (Waves 2-3) compile, THEN the 2-device day.
+2. **2-device day** (Wednesday): verify build 377's #243 batch + Slice B + Wave 2 (C2/H4/C3/H1) + Wave 3
+   mesh (M-F1 half-open, M-F5 fast-reconnect, M-F7 advertiser-retry, H3 transmitter-restart prompt). Repros
+   in each PR body + `docs/sync-reliability-audit-2026-07.md`.
+3. **Held Wave-3 items** (M-F2/M-F3/M-F6/C1/H2): implement WITH the build + devices — designs in the audit doc.
+4. See **`docs/green-day-deploy-runbook.md`** (Steps 1-3 + A1 DONE; native + Wave 1 `pages deploy` remain).
 
 **🚀 DEPLOY STATUS (2026-07-05) — the batch is LIVE (with a multi-tab twist):**
 - **✅ WORKER DEPLOYED by me — 2026-07-05 10:20 PM CDT** (`wrangler deploy`, version `b2f67748`). Lands A2

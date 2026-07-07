@@ -34,30 +34,43 @@ of these can affect a director.
 
 ---
 
-## ⏳ WAVE 3 — native Multipeer MESH + structural bridge (PENDING Miguel's decision)
+## WAVE 3 — native Multipeer MESH + structural bridge (Miguel: "do all now")
 
-**Why pending, not shipped:** (a) the Swift mesh **cannot be compiled in this environment** (no Xcode
-build in the loop) — an uncompiled Swift change risks breaking the build, discovered only at the next
-release archive; (b) the mesh is the **disaster surface** (offline church-critical, no internet
-fallback); (c) some bridge items are **structural refactors** (higher regression risk). These want a
-local `xcodebuild` to confirm compilation + focused Wednesday device-testing before they're trusted.
+Miguel opted to implement Wave 3 now (git-only), with local `xcodebuild` + Wednesday device-test as
+the verification gate. **Shipped the clearly-safe, additive, high-confidence subset; HELD the complex/
+structural ones with ready-to-implement designs** — because shipping those blind (uncompileable Swift /
+flicker-risk / structural refactor) to the disaster surface, right before Wednesday, cuts against the
+zero-regression bar. The held ones are best done WITH a build + devices in hand (Wednesday), where they
+can actually be verified rather than hoped.
+
+- ✅ **SHIPPED (git-only):** M-F1, M-F5, M-F7 (mesh, PR #266 `d06b4617`) + H3 (bridge, PR #267 `5b66b724`).
+  ⚠️ All Swift/native — MIGUEL: local `xcodebuild` to confirm compilation, then Wednesday device-test.
+- ⏳ **HELD (designed, do with a build+devices):** M-F2, M-F3, M-F6 (mesh) + C1, H2 (bridge). Reasons per
+  row below.
+
+**Why the held ones need a build in hand:** (a) the Swift mesh **cannot be compiled in this environment** —
+an uncompiled complex change risks a build-break found only at release; (b) the mesh is the **disaster
+surface**; (c) C1's clean fix risks a 1s render-flicker regression or needs an untested web→native ack;
+(d) H2 is a **structural effect-refactor** whose subtle bugs are undetectable without device-testing;
+(e) M-F2's fix works around an MCSession limitation (can't drop a single peer) + the slot ceiling this
+~10-device choir won't hit.
 
 ### Native mesh (`DirectorSyncModule.swift`) — Swift, uncompileable here
 | ID | Sev | Finding | Fix size |
 |----|-----|---------|----------|
-| M-F1 | CRIT | Half-open follower watchdog is disarmed until the FIRST page ever arrives (`lastFollowerPageReceivedAt > 0` gate at :1254). A follower that joins a director who hasn't turned a page yet has NO half-open recovery. Fix: prime the liveness clock at `.connected` and/or stamp it on the periodic `director_announce` (director already broadcasts it) so "silence since connect" is watched. | SMALL-MED |
-| M-F2 | HIGH | Director never prunes a half-open FOLLOWER → dead followers keep 7-slot seats and can block a real follower's reconnect ("sessions-full"). Fix: track `lastHelloFromPeer`, drop peers silent > ~20-25s. | MED |
-| M-F3 | HIGH | A peer-pushed bundle install swaps the live `WebBundle` dir + remounts EVERY follower mid-Mass (unprompted, coordinated reload). Fix: defer the install/remount to a safe moment (backgrounded/idle) or gate behind a confirm. | MED |
-| M-F5 | MED | `forceFollowerReconnect` doesn't kick a fast rediscovery if the director was already pruned → slow recovery. Fix: fast-refresh burst on reconnect. | SMALL |
-| M-F6 | MED | Director-conflict demotion hard-resets the loser's followers (no snapshot handoff) → sub-group blackout. Fix: additive `redirect` hint before teardown. | MED |
-| M-F7 | MED | Advertiser/browser give up permanently after 5 failures; only a foreground event re-arms — a foregrounded director whose radio hiccups stays dark. Fix: slow last-resort retry + reset the counter on manual reconnect. | SMALL |
+| ✅ M-F1 | CRIT | Half-open follower watchdog is disarmed until the FIRST page ever arrives (`lastFollowerPageReceivedAt > 0` gate at :1254). A follower that joins a director who hasn't turned a page yet has NO half-open recovery. Fix: prime the liveness clock at `.connected` and/or stamp it on the periodic `director_announce` (director already broadcasts it) so "silence since connect" is watched. | SMALL-MED |
+| ⏳ M-F2 | HIGH | Director never prunes a half-open FOLLOWER → dead followers keep 7-slot seats and can block a real follower's reconnect ("sessions-full"). Fix: track `lastHelloFromPeer`, drop peers silent > ~20-25s. | MED |
+| ⏳ M-F3 | HIGH | A peer-pushed bundle install swaps the live `WebBundle` dir + remounts EVERY follower mid-Mass (unprompted, coordinated reload). Fix: defer the install/remount to a safe moment (backgrounded/idle) or gate behind a confirm. | MED |
+| ✅ M-F5 | MED | `forceFollowerReconnect` doesn't kick a fast rediscovery if the director was already pruned → slow recovery. Fix: fast-refresh burst on reconnect. | SMALL |
+| ⏳ M-F6 | MED | Director-conflict demotion hard-resets the loser's followers (no snapshot handoff) → sub-group blackout. Fix: additive `redirect` hint before teardown. | MED |
+| ✅ M-F7 | MED | Advertiser/browser give up permanently after 5 failures; only a foreground event re-arms — a foregrounded director whose radio hiccups stays dark. Fix: slow last-resort retry + reset the counter on manual reconnect. | SMALL |
 
 ### Bridge / role (`PdfReaderApp.tsx`) — compileable but structural/higher-risk
 | ID | Sev | Finding | Fix size |
 |----|-----|---------|----------|
-| C1 | CRIT | `injectJavaScript` is fire-and-forget; a silently-dropped page inject desyncs web from native, and the heartbeat de-dupe (`page === currentPageRef`) never re-drives it. Fix: track `lastInjectedPageRef` distinct from `currentPageRef`, re-inject on mismatch. | MED |
-| H2 | HIGH | The mesh-bootstrap effect's cleanup calls `stopDirectorHeartbeat()`; if that effect ever re-runs for a live director (a future refactor that adds a state dep), it kills the heartbeat mid-Mass. Fix: split the listener into its own effect; own heartbeats only in the role machine. | MED |
-| H3 | HIGH | A transmitter-only director isn't persisted; a native app restart (not just WebView reload) comes back as a silent follower → web congregation frozen with no 401 signal. Fix: persist a non-credential `wasTransmitter` breadcrumb → the existing NEW-DIR "re-enter code" prompt. | MED |
+| ⏳ C1 | CRIT | `injectJavaScript` is fire-and-forget; a silently-dropped page inject desyncs web from native, and the heartbeat de-dupe (`page === currentPageRef`) never re-drives it. Fix: track `lastInjectedPageRef` distinct from `currentPageRef`, re-inject on mismatch. | MED |
+| ⏳ H2 | HIGH | The mesh-bootstrap effect's cleanup calls `stopDirectorHeartbeat()`; if that effect ever re-runs for a live director (a future refactor that adds a state dep), it kills the heartbeat mid-Mass. Fix: split the listener into its own effect; own heartbeats only in the role machine. | MED |
+| ✅ H3 | HIGH | A transmitter-only director isn't persisted; a native app restart (not just WebView reload) comes back as a silent follower → web congregation frozen with no 401 signal. Fix: persist a non-credential `wasTransmitter` breadcrumb → the existing NEW-DIR "re-enter code" prompt. | MED |
 | M1-M4, L1 | MED/LOW | inject-queue drops by age not importance; corrupt peer-bundle poisons every boot (fallback re-loads it); director foreground re-broadcasts before conflict resolves; async confirm dialog acts on stale role; web→native post has no retry. | mixed |
 
 **Recommendation:** M-F1 + M-F2 (the bidirectional half-open gap) and C1/H3 (silent-freeze classes)
