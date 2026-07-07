@@ -1285,6 +1285,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     stopFollowerWatchdog() // restarts cleanly on the next .connected
     startSelfDirectedTimer()
     emitState(status: "searching", message: "Reconectando con el director...")
+    // M-F5: the watchdog can fire because the director genuinely LEFT (not just a data half-open),
+    // in which case reconsiderFollowerTarget alone stalls (discoveredDirectors may be empty). Kick
+    // an immediate re-scan + arm the fast 5 s discovery burst so a returning/other director is
+    // re-found in seconds instead of drifting into the slow ~25 s cadence.
+    earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+    refreshDiscovery()
     reconsiderFollowerTarget()
   }
 
@@ -1609,10 +1615,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       emitError(code: "DIRECTOR_START_FAILED", message: error.localizedDescription)
     }
     advertiserFailureCount += 1
-    // Stop retrying after 5 consecutive failures — permission is likely permanently denied
-    // for this session. The user must toggle it in Settings and restart.
-    guard advertiserFailureCount <= 5 else { return }
-    let delay = min(3.0 * pow(2.0, Double(advertiserFailureCount - 1)), 30.0)
+    // M-F7: fast exponential backoff for the first 5 failures (transient radio/thermal hiccup or a
+    // permission race), then a SLOW 45 s last-resort retry FOREVER — never give up permanently. A
+    // foregrounded director whose radio hiccups past the ceiling would otherwise stay dark until a
+    // foreground transition that may never come during a long foregrounded Mass. A genuine
+    // permanent permission denial just keeps failing harmlessly every 45 s.
+    let delay = advertiserFailureCount <= 5
+      ? min(3.0 * pow(2.0, Double(advertiserFailureCount - 1)), 30.0)
+      : 45.0
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self = self, advertiser === self.advertiser, self.currentRole != "off" else { return }
       self.advertiser?.stopAdvertisingPeer(); self.advertiser?.delegate = nil; self.advertiser = nil
@@ -1680,8 +1690,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       emitError(code: "FOLLOWER_START_FAILED", message: error.localizedDescription)
     }
     browserFailureCount += 1
-    guard browserFailureCount <= 5 else { return }
-    let delay = min(3.0 * pow(2.0, Double(browserFailureCount - 1)), 30.0)
+    // M-F7: same as the advertiser — fast backoff for 5, then a slow 45 s retry forever so a
+    // follower whose radio hiccups past the ceiling keeps trying to find the director instead of
+    // going permanently dark on a foregrounded device.
+    let delay = browserFailureCount <= 5
+      ? min(3.0 * pow(2.0, Double(browserFailureCount - 1)), 30.0)
+      : 45.0
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self = self, browser === self.browser, self.currentRole != "off" else { return }
       self.browser?.stopBrowsingForPeers(); self.browser?.delegate = nil; self.browser = nil
@@ -1706,6 +1720,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           self.startFollowerWatchdog()
           self.sendFollowerHelloIfNeeded()
           self.scheduleFollowerSnapshotProbe()
+          // M-F1: prime the half-open liveness clock at connect so the watchdog measures
+          // "silence since connect", not "silence since the first page ever". Without this, the
+          // watchdog's `lastFollowerPageReceivedAt > 0` gate leaves it DISARMED for a follower
+          // that connects during the director's brief pre-first-page window — a half-open link
+          // there would never trigger a reconnect. A LIVE director's 1s mesh page-heartbeat keeps
+          // this fresh (well under the 3s stale threshold), so this never false-fires.
+          self.lastFollowerPageReceivedAt = Date().timeIntervalSince1970
         } else if self.currentRole == "director" {
           // If this freshly-connected peer is one we've discovered advertising as a director, we
           // have a split-brain: resolve it now via token tiebreak instead of waiting for the
@@ -1772,6 +1793,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       }
 
       if type == "director_announce" {
+        // M-F1 (belt-and-suspenders): a FOLLOWER treats its connected director's periodic announce
+        // as a liveness beat, so the half-open watchdog stays armed even if page heartbeats are
+        // momentarily missed. Only the connected director's announce counts (not a stray one).
+        if self.currentRole == "follower", let dp = self.connectedDirectorPeer, dp == peerID {
+          self.lastFollowerPageReceivedAt = Date().timeIntervalSince1970
+        }
         // Another device just declared itself director with this token. If WE are also a
         // director, resolve the split-brain immediately: the lower token demotes to follower.
         guard self.currentRole == "director" else { return }
