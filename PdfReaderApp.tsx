@@ -462,6 +462,14 @@ export default function App() {
         // No mesh on this device — still act as an online transmitter to the relay.
         explicitTransmitterRef.current = true;
         roleRef.current = "off";
+        // H3: persist a NON-credential role breadcrumb (like the mesh director path does). The
+        // transmitter role lives ONLY in the in-memory explicitTransmitterRef, so a NATIVE APP
+        // restart (crash / memory-kill — not just a WebView reload) would lose it: the bootstrap
+        // would read no "director" role, come back as a silent follower, and the relay heartbeat
+        // would never restart → every signovivo.com follower frozen for the rest of Mass with no
+        // 401 signal. Persisting "director" makes the boot resume prompt fire so the operator
+        // re-enters their code (the code itself is never stored — no auto-resume of a credential).
+        AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director").catch(() => {});
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
         startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
