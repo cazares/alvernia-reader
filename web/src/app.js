@@ -879,14 +879,34 @@ const ensureSyncSpinner = () => {
   document.body.appendChild(syncSpinnerEl);
   return syncSpinnerEl;
 };
+// Fail-silent cap (the native mesh can sit in "searching" a LONG time — no director present, or a
+// flapping link that keeps re-arming the shell's 10s self-directed timer). A spinner that outlives a
+// few seconds reads as "broken/buggy," so we bound how long the bundle NARRATES each working state,
+// then hide it and degrade to a plain songbook — exactly how the relay pill hides when no director is
+// on the web. The mesh keeps browsing underneath, so a director who appears LATER still flips us to
+// "connected" (the spinner returns briefly, then the page snaps in). Per-status so a genuine ~4s
+// connect handshake isn't cut off, while an endless "searching" dies fast. Decoupling spinner
+// VISIBILITY from the native timer this way makes the fix immune to mesh flapping and to any
+// shell-side timer bug — the web side alone guarantees the spinner never looks stuck.
+const SYNC_SPINNER_CAP_MS = { searching: 3500, connecting: 6000, "resolving-conflict": 6000 };
+let syncSpinnerCapTimer = 0;
 const setSyncWorking = (status) => {
   const working = status === "searching" || status === "connecting" || status === "resolving-conflict";
   const el = ensureSyncSpinner();
+  // Every status transition re-decides the spinner, so clear any pending fail-silent cap first.
+  if (syncSpinnerCapTimer) { clearTimeout(syncSpinnerCapTimer); syncSpinnerCapTimer = 0; }
   if (working) {
     el.querySelector(".sv-label").textContent =
       status === "searching" ? "Buscando director…" : "Conectando…";
+    el.classList.add("is-on");
+    const cap = SYNC_SPINNER_CAP_MS[status] || 4000;
+    syncSpinnerCapTimer = window.setTimeout(() => {
+      syncSpinnerCapTimer = 0;
+      el.classList.remove("is-on");
+    }, cap);
+  } else {
+    el.classList.remove("is-on");
   }
-  el.classList.toggle("is-on", working);
 };
 
 // ── Relay-auth warning banner ─────────────────────────────────────────────────
