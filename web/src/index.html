@@ -352,24 +352,6 @@
       </section>
     </main>
 
-    <div class="fleet-picker is-hidden" id="fleet-picker" role="dialog" aria-modal="true" aria-labelledby="fleet-picker-title">
-      <div class="fleet-picker-card">
-        <p class="fleet-picker-title" id="fleet-picker-title">¿Quién usa este iPad?</p>
-        <p class="fleet-picker-sub">Solo para el coro — así el director sabe qué dispositivos están listos. Una sola vez.</p>
-        <input class="fleet-picker-name" id="fleet-picker-name" type="text" placeholder="Tu nombre" autocomplete="off" autocapitalize="words" maxlength="40" />
-        <select class="fleet-picker-role" id="fleet-picker-role" aria-label="Tu rol">
-          <option value="Cantor">Cantor(a)</option>
-          <option value="Cantor/Guitarrista">Cantor / Guitarrista</option>
-          <option value="Bajo/Guitarrón">Bajo / Guitarrón</option>
-          <option value="Director">Director</option>
-        </select>
-        <div class="fleet-picker-actions">
-          <button class="fleet-picker-skip" id="fleet-picker-skip" type="button">Ahora no</button>
-          <button class="fleet-picker-save" id="fleet-picker-save" type="button">Guardar</button>
-        </div>
-      </div>
-    </div>
-
     <!-- Pre-app helpers, loaded first (deferred scripts run in document order).
          svRelayRoom resolves the relay room (staging vs production) defensively;
          if it fails to load, app.js falls back to alvernia-main on its own. -->
