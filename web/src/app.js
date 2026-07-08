@@ -2894,10 +2894,7 @@ const RELAY_LIVE_MAX_AGE_S = 90; // a director counts as "live" if its last upda
 // shows who's ready before Mass. A device sends ONLY a self-entered label — NEVER a phone number
 // (phones live server-side in the gated roster). Fire-and-forget; failures are swallowed so this
 // can never block or slow the reader.
-const FLEET_LABEL_KEY = "svFleetLabel";
-const FLEET_ROLE_KEY = "svFleetRole";
 const FLEET_DEVICE_KEY = "svFleetDeviceId";
-const FLEET_SKIP_KEY = "svFleetSkip";
 
 const fleetDeviceId = () => {
   try {
@@ -2988,20 +2985,14 @@ const fleetCheckin = async (extra = {}) => {
   if (fleetCheckinInFlight) return;
   fleetCheckinInFlight = true;
   try {
-    let label = "";
-    let role = "";
     let webCached = false;
     try {
-      label = localStorage.getItem(FLEET_LABEL_KEY) || "";
-      role = localStorage.getItem(FLEET_ROLE_KEY) || "";
       webCached = localStorage.getItem(OFFLINE_READY_KEY) === "ready";
     } catch {}
     const totalPages = Number(state.totalPages) || STANDARD_TOTAL_PAGES;
     const pagesCached = await countCachedPageImages();
     const payload = {
       deviceId: fleetDeviceId(),
-      label,
-      role,
       surface: "web",
       webCached: webCached || (totalPages > 0 && pagesCached >= totalPages),
       pagesCached,
@@ -3023,57 +3014,12 @@ const fleetCheckin = async (extra = {}) => {
   }
 };
 
-// One-time "¿Quién usa este iPad?" prompt. Choir members self-identify (name + role) for the
-// dashboard; a Skip still checks in anonymously so the device count stays real.
-const fleetPicker = document.getElementById("fleet-picker");
-const fleetPickerName = document.getElementById("fleet-picker-name");
-const fleetPickerRole = document.getElementById("fleet-picker-role");
-const fleetPickerSave = document.getElementById("fleet-picker-save");
-const fleetPickerSkip = document.getElementById("fleet-picker-skip");
-
-const hideFleetPicker = () => fleetPicker?.classList.add("is-hidden");
-const maybeShowFleetPicker = () => {
-  if (NATIVE_FILE_MODE || !fleetPicker) return;
-  try {
-    if (localStorage.getItem(FLEET_LABEL_KEY) || localStorage.getItem(FLEET_SKIP_KEY) === "1") return;
-  } catch {}
-  fleetPicker.classList.remove("is-hidden");
-  setTimeout(() => fleetPickerName?.focus(), 200);
-};
-fleetPickerSave?.addEventListener("click", () => {
-  const name = (fleetPickerName?.value || "").trim().slice(0, 40);
-  const role = fleetPickerRole?.value || "Cantor";
-  if (!name) {
-    fleetPickerName?.focus();
-    return;
-  }
-  try {
-    localStorage.setItem(FLEET_LABEL_KEY, name);
-    localStorage.setItem(FLEET_ROLE_KEY, role);
-  } catch {}
-  hideFleetPicker();
-  fleetCheckin({ label: name, role });
-});
-fleetPickerSkip?.addEventListener("click", () => {
-  try {
-    localStorage.setItem(FLEET_SKIP_KEY, "1");
-  } catch {}
-  hideFleetPicker();
-  fleetCheckin(); // anonymous — device still appears on the dashboard, just unlabeled
-});
-
-// Report presence + cache state on load, then (once the gate has lifted) offer the picker.
+// Report presence + cache state on load so the director's gated /fleet-dashboard shows which web
+// devices are cached and ready. Anonymous by device — the old one-time "¿Quién usa este iPad?"
+// self-ID prompt (name + role) was removed; it was more annoying than useful.
 const scheduleFleetCheckin = () => {
   if (NATIVE_FILE_MODE) return;
   fleetCheckin();
-  const tryPicker = (n = 0) => {
-    if (gateLifted) {
-      maybeShowFleetPicker();
-    } else if (n < 20) {
-      setTimeout(() => tryPicker(n + 1), 1000);
-    }
-  };
-  setTimeout(() => tryPicker(0), 2500);
 };
 
 const relay = {
