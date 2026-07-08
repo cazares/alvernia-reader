@@ -22,7 +22,7 @@ Live page-sync during Mass:
   to web followers and internet-connected devices over WebSocket.
 
 The songbook is a single public book (the ~371-page Alvernia manual), rendered from
-`assets/alvernia_manual_2.pdf` to per-page WebP images + manifests at build time.
+`assets/signo_vivo_371.pdf` to per-page WebP images + manifests at build time.
 
 ## Quick start
 

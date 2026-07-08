@@ -851,61 +851,29 @@ const renderDirectorModeBadge = () => {
   directorModeBadge.classList.toggle("is-hidden", !isDirector);
 };
 
-// ── Sync "working" spinner ──────────────────────────────────────────────────────
-// A small top-center pill with a spinner, shown whenever the native mesh is actively trying to
-// connect (searching / connecting) — so the ~4s handshake and any reconnect read as "working," not
-// "frozen." Hidden the instant we're connected (or idle / self-directed). Native-only: it's driven
-// by the mesh's state events; web relay followers use the relay pill instead.
-let syncSpinnerEl = null;
-const ensureSyncSpinner = () => {
-  if (syncSpinnerEl) return syncSpinnerEl;
-  const style = document.createElement("style");
-  style.textContent =
-    "#sv-sync-spinner{position:fixed;top:max(0.7rem,env(safe-area-inset-top,0px));left:50%;" +
-    "transform:translateX(-50%);z-index:60;display:none;align-items:center;gap:0.5rem;" +
-    "padding:0.5rem 0.95rem;border-radius:999px;background:rgba(26,26,46,0.9);color:#fff;" +
-    "font:600 0.85rem/1 system-ui,-apple-system,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.4);" +
-    "pointer-events:none;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}" +
-    "#sv-sync-spinner.is-on{display:flex}" +
-    "#sv-sync-spinner .sv-dot{width:14px;height:14px;border-radius:50%;" +
-    "border:2px solid rgba(255,255,255,0.25);border-top-color:#fff;animation:sv-syncspin .7s linear infinite}" +
-    "@keyframes sv-syncspin{to{transform:rotate(360deg)}}";
-  document.head.appendChild(style);
-  syncSpinnerEl = document.createElement("div");
-  syncSpinnerEl.id = "sv-sync-spinner";
-  syncSpinnerEl.setAttribute("role", "status");
-  syncSpinnerEl.setAttribute("aria-live", "polite");
-  syncSpinnerEl.innerHTML = '<span class="sv-dot"></span><span class="sv-label"></span>';
-  document.body.appendChild(syncSpinnerEl);
-  return syncSpinnerEl;
-};
-// Fail-silent cap (the native mesh can sit in "searching" a LONG time — no director present, or a
-// flapping link that keeps re-arming the shell's 10s self-directed timer). A spinner that outlives a
-// few seconds reads as "broken/buggy," so we bound how long the bundle NARRATES each working state,
-// then hide it and degrade to a plain songbook — exactly how the relay pill hides when no director is
-// on the web. The mesh keeps browsing underneath, so a director who appears LATER still flips us to
-// "connected" (the spinner returns briefly, then the page snaps in). Per-status so a genuine ~4s
-// connect handshake isn't cut off, while an endless "searching" dies fast. Decoupling spinner
-// VISIBILITY from the native timer this way makes the fix immune to mesh flapping and to any
-// shell-side timer bug — the web side alone guarantees the spinner never looks stuck.
-const SYNC_SPINNER_CAP_MS = { searching: 3500, connecting: 6000, "resolving-conflict": 6000 };
-let syncSpinnerCapTimer = 0;
+// ── Sync "working" indicator ──────────────────────────────────────────────────
+// Reuses the ⟳ resync fab's own tap-spin — same "is-spinning" class, same ~1.1s duration — as the
+// "still working" indicator for native mesh state (searching / connecting / resolving-conflict),
+// instead of a bespoke top-center pill. One visual language: whether the user taps ⟳ or the native
+// mesh is quietly retrying underneath, the same icon spins the same way for the same length of time.
+// Hidden the instant we're connected (or idle / self-directed). Native-only: it's driven by the
+// mesh's state events; web relay followers use the relay pill instead.
+const SYNC_SPIN_MS = 1100;
+let syncSpinTimer = 0;
 const setSyncWorking = (status) => {
   const working = status === "searching" || status === "connecting" || status === "resolving-conflict";
-  const el = ensureSyncSpinner();
-  // Every status transition re-decides the spinner, so clear any pending fail-silent cap first.
-  if (syncSpinnerCapTimer) { clearTimeout(syncSpinnerCapTimer); syncSpinnerCapTimer = 0; }
+  const fab = document.getElementById("resync-fab");
+  if (!fab) return;
+  // Every status transition re-decides the spin, so clear any pending stop first.
+  if (syncSpinTimer) { clearTimeout(syncSpinTimer); syncSpinTimer = 0; }
   if (working) {
-    el.querySelector(".sv-label").textContent =
-      status === "searching" ? "Buscando director…" : "Conectando…";
-    el.classList.add("is-on");
-    const cap = SYNC_SPINNER_CAP_MS[status] || 4000;
-    syncSpinnerCapTimer = window.setTimeout(() => {
-      syncSpinnerCapTimer = 0;
-      el.classList.remove("is-on");
-    }, cap);
+    fab.classList.add("is-spinning");
+    syncSpinTimer = window.setTimeout(() => {
+      syncSpinTimer = 0;
+      fab.classList.remove("is-spinning");
+    }, SYNC_SPIN_MS);
   } else {
-    el.classList.remove("is-on");
+    fab.classList.remove("is-spinning");
   }
 };
 
