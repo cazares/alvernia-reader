@@ -49,7 +49,7 @@ The field fleet runs **native builds 368–381**, each carrying an **old bundled
 ### 1.3 Working agreement (how to execute)
 
 - **Worktree + branch per wave**: `git worktree add` a fresh tree off latest `main`; branch `dev-<wave-slug>`. Pull `origin/main` continuously; small PRs (1–3 per wave as each workstream chapter recommends); **commit + push after every green, logically-complete step** — never batch a day's work into one commit.
-- **Merge-when-green is the default** for web/worker waves once §10 verification passes. **Exceptions that wait for Miguel**: anything tagged **DECISION-REQUIRED**, the entire Workstream 4 (web-director — approval-gated), and pushing the native release train to TestFlight/App Store.
+- **Merge-when-green is the default** for web/worker waves once §10 verification passes. **Exceptions that wait for Miguel**: anything tagged **DECISION-REQUIRED**, Workstream 4's §3 feature (ROLEWEB-02 web-director — approval-gated; WS4 §2's ROLEWEB-01/-07 fixes ship un-gated in Wave 4), and pushing the native release train to TestFlight/App Store.
 - **Hunt → fix → re-hunt → verify, every wave.** After a wave's fixes: run a fresh adversarial review of the wave's full diff (`/code-review` at high effort, or equivalent), fix what it finds, then **re-hunt again**; iterate until a re-hunt comes back clean. Fixes create regressions a single pass misses — a clean *re-hunt*, not a green first pass, is the done signal.
 - **Verify before you claim** (per repo doctrine): run the full available verification end-to-end AND cross-check an independent ground truth (browser preview for web, iPad simulator for native, `wrangler dev` probes for worker). Never report "fixed" on a single weak signal; surface every warning you accepted.
 - **DECISION-REQUIRED protocol**: each chapter marks genuine product forks. Collect them per wave and present to Miguel in one batch (options + recommendation) *before* implementing that item; implement everything else meanwhile. Never resolve a fork by silent assumption.
@@ -89,9 +89,11 @@ Execute in this order. Each wave = one worktree/branch, 1–3 PRs (per its chapt
 | **5** | Fleet & version visibility (rest of Workstream 5) | RELVER-04, -05, -06, -09, FOLNAT-05, FOLNAT-07 | worker + web; native halves → train |
 | **6** | Vestigial debt & comment drift (Workstream 6, minus VESTIG-02) | VESTIG-01, -03, -04, -05, -07, -08, -09, -11, -12, N2W-05 | web + worker; native halves → train |
 | **🚂** | **Native release train** — build 382: all native halves from Waves 2–6, one TestFlight, canary ritual (as repaired by Wave 1), then fleet | (native halves listed above) | native-build |
-| **7 — GATED** | Web-director emergency path (Workstream 4) — **only after Miguel approves the DECISION-REQUIRED register** | ROLEWEB-02, ROLEWEB-01*, ROLEWEB-07 | web + worker |
+| **7 — GATED** | Web-director emergency path (Workstream 4) — **only after Miguel approves the DECISION-REQUIRED register** | ROLEWEB-02 (ROLEWEB-01/-07 ship un-gated — see WS4 §2 and the * note) | web + worker |
 
 *ROLEWEB-01's minimal messaging fix (honest copy for the dead end) may land in Wave 4 if Wave 7 is deferred — its chapter covers both variants.
+
+Within Waves 1/5, the WS5 chapter's PR slicing is authoritative: execute WS5-PR1→PR2→PR3 in full during Wave 1 (their Wave-5-listed riders RELVER-04/-05/-09 land early); Wave 5 then consists only of WS5-PR4 (the native batch).
 
 Wave-2/3 highs are the user-facing heart of this manual. If interrupted, ship completed waves rather than holding for the full program; every wave leaves the app strictly better.
 
@@ -105,7 +107,7 @@ Wave-2/3 highs are the user-facing heart of this manual. If interrupted, ship co
 > working tree has moved past d5075091, re-verify each anchor with Grep before editing — the claims
 > hold, but line numbers drift.
 
-## 1. Workstream intro
+## 1. Workstream intro (WS1)
 
 **Theme.** The director — a volunteer on a portrait iPad, in front of the congregation, zero training —
 currently operates an instrument with almost no gauges. The app *acts* on their input (code entry,
@@ -171,7 +173,7 @@ PRODUCTION relay room and flips live followers' pages.
 
 ---
 
-## 2. Findings
+## 2. Findings (WS1)
 
 #### DIRNAT-01 — Invalid/rejected director code on native gives ZERO feedback — numpad closes, nothing happens `high` `cross` `multi`
 
@@ -1283,7 +1285,7 @@ amber pill tap (:3028-3031), or ⟳ (`reconnectRelay` clears browsing, :3098). O
 jump off the live page** grants browse mode (:1200-1205) — drawer taps and swipes do NOT (that gap
 is the separate known-OPEN web finding `web-reader-browse-result-click-skips-relay-browsing-mode`;
 un-flagged drift keeps getting re-homed, which on mesh means the ≤1s heartbeat yank — that is the
-intended F1-parity semantic, keep it). Mirror all of this exactly; no product fork there.
+intended F1-parity semantic, keep it). When IANAV-02 step 1 (Wave 4) lands, its `noteIntentionalBrowse` helper closes that drawer/turnSong/turnPage gap — the helper must stay transport-agnostic (built on `hasLiveDirector()`, never bare `relay.*`). Mirror all of this exactly; no product fork there.
 
 **Fix — step by step (all in the web bundle; native needs NO change — when the web ignores an
 injected page it never posts `page-changed`, so `currentPageRef` stays on the browsed page and the
@@ -1493,6 +1495,7 @@ device checked in (HTTP is unaffected), reinforcing false confidence.
    code (plain es-MX, no jargon):
    - `FOLLOWER_START_FAILED`: **"Este iPad no puede conectarse con el director. Activa Wi-Fi y Bluetooth, y permite Red local en Ajustes → Privacidad → Red local → Signo Vivo."**
    - `DIRECTOR_START_FAILED`: **"No se pudo activar la señal para los otros iPads. Activa Wi-Fi y Bluetooth, y permite Red local en Ajustes → Privacidad → Red local → Signo Vivo."**
+     > Note: DIRNAT-03 (Wave 2) already shows a native Alert for `DIRECTOR_START_FAILED` on a director — forward only `FOLLOWER_START_FAILED` to the web banner unless the double surface is deliberate; coordinate both notified-latches in the same switch case.
    Close-button aria-label: **"Cerrar aviso"** (same as the existing banner).
 4. **Web: wire it** in `applyNativeSyncEvent` — add before the `state` handler (:972):
    ```js
@@ -2257,7 +2260,7 @@ One iPad-portrait pass stitching the findings together (director device + follow
 > exclusively `web/src/*` (app.js = 3572 lines, index.html = 363, styles.css = 2345, manifest.webmanifest = 35,
 > sw.js = 237), plus one additive `sync-worker` change (FOLWEB-02) and new test files under `e2e/`.
 
-## 1. Workstream intro
+## 1. Workstream intro (WS3)
 
 **Theme.** The shared web bundle (served at signovivo.com AND bundled into the native shell) has a
 discoverability and self-service hole: the entire browse/search IA hides behind an unmarked edge
@@ -2362,7 +2365,7 @@ the PRODUCTION relay room and flips live followers' pages.
 
 ---
 
-## 2. Findings
+## 2. Findings (WS3)
 
 #### IANAV-02 — Entire browse/search IA is behind an invisible left-edge swipe; followers have no visible entry to the song list at all `high` `web` `web-only`
 
@@ -2421,7 +2424,8 @@ gesture (help) is itself unreachable (FOLWEB-05).
    // pause auto-follow and surface the way back. No-op with no live director (and on
    // native, where the relay is disabled and relay.hasDirector is always false).
    const noteIntentionalBrowse = (targetPage) => {
-     if (!relay.hasDirector || relay.livePage == null) return;
+     if (!hasLiveDirector() || liveDirectorPage() == null) return;
+     if (targetPage === liveDirectorPage()) return; // transport-agnostic: FOLNAT-01's mesh tracker feeds these helpers on native
      if (targetPage === relay.livePage) return;
      relay.browsing = true;
      relay.following = false;
@@ -3382,7 +3386,7 @@ who must act on it mid-Mass.
    (If IANAV-09 already deleted `makeSongButton`/index renderers, their "Canción" fallbacks are
    gone — do this pass AFTER the deletion to avoid dead edits.)
 3. **Director banner rewrite** (`app.js:912`). This string is shared with FAILUX-09 (other
-   workstream: append the recovery action + re-show behavior). Land ONE combined string here and
+   workstream: append the recovery action + re-show behavior). AUTHORITATIVE: FAILUX-09's Wave-2 string wins — if Wave 2 already landed, re-pin its string in the IANAV-10 test and skip this rewrite. Land ONE combined string here and
    tell that workstream it's done, or vice versa — never two edits:
    ```js
    msg.textContent = "No se pudo conectar con signovivo.com: el código de director fue rechazado. "
@@ -3881,7 +3885,7 @@ entry point for §3's feature if approved.)
 **Tests.** (Never `npm run test:e2e`; never `e2e/relay-sync.test.mjs`.)
 - **Unit (node, CI-safe):** extract the routing decision into the new pure lib this workstream
   adds anyway (see §3 step 1): `svWebDirector.decideCodeEntry({digits, hasBridge,
-  nativeFileMode, webDirectorEnabled})` → `"song" | "bridge-code" | "flash-invalid" |
+  nativeFileMode, enabled})` → `"song" | "bridge-code" | "flash-invalid" |
   "explain-ipad" | ...`. New file `e2e/svWebDirector.test.mjs` (node:test, pattern of
   `e2e/svRelayRoom.test.mjs`) pinning: `{len:10, web} → "explain-ipad"`, `{len:6, web} →
   "flash-invalid"`, `{len:10, bridge} → "bridge-code"`, `{len:3} → "song"`, junk inputs never
@@ -4114,7 +4118,7 @@ free):
   ```
   Responses: `200 {ok:true, seq}` accepted · `200 {ok:true, seq, ignored:true}` fresh-room
   seq-gate (NOT an error; see §3.4 step 6) · `401 {ok:false,error:"unauthorized"}` bad/retired
-  code · `429 {ok:false,error:"rate_limited"}` token bucket (15 burst / 2 per s per IP,
+  code · `429 {ok:false,error:"rate_limited"}` token bucket (15 burst / 2 per s per IP — 25/4 once SYNCE2E-09 lands,
   index.ts:138) · `400/413/500` per index.ts:789-815.
 - **`GET {RELAY_BASE}/r/{RELAY_ROOM}/state`** → snapshot + `now` (index.ts:748-763) — used for
   the pre-entry freshness warning and the while-directing conflict poll.
@@ -4222,10 +4226,10 @@ index.ts:159-167 + :156-158). So the first real publish IS the credential check:
 2. Publish the CURRENT page (`state.currentPage` — if they were following, that IS the live page,
    so followers don't jump): POST per §3.3 with a 7s AbortController (mirror
    directorRelaySync.js:50).
-3. `401/403` → reset `code`/`active`, show **"El relé no aceptó este código. Revisa el número e
+3. `401/403` → reset `code`/`active`, show **"El código no fue aceptado. Revisa el número e
    intenta de nuevo."** on the sheet; the device never left follower mode. (Garbage code = honest
    verdict at last — the worker is the validator.)
-4. Network failure / abort → **"Sin conexión con el relé. Revisa tu internet e intenta de
+4. Network failure / abort → **"Sin conexión con signovivo.com. Revisa tu internet e intenta de
    nuevo."**; stay follower.
 5. `200` (with or without `ignored:true` — while a fresh director is live our wall-clock seq
    normally wins, but if the very first frame is ignored the 12s heartbeat + next page turn will
@@ -4258,7 +4262,7 @@ index.ts:159-167 + :156-158). So the first real publish IS the credential check:
   mirror of `doPublish`/`publishPageToRelay` (directorRelaySync.js:62-129), with:
   - `webDirector.seq = svWebDirector.nextSeq(webDirector.seq, Date.now())`,
   - on `res.ok` → `webDirector.lastOkAt = Date.now(); webDirector.authWarned = false;`,
-  - on `401/403` once (`!authWarned`) → `authWarned = true; showRelayAuthWarning(res.status);` —
+  - on `401/403` once (`!authWarned`) → `authWarned = true;` + show the code-rejected banner (post-Wave-2 name: `showDirectorWarning("code-rejected")`) —
     the exact banner + copy the native director gets (:887-925), already in the bundle. A
     mid-Mass code rotation is therefore visible, not silent.
   - on network throw → swallow (next turn / heartbeat republishes) — the chip's staleness facet
@@ -4306,9 +4310,8 @@ pre-M4 there is no transmitterId, so a false positive is possible only if someth
 a HIGHER seq (another wall-clock publisher — which IS the conflict case) — the heuristic is sound.
 The NATIVE director in the ping-pong still gets no signal until M4's `{ignored:true}`/pill work.
 
-**Step 11 — Stepping down.** Branch the existing badge tap handler (:2426-2431): keep the
-`window.confirm("¿Salir del modo director?…")`; on OK, `if (webDirector.active)
-exitWebDirector(); else postNativeBridge({type:"exit-director"});`. `exitWebDirector()`:
+**Step 11 — Stepping down.** Branch DIRNAT-04's exit dialog (after Wave 2 the raw `window.confirm` is gone — do not re-add it): in its destructive-button handler run `if (webDirector.active)
+exitWebDirector(); else postNativeBridge({type:"exit-director"});`. Branch the dialog BODY too: when `webDirector.active`, use **"Este teléfono volverá a seguir al director."** (DIRNAT-04's native body "Este iPad quedará en modo lectura." is false here). `exitWebDirector()`:
 1. `webDirector.code = ""` FIRST (in-flight drain drops, step 7), `active = false`; clear
    `heartbeatTimer`/`conflictTimer`; remove the chip; `authWarned = false`.
 2. Role UI back: `state.nativeSyncRole = "off"; renderDirectorModeBadge();` (badge hides, ⌕
@@ -4397,7 +4400,7 @@ Prereqs: feature built behind `?dir=1` (D3 soak), a REAL director code on hand, 
    ♪ → real code → Ir → the "Este código se usa en el iPad…" sheet, NO director option. Back to
    the `&dir=1` URL for the rest.
 5. **Bad code honest 401:** A: ♪ → `9999999999` → "Dirigir desde aquí (emergencia)" → confirm →
-   "El relé no aceptó este código…" — still a follower.
+   "El código no fue aceptado…" — still a follower.
 6. **Become web director:** A: ♪ → real code → emergency button → confirm sheet (plain variant —
    empty staging room) → "Sí, dirigir" → DIRECTOR badge + ⌕ visible, ⟳ gone, chip "● EN DIRECTO…
    los iPads sin internet no te siguen".
@@ -5734,7 +5737,7 @@ workstreams.
 
 | PR | Contents | Ships via | Findings |
 |---|---|---|---|
-| **WS6-A — "make the comments and docs true"** | Comment/doc rewrites + one dev-tool default-path fix. Zero shipped-behavior delta by construction. | Repo-only; web comments ride the next Pages deploy, native comments ride the next build, worker redeploy optional | VESTIG-02, VESTIG-01, VESTIG-03, VESTIG-04, VESTIG-05, VESTIG-07 (document option), N2W-05 leg 1 (the `:585` comment) |
+| **WS6-A — "make the comments and docs true"** | Comment/doc rewrites + one dev-tool default-path fix. Zero shipped-behavior delta by construction. | Repo-only; web comments ride the next Pages deploy, native comments ride the next build, worker redeploy optional | VESTIG-02, VESTIG-01, VESTIG-03, VESTIG-04, VESTIG-05, VESTIG-07 (document option), N2W-05 leg 1 (the `:585` comment). VESTIG-02 executes early in Wave 1 per §3 — drop it from WS6-A when Wave 1 already landed it |
 | **WS6-B — "delete the provably dead"** | File and declaration deletions, each with grep proofs re-run at commit time. Still zero user-observable change. | Repo-only + next web deploy (VESTIG-11) / next native build (VESTIG-08, -09, N2W-05 leg 2) | VESTIG-08, VESTIG-09, VESTIG-11, VESTIG-12 (per decision), N2W-05 leg 2 (INITIAL_BOOK deletion — see its sequencing decision) |
 
 Why this split: WS6-A is reviewable as "text only — `git diff` shows no executable lines changed
@@ -6306,6 +6309,7 @@ exists, reinforcing the deleted-system narrative this workstream is scrubbing.
      lastPagePrefix: "sv.book.lastPage.",
    } as const;
    ```
+   If FOLNAT-04's PR-WS2-C (Wave 3) already removed `lastPagePrefix` (it deletes the write and the key), the replacement block keeps `lastSyncRole` ONLY.
 4. Fix the header comment at :5: `assets/alvernia_manual_2.pdf` → `assets/signo_vivo_371.pdf`.
 5. **Data-at-rest orphans: leave them.** Devices upgraded from pre-374 builds keep a few hundred
    bytes under `sv.onboarding.*`, `sv.mode`, `sv.book.active`, `sv.standard.accessName`,
@@ -6633,7 +6637,7 @@ The safe suite is the set of **network-free node contract tests**. Before runnin
 
 - `e2e/svRelayRoom.test.mjs`, `e2e/svSyncDecision.test.mjs`, `e2e/svSelftest.test.mjs` — web sync-logic contracts
 - `e2e/nearby-sync-contract.test.mjs` — native mesh JS contract
-- `e2e/native-entrypoint.test.mjs`, `e2e/native-stability-config.test.mjs`, `e2e/eas-config.test.mjs`, `e2e/permission-flow.test.mjs` — native config/flow pins
+- `e2e/native-entrypoint.test.mjs`, `e2e/native-stability-config.test.mjs`, `e2e/permission-flow.test.mjs` — native config/flow pins; `e2e/eas-config.test.mjs` shells out and is excluded from CI — run it only when EAS config itself changes
 - `e2e/offline-books-integrity.test.mjs`, `e2e/repo-minimal-footprint.test.mjs` — asset + repo inventory pins (deletions in Wave 6 may require updating the footprint allowlist — that is an *expected* edit, not a bypass)
 - `sync-worker/test/a2.test.mjs` (+ `run-a2.sh`) — worker publish/seq/rate-limit harness against **local `wrangler dev`** only
 - `scripts/smoke-boot.mjs` — boot smoke; `scripts/check-book-consistency.mjs` — book asset integrity
