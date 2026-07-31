@@ -703,10 +703,22 @@ fs.writeFileSync(
   htmlSrc.replace("</head>", `${inlineScripts}</head>`),
 );
 
-// Far-future browser cache for the immutable page images. The WebP filenames are
-// content-stable (page-NNN.webp) under each book; page updates ride the SW
-// cache-version bump, so it's safe to tell the browser to keep these forever.
-// Cloudflare Pages serves custom headers from this _headers file.
+// INERT BY DESIGN — this rule does nothing in production, and that is currently the SAFER
+// outcome. Cloudflare Pages rejects any `_headers` path containing more than one `*`, and
+// `/books/*/pages/*` has two, so Pages drops the rule at parse time and serves its own default
+// `public, max-age=0, must-revalidate` for these images instead. Verified 2026-07-31 against
+// signovivo.com, the raw Pages origin, and a throwaway preview deploy; `wrangler pages dev` logs
+// it outright as an invalid header rule. (Placeholders are unlimited — only splats are capped at
+// one — so the valid rewrite is `/books/:book/pages/*`, confirmed working on that preview deploy.)
+//
+// DO NOT apply that rewrite yet. Page filenames are stable across PDF revisions, so making
+// `immutable` real would pin a revised page in every follower's browser cache for a YEAR with no
+// operator remedy short of a cache purge plus a per-device storage clear — and pages DO get
+// revised in place: build 377 / PR #257 edited assets/alvernia_manual_2.pdf and re-rendered ~290
+// pages under unchanged page-NNN.webp names. M6 in docs/major-update-2026-07.md gives pages
+// hash-keyed URLs, which is what makes `immutable` safe; enable it then, not before.
+// The rule is kept (rather than deleted) as the marker for that M6 follow-up. See web/src/sw.js,
+// whose cross-version page-cache fallback is governed by the same staleness question.
 fs.writeFileSync(
   path.join(distDir, "_headers"),
   "/books/*/pages/*\n  Cache-Control: public, max-age=31536000, immutable\n",
