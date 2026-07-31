@@ -185,7 +185,7 @@ const state = {
 const BOOK_ID = "standard";
 // Fallback page count used for page-filename pad width before the manifest lands (the real value
 // comes from /books/standard/pages.json → state.totalPages). Kept generous so pad width is right.
-const STANDARD_TOTAL_PAGES = 371;
+const STANDARD_TOTAL_PAGES = 372;
 state.currentBook = BOOK_ID;
 
 let cachedSongKeys = null;
@@ -252,7 +252,7 @@ const coreAssets = () => [
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 // pdftoppm zero-pads page filenames to the WIDTH of the book's total page count
-// (standard: 371 → page-001.webp). Derive the pad width from the live totalPages,
+// (standard: 372 → page-001.webp). Derive the pad width from the live totalPages,
 // falling back to the known standard count before the manifest lands.
 const pagePadWidth = () => String(state.totalPages || STANDARD_TOTAL_PAGES || 0).length;
 const pageFileName = (pageNumber) => {

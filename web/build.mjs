@@ -672,7 +672,7 @@ const DEFAULT_BOOK = "standard";
 const standard = buildBook({
   id: DEFAULT_BOOK,
   label: "Manual Alvernia",
-  pdfPath: path.join(rootDir, "assets", "signo_vivo_371.pdf"),
+  pdfPath: path.join(rootDir, "assets", "signo_vivo_372.pdf"),
 });
 
 // ─── books.json — single-book registry ───────────────────────────────────────
