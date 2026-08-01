@@ -1,34 +1,40 @@
 const CACHE_VERSION = "__CACHE_VERSION__";
+// Content-address of the BOOK (source PDF bytes + render knobs, hashed by build.mjs).
+// Distinct from CACHE_VERSION (the shell hash) ON PURPOSE:
+//   - shell-only deploy → bookVersion unchanged → PAGE_CACHE name unchanged → every cached
+//     page stays a hit; no 25MB re-download for a CSS fix.
+//   - ANY book change — including a page revised IN PLACE under an unchanged page-NNN.webp
+//     filename — → new PAGE_CACHE name → the network-first page handler below fetches the
+//     new bytes instead of resurrecting the old ones from cache.
+// A book-only change still propagates without a shell bump because this token changes the
+// emitted sw.js bytes, which is what triggers the browser's SW update flow.
+const BOOK_VERSION = "__BOOK_VERSION__";
 const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
-const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vivo-pages-${BOOK_VERSION}`;
 const STATIC_CACHE_PREFIX = "signo-vivo-static-";
 const PAGE_CACHE_PREFIX = "signo-vivo-pages-";
-// Page filenames (page-NNN.webp) are STABLE per book, and book updates are normally ADDITIVE —
-// pages appended, existing ones untouched — so a precached page from an OLDER cache version is
-// normally the right bytes for that same URL. We therefore KEEP previous page caches across a
-// version bump (instead of deleting them in activate) and let the page handler fall back across
-// them. This is what saves a
-// follower who goes offline right after a deploy: the freshly-activated SW's own PAGE_CACHE is
-// empty (app.js re-precaches into it lazily), but the previous version's full bundle is still
-// there to serve. We retain the two newest page caches so storage can't grow unbounded across many
-// deploys — the current (new) one plus the immediately-previous full one is all the rollover needs.
+// We KEEP the previous book's page cache across a version bump (instead of deleting it in
+// activate) and the page handler falls back to it when the network can't help. That is what
+// saves a follower who goes offline right after a book deploy: the freshly-activated SW's own
+// PAGE_CACHE is empty (app.js re-precaches into it lazily), but the previous version's full
+// bundle is still there to serve — a stale page beats a blank one, and ONLY when offline.
+// Two newest kept so storage can't grow unbounded: current + the immediately-previous full one.
 //
-// That justification is a CONVENTION about how the book changes, NOT an HTTP guarantee. An earlier
-// version of this comment claimed these images ship `Cache-Control: max-age=31536000, immutable`
-// per build.mjs's `_headers`; they do not. Cloudflare Pages rejects a `_headers` path containing
-// more than one `*`, and `/books/*/pages/*` has two, so that rule is dropped and production serves
-// `public, max-age=0, must-revalidate` (verified 2026-07-31 against signovivo.com and the raw Pages
-// origin). Nothing enforces byte-identity across versions.
-//
-// So the real limit of the fallback below: when a page's CONTENT changes under an UNCHANGED
-// filename, a returning follower keeps seeing the old bytes until the old cache rolls out. That is
-// not hypothetical — build 377 / PR #257 edited assets/alvernia_manual_2.pdf in place and
-// re-rendered ~290 pages. Today's revalidating header is what bounds that staleness to the SW
-// caches instead of a year of browser cache, which is why build.mjs's inert rule is deliberately
-// left inert. M6 in docs/major-update-2026-07.md is the real fix (hash-keyed page URLs): once page
-// content lives at a content-addressed path, a changed page is a changed URL, this fallback misses
-// it naturally, and `immutable` becomes safe to turn on.
+// HISTORY, do not regress this: the fallback used to run BEFORE the network, justified first by
+// an `immutable` header that never actually applied in prod (Cloudflare Pages drops `_headers`
+// rules with two `*`s — see PR #273), then by an "additive-only" convention that build 377 / PR
+// #257 had already violated by re-rendering ~290 pages in place. Old-cache-before-network meant
+// a page changed under an unchanged filename NEVER reached an already-cached device — the
+// re-precache itself was served from the old cache, copying stale bytes forward version after
+// version. Network-first-on-miss (below) + the book-keyed cache name is the fix. M6's
+// hash-keyed page URLs remain the long-term design; until then `immutable` stays inert.
 const PAGE_CACHES_TO_KEEP = 2;
+// Bound the network attempt for a PAGE image before falling back to a previous book's cache.
+// Truly offline (church) fetches reject in milliseconds, so this timer is irrelevant at Mass;
+// it only matters on pathological weak-signal networks, where showing the PREVIOUS edition of
+// a page after 3s beats an indefinite spinner mid-song. The slow fetch is not abandoned — it
+// finishes via waitUntil and lands in the cache for the next page-turn.
+const PAGE_NETWORK_TIMEOUT_MS = 3000;
 // The shell assets a returning follower MUST have cached to load/reload offline. If the install
 // precache can't populate these (e.g. install ran on the last bar of signal, then the network
 // died), we must NOT let this half-baked SW take over from a fully-cached older one.
@@ -110,8 +116,9 @@ self.addEventListener("activate", (event) => {
   // Two deliberate departures from a naive "delete everything that isn't the current version":
   //   1. PAGE caches: keep the newest PAGE_CACHES_TO_KEEP (current + previous) instead of nuking
   //      the old one. The new PAGE_CACHE starts empty and only fills lazily, so deleting the old
-  //      full bundle here would strand a follower who goes offline right after a deploy. Pages are
-  //      immutable, so the surviving old cache is byte-valid and the page handler falls back to it.
+  //      full bundle here would strand a follower who goes offline right after a book deploy. The
+  //      surviving old cache is the PREVIOUS edition — possibly stale bytes for a revised page —
+  //      which the handler serves only when the network can't provide the current ones.
   //   2. STATIC caches: only delete the old shell once the NEW shell is actually cached. If we
   //      somehow activate without a complete shell (shouldn't happen — skipWaiting is gated above —
   //      but be defensive), keep the old static cache so offline reloads still find a shell.
@@ -120,9 +127,16 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
 
       const pageCaches = keys.filter((key) => key.startsWith(PAGE_CACHE_PREFIX));
-      // caches.keys() preserves insertion order, so the tail is the newest. Always retain the
-      // current PAGE_CACHE plus enough recent ones to total PAGE_CACHES_TO_KEEP.
-      const pageCachesToKeep = new Set([PAGE_CACHE, ...pageCaches.slice(-PAGE_CACHES_TO_KEEP)]);
+      // caches.keys() preserves insertion order, so the tail is the newest. Count the CURRENT
+      // cache toward the cap whether or not it exists yet (it usually doesn't at activate — it's
+      // created lazily on first use): current + (PAGE_CACHES_TO_KEEP - 1) most recent others.
+      // The naive `slice(-PAGE_CACHES_TO_KEEP)` kept THREE full editions (~84MB) whenever the
+      // current cache hadn't been created yet, on exactly the storage-constrained old devices
+      // the cap exists for.
+      const pageCachesToKeep = new Set([
+        PAGE_CACHE,
+        ...pageCaches.filter((key) => key !== PAGE_CACHE).slice(-(PAGE_CACHES_TO_KEEP - 1)),
+      ]);
 
       const shellReady = await isShellCached();
 
@@ -151,6 +165,15 @@ self.addEventListener("message", (event) => {
     // a shell-less (offline-installed) SW doesn't get pushed live and wipe the old shell.
     event.waitUntil(skipWaitingIfShellReady());
   }
+  // Version handshake for the precache gate. app.js refuses to run ensureOfflineBundle until the
+  // CONTROLLING SW answers with the SAME book version — otherwise, during the deploy skew window,
+  // a NEW app.js running under an OLD (cache-first, pre-BOOK_VERSION) SW would have its precache
+  // fetches answered instantly from the old SW's stale page cache and would launder previous-
+  // edition bytes into the new book-keyed cache. Old SWs simply never reply; app.js treats
+  // silence as "wrong SW, don't precache yet" and retries after the controllerchange reload.
+  if (event.data?.type === "GET_BOOK_VERSION") {
+    event.ports?.[0]?.postMessage({ bookVersion: BOOK_VERSION });
+  }
 });
 
 // Matches "/books/standard/pages/page-NNN.webp" so page images use the dedicated PAGE_CACHE
@@ -162,17 +185,28 @@ const shouldCacheResponse = (response) => {
   return !cacheControl.toLowerCase().includes("no-store");
 };
 
-// Look for a page image in ANY surviving page cache (current + the previous version kept by
-// activate). Pages are immutable, so a hit in an older version's cache is byte-identical. Used as
-// a fallback so a deploy bump (which starts the new PAGE_CACHE empty) can't strand an offline
-// follower whose full bundle lives in the previous cache. ignoreSearch covers retry/reload params.
+// Look for a page image in any PREVIOUS book version's page cache (kept by activate). A hit is
+// that page as of the PREVIOUS edition — right bytes for an unchanged page, stale bytes for a
+// revised one — so this runs strictly AFTER the network has had its chance: it exists so a book
+// bump (which starts the new PAGE_CACHE empty) can't strand an OFFLINE follower whose full bundle
+// lives in the previous cache. ignoreSearch covers app.js's ?retry=/?reload= cache-busting params.
 const matchAnyPageCache = async (request) => {
-  const keys = await caches.keys();
+  // Newest-first: insertion order puts the freshest surviving edition LAST, and when several
+  // caches hold the same URL the least-stale copy should win the fallback.
+  const keys = (await caches.keys()).reverse();
   for (const key of keys) {
     if (key === PAGE_CACHE || !key.startsWith(PAGE_CACHE_PREFIX)) continue;
     const cache = await caches.open(key);
     const hit = await cache.match(request, { ignoreSearch: true });
-    if (hit) return hit;
+    if (hit) {
+      // Tag the response so callers can TELL it is previous-edition material. Display code
+      // ignores the header; app.js's cacheSinglePage treats it as a failed download so these
+      // bytes are never persisted into the current book's cache as if they were fresh
+      // (defense-in-depth behind the no-store branch in the fetch handler).
+      const headers = new Headers(hit.headers);
+      headers.set("X-SV-Prev-Edition", "1");
+      return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
+    }
   }
   return null;
 };
@@ -191,24 +225,71 @@ self.addEventListener("fetch", (event) => {
         // every offline retry of an already-cached page would miss and hit the dead network —
         // the recovery path that exists to fix transient failures would be a guaranteed miss
         // offline, stranding the follower on "No se pudo cargar esta página." for a cached page.
+        // A hit here is CURRENT-edition bytes by construction (PAGE_CACHE is book-keyed and only
+        // ever filled from the network below / app.js's precache), so serving it instantly is safe.
         const cache = await caches.open(PAGE_CACHE);
         const cached = await cache.match(event.request, { ignoreSearch: true });
         if (cached) return cached;
 
-        // Fall back across previous-version page caches (kept in activate). After a deploy the new
-        // PAGE_CACHE is empty until app.js re-precaches; the prior version's full, immutable bundle
-        // is still here. This is what keeps a follower who goes offline right after a bump working.
+        // Miss → NETWORK FIRST, then previous-edition caches. Order is load-bearing: the old
+        // order (previous caches first) meant a page revised under an unchanged filename could
+        // never reach an already-cached device — even the re-precache was answered from the old
+        // cache, copying stale bytes forward forever. Offline cost: none — a dead network rejects
+        // in milliseconds and we land on the fallback exactly like before. Weak-signal cost is
+        // bounded by PAGE_NETWORK_TIMEOUT_MS, and the race is on response HEADERS (TTFB), not on
+        // the full body: the winning response streams to the page while the cache write happens
+        // in the background, so a slow-but-alive network never stalls a page turn on the put.
+        const cacheKey = new Request(requestUrl.origin + requestUrl.pathname);
+        let networkError = null;
+        const fetched = fetch(event.request).catch((error) => {
+          networkError = error;
+          return null; // settled-but-failed marker
+        });
+        // Persist in the background whenever the fetch succeeds. clone() is taken in the same
+        // microtask turn the response settles in — before the page starts consuming the body.
+        // A failed put (storage quota, private mode) must NEVER cost the page its bytes: the
+        // network delivered them; caching is best-effort. Normalized to the bare URL (drop any
+        // ?retry=/?reload=) to stay deduplicated and consistent with getCachedPageSet.
+        const putChain = fetched.then(async (response) => {
+          if (!response || !response.ok || !shouldCacheResponse(response)) return;
+          try {
+            await cache.put(cacheKey, response.clone());
+          } catch (_) {
+            /* best-effort */
+          }
+        });
+        event.waitUntil(putChain);
+
+        // PRECACHE CONTRACT: app.js's cacheSinglePage — the ONLY writer that persists page bytes
+        // app-side — fetches with {cache:"no-store"}. Those requests must NEVER be answered from
+        // a previous edition: the caller's entire purpose is to install CURRENT-edition bytes,
+        // and a stale 200 here would be written into the new book's cache and certified as ready
+        // (the original drift bug, reintroduced through the app's side door). Fail honestly and
+        // let ensureOfflineBundle's catch retry when the network is real. Live <img> loads use
+        // the default cache mode and never take this branch.
+        if (event.request.cache === "no-store") {
+          const settled = await fetched;
+          if (settled) return settled; // non-ok included: cacheSinglePage's !ok check handles it
+          throw networkError;
+        }
+
+        const timedOut = Symbol("timeout");
+        const winner = await Promise.race([
+          fetched,
+          new Promise((resolve) => setTimeout(() => resolve(timedOut), PAGE_NETWORK_TIMEOUT_MS)),
+        ]);
+        if (winner !== timedOut && winner && winner.ok) return winner;
+
+        // Network failed / non-ok / slow-to-first-byte → previous edition from an older cache
+        // (tagged X-SV-Prev-Edition by matchAnyPageCache). A slow fetch that eventually lands
+        // still reaches the cache via putChain, so the NEXT view of this page is current.
         const fallback = await matchAnyPageCache(event.request);
         if (fallback) return fallback;
 
-        const response = await fetch(event.request);
-        if (response.ok && shouldCacheResponse(response)) {
-          // Normalize the key to the bare URL (drop any ?retry=/?reload=) so cache entries stay
-          // deduplicated and consistent with app.js's getCachedPageSet (which counts by pathname).
-          const cacheKey = new Request(requestUrl.origin + requestUrl.pathname);
-          cache.put(cacheKey, response.clone());
-        }
-        return response;
+        // No cached copy anywhere: the network is all we have — give it its full chance.
+        const settled = await fetched;
+        if (settled) return settled; // includes non-ok responses: let the page's own retry UI run
+        throw networkError; // fetch rejected outright — surfaces exactly like the old code's throw
       })(),
     );
     return;

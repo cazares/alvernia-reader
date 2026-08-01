@@ -7,6 +7,43 @@ const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
 const srcDir = path.join(rootDir, "web", "src");
 const distDir = path.join(rootDir, "web", "dist");
 const booksDir = path.join(distDir, "books");
+
+const parsePositiveInt = (value, fallback) => {
+  const n = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const parseJpegQuality = (value, fallback) => {
+  const n = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(100, n));
+};
+
+// Rendering pages from the PDF is the single biggest lever for size vs sharpness.
+// Phone-readable target: render lossless PNG, then encode compact WebP
+// (pdftoppm can't emit WebP directly). ~115 DPI + q60 ≈ ~28MB for the full manual.
+// (Defined up here, before the version stamps, because they feed bookVersion below.)
+const PDF_RENDER_DPI = parsePositiveInt(process.env.ALVERNIA_PDF_RENDER_DPI, 115);
+const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60);
+const BOOK_PDF_PATH = path.join(rootDir, "assets", "signo_vivo_372.pdf");
+
+// Content-address of the BOOK: the source PDF's bytes plus the two render knobs that
+// determine the output pixels. This is what keys the page-image cache (PAGE_CACHE in
+// sw.js/app.js), SEPARATELY from the shell's cacheVersion, so that:
+//   - a shell-only deploy does NOT bust the page cache (no 25MB re-download for a CSS fix);
+//   - ANY change to the book — including a page revised IN PLACE under an unchanged
+//     page-NNN.webp filename — busts it, and the SW's network-first page path (sw.js)
+//     then fetches the new bytes instead of resurrecting the old ones.
+// Before this existed, cacheVersion hashed only shell files, so an in-place page edit
+// (the build-377 header cleanup class, or the title-page date stamp) NEVER reached any
+// device that already had the page cached. Appending pages worked; correcting one didn't.
+const bookVersion = (() => {
+  const hash = crypto.createHash("sha256");
+  hash.update(fs.readFileSync(BOOK_PDF_PATH));
+  hash.update(`dpi=${PDF_RENDER_DPI};q=${WEBP_QUALITY}`);
+  return hash.digest("hex").slice(0, 12);
+})();
+
 const cacheVersion = (() => {
   const gitSha = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
     cwd: rootDir,
@@ -64,6 +101,7 @@ const relayBase = (process.env.ALVERNIA_RELAY_BASE || "https://signovivo-sync.4j
 const appSource = fs
   .readFileSync(path.join(srcDir, "app.js"), "utf8")
   .replaceAll("__CACHE_VERSION__", cacheVersion)
+  .replaceAll("__BOOK_VERSION__", bookVersion)
   .replaceAll("__RELAY_BASE__", relayBase)
   .replaceAll("__BUILD_NUMBER__", buildNumber);
 fs.writeFileSync(path.join(distDir, "app.js"), appSource);
@@ -73,7 +111,11 @@ fs.copyFileSync(path.join(srcDir, "manifest.webmanifest"), path.join(distDir, "m
 fs.copyFileSync(path.join(rootDir, "assets", "icon.png"), path.join(distDir, "icon.png"));
 const serviceWorkerSource = fs
   .readFileSync(path.join(srcDir, "sw.js"), "utf8")
-  .replaceAll("__CACHE_VERSION__", cacheVersion);
+  .replaceAll("__CACHE_VERSION__", cacheVersion)
+  // NOTE: a book-only change leaves cacheVersion untouched but still changes the EMITTED
+  // sw.js bytes (this token) — which is exactly what triggers the browser's SW update flow
+  // and rolls the fleet onto the new book. The propagation ride-along is load-bearing.
+  .replaceAll("__BOOK_VERSION__", bookVersion);
 fs.writeFileSync(path.join(distDir, "sw.js"), serviceWorkerSource);
 
 const generateIcon = (size, outputName) => {
@@ -91,24 +133,8 @@ const generateIcon = (size, outputName) => {
 generateIcon(192, "icon-192.png");
 generateIcon(512, "icon-512.png");
 
-const parsePositiveInt = (value, fallback) => {
-  const n = Number.parseInt(String(value ?? "").trim(), 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-};
-
-const parseJpegQuality = (value, fallback) => {
-  const n = Number.parseInt(String(value ?? "").trim(), 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(1, Math.min(100, n));
-};
-
-// Rendering pages from the PDF is the single biggest lever for size vs sharpness.
-// Phone-readable target: render lossless PNG, then encode compact WebP
-// (pdftoppm can't emit WebP directly). ~115 DPI + q60 ≈ ~28MB for the full manual.
-const PDF_RENDER_DPI = parsePositiveInt(process.env.ALVERNIA_PDF_RENDER_DPI, 115);
-const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60);
-
 // ─── Shared page render + encode ─────────────────────────────────────────────
+// (PDF_RENDER_DPI / WEBP_QUALITY are defined at the top of the file — they feed bookVersion.)
 // Renders every PDF page to WebP under <bookOutDir>/pages/page-NNN.webp using the
 // same pdftoppm→cwebp path for every book. Returns the sorted list of webp files.
 const renderPagesToWebp = (pdfPath, pagesOutDir) => {
@@ -672,7 +698,7 @@ const DEFAULT_BOOK = "standard";
 const standard = buildBook({
   id: DEFAULT_BOOK,
   label: "Manual Alvernia",
-  pdfPath: path.join(rootDir, "assets", "signo_vivo_372.pdf"),
+  pdfPath: BOOK_PDF_PATH, // single source of truth — the same path bookVersion hashes
 });
 
 // ─── books.json — single-book registry ───────────────────────────────────────

@@ -215,12 +215,21 @@ const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
 const CACHE_VERSION = "__CACHE_VERSION__";
+// Content-address of the BOOK (source PDF + render knobs, hashed by build.mjs). Keys everything
+// page-image-related SEPARATELY from the shell's CACHE_VERSION: a shell deploy leaves the cached
+// book untouched (no 25MB re-download), while ANY book change — even a page revised in place under
+// an unchanged filename — starts a fresh page cache that the SW fills from the network. MUST stay
+// in lockstep with sw.js's PAGE_CACHE name, or getCachedPageSet counts a cache the SW isn't using.
+const BOOK_VERSION = "__BOOK_VERSION__";
 // Human-facing build number, baked from version.json at build time, shown as a small "v<NNN>" badge
 // so signovivo.com always reveals which build it's on. Native injects its own version + overlay.
 const BUILD_NUMBER = "__BUILD_NUMBER__";
 const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
-const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
-const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vivo-pages-${BOOK_VERSION}`;
+// Book-keyed (not shell-keyed): "fully cached offline" is a claim about the BOOK, so a shell-only
+// deploy must not un-ready a device, and a book change must — the new key reads as not-ready,
+// isOfflineBundleReady re-verifies, and ensureOfflineBundle re-fetches into the new page cache.
+const OFFLINE_READY_KEY = `sv-offline-ready-${BOOK_VERSION}`;
 const OFFLINE_DB_NAME = "signo-vivo-offline";
 const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
@@ -566,15 +575,61 @@ const ensureCoreAssetsCached = async () => {
 const cacheSinglePage = async (cache, pageNumber) => {
   const url = pageFileName(pageNumber);
   if (await cache.match(url)) return false;
+  // {cache:"no-store"} is a CONTRACT with the SW, not just an HTTP-cache bypass: the SW's page
+  // handler refuses to answer no-store requests from a previous edition's cache, so an offline /
+  // weak-signal precache fails honestly instead of "completing" instantly with stale bytes.
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`No se pudo descargar la página ${pageNumber}`);
+  }
+  // Backstop for the same invariant (e.g. an OLD pre-BOOK_VERSION SW that ignores the no-store
+  // contract but whose fallback still tags — or any future code path that serves a tagged
+  // response): previous-edition bytes must never be persisted into THIS book's cache as if they
+  // were current, nor counted toward its completeness. That silent laundering was the original
+  // stale-book bug; failing the download keeps ensureOfflineBundle retryable and the ready flag
+  // unset until genuine current-edition bytes arrive.
+  if (response.headers.get("X-SV-Prev-Edition")) {
+    throw new Error(`Página ${pageNumber} servida de una edición anterior — reintentando en línea`);
   }
   await cache.put(url, response.clone());
   return true;
 };
 
+// Ask the CONTROLLING service worker which book version it serves. Returns:
+//   null       — no controller (first-ever load; fetches go straight to the network — safe)
+//   "<hex>"    — the controller's BOOK_VERSION
+//   "no-reply" — controller didn't answer (an OLD pre-BOOK_VERSION SW, or a hung one)
+const controllerBookVersion = () =>
+  new Promise((resolve) => {
+    const controller = navigator.serviceWorker?.controller;
+    if (!controller) return resolve(null);
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => resolve("no-reply"), 1500);
+    channel.port1.onmessage = (event) => {
+      clearTimeout(timer);
+      resolve(event.data?.bookVersion || "no-reply");
+    };
+    try {
+      controller.postMessage({ type: "GET_BOOK_VERSION" }, [channel.port2]);
+    } catch (_) {
+      clearTimeout(timer);
+      resolve("no-reply");
+    }
+  });
+
 const ensureOfflineBundle = async (totalPages, onProgress) => {
+  // DEPLOY-SKEW GATE. During an update there is a window where NEW app.js (this code) runs under
+  // the OLD, still-controlling SW — whose page handler is cache-first and predates the no-store
+  // contract. Precaching through it would be answered instantly from the OLD edition's cache and
+  // laundered into this book's cache at full speed, then certified "ready". Refuse to precache
+  // until the controller confirms it serves THIS book version; the controllerchange reload that
+  // accompanies every SW update re-runs the precache moments later under the right SW. Throwing
+  // (vs returning) keeps deferOfflinePrecache's catch in charge: the started flag resets and the
+  // next trigger retries.
+  const swBook = await controllerBookVersion();
+  if (swBook !== null && swBook !== BOOK_VERSION) {
+    throw new Error(`sw-version-skew: controller=${String(swBook).slice(0, 16)} app=${BOOK_VERSION}`);
+  }
   await ensureCoreAssetsCached();
   const cache = await caches.open(PAGE_CACHE);
   const cachedPages = await getCachedPageSet(cache);
@@ -606,7 +661,7 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
   try { localStorage.setItem(OFFLINE_READY_KEY, "ready"); } catch (_) {}
   fleetCheckin({ webCached: true }); // tell the readiness dashboard this iPad is fully cached
   await writeOfflineMetadata({
-    version: CACHE_VERSION,
+    version: BOOK_VERSION, // paired with isOfflineBundleReady's check — a book claim, not a shell claim
     totalPages,
     verifiedAt: new Date().toISOString(),
   });
@@ -648,7 +703,10 @@ const isOfflineBundleReady = async (totalPages) => {
   try {
     const metadata = await readOfflineMetadata();
     if (!metadata) return false;
-    if (metadata.version !== CACHE_VERSION) return false;
+    // Book-keyed on purpose: this readiness claim is about the BOOK. A shell deploy must not
+    // invalidate it (metadata from a pre-BOOK_VERSION build simply reads as a mismatch → one
+    // cheap cache-hit re-verify); a book change must and does.
+    if (metadata.version !== BOOK_VERSION) return false;
     if (metadata.totalPages !== totalPages) return false;
 
     const staticCache = await caches.open(STATIC_CACHE);
@@ -2929,19 +2987,17 @@ try {
   if (boot && typeof boot === "object") reportCrash(boot.where || "boot", boot.msg || "", boot.stack || "");
 } catch (_) {}
 
-// Rough count of cached page images across all page caches (immutable, so max across versions).
+// Count of cached page images in the CURRENT book's cache ONLY. This feeds the pre-Mass
+// readiness dashboard's webCached claim, and that claim must mean "has THIS edition" — counting
+// the max across surviving previous-edition caches (as this once did, under an "immutable pages"
+// assumption) reported every device fully cached immediately after a book deploy, which is the
+// one moment the dashboard exists to catch stragglers in.
 const countCachedPageImages = async () => {
   if (!("caches" in window)) return 0;
   try {
-    const names = await caches.keys();
-    let max = 0;
-    for (const nm of names) {
-      if (!nm.includes("pages")) continue;
-      const c = await caches.open(nm);
-      const keys = await c.keys();
-      max = Math.max(max, keys.filter((r) => r.url.includes("/pages/")).length);
-    }
-    return max;
+    const c = await caches.open(PAGE_CACHE);
+    const keys = await c.keys();
+    return keys.filter((r) => r.url.includes("/pages/")).length;
   } catch {
     return 0;
   }
