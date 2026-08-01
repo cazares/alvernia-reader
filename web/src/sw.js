@@ -3,14 +3,31 @@ const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
 const STATIC_CACHE_PREFIX = "signo-vivo-static-";
 const PAGE_CACHE_PREFIX = "signo-vivo-pages-";
-// Page images are content-immutable (Cache-Control: max-age=31536000, immutable — see
-// build.mjs _headers), so a precached page-NNN.webp from an OLDER cache version is byte-identical
-// to the new one. We therefore KEEP previous page caches across a version bump (instead of
-// deleting them in activate) and let the page handler fall back across them. This is what saves a
+// Page filenames (page-NNN.webp) are STABLE per book, and book updates are normally ADDITIVE —
+// pages appended, existing ones untouched — so a precached page from an OLDER cache version is
+// normally the right bytes for that same URL. We therefore KEEP previous page caches across a
+// version bump (instead of deleting them in activate) and let the page handler fall back across
+// them. This is what saves a
 // follower who goes offline right after a deploy: the freshly-activated SW's own PAGE_CACHE is
 // empty (app.js re-precaches into it lazily), but the previous version's full bundle is still
 // there to serve. We retain the two newest page caches so storage can't grow unbounded across many
 // deploys — the current (new) one plus the immediately-previous full one is all the rollover needs.
+//
+// That justification is a CONVENTION about how the book changes, NOT an HTTP guarantee. An earlier
+// version of this comment claimed these images ship `Cache-Control: max-age=31536000, immutable`
+// per build.mjs's `_headers`; they do not. Cloudflare Pages rejects a `_headers` path containing
+// more than one `*`, and `/books/*/pages/*` has two, so that rule is dropped and production serves
+// `public, max-age=0, must-revalidate` (verified 2026-07-31 against signovivo.com and the raw Pages
+// origin). Nothing enforces byte-identity across versions.
+//
+// So the real limit of the fallback below: when a page's CONTENT changes under an UNCHANGED
+// filename, a returning follower keeps seeing the old bytes until the old cache rolls out. That is
+// not hypothetical — build 377 / PR #257 edited assets/alvernia_manual_2.pdf in place and
+// re-rendered ~290 pages. Today's revalidating header is what bounds that staleness to the SW
+// caches instead of a year of browser cache, which is why build.mjs's inert rule is deliberately
+// left inert. M6 in docs/major-update-2026-07.md is the real fix (hash-keyed page URLs): once page
+// content lives at a content-addressed path, a changed page is a changed URL, this fallback misses
+// it naturally, and `immutable` becomes safe to turn on.
 const PAGE_CACHES_TO_KEEP = 2;
 // The shell assets a returning follower MUST have cached to load/reload offline. If the install
 // precache can't populate these (e.g. install ran on the last bar of signal, then the network

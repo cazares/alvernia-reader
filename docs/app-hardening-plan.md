@@ -408,6 +408,18 @@ switchbook, browsing-user-book-switched._
   keep immutable caching (now safe). Coordinate with P3-CACHEVERSION and the song→page→image manifest.
   **The correct long-term fix for the "song N shows the wrong/old scan" class** (song-370 fire-drill
   memory). Single-book only — the hymns-4 half of the original finding is MOOT.
+- **STATUS 2026-07-31 (severity partly overstated — read before sizing this):** the `_headers`
+  `immutable` rule has NEVER applied in production. Cloudflare Pages rejects any `_headers` path with
+  more than one `*`, and `/books/*/pages/*` has two, so Pages discards it and serves
+  `max-age=0, must-revalidate` (verified on signovivo.com, the raw pages.dev origin, and a preview
+  deploy; `wrangler pages dev` logs it as an invalid rule). So the **1-year browser-cache half of this
+  finding is unarmed** — only the SW's cross-version page-cache fallback (`sw.js` `matchAnyPageCache`)
+  actually strands old bytes, and it rolls over within `PAGE_CACHES_TO_KEEP` deploys rather than
+  persisting for a year. The in-place-revision trigger is real and has already fired: build 377 /
+  PR #257 re-rendered ~290 pages from an edited PDF under unchanged names. **Do NOT "repair" the
+  `_headers` rule as a quick win** — that would arm the year-long half that is currently harmless. The
+  rule is deliberately left inert (annotated in `web/build.mjs`/`web/src/sw.js`, PR #273) until the
+  content-hashed URLs below land. Superseded in scope by **M6** in `docs/major-update-2026-07.md`.
 - **Dedup:** = `build-release-immutable-page-urls-vs-changed-bytes`.
 
 ### P3-SW-LIFECYCLE (batch, med) `[code-grounded]`
