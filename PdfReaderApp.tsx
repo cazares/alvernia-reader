@@ -213,38 +213,22 @@ export default function App() {
         dbgDeviceRef.current = "?";
       }
       dbgLog("boot", { syncAvailable });
-      // Fleet identity: one-time name prompt (iOS), then report readiness to the dashboard.
+      // Fleet identity: report readiness under whatever label this device ALREADY has. The
+      // one-time "¿Quién usa este iPad?" Alert.prompt is gone.
+      //
+      // PR #270 removed this modal and its message says "(web PWA only — native does its own
+      // check-in)" — but the NATIVE copy survived here and still fired on every fresh install,
+      // putting a keyboard-bearing alert over the songbook on first launch. That is exactly the
+      // friction #270 set out to delete, and it lands on all 6-8 iPads after any TestFlight
+      // round. Same call as #270: choir members mostly tapped "Ahora no", so the labels were
+      // rarely filled and were not worth the boot-path interruption.
+      //
+      // Devices labelled before this build KEEP their label (the key is still read, just never
+      // written); new devices report anonymously by sv_devid, matching the web PWA's
+      // "anonymous by device" behaviour (web/src/app.js:2986). sv_fleet_skip is now dead — it
+      // only ever existed to suppress this prompt.
       try {
-        let label = await AsyncStorage.getItem("sv_fleet_label");
-        const skip = await AsyncStorage.getItem("sv_fleet_skip");
-        if (!label && !skip && Platform.OS === "ios") {
-          label = await new Promise<string>((resolve) => {
-            Alert.prompt(
-              "¿Quién usa este iPad?",
-              "Para el tablero del coro — una sola vez.",
-              [
-                {
-                  text: "Ahora no",
-                  style: "cancel",
-                  onPress: () => {
-                    AsyncStorage.setItem("sv_fleet_skip", "1").catch(() => {});
-                    resolve("");
-                  },
-                },
-                {
-                  text: "Guardar",
-                  onPress: (v?: string) => {
-                    const n = (v || "").trim().slice(0, 40);
-                    if (n) AsyncStorage.setItem("sv_fleet_label", n).catch(() => {});
-                    resolve(n);
-                  },
-                },
-              ],
-              "plain-text",
-            );
-          });
-        }
-        fleetLabelRef.current = label || "";
+        fleetLabelRef.current = (await AsyncStorage.getItem("sv_fleet_label")) || "";
       } catch {
         /* ignore */
       }
