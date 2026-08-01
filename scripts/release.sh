@@ -35,6 +35,15 @@ else
   DEPLOY_BRANCH="main"
 fi
 
+# PREFLIGHT: book consistency. This guard existed but ran ONLY from `preios` (local
+# simulator runs) and never on the release path — so `bash scripts/release.sh` could
+# publish a book whose song index points past the last rendered page, which is the
+# build-325/327 "song N unreachable" class, straight to prod with nothing firing.
+# It costs ~1s (pdfinfo + a regex) and it runs in EVERY mode, staging included:
+# STAGING still builds and deploys a real bundle that a canary iPad will read.
+echo "==> 0/6  Preflight: book consistency (song index vs shipped PDF)"
+node scripts/check-book-consistency.mjs
+
 if [ "$STAGING" = "1" ]; then
   echo "==> 1/6  STAGING/CANARY -> skip bump; build web at the CURRENT version (prod untouched)"
   BUILD=$(node -e "process.stdout.write(String(require('./version.json').buildNumber))")
