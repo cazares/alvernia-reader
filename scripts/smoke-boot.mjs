@@ -181,6 +181,77 @@ try {
   check('sw.js answers the GET_BOOK_VERSION handshake', swJs.includes("GET_BOOK_VERSION"), "precache skew gate has no SW counterpart — deploy-window laundering possible");
   check('app.js gates the precache on the controller book version', appJs.includes("GET_BOOK_VERSION"), "deploy-skew precache gate lost in app.js");
 
+  // The fleet dashboard's readiness claim must stay a MEASUREMENT. isOfflineBundleReady already
+  // rotted into zero-caller dead code once, and while it was dead the webCached claim rested on
+  // OFFLINE_READY_KEY alone — a flag written once per book version that nothing ever clears, so an
+  // iPad whose CacheStorage iOS had evicted still reported green with zero pages cached. Losing
+  // the call site is silent and invisible in every test that checks behavior rather than wiring,
+  // so pin the wiring itself.
+  // The load-bearing clause is the READ COUNT, not the call site. Asserting only "is the verifier
+  // referenced?" passes when the sticky flag is re-added as an OR-fallback beside it — the
+  // original bug, restored, with the verifier still present as decoration. OFFLINE_READY_KEY must
+  // be read in exactly ONE place (inside isOfflineBundleReady, where it is confirmed against the
+  // real caches); any second reader is something claiming readiness from the flag alone.
+  const readyFlagReads = (appJs.match(/localStorage\.getItem\(OFFLINE_READY_KEY\)/g) || []).length;
+  check(
+    "app.js verifies the offline bundle before claiming webCached",
+    /isOfflineBundleReady\(totalPages\)/.test(appJs)
+      && appJs.includes("webCached: verifiedReady,")
+      && readyFlagReads === 1,
+    `fleetCheckin no longer verifies — webCached is back to trusting the never-cleared ready flag `
+      + `(OFFLINE_READY_KEY read in ${readyFlagReads} place(s), expected exactly 1)`,
+  );
+  // Read-only inspection must not CREATE the current book's cache: an empty husk is something the
+  // SW's activate keep-policy then has to score and reason about.
+  // BOTH caches, asserted separately on purpose: an "either one" test passes while the PAGE_CACHE
+  // read — the one whose husk the SW's activate keep-policy has to score — is still creating.
+  check(
+    "app.js inspects caches without creating them (openExistingCache)",
+    appJs.includes("openExistingCache(STATIC_CACHE)")
+      && appJs.includes("openExistingCache(PAGE_CACHE)"),
+    "readiness check reverted to caches.open() — boot on an evicted device mints an empty husk",
+  );
+  // ...and the helper must still BE non-creating. Pinning only the call sites lets someone gut
+  // the body to a bare caches.open() while both assertions above stay green — the protection
+  // would be gone and the guards would still say it is there.
+  const helperAt = appJs.indexOf("const openExistingCache");
+  check(
+    "openExistingCache is itself non-creating (existence-checks before opening)",
+    helperAt !== -1 && appJs.slice(helperAt, helperAt + 300).includes("caches.keys()"),
+    "openExistingCache no longer checks caches.keys() first — it now creates what it inspects",
+  );
+
+  // The readiness checklist must be EXACTLY what the SW commits to installing. This drift is not
+  // hypothetical: coreAssets() once required /books.json, which sw.js never installs and nothing
+  // fetches at runtime, so every device reported not-ready for the window after each shell deploy
+  // — a fleet-wide false red at the one moment the dashboard is read. An asset added to one list
+  // and not the other silently re-creates that, and no behavioral test would notice.
+  const literals = (text, name) => {
+    const start = text.indexOf(`const ${name} = [`);
+    if (start === -1) return null;
+    const end = text.indexOf("]", start);
+    if (end === -1) return null;
+    return (text.slice(start, end).match(/"([^"]+)"/g) || []).map((s) => s.slice(1, -1));
+  };
+  const shellAssets = literals(appJs, "SHELL_ASSETS");
+  const swCoreAssets = literals(swJs, "CORE_ASSETS");
+  if (!shellAssets || !swCoreAssets) {
+    check("app.js readiness checklist matches the SW's install set", false, "could not parse SHELL_ASSETS / CORE_ASSETS");
+  } else {
+    const readiness = [
+      ...shellAssets,
+      `/books/${BOOK_ID}/pages.json`,
+      `/books/${BOOK_ID}/search-index.json`,
+    ];
+    const onlyReadiness = readiness.filter((asset) => !swCoreAssets.includes(asset));
+    check(
+      "app.js readiness checklist matches the SW's install set",
+      onlyReadiness.length === 0,
+      `coreAssets() requires ${JSON.stringify(onlyReadiness)} which sw.js CORE_ASSETS never installs `
+        + `— every device reports not-ready until the deferred precache runs`,
+    );
+  }
+
   // ── 7. Pre-app lib helpers loaded before app.js (M1 relay-room resolver) ───
   // If the lib isn't copied or isn't referenced, app.js still defaults safely to
   // the production room — but we assert it here so a broken build is caught.

@@ -70,3 +70,11 @@ jobs:
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
         run: node scripts/smoke-boot.mjs
+
+      # Runs AFTER the smoke test so web/dist already exists — this one never builds.
+      # Proves the smoke test's WIRING guards can actually fail: a call-site assertion that
+      # merely quotes the current source passes forever and catches nothing, and a passing
+      # test looks identical either way. Mutates a copy of the bundle and requires each
+      # guard to trip.
+      - name: Guard mutation test (proves the wiring guards have teeth)
+        run: node scripts/verify-smoke-guards.mjs
