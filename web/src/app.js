@@ -255,9 +255,17 @@ const SHELL_ASSETS = [
   "/icon-192.png",
   "/icon-512.png",
 ].map(resolveAppPath);
-// The book's manifests live under books/standard/. Cache them for the offline bundle.
+// Precached (it is 88 bytes, so harmless) but NEVER fetched at runtime: the single-book registry
+// is INLINED into index.html as #books-data, and nothing reads /books.json. It is also absent from
+// the SW's CORE_ASSETS, so a freshly-rotated post-deploy STATIC_CACHE does not contain it until
+// the DEFERRED precache writes it seconds later — long after the boot-time fleet check-in.
+// It therefore must not gate readiness: doing so reported the ENTIRE fleet not-ready for that
+// window after every shell deploy, over a file whose absence cannot affect offline rendering.
+const READINESS_EXEMPT_ASSETS = new Set([resolveAppPath("/books.json")]);
+// The checklist for "this device can still render the book with no network" — isOfflineBundleReady
+// is the only consumer. Deliberately NOT all of SHELL_ASSETS; see the exemption above.
 const coreAssets = () => [
-  ...SHELL_ASSETS,
+  ...SHELL_ASSETS.filter((asset) => !READINESS_EXEMPT_ASSETS.has(asset)),
   resolveAppPath(`/books/${BOOK_ID}/pages.json`),
   resolveAppPath(`/books/${BOOK_ID}/search-index.json`),
 ];
@@ -752,12 +760,17 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
   // reports not-ready on the dashboard until a later run sets it. That is the safe direction to
   // fail. No data loss, and no thrown rejection out of a finished download.
   try { localStorage.setItem(OFFLINE_READY_KEY, "ready"); } catch (_) {}
-  fleetCheckin({ webCached: true }); // tell the readiness dashboard this iPad is fully cached
+  // Metadata BEFORE the check-in, and the check-in makes no claim of its own. Ordering is the
+  // whole point: this used to post fleetCheckin({webCached:true}) — an ASSERTION that bypassed
+  // verification via the trailing ...extra spread — and it had to, because the metadata
+  // isOfflineBundleReady reads was not written until afterwards. Writing it first lets the
+  // completion check-in MEASURE what it reports, so no path can claim the green light unverified.
   await writeOfflineMetadata({
     version: BOOK_VERSION, // paired with isOfflineBundleReady's check — a book claim, not a shell claim
     totalPages,
     verifiedAt: new Date().toISOString(),
   });
+  fleetCheckin(); // tell the readiness dashboard this iPad is cached — verified, not asserted
 };
 
 // Defer the ~13 MB background pre-cache until AFTER the reader is revealed. On weak connections

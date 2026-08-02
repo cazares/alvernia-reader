@@ -71,6 +71,33 @@ const MUTATIONS = [
     check: "inspects caches without creating them",
     edits: [["openExistingCache(STATIC_CACHE)", "caches.open(STATIC_CACHE)"]],
   },
+  {
+    // The call sites can stay untouched while the helper stops being a helper. Without a
+    // body assertion this passes every other guard and silently restores husk-minting.
+    name: "gut openExistingCache's body to a bare creating caches.open()",
+    check: "openExistingCache is itself non-creating",
+    edits: [[
+      "if (!(await caches.keys()).includes(name)) return null;",
+      "// (existence check removed)",
+    ]],
+  },
+  {
+    // The original bug re-introduced as an OR-fallback rather than a replacement: the
+    // verifier is still called, so a naive "is it referenced?" guard would pass.
+    name: "re-add the sticky flag as an OR-fallback beside the verifier",
+    check: "verifies the offline bundle before claiming webCached",
+    edits: [[
+      "webCached: verifiedReady,",
+      'webCached: verifiedReady || localStorage.getItem(OFFLINE_READY_KEY) === "ready",',
+    ]],
+  },
+  {
+    // Reproduces the fleet-wide post-deploy false red found by the adversarial re-hunt:
+    // a readiness checklist demanding an asset the SW never installs.
+    name: "un-exempt /books.json so readiness demands an asset the SW never installs",
+    check: "readiness checklist matches the SW's install set",
+    edits: [['new Set([resolveAppPath("/books.json")])', "new Set([])"]],
+  },
 ];
 
 /** Run smoke-boot against `dir` without building, and return its combined output. */
