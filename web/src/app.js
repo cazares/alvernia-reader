@@ -255,17 +255,15 @@ const SHELL_ASSETS = [
   "/icon-192.png",
   "/icon-512.png",
 ].map(resolveAppPath);
-// Precached (it is 88 bytes, so harmless) but NEVER fetched at runtime: the single-book registry
-// is INLINED into index.html as #books-data, and nothing reads /books.json. It is also absent from
-// the SW's CORE_ASSETS, so a freshly-rotated post-deploy STATIC_CACHE does not contain it until
-// the DEFERRED precache writes it seconds later — long after the boot-time fleet check-in.
-// It therefore must not gate readiness: doing so reported the ENTIRE fleet not-ready for that
-// window after every shell deploy, over a file whose absence cannot affect offline rendering.
-const READINESS_EXEMPT_ASSETS = new Set([resolveAppPath("/books.json")]);
-// The checklist for "this device can still render the book with no network" — isOfflineBundleReady
-// is the only consumer. Deliberately NOT all of SHELL_ASSETS; see the exemption above.
+// The checklist for "this device can still render the book with no network" —
+// isOfflineBundleReady is the only consumer. It must stay a SUBSET of what the SW installs at
+// activate: anything here that install does not cache is absent from a freshly-rotated
+// post-deploy STATIC_CACHE until the DEFERRED precache writes it, which would make every device
+// report not-ready for that window — a fleet-wide false red at the one moment the dashboard is
+// read. smoke-boot pins that subset relation; keep the two lists in step rather than special-
+// casing this one.
 const coreAssets = () => [
-  ...SHELL_ASSETS.filter((asset) => !READINESS_EXEMPT_ASSETS.has(asset)),
+  ...SHELL_ASSETS,
   resolveAppPath(`/books/${BOOK_ID}/pages.json`),
   resolveAppPath(`/books/${BOOK_ID}/search-index.json`),
 ];

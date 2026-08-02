@@ -93,10 +93,12 @@ const MUTATIONS = [
   },
   {
     // Reproduces the fleet-wide post-deploy false red found by the adversarial re-hunt:
-    // a readiness checklist demanding an asset the SW never installs.
-    name: "un-exempt /books.json so readiness demands an asset the SW never installs",
+    // a readiness checklist demanding an asset the SW's install never caches. Drops
+    // /books.json from the SW side (main added it there) while app.js still requires it.
+    name: "drop /books.json from the SW install set while readiness still requires it",
     check: "readiness checklist matches the SW's install set",
-    edits: [['new Set([resolveAppPath("/books.json")])', "new Set([])"]],
+    file: "sw.js",
+    edits: [['"/books.json",', ""]],
   },
 ];
 
@@ -140,12 +142,14 @@ try {
   MUTATIONS.forEach((mutation, index) => {
     const dir = path.join(work, `mut-${index}`);
     fs.cpSync(DIST, dir, { recursive: true });
-    const file = path.join(dir, "app.js");
+    // Most mutations edit app.js; the cross-file invariants (readiness checklist vs the SW's
+    // install set) have to be broken from the sw.js side instead.
+    const file = path.join(dir, mutation.file || "app.js");
     let source = fs.readFileSync(file, "utf8");
 
     for (const [find, replace] of mutation.edits) {
       if (!source.includes(find)) {
-        failures.push(`STALE mutation "${mutation.name}": ${JSON.stringify(find)} not in the bundle`);
+        failures.push(`STALE mutation "${mutation.name}": ${JSON.stringify(find)} not in ${mutation.file || "app.js"}`);
         console.log(`  FAIL stale mutation (source drifted): ${mutation.name}`);
         return;
       }

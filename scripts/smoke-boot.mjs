@@ -235,20 +235,15 @@ try {
   };
   const shellAssets = literals(appJs, "SHELL_ASSETS");
   const swCoreAssets = literals(swJs, "CORE_ASSETS");
-  const exemptAssets = literals(appJs, "READINESS_EXEMPT_ASSETS")
-    // The Set is built from resolveAppPath("/books.json") calls, not bare array literals.
-    || (appJs.match(/READINESS_EXEMPT_ASSETS = new Set\(\[([^\]]*)\]/)?.[1].match(/"([^"]+)"/g) || [])
-      .map((s) => s.slice(1, -1));
   if (!shellAssets || !swCoreAssets) {
     check("app.js readiness checklist matches the SW's install set", false, "could not parse SHELL_ASSETS / CORE_ASSETS");
   } else {
     const readiness = [
-      ...shellAssets.filter((a) => !exemptAssets.includes(a)),
+      ...shellAssets,
       `/books/${BOOK_ID}/pages.json`,
       `/books/${BOOK_ID}/search-index.json`,
-    ].sort();
-    const installed = [...swCoreAssets].sort();
-    const onlyReadiness = readiness.filter((a) => !installed.includes(a));
+    ];
+    const onlyReadiness = readiness.filter((asset) => !swCoreAssets.includes(asset));
     check(
       "app.js readiness checklist matches the SW's install set",
       onlyReadiness.length === 0,
