@@ -127,16 +127,30 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
 
       const pageCaches = keys.filter((key) => key.startsWith(PAGE_CACHE_PREFIX));
-      // caches.keys() preserves insertion order, so the tail is the newest. Count the CURRENT
-      // cache toward the cap whether or not it exists yet (it usually doesn't at activate — it's
-      // created lazily on first use): current + (PAGE_CACHES_TO_KEEP - 1) most recent others.
-      // The naive `slice(-PAGE_CACHES_TO_KEEP)` kept THREE full editions (~84MB) whenever the
-      // current cache hadn't been created yet, on exactly the storage-constrained old devices
-      // the cap exists for.
-      const pageCachesToKeep = new Set([
-        PAGE_CACHE,
-        ...pageCaches.filter((key) => key !== PAGE_CACHE).slice(-(PAGE_CACHES_TO_KEEP - 1)),
-      ]);
+      // Retention: the CURRENT cache (whether or not it exists yet — it's created lazily) plus
+      // the (PAGE_CACHES_TO_KEEP - 1) BEST previous edition(s). "Best" is judged by CONTENT, not
+      // recency: an interrupted precache or a mere boot-time existence check can leave a NEWER
+      // cache that is empty or nearly so, and recency-based keeping (`slice(-N)`) would evict the
+      // only FULL edition in its favor — leaving a once-fully-cached device with BLANK pages the
+      // next time it goes offline mid-migration. Entry counts are one cheap await per cache
+      // (at most a couple of previous caches exist). Ties break to the newest (reverse scan).
+      const previous = pageCaches.filter((key) => key !== PAGE_CACHE);
+      const counted = await Promise.all(
+        previous.map(async (key, index) => {
+          try {
+            const entries = await (await caches.open(key)).keys();
+            return { key, index, count: entries.length };
+          } catch (_) {
+            return { key, index, count: 0 };
+          }
+        }),
+      );
+      const keepPrevious = counted
+        .filter((c) => c.count > 0) // an empty cache is never worth a keep slot
+        .sort((a, b) => b.count - a.count || b.index - a.index)
+        .slice(0, PAGE_CACHES_TO_KEEP - 1)
+        .map((c) => c.key);
+      const pageCachesToKeep = new Set([PAGE_CACHE, ...keepPrevious]);
 
       const shellReady = await isShellCached();
 
@@ -196,8 +210,11 @@ const matchAnyPageCache = async (request) => {
   const keys = (await caches.keys()).reverse();
   for (const key of keys) {
     if (key === PAGE_CACHE || !key.startsWith(PAGE_CACHE_PREFIX)) continue;
-    const cache = await caches.open(key);
-    const hit = await cache.match(request, { ignoreSearch: true });
+    // caches.match({cacheName}) instead of caches.open(): open() CREATES a cache that was
+    // deleted between our keys() snapshot and now (activate cleanup racing a fallback scan),
+    // and the resurrected empty husk — newest by insertion order — would later win the
+    // activate keep slot over a full edition. match() never creates.
+    const hit = await caches.match(request, { cacheName: key, ignoreSearch: true });
     if (hit) {
       // Tag the response so callers can TELL it is previous-edition material. Display code
       // ignores the header; app.js's cacheSinglePage treats it as a failed download so these

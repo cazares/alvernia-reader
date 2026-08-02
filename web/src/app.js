@@ -598,13 +598,15 @@ const cacheSinglePage = async (cache, pageNumber) => {
 // Ask the CONTROLLING service worker which book version it serves. Returns:
 //   null       — no controller (first-ever load; fetches go straight to the network — safe)
 //   "<hex>"    — the controller's BOOK_VERSION
-//   "no-reply" — controller didn't answer (an OLD pre-BOOK_VERSION SW, or a hung one)
-const controllerBookVersion = () =>
+//   "no-reply" — controller didn't answer after retries (an OLD pre-BOOK_VERSION SW, or a hung one)
+// Retried with backoff because a cold SW start on an old, memory-pressured iPad can exceed a
+// single short window — one transient miss must read as "try again", not "wrong SW".
+const controllerBookVersionOnce = (timeoutMs) =>
   new Promise((resolve) => {
     const controller = navigator.serviceWorker?.controller;
     if (!controller) return resolve(null);
     const channel = new MessageChannel();
-    const timer = setTimeout(() => resolve("no-reply"), 1500);
+    const timer = setTimeout(() => resolve("no-reply"), timeoutMs);
     channel.port1.onmessage = (event) => {
       clearTimeout(timer);
       resolve(event.data?.bookVersion || "no-reply");
@@ -616,21 +618,35 @@ const controllerBookVersion = () =>
       resolve("no-reply");
     }
   });
+const controllerBookVersion = async () => {
+  for (const timeoutMs of [1500, 3000, 5000]) {
+    const answer = await controllerBookVersionOnce(timeoutMs);
+    if (answer !== "no-reply") return answer; // null (no controller) or a real version
+  }
+  return "no-reply";
+};
 
 const ensureOfflineBundle = async (totalPages, onProgress) => {
+  // Shell/core assets FIRST, before the skew gate below. They are shell-keyed (STATIC_CACHE) and
+  // cannot launder page bytes — and running this unconditionally is load-bearing: when a deploy's
+  // install precache only partially filled the new static cache (offline mid-install), the new SW
+  // waits, refusing skipWaiting until the shell is complete. This call is the app-side writer
+  // that completes that shell so the next SKIP_WAITING passes. Putting it behind the skew gate
+  // (which throws under the old SW — exactly the stuck-WAITING situation) would starve the only
+  // healer and wedge the device on the old SW until the next deploy.
+  await ensureCoreAssetsCached();
   // DEPLOY-SKEW GATE. During an update there is a window where NEW app.js (this code) runs under
   // the OLD, still-controlling SW — whose page handler is cache-first and predates the no-store
   // contract. Precaching through it would be answered instantly from the OLD edition's cache and
-  // laundered into this book's cache at full speed, then certified "ready". Refuse to precache
-  // until the controller confirms it serves THIS book version; the controllerchange reload that
-  // accompanies every SW update re-runs the precache moments later under the right SW. Throwing
-  // (vs returning) keeps deferOfflinePrecache's catch in charge: the started flag resets and the
-  // next trigger retries.
+  // laundered into this book's cache at full speed, then certified "ready". Refuse to PRECACHE
+  // PAGES until the controller confirms it serves THIS book version; the controllerchange reload
+  // that accompanies a SW update — or the retry triggers in deferOfflinePrecache — re-run this
+  // moments later under the right SW. Throwing (vs returning) keeps deferOfflinePrecache's catch
+  // in charge: the started flag resets and the next trigger retries.
   const swBook = await controllerBookVersion();
   if (swBook !== null && swBook !== BOOK_VERSION) {
     throw new Error(`sw-version-skew: controller=${String(swBook).slice(0, 16)} app=${BOOK_VERSION}`);
   }
-  await ensureCoreAssetsCached();
   const cache = await caches.open(PAGE_CACHE);
   const cachedPages = await getCachedPageSet(cache);
   let completed = cachedPages.size;
@@ -684,8 +700,23 @@ const deferOfflinePrecache = (totalPages) => {
     ensureOfflineBundle(totalPages, () => {}).catch((error) => {
       offlinePrecacheStarted = false;   // failed → let a later trigger retry
       console.warn("Pre-cache offline incompleto:", error);
+      // Surface honest progress to the fleet dashboard even on failure — a device stuck
+      // mid-migration should read as "recaching", not freeze at its boot-time snapshot.
+      fleetCheckin().catch(() => {});
     });
   };
+  // RETRY TRIGGERS. A failed run (offline, weak signal, sw-version-skew, handshake no-reply)
+  // resets the started flag above, but the gate poll below fires kick() exactly once — without
+  // these, one transient failure would cost the whole session's precache. Each is a cheap no-op
+  // while a run is in flight or after success (the started flag guards). controllerchange also
+  // covers the deploy-skew case where the page is NOT reloaded (SW_RELOAD_FLAG already set).
+  window.addEventListener("online", () => kick());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") kick();
+  });
+  try {
+    navigator.serviceWorker?.addEventListener("controllerchange", () => setTimeout(kick, 1000));
+  } catch (_) {}
   const waitForGate = () => {
     if (gateLifted) { kick(); return; }
     setTimeout(waitForGate, POLL_MS);
@@ -2995,6 +3026,11 @@ try {
 const countCachedPageImages = async () => {
   if (!("caches" in window)) return 0;
   try {
+    // NON-CREATING on purpose: caches.open() would mint an empty current-book cache on every
+    // boot even when the precache never ran — and an empty cache that EXISTS is newest by
+    // insertion order, so the SW's activate keep-policy could later evict the full previous
+    // edition in favor of the husk. Only count what actually exists.
+    if (!(await caches.keys()).includes(PAGE_CACHE)) return 0;
     const c = await caches.open(PAGE_CACHE);
     const keys = await c.keys();
     return keys.filter((r) => r.url.includes("/pages/")).length;
