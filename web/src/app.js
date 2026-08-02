@@ -610,15 +610,25 @@ const ensureShellAssetsCached = async () => {
     if (!(await cache.match(asset))) missing += 1;
   }
   if (missing > 0) {
-    const fetched = await Promise.all(
-      assets.map(async (asset) => {
-        const response = await fetch(asset, { cache: "no-store" });
-        if (!response.ok) throw new Error(`no se pudo descargar ${asset}`);
-        return { asset, response };
-      }),
-    ); // any rejection propagates: nothing below runs, nothing was written
-    for (const { asset, response } of fetched) {
-      await cache.put(asset, response.clone());
+    // BEST-EFFORT to the caller, transactional inside. The heal must never block the page
+    // precache: a persistently-failing single asset (a 404'd icon after some future deploy —
+    // install's allSettled leaves it missing on every device forever) would otherwise abort
+    // ensureOfflineBundle before a single page fetched, converting a tolerated decorative gap
+    // into a total offline-bundle blackout. Stale-beats-blank; an icon never outranks the book.
+    // The gap persists, so every later armed-trigger run re-attempts this heal anyway.
+    try {
+      const fetched = await Promise.all(
+        assets.map(async (asset) => {
+          const response = await fetch(asset, { cache: "no-store" });
+          if (!response.ok) throw new Error(`no se pudo descargar ${asset}`);
+          return { asset, response };
+        }),
+      ); // any rejection propagates: nothing below runs, nothing was written — no torn shell
+      for (const { asset, response } of fetched) {
+        await cache.put(asset, response.clone());
+      }
+    } catch (error) {
+      console.warn("Shell heal incompleto (se reintentará):", error);
     }
   }
 };
