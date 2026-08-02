@@ -227,8 +227,11 @@ const BUILD_NUMBER = "__BUILD_NUMBER__";
 const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vivo-pages-${BOOK_VERSION}`;
 // Book-keyed (not shell-keyed): "fully cached offline" is a claim about the BOOK, so a shell-only
-// deploy must not un-ready a device, and a book change must — the new key reads as not-ready,
-// isOfflineBundleReady re-verifies, and ensureOfflineBundle re-fetches into the new page cache.
+// deploy must not un-ready a device, and a book change must — the new key reads as not-ready, so
+// fleetCheckin stops claiming cached and ensureOfflineBundle re-fetches into the new page cache.
+// The flag is a set-once HINT, never a claim on its own: it is written when a bundle completes and
+// nothing ever clears it, so isOfflineBundleReady must confirm it against the real caches before
+// anyone reports this device ready. See its comment for the eviction case that forces this.
 const OFFLINE_READY_KEY = `sv-offline-ready-${BOOK_VERSION}`;
 const OFFLINE_DB_NAME = "signo-vivo-offline";
 const OFFLINE_DB_STORE = "bundle-status";
@@ -327,16 +330,6 @@ const postNativeBridge = (payload) => {
     console.error("No se pudo hablar con la app nativa", error);
     return false;
   }
-};
-
-const formatVerifiedAt = (isoString) => {
-  if (!isoString) return "";
-  const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("es-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 };
 
 const openOfflineDb = () => new Promise((resolve, reject) => {
@@ -550,6 +543,16 @@ const extractCachedPageNumber = (request) => {
   return Number.parseInt(match[2], 10);
 };
 
+// caches.open() CREATES the cache when it is absent. For read-only inspection that is a real
+// side effect — an empty husk under the current book's name is something the SW's activate
+// keep-policy then has to reason about — so any code that merely *asks* what is cached must go
+// through here and treat "absent" as "empty". (countCachedPageImages enforces the same rule
+// inline for the same reason.)
+const openExistingCache = async (name) => {
+  if (!(await caches.keys()).includes(name)) return null;
+  return caches.open(name);
+};
+
 const getCachedPageSet = async (cache) => {
   const keys = await cache.keys();
   return new Set(
@@ -744,8 +747,9 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
     { strict: true },
   );
   // Best-effort: a storage-disabled browser must not fail an otherwise-successful cache. The
-  // pages ARE cached; a missing "ready" flag just means isOfflineBundleReady re-verifies next
-  // load (cache-hit, so cheap) — no data loss, no thrown rejection out of a finished download.
+  // pages ARE cached, and losing the flag costs nothing but a re-run: isOfflineBundleReady
+  // short-circuits to false without it, and fleetCheckin's independent page-count input still
+  // reports this device cached. No data loss, no thrown rejection out of a finished download.
   try { localStorage.setItem(OFFLINE_READY_KEY, "ready"); } catch (_) {}
   fleetCheckin({ webCached: true }); // tell the readiness dashboard this iPad is fully cached
   await writeOfflineMetadata({
@@ -841,8 +845,21 @@ const deferOfflinePrecache = (totalPages) => {
   setTimeout(waitForGate, SETTLE_MS);
 };
 
+// Turns the OFFLINE_READY_KEY *hint* into a verified readiness CLAIM by re-measuring the caches
+// it refers to. This exists because the flag is written once when a bundle completes and nothing
+// ever clears it — on its own it is a memory, not a measurement. iOS evicts CacheStorage under
+// storage pressure while localStorage survives, so a sacristy iPad can sit there insisting it is
+// "ready" with zero pages actually cached, and the pre-Mass dashboard would show it green right
+// up until parish wifi dies mid-hymn. fleetCheckin is the caller: the dashboard's green light has
+// to mean "this device can still render the book with no network."
+//
+// NON-CREATING on both caches (see openExistingCache): a check that runs at boot on an evicted
+// device must not mint an empty current-book cache as a side effect of asking the question.
 const isOfflineBundleReady = async (totalPages) => {
   if (!("caches" in window)) return false;
+  // A zero/NaN page count would make the completeness test below vacuously true. Never certify
+  // readiness against a total we don't actually know.
+  if (!Number.isFinite(totalPages) || totalPages <= 0) return false;
   // Guarded read: localStorage throws in a storage-disabled browser. Treat any failure as
   // "not ready" (safe default → re-verify/re-cache), never let it reject this check.
   let readyFlag = false;
@@ -857,13 +874,15 @@ const isOfflineBundleReady = async (totalPages) => {
     if (metadata.version !== BOOK_VERSION) return false;
     if (metadata.totalPages !== totalPages) return false;
 
-    const staticCache = await caches.open(STATIC_CACHE);
+    const staticCache = await openExistingCache(STATIC_CACHE);
+    if (!staticCache) return false;
     const coreMatches = await Promise.all(
       coreAssets().map((asset) => staticCache.match(asset)),
     );
     if (coreMatches.some((match) => !match)) return false;
 
-    const pageCache = await caches.open(PAGE_CACHE);
+    const pageCache = await openExistingCache(PAGE_CACHE);
+    if (!pageCache) return false;
     const cachedPages = await getCachedPageSet(pageCache);
     return cachedPages.size >= totalPages;
   } catch {
@@ -3167,21 +3186,32 @@ const fleetCheckin = async (extra = {}) => {
   if (fleetCheckinInFlight) return;
   fleetCheckinInFlight = true;
   try {
-    let webCached = false;
-    try {
-      webCached = localStorage.getItem(OFFLINE_READY_KEY) === "ready";
-    } catch {}
     const totalPages = Number(state.totalPages) || STANDARD_TOTAL_PAGES;
-    const pagesCached = await countCachedPageImages();
+    // A MEASUREMENT of the live caches, not the bare OFFLINE_READY_KEY flag this used to read.
+    // Keeping round 4's rule — no `|| pagesCached >= totalPages` fallback, because pages landing
+    // while the manifests failed is exactly the half-updated state the dashboard must surface —
+    // and closing the hole on the other side: the flag is written once per BOOK_VERSION and
+    // nothing ever clears it, so on its own it is a memory. iOS evicts CacheStorage under storage
+    // pressure while localStorage survives, and such an iPad kept reporting green with zero pages
+    // cached, the exact straggler this exists to catch, on the one morning it matters.
+    //
+    // isOfflineBundleReady is a strict SUPERSET of what the flag promises: it re-confirms the
+    // flag against the book metadata, every core asset (manifests included — see coreAssets)
+    // AND page completeness. It can only ever downgrade this claim, never invent one, so the
+    // residual error is a false NEGATIVE (an IndexedDB-less device reads as not-ready). That is
+    // the safe direction: a needless walk to the sacristy costs a minute, a false green costs
+    // the Mass. pagesCached still reports alongside for partial-progress display.
+    // The .catch is structural: Promise.all rejects if EITHER input rejects, and that would
+    // escape to the outer catch and skip the whole check-in — a device that silently vanishes
+    // from the dashboard is worse than one reported not-ready. This must degrade, never abort.
+    const [verifiedReady, pagesCached] = await Promise.all([
+      isOfflineBundleReady(totalPages).catch(() => false),
+      countCachedPageImages().catch(() => 0),
+    ]);
     const payload = {
       deviceId: fleetDeviceId(),
       surface: "web",
-      // The flag ALONE — no pagesCached fallback. The ready flag is only written after pages
-      // AND manifests certify for THIS book version; the old `|| pagesCached >= totalPages`
-      // fallback re-reported a device as cached when its pages landed but its manifests failed
-      // (or predate the edition), which is exactly the half-updated state the dashboard exists
-      // to surface. pagesCached still reports alongside for partial-progress display.
-      webCached,
+      webCached: verifiedReady,
       pagesCached,
       totalPages,
       homeScreen: isStandaloneApp,
