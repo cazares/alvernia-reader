@@ -108,7 +108,14 @@ fs.writeFileSync(path.join(distDir, "app.js"), appSource);
 fs.copyFileSync(path.join(srcDir, "manifest.webmanifest"), path.join(distDir, "manifest.webmanifest"));
 // index.html is written later with inlined JSON data
 
-fs.copyFileSync(path.join(rootDir, "assets", "icon.png"), path.join(distDir, "icon.png"));
+// Icons are pre-optimized committed assets (pngquant + oxipng), NOT generated at
+// build time: sips emits unoptimized truecolor PNGs, and the SW install precache
+// re-downloads all three icons on every deploy on every device (~1.5 MB → ~0.6 MB).
+// The pristine 1024px master stays at assets/icon.png; if the artwork ever changes,
+// regenerate these with scripts/regen-web-icons.sh.
+for (const iconName of ["icon.png", "icon-192.png", "icon-512.png"]) {
+  fs.copyFileSync(path.join(srcDir, iconName), path.join(distDir, iconName));
+}
 const serviceWorkerSource = fs
   .readFileSync(path.join(srcDir, "sw.js"), "utf8")
   .replaceAll("__CACHE_VERSION__", cacheVersion)
@@ -117,21 +124,6 @@ const serviceWorkerSource = fs
   // and rolls the fleet onto the new book. The propagation ride-along is load-bearing.
   .replaceAll("__BOOK_VERSION__", bookVersion);
 fs.writeFileSync(path.join(distDir, "sw.js"), serviceWorkerSource);
-
-const generateIcon = (size, outputName) => {
-  const result = spawnSync(
-    "sips",
-    ["-z", String(size), String(size), path.join(rootDir, "assets", "icon.png"), "--out", path.join(distDir, outputName)],
-    { stdio: "inherit" },
-  );
-
-  if (result.status !== 0) {
-    throw new Error(`sips failed while generating ${outputName}`);
-  }
-};
-
-generateIcon(192, "icon-192.png");
-generateIcon(512, "icon-512.png");
 
 // ─── Shared page render + encode ─────────────────────────────────────────────
 // (PDF_RENDER_DPI / WEBP_QUALITY are defined at the top of the file — they feed bookVersion.)
