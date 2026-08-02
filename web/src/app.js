@@ -559,17 +559,37 @@ const getCachedPageSet = async (cache) => {
   );
 };
 
-const ensureCoreAssetsCached = async () => {
-  const cache = await caches.open(STATIC_CACHE);
-  // Cache each core/book-manifest asset INDEPENDENTLY (Promise.allSettled), mirroring the SW
-  // install's resilience — NOT an atomic cache.addAll(). With addAll, a single transient drop
-  // or a 404 (e.g. search-index.json missing on a partially-deployed origin) rejects the whole
-  // batch, aborting the offline-bundle prep before ANY pages cache → the book never precaches
-  // and stays unusable offline, retry after retry hitting the same weak link. allSettled lets
-  // the run proceed past one bad asset so the page-precache step still gets to run.
-  await Promise.allSettled(
-    coreAssets().map((asset) => cache.add(asset)),
+// Fetch-and-put with {cache:"no-store"} instead of cache.add(). no-store is the CONTRACT with
+// the SW (both branches of it): these requests exist to install verified-fresh bytes, so the SW
+// passes them straight to the network — a cache-first answer here is how a previous edition's
+// pages.json (or a stale shell file served by an OLD still-controlling SW) could be laundered
+// into the new static cache and then served cache-first forever. Non-strict = allSettled
+// resilience (heal what you can); strict = first failure throws (for assets whose staleness
+// must block the "ready" certification).
+const cacheAssetsNoStore = async (cache, assets, { strict = false } = {}) => {
+  const results = await Promise.allSettled(
+    assets.map(async (asset) => {
+      const response = await fetch(asset, { cache: "no-store" });
+      if (!response.ok) throw new Error(`no se pudo descargar ${asset}`);
+      await cache.put(asset, response.clone());
+    }),
   );
+  if (strict) {
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed) throw failed.reason;
+  }
+};
+
+// SHELL assets only — deliberately NOT the book manifests. This runs BEFORE the deploy-skew
+// gate (it is the app-side writer that completes a partially-installed shell so a WAITING SW's
+// skipWaiting gate can pass), and anything cached pre-gate can be served by an OLD
+// still-controlling SW. For shell files that risk is bounded: "/" and friends are
+// network-first/stale-while-revalidate, so a stale copy self-corrects one load later. The book
+// manifests have NO such refresh path (generic cache-first handler) — a stale pages.json cached
+// here would be served forever — so they are cached strictly, post-gate, after the pages.
+const ensureShellAssetsCached = async () => {
+  const cache = await caches.open(STATIC_CACHE);
+  await cacheAssetsNoStore(cache, SHELL_ASSETS.map(resolveAppPath));
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {
@@ -627,14 +647,14 @@ const controllerBookVersion = async () => {
 };
 
 const ensureOfflineBundle = async (totalPages, onProgress) => {
-  // Shell/core assets FIRST, before the skew gate below. They are shell-keyed (STATIC_CACHE) and
-  // cannot launder page bytes — and running this unconditionally is load-bearing: when a deploy's
-  // install precache only partially filled the new static cache (offline mid-install), the new SW
-  // waits, refusing skipWaiting until the shell is complete. This call is the app-side writer
-  // that completes that shell so the next SKIP_WAITING passes. Putting it behind the skew gate
-  // (which throws under the old SW — exactly the stuck-WAITING situation) would starve the only
-  // healer and wedge the device on the old SW until the next deploy.
-  await ensureCoreAssetsCached();
+  // SHELL assets first, before the skew gate below — running this unconditionally is
+  // load-bearing: when a deploy's install precache only partially filled the new static cache
+  // (offline mid-install), the new SW waits, refusing skipWaiting until the shell is complete.
+  // This call is the app-side writer that completes that shell so the next SKIP_WAITING passes.
+  // Putting it behind the skew gate (which throws under the old SW — exactly the stuck-WAITING
+  // situation) would starve the only healer and wedge the device on the old SW until the next
+  // deploy. Shell ONLY: the book manifests are cached post-gate, after the pages (see below).
+  await ensureShellAssetsCached();
   // DEPLOY-SKEW GATE. During an update there is a window where NEW app.js (this code) runs under
   // the OLD, still-controlling SW — whose page handler is cache-first and predates the no-store
   // contract. Precaching through it would be answered instantly from the OLD edition's cache and
@@ -671,6 +691,17 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
   });
 
   await Promise.all(workers);
+  // Book manifests LAST, strict, and only after every page landed. Ordering is deliberate on
+  // both sides: after the pages so a flaky manifest fetch can never block the page precache
+  // (the old ensureCoreAssetsCached-first shape re-hit the same weak link before any page ever
+  // cached); strict so the "ready" flag below can never certify a bundle whose pages.json /
+  // search-index.json are a different edition than its pages — the manifests are served
+  // cache-first with no refresh path, so certifying stale ones would pin them forever.
+  await cacheAssetsNoStore(
+    await caches.open(STATIC_CACHE),
+    [resolveAppPath(`/books/${BOOK_ID}/pages.json`), resolveAppPath(`/books/${BOOK_ID}/search-index.json`)],
+    { strict: true },
+  );
   // Best-effort: a storage-disabled browser must not fail an otherwise-successful cache. The
   // pages ARE cached; a missing "ready" flag just means isOfflineBundleReady re-verifies next
   // load (cache-hit, so cheap) — no data loss, no thrown rejection out of a finished download.
@@ -689,13 +720,18 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
 // base settle delay so the critical fetches win the bandwidth, THEN start the pre-cache.
 // Non-blocking; guarded-once so it never double-runs.
 let offlinePrecacheStarted = false;
+// Set the moment the controllerchange handler commits to location.reload(): the dying document
+// must not start a fresh precache run (it would re-create the old static cache activate just
+// deleted, and start page downloads that die at reload commit). Module state is per-document,
+// so the fresh post-reload document starts with this false.
+let swReloadPending = false;
 const deferOfflinePrecache = (totalPages) => {
   if (NATIVE_FILE_MODE || !("caches" in window)) return;
   if (offlinePrecacheStarted) return;
   const SETTLE_MS = 4000;   // base delay so first paint + relay handshake finish first
   const POLL_MS = 1500;     // how often we re-check the gate after the settle delay
   const kick = () => {
-    if (offlinePrecacheStarted) return;
+    if (offlinePrecacheStarted || swReloadPending) return;
     offlinePrecacheStarted = true;
     ensureOfflineBundle(totalPages, () => {}).catch((error) => {
       offlinePrecacheStarted = false;   // failed → let a later trigger retry
@@ -710,15 +746,26 @@ const deferOfflinePrecache = (totalPages) => {
   // these, one transient failure would cost the whole session's precache. Each is a cheap no-op
   // while a run is in flight or after success (the started flag guards). controllerchange also
   // covers the deploy-skew case where the page is NOT reloaded (SW_RELOAD_FLAG already set).
-  window.addEventListener("online", () => kick());
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") kick();
-  });
-  try {
-    navigator.serviceWorker?.addEventListener("controllerchange", () => setTimeout(kick, 1000));
-  } catch (_) {}
+  //
+  // Armed only at the FIRST settle-gated kick, never earlier: these exist to RETRY after a
+  // failed run, and the first run cannot have failed before it was allowed to start. Arming
+  // them at deferOfflinePrecache() time let a visibilitychange/'online' inside the first ~4s
+  // start the full ~13MB precache during first paint on weak signal — the exact contention
+  // SETTLE_MS exists to prevent.
+  let triggersArmed = false;
+  const armRetryTriggers = () => {
+    if (triggersArmed) return;
+    triggersArmed = true;
+    window.addEventListener("online", () => kick());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") kick();
+    });
+    try {
+      navigator.serviceWorker?.addEventListener("controllerchange", () => setTimeout(kick, 1000));
+    } catch (_) {}
+  };
   const waitForGate = () => {
-    if (gateLifted) { kick(); return; }
+    if (gateLifted) { armRetryTriggers(); kick(); return; }
     setTimeout(waitForGate, POLL_MS);
   };
   setTimeout(waitForGate, SETTLE_MS);
@@ -2168,6 +2215,7 @@ const registerServiceWorker = async () => {
       // controller already existed at boot (a true update that activated without our flag).
       if (!flagged && !hadControllerAtBoot) return;   // first install — nothing to refresh
       hasReloadedForUpdate = true;
+      swReloadPending = true; // this document is dying — no precache kick may start in it
       sessionStorage.removeItem(SW_RELOAD_FLAG);
       window.location.reload();
     });

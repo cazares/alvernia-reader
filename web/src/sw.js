@@ -139,7 +139,18 @@ self.addEventListener("activate", (event) => {
         previous.map(async (key, index) => {
           try {
             const entries = await (await caches.open(key)).keys();
-            return { key, index, count: entries.length };
+            // Score unique PAGE COVERAGE, not raw entries. Pre-build-347 caches hold duplicate
+            // `?retry=`/`?reload=` query-variant entries (normalization began at cb853ac), so a
+            // June-era cache can hold 373+ raw keys while covering fewer real pages than a
+            // modern, normalized 372-entry edition — and raw counting would let that ancient
+            // cache win the keep slot over the complete immediately-previous edition on EVERY
+            // future deploy, a self-perpetuating pin until someone clears site storage.
+            const coverage = new Set(
+              entries
+                .filter((r) => r.url.includes("/pages/"))
+                .map((r) => new URL(r.url).pathname),
+            );
+            return { key, index, count: coverage.size };
           } catch (_) {
             return { key, index, count: 0 };
           }
@@ -309,6 +320,18 @@ self.addEventListener("fetch", (event) => {
         throw networkError; // fetch rejected outright — surfaces exactly like the old code's throw
       })(),
     );
+    return;
+  }
+
+  // NO-STORE CONTRACT, non-page half. app.js's precache/healer fetches shell assets and book
+  // manifests with {cache:"no-store"} and writes the bytes itself — those requests exist to
+  // install VERIFIED-fresh content, so they must reach the real network and must not be
+  // answered from any cache (a cache-first answer here is how an old edition's pages.json
+  // could be laundered into the new static cache and then served cache-first forever).
+  // Display traffic uses the default cache mode and never takes this branch. (Page images
+  // have their own no-store handling in the page branch above.)
+  if (event.request.cache === "no-store") {
+    event.respondWith(fetch(event.request));
     return;
   }
 
