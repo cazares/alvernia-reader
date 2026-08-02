@@ -185,7 +185,7 @@ const state = {
 const BOOK_ID = "standard";
 // Fallback page count used for page-filename pad width before the manifest lands (the real value
 // comes from /books/standard/pages.json → state.totalPages). Kept generous so pad width is right.
-const STANDARD_TOTAL_PAGES = 371;
+const STANDARD_TOTAL_PAGES = 372;
 state.currentBook = BOOK_ID;
 
 let cachedSongKeys = null;
@@ -215,12 +215,21 @@ const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen
 const DEFAULT_START_PAGE = 2;
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
 const CACHE_VERSION = "__CACHE_VERSION__";
+// Content-address of the BOOK (source PDF + render knobs, hashed by build.mjs). Keys everything
+// page-image-related SEPARATELY from the shell's CACHE_VERSION: a shell deploy leaves the cached
+// book untouched (no 25MB re-download), while ANY book change — even a page revised in place under
+// an unchanged filename — starts a fresh page cache that the SW fills from the network. MUST stay
+// in lockstep with sw.js's PAGE_CACHE name, or getCachedPageSet counts a cache the SW isn't using.
+const BOOK_VERSION = "__BOOK_VERSION__";
 // Human-facing build number, baked from version.json at build time, shown as a small "v<NNN>" badge
 // so signovivo.com always reveals which build it's on. Native injects its own version + overlay.
 const BUILD_NUMBER = "__BUILD_NUMBER__";
 const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
-const PAGE_CACHE = `signo-vivo-pages-${CACHE_VERSION}`;
-const OFFLINE_READY_KEY = `sv-offline-ready-${CACHE_VERSION}`;
+const PAGE_CACHE = `signo-vivo-pages-${BOOK_VERSION}`;
+// Book-keyed (not shell-keyed): "fully cached offline" is a claim about the BOOK, so a shell-only
+// deploy must not un-ready a device, and a book change must — the new key reads as not-ready,
+// isOfflineBundleReady re-verifies, and ensureOfflineBundle re-fetches into the new page cache.
+const OFFLINE_READY_KEY = `sv-offline-ready-${BOOK_VERSION}`;
 const OFFLINE_DB_NAME = "signo-vivo-offline";
 const OFFLINE_DB_STORE = "bundle-status";
 const OFFLINE_DB_RECORD_ID = "current";
@@ -252,7 +261,7 @@ const coreAssets = () => [
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 // pdftoppm zero-pads page filenames to the WIDTH of the book's total page count
-// (standard: 371 → page-001.webp). Derive the pad width from the live totalPages,
+// (standard: 372 → page-001.webp). Derive the pad width from the live totalPages,
 // falling back to the known standard count before the manifest lands.
 const pagePadWidth = () => String(state.totalPages || STANDARD_TOTAL_PAGES || 0).length;
 const pageFileName = (pageNumber) => {
@@ -550,32 +559,155 @@ const getCachedPageSet = async (cache) => {
   );
 };
 
-const ensureCoreAssetsCached = async () => {
-  const cache = await caches.open(STATIC_CACHE);
-  // Cache each core/book-manifest asset INDEPENDENTLY (Promise.allSettled), mirroring the SW
-  // install's resilience — NOT an atomic cache.addAll(). With addAll, a single transient drop
-  // or a 404 (e.g. search-index.json missing on a partially-deployed origin) rejects the whole
-  // batch, aborting the offline-bundle prep before ANY pages cache → the book never precaches
-  // and stays unusable offline, retry after retry hitting the same weak link. allSettled lets
-  // the run proceed past one bad asset so the page-precache step still gets to run.
-  await Promise.allSettled(
-    coreAssets().map((asset) => cache.add(asset)),
+// Fetch-and-put with {cache:"no-store"} instead of cache.add(). no-store is the CONTRACT with
+// the SW (both branches of it): these requests exist to install verified-fresh bytes, so the SW
+// passes them straight to the network — a cache-first answer here is how a previous edition's
+// pages.json (or a stale shell file served by an OLD still-controlling SW) could be laundered
+// into the new static cache and then served cache-first forever. Non-strict = allSettled
+// resilience (heal what you can); strict = first failure throws (for assets whose staleness
+// must block the "ready" certification).
+const cacheAssetsNoStore = async (cache, assets, { strict = false } = {}) => {
+  const results = await Promise.allSettled(
+    assets.map(async (asset) => {
+      const response = await fetch(asset, { cache: "no-store" });
+      if (!response.ok) throw new Error(`no se pudo descargar ${asset}`);
+      await cache.put(asset, response.clone());
+    }),
   );
+  if (strict) {
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed) throw failed.reason;
+  }
+};
+
+// SHELL assets only — deliberately NOT the book manifests. This runs BEFORE the deploy-skew
+// gate (it is the app-side writer that completes a partially-installed shell so a WAITING SW's
+// skipWaiting gate can pass), and anything cached pre-gate can be served by an OLD
+// still-controlling SW. For shell files that risk is bounded: "/" and friends are
+// network-first/stale-while-revalidate, so a stale copy self-corrects one load later. The book
+// manifests have NO such refresh path (generic cache-first handler) — a stale pages.json cached
+// here would be served forever — so they are cached strictly, post-gate, after the pages.
+const ensureShellAssetsCached = async () => {
+  const cache = await caches.open(STATIC_CACHE);
+  // Heal only when something is MISSING — but then refetch the WHOLE shell, TRANSACTIONALLY.
+  // The presence check keeps healthy-device retries free (zero fetches when the shell is
+  // complete — without it, every armed-trigger retry re-downloaded the shell, since no-store
+  // bypasses every cache by contract). The refill keeps the shell COHERENT: the cache name pins
+  // a deploy, but a no-store fetch returns whatever the origin serves NOW, so healing only the
+  // gaps could assemble old index.html + new app.js in one cache — a torn shell that
+  // presence-only gates (isShellCached → skipWaiting) would push live, and that crashes on the
+  // next OFFLINE boot with no revalidation possible.
+  //
+  // TRANSACTIONAL means fetch-all-THEN-put-all: a per-asset settle-and-put (the earlier shape)
+  // could itself tear the critical pair on weak signal — index.html succeeding at the new
+  // deploy's bytes while app.js fails and stays old, OVERWRITING a coherent shell with a torn
+  // one. Every fetch must succeed before a single byte is written; any failure heals nothing
+  // and the armed retries try again later. A complete-but-stale shell keeps working offline;
+  // a torn shell does not.
+  const assets = SHELL_ASSETS.map(resolveAppPath);
+  let missing = 0;
+  for (const asset of assets) {
+    if (!(await cache.match(asset))) missing += 1;
+  }
+  if (missing > 0) {
+    // BEST-EFFORT to the caller, transactional inside. The heal must never block the page
+    // precache: a persistently-failing single asset (a 404'd icon after some future deploy —
+    // install's allSettled leaves it missing on every device forever) would otherwise abort
+    // ensureOfflineBundle before a single page fetched, converting a tolerated decorative gap
+    // into a total offline-bundle blackout. Stale-beats-blank; an icon never outranks the book.
+    // The gap persists, so every later armed-trigger run re-attempts this heal anyway.
+    try {
+      const fetched = await Promise.all(
+        assets.map(async (asset) => {
+          const response = await fetch(asset, { cache: "no-store" });
+          if (!response.ok) throw new Error(`no se pudo descargar ${asset}`);
+          return { asset, response };
+        }),
+      ); // any rejection propagates: nothing below runs, nothing was written — no torn shell
+      for (const { asset, response } of fetched) {
+        await cache.put(asset, response.clone());
+      }
+    } catch (error) {
+      console.warn("Shell heal incompleto (se reintentará):", error);
+    }
+  }
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {
   const url = pageFileName(pageNumber);
   if (await cache.match(url)) return false;
+  // {cache:"no-store"} is a CONTRACT with the SW, not just an HTTP-cache bypass: the SW's page
+  // handler refuses to answer no-store requests from a previous edition's cache, so an offline /
+  // weak-signal precache fails honestly instead of "completing" instantly with stale bytes.
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`No se pudo descargar la página ${pageNumber}`);
+  }
+  // Backstop for the same invariant (e.g. an OLD pre-BOOK_VERSION SW that ignores the no-store
+  // contract but whose fallback still tags — or any future code path that serves a tagged
+  // response): previous-edition bytes must never be persisted into THIS book's cache as if they
+  // were current, nor counted toward its completeness. That silent laundering was the original
+  // stale-book bug; failing the download keeps ensureOfflineBundle retryable and the ready flag
+  // unset until genuine current-edition bytes arrive.
+  if (response.headers.get("X-SV-Prev-Edition")) {
+    throw new Error(`Página ${pageNumber} servida de una edición anterior — reintentando en línea`);
   }
   await cache.put(url, response.clone());
   return true;
 };
 
+// Ask the CONTROLLING service worker which book version it serves. Returns:
+//   null       — no controller (first-ever load; fetches go straight to the network — safe)
+//   "<hex>"    — the controller's BOOK_VERSION
+//   "no-reply" — controller didn't answer after retries (an OLD pre-BOOK_VERSION SW, or a hung one)
+// Retried with backoff because a cold SW start on an old, memory-pressured iPad can exceed a
+// single short window — one transient miss must read as "try again", not "wrong SW".
+const controllerBookVersionOnce = (timeoutMs) =>
+  new Promise((resolve) => {
+    const controller = navigator.serviceWorker?.controller;
+    if (!controller) return resolve(null);
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => resolve("no-reply"), timeoutMs);
+    channel.port1.onmessage = (event) => {
+      clearTimeout(timer);
+      resolve(event.data?.bookVersion || "no-reply");
+    };
+    try {
+      controller.postMessage({ type: "GET_BOOK_VERSION" }, [channel.port2]);
+    } catch (_) {
+      clearTimeout(timer);
+      resolve("no-reply");
+    }
+  });
+const controllerBookVersion = async () => {
+  for (const timeoutMs of [1500, 3000, 5000]) {
+    const answer = await controllerBookVersionOnce(timeoutMs);
+    if (answer !== "no-reply") return answer; // null (no controller) or a real version
+  }
+  return "no-reply";
+};
+
 const ensureOfflineBundle = async (totalPages, onProgress) => {
-  await ensureCoreAssetsCached();
+  // SHELL assets first, before the skew gate below — running this unconditionally is
+  // load-bearing: when a deploy's install precache only partially filled the new static cache
+  // (offline mid-install), the new SW waits, refusing skipWaiting until the shell is complete.
+  // This call is the app-side writer that completes that shell so the next SKIP_WAITING passes.
+  // Putting it behind the skew gate (which throws under the old SW — exactly the stuck-WAITING
+  // situation) would starve the only healer and wedge the device on the old SW until the next
+  // deploy. Shell ONLY: the book manifests are cached post-gate, after the pages (see below).
+  await ensureShellAssetsCached();
+  // DEPLOY-SKEW GATE. During an update there is a window where NEW app.js (this code) runs under
+  // the OLD, still-controlling SW — whose page handler is cache-first and predates the no-store
+  // contract. Precaching through it would be answered instantly from the OLD edition's cache and
+  // laundered into this book's cache at full speed, then certified "ready". Refuse to PRECACHE
+  // PAGES until the controller confirms it serves THIS book version; the controllerchange reload
+  // that accompanies a SW update — or the retry triggers in deferOfflinePrecache — re-run this
+  // moments later under the right SW. Throwing (vs returning) keeps deferOfflinePrecache's catch
+  // in charge: the started flag resets and the next trigger retries.
+  const swBook = await controllerBookVersion();
+  if (swBook !== null && swBook !== BOOK_VERSION) {
+    throw new Error(`sw-version-skew: controller=${String(swBook).slice(0, 16)} app=${BOOK_VERSION}`);
+  }
   const cache = await caches.open(PAGE_CACHE);
   const cachedPages = await getCachedPageSet(cache);
   let completed = cachedPages.size;
@@ -600,13 +732,24 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
   });
 
   await Promise.all(workers);
+  // Book manifests LAST, strict, and only after every page landed. Ordering is deliberate on
+  // both sides: after the pages so a flaky manifest fetch can never block the page precache
+  // (the old ensureCoreAssetsCached-first shape re-hit the same weak link before any page ever
+  // cached); strict so the "ready" flag below can never certify a bundle whose pages.json /
+  // search-index.json are a different edition than its pages — the manifests are served
+  // cache-first with no refresh path, so certifying stale ones would pin them forever.
+  await cacheAssetsNoStore(
+    await caches.open(STATIC_CACHE),
+    [resolveAppPath(`/books/${BOOK_ID}/pages.json`), resolveAppPath(`/books/${BOOK_ID}/search-index.json`)],
+    { strict: true },
+  );
   // Best-effort: a storage-disabled browser must not fail an otherwise-successful cache. The
   // pages ARE cached; a missing "ready" flag just means isOfflineBundleReady re-verifies next
   // load (cache-hit, so cheap) — no data loss, no thrown rejection out of a finished download.
   try { localStorage.setItem(OFFLINE_READY_KEY, "ready"); } catch (_) {}
   fleetCheckin({ webCached: true }); // tell the readiness dashboard this iPad is fully cached
   await writeOfflineMetadata({
-    version: CACHE_VERSION,
+    version: BOOK_VERSION, // paired with isOfflineBundleReady's check — a book claim, not a shell claim
     totalPages,
     verifiedAt: new Date().toISOString(),
   });
@@ -618,21 +761,81 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
 // base settle delay so the critical fetches win the bandwidth, THEN start the pre-cache.
 // Non-blocking; guarded-once so it never double-runs.
 let offlinePrecacheStarted = false;
+// Set the moment the controllerchange handler commits to location.reload(): the dying document
+// must not start a fresh precache run (it would re-create the old static cache activate just
+// deleted, and start page downloads that die at reload commit). Module state is per-document,
+// so the fresh post-reload document starts with this false.
+let swReloadPending = false;
 const deferOfflinePrecache = (totalPages) => {
   if (NATIVE_FILE_MODE || !("caches" in window)) return;
   if (offlinePrecacheStarted) return;
   const SETTLE_MS = 4000;   // base delay so first paint + relay handshake finish first
   const POLL_MS = 1500;     // how often we re-check the gate after the settle delay
+  let lastFailureAt = 0;
+  const RETRY_COOLDOWN_MS = 60000; // armed-trigger retries after a failure: at most once a minute
   const kick = () => {
-    if (offlinePrecacheStarted) return;
+    if (offlinePrecacheStarted || swReloadPending) return;
     offlinePrecacheStarted = true;
     ensureOfflineBundle(totalPages, () => {}).catch((error) => {
       offlinePrecacheStarted = false;   // failed → let a later trigger retry
+      lastFailureAt = Date.now();
       console.warn("Pre-cache offline incompleto:", error);
+      // Surface honest progress to the fleet dashboard even on failure — a device stuck
+      // mid-migration should read as "recaching", not freeze at its boot-time snapshot.
+      fleetCheckin().catch(() => {});
     });
   };
+  // Retry entry for the armed triggers: cooldown after a failure so a persistent problem (e.g.
+  // a 404'ing manifest on a partially-deployed origin) can't loop the handshake + manifest
+  // fetches on every foreground/online flap. The shell heal-check and cache-hit page scan make
+  // each retry cheap, but "cheap" times "every visibilitychange" still adds up on cell.
+  //
+  // A suppressed trigger is DEFERRED, never discarded: 'online' is edge-triggered and fires
+  // ONCE when the network returns, and the fleet's iPads run wake-locked with Auto-Lock Never —
+  // visibilitychange may never fire either. Discarding the one wakeup inside the cooldown
+  // window would leave the precache un-retried for the entire session on exactly those devices.
+  let deferredRetryTimer = null;
+  const retryKick = () => {
+    const remainingMs = RETRY_COOLDOWN_MS - (Date.now() - lastFailureAt);
+    if (remainingMs > 0) {
+      if (!deferredRetryTimer) {
+        deferredRetryTimer = setTimeout(() => {
+          deferredRetryTimer = null;
+          kick();
+        }, remainingMs);
+      }
+      return;
+    }
+    kick();
+  };
+  // RETRY TRIGGERS. A failed run (offline, weak signal, sw-version-skew, handshake no-reply)
+  // resets the started flag above, but the gate poll below fires kick() exactly once — without
+  // these, one transient failure would cost the whole session's precache. Each is a cheap no-op
+  // while a run is in flight or after success (the started flag guards). controllerchange also
+  // covers the deploy-skew case where the page is NOT reloaded (SW_RELOAD_FLAG already set).
+  //
+  // Armed only at the FIRST settle-gated kick, never earlier: these exist to RETRY after a
+  // failed run, and the first run cannot have failed before it was allowed to start. Arming
+  // them at deferOfflinePrecache() time let a visibilitychange/'online' inside the first ~4s
+  // start the full ~13MB precache during first paint on weak signal — the exact contention
+  // SETTLE_MS exists to prevent.
+  let triggersArmed = false;
+  const armRetryTriggers = () => {
+    if (triggersArmed) return;
+    triggersArmed = true;
+    window.addEventListener("online", () => retryKick());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") retryKick();
+    });
+    try {
+      // controllerchange bypasses the cooldown deliberately: a NEW controlling SW is precisely
+      // the event that can resolve an sw-version-skew failure, so waiting a minute would be
+      // waiting on nothing.
+      navigator.serviceWorker?.addEventListener("controllerchange", () => setTimeout(kick, 1000));
+    } catch (_) {}
+  };
   const waitForGate = () => {
-    if (gateLifted) { kick(); return; }
+    if (gateLifted) { armRetryTriggers(); kick(); return; }
     setTimeout(waitForGate, POLL_MS);
   };
   setTimeout(waitForGate, SETTLE_MS);
@@ -648,7 +851,10 @@ const isOfflineBundleReady = async (totalPages) => {
   try {
     const metadata = await readOfflineMetadata();
     if (!metadata) return false;
-    if (metadata.version !== CACHE_VERSION) return false;
+    // Book-keyed on purpose: this readiness claim is about the BOOK. A shell deploy must not
+    // invalidate it (metadata from a pre-BOOK_VERSION build simply reads as a mismatch → one
+    // cheap cache-hit re-verify); a book change must and does.
+    if (metadata.version !== BOOK_VERSION) return false;
     if (metadata.totalPages !== totalPages) return false;
 
     const staticCache = await caches.open(STATIC_CACHE);
@@ -1226,7 +1432,11 @@ const loadSearchIndex = async () => {
     }
   }
   try {
-    const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/search-index.json`), { cache: "no-store" });
+    // Default cache mode ON PURPOSE (no-store is reserved for cache WRITERS): this is a display
+    // READER, and it must flow through the SW's network-first-with-cache-fallback branch so an
+    // offline device can read the search index its own precache wrote. With no-store it would hit
+    // the SW's network-only passthrough and search would silently die offline.
+    const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/search-index.json`));
     const data = await response.json();
     state.searchIndexPages = data.pages || [];
   } catch (error) {
@@ -2079,6 +2289,7 @@ const registerServiceWorker = async () => {
       // controller already existed at boot (a true update that activated without our flag).
       if (!flagged && !hadControllerAtBoot) return;   // first install — nothing to refresh
       hasReloadedForUpdate = true;
+      swReloadPending = true; // this document is dying — no precache kick may start in it
       sessionStorage.removeItem(SW_RELOAD_FLAG);
       window.location.reload();
     });
@@ -2929,19 +3140,22 @@ try {
   if (boot && typeof boot === "object") reportCrash(boot.where || "boot", boot.msg || "", boot.stack || "");
 } catch (_) {}
 
-// Rough count of cached page images across all page caches (immutable, so max across versions).
+// Count of cached page images in the CURRENT book's cache ONLY. This feeds the pre-Mass
+// readiness dashboard's webCached claim, and that claim must mean "has THIS edition" — counting
+// the max across surviving previous-edition caches (as this once did, under an "immutable pages"
+// assumption) reported every device fully cached immediately after a book deploy, which is the
+// one moment the dashboard exists to catch stragglers in.
 const countCachedPageImages = async () => {
   if (!("caches" in window)) return 0;
   try {
-    const names = await caches.keys();
-    let max = 0;
-    for (const nm of names) {
-      if (!nm.includes("pages")) continue;
-      const c = await caches.open(nm);
-      const keys = await c.keys();
-      max = Math.max(max, keys.filter((r) => r.url.includes("/pages/")).length);
-    }
-    return max;
+    // NON-CREATING on purpose: caches.open() would mint an empty current-book cache on every
+    // boot even when the precache never ran — and an empty cache that EXISTS is newest by
+    // insertion order, so the SW's activate keep-policy could later evict the full previous
+    // edition in favor of the husk. Only count what actually exists.
+    if (!(await caches.keys()).includes(PAGE_CACHE)) return 0;
+    const c = await caches.open(PAGE_CACHE);
+    const keys = await c.keys();
+    return keys.filter((r) => r.url.includes("/pages/")).length;
   } catch {
     return 0;
   }
@@ -2962,7 +3176,12 @@ const fleetCheckin = async (extra = {}) => {
     const payload = {
       deviceId: fleetDeviceId(),
       surface: "web",
-      webCached: webCached || (totalPages > 0 && pagesCached >= totalPages),
+      // The flag ALONE — no pagesCached fallback. The ready flag is only written after pages
+      // AND manifests certify for THIS book version; the old `|| pagesCached >= totalPages`
+      // fallback re-reported a device as cached when its pages landed but its manifests failed
+      // (or predate the edition), which is exactly the half-updated state the dashboard exists
+      // to surface. pagesCached still reports alongside for partial-progress display.
+      webCached,
       pagesCached,
       totalPages,
       homeScreen: isStandaloneApp,
@@ -3394,7 +3613,8 @@ const initReader = async () => {
     // booting rather than aborting the whole reader (the totalPages fallback below
     // turns {} into STANDARD_TOTAL_PAGES, and the song index hydrates in the background).
     try {
-      const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`), { cache: "no-store" });
+      // Default cache mode (READER, not writer): must be servable from the SW cache offline.
+      const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`));
       manifest = response.ok ? await response.json() : {};
     } catch (_) {
       manifest = {};
@@ -3452,7 +3672,14 @@ const initReader = async () => {
   // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
   // off the critical first paint without losing titles, themes, or jump-to-song.
   if (!manifest.songIndex) {
-    fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`), { cache: "no-store" })
+    // Default cache mode ON PURPOSE — this hydration runs on EVERY web boot (build.mjs inlines
+    // only {totalPages}), and it is the sole source of the song index. As a no-store request it
+    // would hit the SW's network-only passthrough and reject offline, leaving songIndex empty:
+    // every numpad jump would land on the LAST page (resolveSongPage's fallback), titles/browse/
+    // prev-next would die — at Mass, on a device carrying a perfectly cached manifest it wrote
+    // itself. Default mode flows through the SW's network-first branch: fresh online, cached
+    // offline. no-store is reserved for the cache WRITERS (cacheAssetsNoStore/cacheSinglePage).
+    fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`))
       .then((response) => response.json())
       .then(hydrateSongIndex)
       .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));

@@ -161,11 +161,25 @@ try {
   check('app.js contains the "bridge-ready" handshake', appJs.includes("bridge-ready"), "bridge handshake missing");
 
   // ── 6. No unreplaced build-time tokens (a half-built bundle catcher) ────────
-  for (const tok of ["__CACHE_VERSION__", "__RELAY_BASE__", "__BUILD_NUMBER__"]) {
+  for (const tok of ["__CACHE_VERSION__", "__BOOK_VERSION__", "__RELAY_BASE__", "__BUILD_NUMBER__"]) {
     check(`app.js has no unreplaced token ${tok}`, !appJs.includes(tok), "build-time replacement did not run — bundle is half-built");
   }
   const swJs = exists("sw.js") ? read("sw.js") : "";
-  check("sw.js has no unreplaced token __CACHE_VERSION__", !swJs.includes("__CACHE_VERSION__"), "service worker cache version not stamped");
+  for (const tok of ["__CACHE_VERSION__", "__BOOK_VERSION__"]) {
+    check(`sw.js has no unreplaced token ${tok}`, !swJs.includes(tok), "service worker version not stamped");
+  }
+  // PAGE_CACHE must be keyed identically in app.js and sw.js — a drift here silently splits the
+  // cache the app counts from the cache the SW serves, and every offline-readiness claim lies.
+  const pageCacheNames = [appJs, swJs].map((s) => (s.match(/signo-vivo-pages-\$\{BOOK_VERSION\}/g) || []).length);
+  check("app.js and sw.js both key PAGE_CACHE by BOOK_VERSION", pageCacheNames.every((n) => n === 1), "page-cache key drifted between app.js and sw.js");
+  // The anti-laundering contract is spread across both files; losing EITHER half silently
+  // reintroduces the stale-book bug through the precache (previous-edition bytes persisted into
+  // the current book's cache and certified "ready"). Pin all four pieces.
+  check('sw.js tags previous-edition fallbacks (X-SV-Prev-Edition)', swJs.includes("X-SV-Prev-Edition"), "fallback tagging lost — precache can launder stale pages");
+  check('sw.js refuses previous-edition fallbacks for no-store (precache) requests', swJs.includes('event.request.cache === "no-store"'), "no-store precache contract lost in sw.js");
+  check('app.js precache rejects previous-edition responses', appJs.includes("X-SV-Prev-Edition"), "cacheSinglePage backstop lost — stale bytes can be persisted as current");
+  check('sw.js answers the GET_BOOK_VERSION handshake', swJs.includes("GET_BOOK_VERSION"), "precache skew gate has no SW counterpart — deploy-window laundering possible");
+  check('app.js gates the precache on the controller book version', appJs.includes("GET_BOOK_VERSION"), "deploy-skew precache gate lost in app.js");
 
   // ── 7. Pre-app lib helpers loaded before app.js (M1 relay-room resolver) ───
   // If the lib isn't copied or isn't referenced, app.js still defaults safely to

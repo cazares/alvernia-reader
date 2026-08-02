@@ -1,0 +1,178 @@
+#!/usr/bin/env node
+/**
+ * Stamp a human-readable edition line onto page 1 of the songbook PDF.
+ *
+ *   "1 de agosto de 2026 · 372 páginas"
+ *
+ * WHY THIS EXISTS. There is no reliable way to tell which songbook a device is actually
+ * rendering. The bottom-right build badge shows the native SHELL's build number, not the
+ * book's — a device can display "b382" while rendering a book from months earlier. The
+ * fleet dashboard reports nativeBuild and webCached, neither of which is the book. And
+ * inside the church there is no internet, so nothing can be looked up.
+ *
+ * A date printed INTO the artifact solves that, and it has one property nothing else has:
+ * it reads out the truth even when a cache is stale. A device serving an old book shows
+ * the old date. A device that updated shows the new one. The director can check the whole
+ * room in seconds — "¿la suya dice agosto?" — with no network and no maintainer present.
+ *
+ * The page COUNT is on the same line deliberately: a date alone cannot catch a truncated
+ * or half-rendered book, which is exactly the failure a partial update would produce.
+ *
+ * It is stamped into the PDF rather than drawn by the app so that everything downstream
+ * inherits it — the rendered page images, the PDF that gets AirDropped as the offline
+ * fallback, and any printout. One source of truth, and the fallback copy declares its own
+ * age, which is the staleness problem pre-positioned PDFs otherwise have.
+ *
+ * Bottom-LEFT on purpose: the app draws its build badge in the bottom-right.
+ *
+ * Usage:
+ *   node scripts/stamp-book-date.mjs --pdf assets/signo_vivo_372.pdf
+ *   node scripts/stamp-book-date.mjs --pdf <in> --out <out> --date 2026-08-01
+ *
+ * Requires: ghostscript (gs) + qpdf + poppler (pdfinfo). All already used by this repo.
+ */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const argv = process.argv.slice(2);
+const arg = (name, fallback = null) => {
+  const i = argv.indexOf(name);
+  return i === -1 ? fallback : (argv[i + 1] ?? fallback);
+};
+
+const pdfRel = arg("--pdf");
+if (!pdfRel) {
+  console.error("Missing --pdf <path>");
+  process.exit(2);
+}
+const pdfPath = path.resolve(root, pdfRel);
+const outPath = path.resolve(root, arg("--out", pdfRel));
+if (!fs.existsSync(pdfPath)) {
+  console.error(`No such PDF: ${pdfPath}`);
+  process.exit(1);
+}
+
+const need = (bin) => {
+  if (spawnSync("which", [bin]).status !== 0) {
+    console.error(`Missing required tool: ${bin}`);
+    process.exit(1);
+  }
+};
+["gs", "qpdf", "pdfinfo"].forEach(need);
+
+// ── Book facts, read from the PDF itself so the stamp can never disagree with it ──────
+const info = spawnSync("pdfinfo", [pdfPath], { encoding: "utf8" });
+if (info.status !== 0) {
+  console.error("pdfinfo failed — cannot read the PDF.");
+  process.exit(1);
+}
+const pages = Number((info.stdout.match(/^Pages:\s+(\d+)/m) || [])[1]);
+const sizeMatch = info.stdout.match(/^Page size:\s+([\d.]+) x ([\d.]+)/m);
+if (!Number.isFinite(pages) || !sizeMatch) {
+  console.error("Could not read page count / page size from pdfinfo.");
+  process.exit(1);
+}
+const pageW = Number(sizeMatch[1]);
+const pageH = Number(sizeMatch[2]);
+
+// ── The date. Defaults to today; --date YYYY-MM-DD for a reproducible build. ──────────
+const MESES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+const iso = arg("--date");
+let d;
+if (iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) {
+    console.error("--date must be YYYY-MM-DD");
+    process.exit(2);
+  }
+  d = { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+} else {
+  const now = new Date();
+  d = { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+}
+// Spanish long form: lowercase month, "de" on both sides. "1 de agosto de 2026".
+const fecha = `${d.d} de ${MESES[d.m - 1]} de ${d.y}`;
+const label = `${fecha} \\267 ${pages} p\\341ginas`; // \267 = ·, \341 = á (ISOLatin1)
+const human = `${fecha} · ${pages} páginas`;
+
+// ── Build a one-page overlay at the exact page geometry ───────────────────────────────
+// Small but readable: 14pt at the 115 DPI the book renders at is ~19px tall on device.
+// Mid-grey so it reads as a colophon rather than competing with the music.
+const FONT_SIZE = 14;
+const MARGIN_X = 30;
+const MARGIN_Y = 24;
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sv-stamp-"));
+const psPath = path.join(tmp, "stamp.ps");
+const stampPdf = path.join(tmp, "stamp.pdf");
+
+fs.writeFileSync(
+  psPath,
+  `%!PS-Adobe-3.0
+<< /PageSize [${pageW} ${pageH}] >> setpagedevice
+% Re-encode Helvetica to ISOLatin1 so the accented "páginas" and the "·" render.
+/Helvetica findfont
+dup length dict begin
+  { 1 index /FID ne { def } { pop pop } ifelse } forall
+  /Encoding ISOLatin1Encoding def
+  currentdict
+end
+/Helvetica-SV exch definefont pop
+/Helvetica-SV findfont ${FONT_SIZE} scalefont setfont
+0.35 setgray
+${MARGIN_X} ${MARGIN_Y} moveto
+(${label}) show
+showpage
+`,
+);
+
+const gs = spawnSync(
+  "gs",
+  ["-q", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
+    `-dDEVICEWIDTHPOINTS=${pageW}`, `-dDEVICEHEIGHTPOINTS=${pageH}`, "-dFIXEDMEDIA",
+    `-sOutputFile=${stampPdf}`, psPath],
+  { stdio: "inherit" },
+);
+if (gs.status !== 0) {
+  console.error("ghostscript failed to build the stamp overlay.");
+  process.exit(1);
+}
+
+// ── Overlay onto page 1 ONLY. qpdf composites; it does not re-encode the other pages. ──
+const merged = path.join(tmp, "merged.pdf");
+const overlay = spawnSync(
+  "qpdf",
+  [pdfPath, "--overlay", stampPdf, "--to=1", "--", merged],
+  { stdio: "inherit" },
+);
+if (overlay.status !== 0) {
+  console.error("qpdf overlay failed.");
+  process.exit(1);
+}
+
+// ── Verify BEFORE overwriting: page count and geometry must be untouched. ─────────────
+const after = spawnSync("pdfinfo", [merged], { encoding: "utf8" });
+const pagesAfter = Number((after.stdout.match(/^Pages:\s+(\d+)/m) || [])[1]);
+if (pagesAfter !== pages) {
+  console.error(`❌ page count changed ${pages} → ${pagesAfter}; refusing to write.`);
+  process.exit(1);
+}
+const sizeAfter = after.stdout.match(/^Page size:\s+([\d.]+) x ([\d.]+)/m);
+if (!sizeAfter || Number(sizeAfter[1]) !== pageW || Number(sizeAfter[2]) !== pageH) {
+  console.error(`❌ page geometry changed; refusing to write.`);
+  process.exit(1);
+}
+
+fs.copyFileSync(merged, outPath);
+fs.rmSync(tmp, { recursive: true, force: true });
+
+console.log(`✅ stamped "${human}"`);
+console.log(`   bottom-left of page 1 · ${pages} pages · ${pageW}x${pageH} pts unchanged`);
+console.log(`   -> ${path.relative(root, outPath)}`);

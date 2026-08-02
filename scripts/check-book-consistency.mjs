@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const songIndexPath = path.join(root, "src/alverniaManual2SongIndex.js");
-const pdfPath = path.join(root, "assets/signo_vivo_371.pdf");
+const pdfPath = path.join(root, "assets/signo_vivo_372.pdf");
 
 const src = fs.readFileSync(songIndexPath, "utf8");
 const pairs = [...src.matchAll(/\[(\d+),\s*(\d+)\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
