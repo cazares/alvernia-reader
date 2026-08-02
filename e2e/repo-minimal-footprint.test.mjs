@@ -103,3 +103,32 @@ test("repo keeps the song index data used by the web build", () => {
     assert.equal(fs.existsSync(path.join(APP_ROOT, relativePath)), true, `Expected helper path missing: ${relativePath}`);
   }
 });
+
+test("committed web icons stay optimized — the SW precache re-downloads them on every deploy", () => {
+  // Budgets hold the pngquant+oxipng optimization (2026-08-02: 451,515 /
+  // 120,074 / 18,365 bytes). A regenerate-with-plain-sips regression lands at
+  // ~1.5 MB combined and every parish iPad pays it at each deploy's SW
+  // install. If the artwork changes, regenerate via scripts/regen-web-icons.sh
+  // — its output fits these ceilings.
+  const iconBudgets = [
+    { relativePath: "web/src/icon.png", pixels: 1024, maxBytes: 500_000 },
+    { relativePath: "web/src/icon-512.png", pixels: 512, maxBytes: 140_000 },
+    { relativePath: "web/src/icon-192.png", pixels: 192, maxBytes: 25_000 },
+  ];
+
+  for (const { relativePath, pixels, maxBytes } of iconBudgets) {
+    const iconPath = path.join(APP_ROOT, relativePath);
+    assert.equal(fs.existsSync(iconPath), true, `Expected committed icon missing: ${relativePath}`);
+
+    const bytes = fs.readFileSync(iconPath);
+    // PNG signature, then IHDR width/height at fixed offsets 16 and 20.
+    assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", `${relativePath} is not a PNG`);
+    assert.equal(bytes.readUInt32BE(16), pixels, `${relativePath} width drifted`);
+    assert.equal(bytes.readUInt32BE(20), pixels, `${relativePath} height drifted`);
+
+    assert.ok(
+      bytes.length <= maxBytes,
+      `${relativePath} is ${bytes.length} bytes (budget ${maxBytes}) — regenerate with scripts/regen-web-icons.sh, not raw sips`,
+    );
+  }
+});

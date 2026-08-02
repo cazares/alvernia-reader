@@ -5,9 +5,9 @@
 # the choir until it's proven": typecheck + the SAFE e2e subset + the boot smoke
 # test that would have caught the "busted for everyone" practice failure.
 #
-# RUNNER: macOS. web/build.mjs shells out to `sips` (macOS-only) plus poppler
-# (pdftoppm/pdftotext) and cwebp — so a faithful build (and thus the smoke test)
-# only runs on macOS, matching the operator's own build machine.
+# RUNNER: macOS. web/build.mjs shells out to poppler (pdftoppm/pdftotext) and
+# cwebp — the runner stays macOS so a faithful build (and thus the smoke test)
+# matches the operator's own build machine.
 #
 # HARD RULE: never run `npm run test:e2e` here. That glob includes
 # e2e/relay-sync.test.mjs, which publishes to the PRODUCTION relay room
@@ -46,7 +46,7 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Install render tools (poppler + webp; sips is built into macOS)
+      - name: Install render tools (poppler + webp)
         run: brew install poppler webp
 
       - name: Install dependencies
