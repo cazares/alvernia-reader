@@ -747,9 +747,10 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
     { strict: true },
   );
   // Best-effort: a storage-disabled browser must not fail an otherwise-successful cache. The
-  // pages ARE cached, and losing the flag costs nothing but a re-run: isOfflineBundleReady
-  // short-circuits to false without it, and fleetCheckin's independent page-count input still
-  // reports this device cached. No data loss, no thrown rejection out of a finished download.
+  // pages ARE cached and the reader works offline regardless; what is lost is only the READINESS
+  // CLAIM — isOfflineBundleReady short-circuits to false without the flag, so such a device
+  // reports not-ready on the dashboard until a later run sets it. That is the safe direction to
+  // fail. No data loss, and no thrown rejection out of a finished download.
   try { localStorage.setItem(OFFLINE_READY_KEY, "ready"); } catch (_) {}
   fleetCheckin({ webCached: true }); // tell the readiness dashboard this iPad is fully cached
   await writeOfflineMetadata({
