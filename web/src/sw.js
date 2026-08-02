@@ -58,6 +58,13 @@ const NETWORK_FIRST_PATHS = new Set([
   "/styles.css",
   "/app.js",
   "/manifest.webmanifest",
+  // The book manifests: their display READERS (song-index hydration, search) use the default
+  // cache mode and need stale-while-revalidate semantics — fresh online, served from cache
+  // offline. Their WRITER (the strict post-gate precache step) uses no-store and never reaches
+  // this branch. Without these entries the manifests fell to the generic cache-first handler,
+  // where a cached copy was never refreshed.
+  "/books/standard/pages.json",
+  "/books/standard/search-index.json",
 ]);
 
 // NOTE: bulk offline precaching lives in app.js (ensureOfflineBundle), which caches
@@ -323,13 +330,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // NO-STORE CONTRACT, non-page half. app.js's precache/healer fetches shell assets and book
-  // manifests with {cache:"no-store"} and writes the bytes itself — those requests exist to
-  // install VERIFIED-fresh content, so they must reach the real network and must not be
-  // answered from any cache (a cache-first answer here is how an old edition's pages.json
-  // could be laundered into the new static cache and then served cache-first forever).
-  // Display traffic uses the default cache mode and never takes this branch. (Page images
-  // have their own no-store handling in the page branch above.)
+  // NO-STORE CONTRACT, non-page half. no-store marks cache WRITERS and network probes ONLY:
+  // app.js's cacheAssetsNoStore (shell healer + strict manifest step), and the ?selftest
+  // card's connectivity probes (which SHOULD see the real network — serving those from cache
+  // made the selftest lie about network health). These requests exist to obtain verified-fresh
+  // bytes, so they go straight to the network and fail honestly offline; a cache-first answer
+  // here is how an old edition's pages.json could be laundered into the new static cache.
+  // Display READERS — song-index hydration, search-index, the boot manifest fallback — use the
+  // default cache mode by contract (app.js documents each) and are served by the network-first
+  // branch below: fresh online, cached offline. (Page images have their own no-store handling
+  // in the page branch above; cross-origin relay traffic never reaches this listener.)
   if (event.request.cache === "no-store") {
     event.respondWith(fetch(event.request));
     return;

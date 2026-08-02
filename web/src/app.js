@@ -589,7 +589,16 @@ const cacheAssetsNoStore = async (cache, assets, { strict = false } = {}) => {
 // here would be served forever — so they are cached strictly, post-gate, after the pages.
 const ensureShellAssetsCached = async () => {
   const cache = await caches.open(STATIC_CACHE);
-  await cacheAssetsNoStore(cache, SHELL_ASSETS.map(resolveAppPath));
+  // GAP-healing only: skip assets already present. The healer exists to COMPLETE a partial
+  // shell (so a WAITING SW's skipWaiting gate can pass), not to refresh a complete one —
+  // freshness is stale-while-revalidate's job. Without this check, every armed-trigger retry
+  // after a precache failure re-downloaded the entire shell from origin (no-store bypasses
+  // every cache by contract) on each visibilitychange/online event.
+  const missing = [];
+  for (const asset of SHELL_ASSETS.map(resolveAppPath)) {
+    if (!(await cache.match(asset))) missing.push(asset);
+  }
+  if (missing.length > 0) await cacheAssetsNoStore(cache, missing);
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {
@@ -730,16 +739,27 @@ const deferOfflinePrecache = (totalPages) => {
   if (offlinePrecacheStarted) return;
   const SETTLE_MS = 4000;   // base delay so first paint + relay handshake finish first
   const POLL_MS = 1500;     // how often we re-check the gate after the settle delay
+  let lastFailureAt = 0;
+  const RETRY_COOLDOWN_MS = 60000; // armed-trigger retries after a failure: at most once a minute
   const kick = () => {
     if (offlinePrecacheStarted || swReloadPending) return;
     offlinePrecacheStarted = true;
     ensureOfflineBundle(totalPages, () => {}).catch((error) => {
       offlinePrecacheStarted = false;   // failed → let a later trigger retry
+      lastFailureAt = Date.now();
       console.warn("Pre-cache offline incompleto:", error);
       // Surface honest progress to the fleet dashboard even on failure — a device stuck
       // mid-migration should read as "recaching", not freeze at its boot-time snapshot.
       fleetCheckin().catch(() => {});
     });
+  };
+  // Retry entry for the armed triggers: cooldown after a failure so a persistent problem (e.g.
+  // a 404'ing manifest on a partially-deployed origin) can't loop the handshake + manifest
+  // fetches on every foreground/online flap. The gap-healing shell step and cache-hit page scan
+  // make each retry cheap, but "cheap" times "every visibilitychange" still adds up on cell.
+  const retryKick = () => {
+    if (Date.now() - lastFailureAt < RETRY_COOLDOWN_MS) return;
+    kick();
   };
   // RETRY TRIGGERS. A failed run (offline, weak signal, sw-version-skew, handshake no-reply)
   // resets the started flag above, but the gate poll below fires kick() exactly once — without
@@ -756,11 +776,14 @@ const deferOfflinePrecache = (totalPages) => {
   const armRetryTriggers = () => {
     if (triggersArmed) return;
     triggersArmed = true;
-    window.addEventListener("online", () => kick());
+    window.addEventListener("online", () => retryKick());
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") kick();
+      if (document.visibilityState === "visible") retryKick();
     });
     try {
+      // controllerchange bypasses the cooldown deliberately: a NEW controlling SW is precisely
+      // the event that can resolve an sw-version-skew failure, so waiting a minute would be
+      // waiting on nothing.
       navigator.serviceWorker?.addEventListener("controllerchange", () => setTimeout(kick, 1000));
     } catch (_) {}
   };
@@ -1362,7 +1385,11 @@ const loadSearchIndex = async () => {
     }
   }
   try {
-    const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/search-index.json`), { cache: "no-store" });
+    // Default cache mode ON PURPOSE (no-store is reserved for cache WRITERS): this is a display
+    // READER, and it must flow through the SW's network-first-with-cache-fallback branch so an
+    // offline device can read the search index its own precache wrote. With no-store it would hit
+    // the SW's network-only passthrough and search would silently die offline.
+    const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/search-index.json`));
     const data = await response.json();
     state.searchIndexPages = data.pages || [];
   } catch (error) {
@@ -3102,7 +3129,12 @@ const fleetCheckin = async (extra = {}) => {
     const payload = {
       deviceId: fleetDeviceId(),
       surface: "web",
-      webCached: webCached || (totalPages > 0 && pagesCached >= totalPages),
+      // The flag ALONE — no pagesCached fallback. The ready flag is only written after pages
+      // AND manifests certify for THIS book version; the old `|| pagesCached >= totalPages`
+      // fallback re-reported a device as cached when its pages landed but its manifests failed
+      // (or predate the edition), which is exactly the half-updated state the dashboard exists
+      // to surface. pagesCached still reports alongside for partial-progress display.
+      webCached,
       pagesCached,
       totalPages,
       homeScreen: isStandaloneApp,
@@ -3534,7 +3566,8 @@ const initReader = async () => {
     // booting rather than aborting the whole reader (the totalPages fallback below
     // turns {} into STANDARD_TOTAL_PAGES, and the song index hydrates in the background).
     try {
-      const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`), { cache: "no-store" });
+      // Default cache mode (READER, not writer): must be servable from the SW cache offline.
+      const response = await fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`));
       manifest = response.ok ? await response.json() : {};
     } catch (_) {
       manifest = {};
@@ -3592,7 +3625,14 @@ const initReader = async () => {
   // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
   // off the critical first paint without losing titles, themes, or jump-to-song.
   if (!manifest.songIndex) {
-    fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`), { cache: "no-store" })
+    // Default cache mode ON PURPOSE — this hydration runs on EVERY web boot (build.mjs inlines
+    // only {totalPages}), and it is the sole source of the song index. As a no-store request it
+    // would hit the SW's network-only passthrough and reject offline, leaving songIndex empty:
+    // every numpad jump would land on the LAST page (resolveSongPage's fallback), titles/browse/
+    // prev-next would die — at Mass, on a device carrying a perfectly cached manifest it wrote
+    // itself. Default mode flows through the SW's network-first branch: fresh online, cached
+    // offline. no-store is reserved for the cache WRITERS (cacheAssetsNoStore/cacheSinglePage).
+    fetch(resolveAppPath(`/books/${BOOK_ID}/pages.json`))
       .then((response) => response.json())
       .then(hydrateSongIndex)
       .catch((error) => console.warn("No se pudo cargar el índice de canciones", error));
