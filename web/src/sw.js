@@ -39,9 +39,14 @@ const PAGE_NETWORK_TIMEOUT_MS = 3000;
 // precache can't populate these (e.g. install ran on the last bar of signal, then the network
 // died), we must NOT let this half-baked SW take over from a fully-cached older one.
 const CRITICAL_SHELL_ASSETS = ["/", "/index.html", "/styles.css", "/app.js"];
-// NOTE: the book manifests (/books/standard/pages.json, /books/standard/search-index.json) are NOT
-// listed here — they live under /books/standard/ and are cached by app.js at their real paths.
-// Listing them here would risk aborting the atomic install precache if a fetch 404s.
+// The book manifests ARE included (an earlier comment excluded them fearing an aborted atomic
+// install — stale since the install went per-asset Promise.allSettled). They are deliberately
+// NOT in CRITICAL_SHELL_ASSETS: a missed manifest must never block activation, it just gets
+// picked up by SWR / the precache's strict step. Installing them matters because STATIC_CACHE
+// rotates on EVERY deploy and activate deletes the old one — without an install copy (plus the
+// activate salvage below), the deploy boundary destroyed the only cached manifests, and an
+// offline boot in that window had pages but no song index: every numpad jump landed on the
+// last page. Pages get two-edition retention; the manifests get install + salvage.
 const CORE_ASSETS = [
   "/",
   "/index.html",
@@ -51,7 +56,13 @@ const CORE_ASSETS = [
   "/icon.png",
   "/icon-192.png",
   "/icon-512.png",
+  "/books/standard/pages.json",
+  "/books/standard/search-index.json",
 ];
+// The two book manifests, named once: install precaches them, and activate salvages them from a
+// retiring static cache when the new one lacks them (stale manifest beats NO manifest — the same
+// judgment the previous-edition page fallback makes).
+const BOOK_MANIFEST_PATHS = ["/books/standard/pages.json", "/books/standard/search-index.json"];
 const NETWORK_FIRST_PATHS = new Set([
   "/",
   "/index.html",
@@ -171,6 +182,30 @@ self.addEventListener("activate", (event) => {
       const pageCachesToKeep = new Set([PAGE_CACHE, ...keepPrevious]);
 
       const shellReady = await isShellCached();
+
+      // MANIFEST SALVAGE, before any retiring static cache is deleted. STATIC_CACHE rotates on
+      // every deploy, and deleting the old one used to destroy the device's ONLY cached book
+      // manifests — the offline song index — until a full online precache completed (which after
+      // a book bump means the entire page download finishing first). Copy the manifests forward
+      // when the new cache lacks them: a stale manifest beats no manifest, exactly like the
+      // kept previous-edition page cache, and SWR / the precache's strict step replace it with
+      // fresh bytes on the next online run.
+      try {
+        const currentStatic = await caches.open(STATIC_CACHE);
+        for (const manifestPath of BOOK_MANIFEST_PATHS) {
+          if (await currentStatic.match(manifestPath)) continue;
+          for (const key of keys) {
+            if (!key.startsWith(STATIC_CACHE_PREFIX) || key === STATIC_CACHE) continue;
+            const hit = await caches.match(manifestPath, { cacheName: key });
+            if (hit) {
+              await currentStatic.put(manifestPath, hit);
+              break;
+            }
+          }
+        }
+      } catch (_) {
+        // Salvage is best-effort; never let it block activation or cleanup.
+      }
 
       await Promise.all(
         keys

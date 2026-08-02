@@ -589,16 +589,21 @@ const cacheAssetsNoStore = async (cache, assets, { strict = false } = {}) => {
 // here would be served forever — so they are cached strictly, post-gate, after the pages.
 const ensureShellAssetsCached = async () => {
   const cache = await caches.open(STATIC_CACHE);
-  // GAP-healing only: skip assets already present. The healer exists to COMPLETE a partial
-  // shell (so a WAITING SW's skipWaiting gate can pass), not to refresh a complete one —
-  // freshness is stale-while-revalidate's job. Without this check, every armed-trigger retry
-  // after a precache failure re-downloaded the entire shell from origin (no-store bypasses
-  // every cache by contract) on each visibilitychange/online event.
-  const missing = [];
-  for (const asset of SHELL_ASSETS.map(resolveAppPath)) {
-    if (!(await cache.match(asset))) missing.push(asset);
+  // Heal only when something is MISSING — but then refetch the WHOLE shell, not just the gaps.
+  // The presence check keeps healthy-device retries free (zero fetches when the shell is
+  // complete — without it, every armed-trigger retry re-downloaded the shell, since no-store
+  // bypasses every cache by contract). The all-or-nothing refill keeps the shell COHERENT: the
+  // cache name pins a deploy, but a no-store fetch returns whatever the origin serves NOW, so
+  // healing only the gaps could assemble old index.html + new app.js in one cache — a torn
+  // shell that presence-only gates (isShellCached → skipWaiting) would push live, and that
+  // crashes on the next OFFLINE boot with no revalidation possible. One origin snapshot for
+  // everything, or heal nothing.
+  const assets = SHELL_ASSETS.map(resolveAppPath);
+  let missing = 0;
+  for (const asset of assets) {
+    if (!(await cache.match(asset))) missing += 1;
   }
-  if (missing.length > 0) await cacheAssetsNoStore(cache, missing);
+  if (missing > 0) await cacheAssetsNoStore(cache, assets);
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {
@@ -755,10 +760,25 @@ const deferOfflinePrecache = (totalPages) => {
   };
   // Retry entry for the armed triggers: cooldown after a failure so a persistent problem (e.g.
   // a 404'ing manifest on a partially-deployed origin) can't loop the handshake + manifest
-  // fetches on every foreground/online flap. The gap-healing shell step and cache-hit page scan
-  // make each retry cheap, but "cheap" times "every visibilitychange" still adds up on cell.
+  // fetches on every foreground/online flap. The shell heal-check and cache-hit page scan make
+  // each retry cheap, but "cheap" times "every visibilitychange" still adds up on cell.
+  //
+  // A suppressed trigger is DEFERRED, never discarded: 'online' is edge-triggered and fires
+  // ONCE when the network returns, and the fleet's iPads run wake-locked with Auto-Lock Never —
+  // visibilitychange may never fire either. Discarding the one wakeup inside the cooldown
+  // window would leave the precache un-retried for the entire session on exactly those devices.
+  let deferredRetryTimer = null;
   const retryKick = () => {
-    if (Date.now() - lastFailureAt < RETRY_COOLDOWN_MS) return;
+    const remainingMs = RETRY_COOLDOWN_MS - (Date.now() - lastFailureAt);
+    if (remainingMs > 0) {
+      if (!deferredRetryTimer) {
+        deferredRetryTimer = setTimeout(() => {
+          deferredRetryTimer = null;
+          kick();
+        }, remainingMs);
+      }
+      return;
+    }
     kick();
   };
   // RETRY TRIGGERS. A failed run (offline, weak signal, sw-version-skew, handshake no-reply)
