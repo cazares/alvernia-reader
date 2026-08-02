@@ -589,21 +589,38 @@ const cacheAssetsNoStore = async (cache, assets, { strict = false } = {}) => {
 // here would be served forever — so they are cached strictly, post-gate, after the pages.
 const ensureShellAssetsCached = async () => {
   const cache = await caches.open(STATIC_CACHE);
-  // Heal only when something is MISSING — but then refetch the WHOLE shell, not just the gaps.
+  // Heal only when something is MISSING — but then refetch the WHOLE shell, TRANSACTIONALLY.
   // The presence check keeps healthy-device retries free (zero fetches when the shell is
   // complete — without it, every armed-trigger retry re-downloaded the shell, since no-store
-  // bypasses every cache by contract). The all-or-nothing refill keeps the shell COHERENT: the
-  // cache name pins a deploy, but a no-store fetch returns whatever the origin serves NOW, so
-  // healing only the gaps could assemble old index.html + new app.js in one cache — a torn
-  // shell that presence-only gates (isShellCached → skipWaiting) would push live, and that
-  // crashes on the next OFFLINE boot with no revalidation possible. One origin snapshot for
-  // everything, or heal nothing.
+  // bypasses every cache by contract). The refill keeps the shell COHERENT: the cache name pins
+  // a deploy, but a no-store fetch returns whatever the origin serves NOW, so healing only the
+  // gaps could assemble old index.html + new app.js in one cache — a torn shell that
+  // presence-only gates (isShellCached → skipWaiting) would push live, and that crashes on the
+  // next OFFLINE boot with no revalidation possible.
+  //
+  // TRANSACTIONAL means fetch-all-THEN-put-all: a per-asset settle-and-put (the earlier shape)
+  // could itself tear the critical pair on weak signal — index.html succeeding at the new
+  // deploy's bytes while app.js fails and stays old, OVERWRITING a coherent shell with a torn
+  // one. Every fetch must succeed before a single byte is written; any failure heals nothing
+  // and the armed retries try again later. A complete-but-stale shell keeps working offline;
+  // a torn shell does not.
   const assets = SHELL_ASSETS.map(resolveAppPath);
   let missing = 0;
   for (const asset of assets) {
     if (!(await cache.match(asset))) missing += 1;
   }
-  if (missing > 0) await cacheAssetsNoStore(cache, assets);
+  if (missing > 0) {
+    const fetched = await Promise.all(
+      assets.map(async (asset) => {
+        const response = await fetch(asset, { cache: "no-store" });
+        if (!response.ok) throw new Error(`no se pudo descargar ${asset}`);
+        return { asset, response };
+      }),
+    ); // any rejection propagates: nothing below runs, nothing was written
+    for (const { asset, response } of fetched) {
+      await cache.put(asset, response.clone());
+    }
+  }
 };
 
 const cacheSinglePage = async (cache, pageNumber) => {

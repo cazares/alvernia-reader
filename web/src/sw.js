@@ -53,6 +53,10 @@ const CORE_ASSETS = [
   "/styles.css",
   "/app.js",
   "/manifest.webmanifest",
+  // books.json: app.js's SHELL_ASSETS includes it, so the shell healer checks for it — if the
+  // install doesn't cache it, the healer finds a gap after EVERY deploy and refetches the whole
+  // shell on every device, deterministically. Install and heal must agree on the asset list.
+  "/books.json",
   "/icon.png",
   "/icon-192.png",
   "/icon-512.png",
