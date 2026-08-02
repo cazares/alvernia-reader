@@ -41,7 +41,12 @@ const MUTATIONS = [
   {
     name: "unwire fleetCheckin (webCached back to the raw sticky flag)",
     check: "verifies the offline bundle before claiming webCached",
-    edits: [["webCached: verifiedReady ||", "webCached: webCached ||"]],
+    // Verbatim the pre-fix expression, so this reproduces the real regression rather than
+    // some synthetic edit that happens to trip the regex.
+    edits: [[
+      "webCached: verifiedReady,",
+      'webCached: localStorage.getItem(OFFLINE_READY_KEY) === "ready",',
+    ]],
   },
   {
     name: "delete the isOfflineBundleReady call site (the original rot)",
