@@ -181,6 +181,28 @@ try {
   check('sw.js answers the GET_BOOK_VERSION handshake', swJs.includes("GET_BOOK_VERSION"), "precache skew gate has no SW counterpart — deploy-window laundering possible");
   check('app.js gates the precache on the controller book version', appJs.includes("GET_BOOK_VERSION"), "deploy-skew precache gate lost in app.js");
 
+  // The fleet dashboard's readiness claim must stay a MEASUREMENT. isOfflineBundleReady already
+  // rotted into zero-caller dead code once, and while it was dead the webCached claim rested on
+  // OFFLINE_READY_KEY alone — a flag written once per book version that nothing ever clears, so an
+  // iPad whose CacheStorage iOS had evicted still reported green with zero pages cached. Losing
+  // the call site is silent and invisible in every test that checks behavior rather than wiring,
+  // so pin the wiring itself.
+  check(
+    "app.js verifies the offline bundle before claiming webCached",
+    /isOfflineBundleReady\(totalPages\)/.test(appJs) && /webCached:\s*verifiedReady/.test(appJs),
+    "fleetCheckin no longer verifies — webCached is back to trusting the never-cleared ready flag",
+  );
+  // Read-only inspection must not CREATE the current book's cache: an empty husk is something the
+  // SW's activate keep-policy then has to score and reason about.
+  // BOTH caches, asserted separately on purpose: an "either one" test passes while the PAGE_CACHE
+  // read — the one whose husk the SW's activate keep-policy has to score — is still creating.
+  check(
+    "app.js inspects caches without creating them (openExistingCache)",
+    appJs.includes("openExistingCache(STATIC_CACHE)")
+      && appJs.includes("openExistingCache(PAGE_CACHE)"),
+    "readiness check reverted to caches.open() — boot on an evicted device mints an empty husk",
+  );
+
   // ── 7. Pre-app lib helpers loaded before app.js (M1 relay-room resolver) ───
   // If the lib isn't copied or isn't referenced, app.js still defaults safely to
   // the production room — but we assert it here so a broken build is caught.
