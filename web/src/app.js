@@ -572,12 +572,51 @@ const openExistingCache = async (name) => {
   return caches.open(name);
 };
 
+// PAGE-SLOT CONTENT GUARD. A page slot holds a real image only if the response says
+// `content-type: image/*`. Cloudflare Pages answers an unmatched path with the SPA shell — 200,
+// text/html, the bytes of index.html — so during the window where the shell advertises more
+// pages than a PoP can serve, a page fetch "succeeds" with a document. sw.js refuses to cache
+// those; these are the same guards on the app side, which needs its own because cacheSinglePage
+// writes to PAGE_CACHE with a DIRECT cache.put that never passes through the SW's fetch handler.
+//
+// Two rules, asymmetric for the same reason sw.js's are:
+//   - WRITING demands a POSITIVE image/*. A bad write is permanent and unrecoverable offline.
+//   - JUDGING what is ALREADY cached condemns only a positively-wrong type. An entry we cannot
+//     classify is left alone, because a false "missing" verdict re-downloads the whole 25MB book
+//     on every device — a far larger harm than the one page it would be guessing about.
+const pageResponseContentType = (response) =>
+  (response?.headers?.get("content-type") || "").toLowerCase().trim();
+const isPageImageResponse = (response) => pageResponseContentType(response).startsWith("image/");
+const isPoisonedPageEntry = (response) => {
+  const contentType = pageResponseContentType(response);
+  return contentType !== "" && !contentType.startsWith("image/");
+};
+
 const getCachedPageSet = async (cache) => {
   const keys = await cache.keys();
+  const pageNumbers = keys.map(extractCachedPageNumber);
+  // CONTENT-AWARE, not merely key-aware. A poisoned slot still has a perfectly good
+  // page-NNN.webp KEY, and counting keys alone was wrong twice over: ensureOfflineBundle never
+  // listed that page as missing (so cacheSinglePage's repair below could never fire, and the
+  // poison was permanent), and isOfflineBundleReady certified a bundle containing a page that
+  // renders broken — the pre-Mass dashboard showing green over it.
+  //
+  // matchAll() reads every entry's headers in ONE call instead of one match() per page, and its
+  // result is in the same insertion order as keys(). If that correlation ever fails to hold — or
+  // matchAll is unavailable — the length check drops us back to key-only counting, because
+  // mislabelling good pages as missing is the more expensive way to be wrong.
+  let responses = null;
+  try {
+    responses = await cache.matchAll();
+  } catch (_) {
+    responses = null;
+  }
+  const canInspect = Array.isArray(responses) && responses.length === keys.length;
   return new Set(
-    keys
-      .map(extractCachedPageNumber)
-      .filter((pageNumber) => Number.isFinite(pageNumber)),
+    pageNumbers.filter((pageNumber, index) => {
+      if (!Number.isFinite(pageNumber)) return false;
+      return canInspect ? !isPoisonedPageEntry(responses[index]) : true;
+    }),
   );
 };
 
@@ -657,7 +696,18 @@ const ensureShellAssetsCached = async () => {
 
 const cacheSinglePage = async (cache, pageNumber) => {
   const url = pageFileName(pageNumber);
-  if (await cache.match(url)) return false;
+  const existing = await cache.match(url);
+  // REPAIR, not just skip. The presence check is what keeps re-runs free, but a slot poisoned by
+  // a build that predates these guards is "present" too, and skipping it would make the poison
+  // permanent — a code-only deploy does not rotate PAGE_CACHE (it is keyed by BOOK_VERSION, the
+  // book's hash). getCachedPageSet is what surfaces such a page as missing in the first place;
+  // this drops the bad bytes so the fetch below can replace them. Healthy devices pay nothing:
+  // the match already happened, and a good entry returns here exactly as it always did.
+  if (existing && isPoisonedPageEntry(existing)) {
+    await cache.delete(url);
+  } else if (existing) {
+    return false;
+  }
   // {cache:"no-store"} is a CONTRACT with the SW, not just an HTTP-cache bypass: the SW's page
   // handler refuses to answer no-store requests from a previous edition's cache, so an offline /
   // weak-signal precache fails honestly instead of "completing" instantly with stale bytes.
@@ -673,6 +723,12 @@ const cacheSinglePage = async (cache, pageNumber) => {
   // unset until genuine current-edition bytes arrive.
   if (response.headers.get("X-SV-Prev-Edition")) {
     throw new Error(`Página ${pageNumber} servida de una edición anterior — reintentando en línea`);
+  }
+  // Same shape as the check above, same reason: a 200 that is not an image must fail the download
+  // rather than be persisted and counted. Throwing keeps ensureOfflineBundle retryable and leaves
+  // the ready flag unset until the PoP can actually serve this page.
+  if (!isPageImageResponse(response)) {
+    throw new Error(`Página ${pageNumber} no devolvió una imagen — reintentando en línea`);
   }
   await cache.put(url, response.clone());
   return true;
