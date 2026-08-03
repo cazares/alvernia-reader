@@ -1760,9 +1760,33 @@ export default function App() {
         banner is deliberately non-dismissible and survives restarts.
       */}
       {revertedBook ? (
-        <View style={styles.revertBanner} pointerEvents="none">
+        <TouchableOpacity
+          style={styles.revertBanner}
+          accessibilityRole="button"
+          // Non-dismissible by ACCIDENT, clearable by an OPERATOR. The plan parks the clear action
+          // inside DIAGNÓSTICO, which is not in this build — so without this the banner would stick
+          // on the device forever with no way off it, which is its own small outage. A deliberate
+          // tap plus a confirm is the same "an operator decided" bar, reachable today.
+          onPress={() => {
+            Alert.alert(
+              "Cancionero anterior",
+              "Este iPad volvió a una versión anterior del cancionero. Avísale al director antes de quitar el aviso.",
+              [
+                { text: "Dejar el aviso", style: "cancel" },
+                {
+                  text: "Ya avisé",
+                  onPress: () => {
+                    void AsyncStorage.removeItem(STORAGE_KEYS.bookReverted).catch(() => {});
+                    setRevertedBook(null);
+                    breadcrumb("reverted-banner-cleared");
+                  },
+                },
+              ],
+            );
+          }}
+        >
           <Text style={styles.revertBannerText}>LIBRO ANTERIOR · avísale al director</Text>
-        </View>
+        </TouchableOpacity>
       ) : null}
       <WebView
         key={`webbundle-${mountKey}`}

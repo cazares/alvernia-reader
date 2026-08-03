@@ -95,11 +95,33 @@ ${handshake
 const resetResolverState = () => {
   // The resolver caches its decision (sv.book.resolved) and tracks boot health (sv.book.boot,
   // sv.book.quarantine, sv.book.reverted). A test that leaves those behind measures the PREVIOUS
-  // test. RN's AsyncStorage is a plain SQLite/manifest store under RCTAsyncLocalStorage_V1.
-  for (const dir of ["RCTAsyncLocalStorage_V1", "RCTAsyncLocalStorage"]) {
-    fs.rmSync(path.join(dataDir, "Library", "Application Support", dir), { recursive: true, force: true });
-    fs.rmSync(path.join(docs, dir), { recursive: true, force: true });
-  }
+  // test — and silently, because a stale LIBRO ANTERIOR banner looks exactly like a fresh one.
+  //
+  // DO NOT hardcode the path. RN's AsyncStorage lives at
+  //   Library/Application Support/<bundleId>/RCTAsyncLocalStorage_V1
+  // on current React Native, but it has moved between versions (it used to sit directly under
+  // Application Support, and older builds used Documents). Guessing produced a reset that was a
+  // silent NO-OP: it deleted directories that did not exist, reported success, and every
+  // subsequent "clean" run inherited the previous run's quarantine and banner state. Search for it.
+  const found = [];
+  const walk = (dir, depth = 0) => {
+    if (depth > 4) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const full = path.join(dir, e.name);
+      if (e.name.startsWith("RCTAsyncLocalStorage")) found.push(full);
+      else walk(full, depth + 1);
+    }
+  };
+  walk(dataDir);
+  for (const dir of found) fs.rmSync(dir, { recursive: true, force: true });
+  return found;
 };
 
 const state = arg("--state");
@@ -119,14 +141,19 @@ if (argv.includes("--inspect") || !state) {
 }
 
 switch (state) {
-  case "clean":
+  case "clean": {
     fs.rmSync(webBundle, { recursive: true, force: true });
     for (const n of fs.existsSync(docs) ? fs.readdirSync(docs) : []) {
       if (n.startsWith("WebBundle")) fs.rmSync(path.join(docs, n), { recursive: true, force: true });
     }
-    resetResolverState();
-    console.log("✅ cleaned: no Documents bundle, resolver state reset");
+    const wiped = resetResolverState();
+    // Report what was actually removed. A reset that silently finds nothing is worse than no
+    // reset at all, because every later run then measures the previous run's state.
+    console.log(`✅ cleaned: no Documents bundle; wiped ${wiped.length} AsyncStorage store(s)`);
+    for (const w of wiped) console.log(`   - ${path.relative(dataDir, w)}`);
+    if (!wiped.length) console.log("   ⚠️  no AsyncStorage store found — resolver state may PERSIST");
     break;
+  }
 
   case "legacy":
     // The D1 shape: a real bundle, no manifest. Every mesh-pushed copy in the field looks like this.
