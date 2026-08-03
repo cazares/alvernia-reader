@@ -78,6 +78,43 @@ test('both switches set arms the fleet', () => {
   assert.ok(decideBookUpdate(env, dev({ deviceId: "any" }), [], NOW));
 });
 
+// ─── The throttle gates STARTS, never work in progress ──────────────────────
+//
+// Returning null is byte-identical to "disarmed", and the client treats an absent pointer as a
+// REVOKE (PdfReaderApp.tsx:1376 deletes the staged directory). Throttling a device that already
+// downloaded therefore destroys ~27 MB of verified work and restarts it — the exact opposite of
+// what the throttle is for. Gate on bookStage: a device reports bookVersion = the ACTIVE book
+// (PdfReaderApp.tsx:273), so a staged-and-ready device still reports the OLD version.
+
+const queueEnv = (over) => armedEnv({ BOOK_UPDATE_DEVICES: "*", BOOK_UPDATE_ALLOW_FLEET: "yes", ...over });
+const queueBusy = (n) => Array.from({ length: n }, (_, i) => dev({ deviceId: `other${i}`, bookStage: "downloading:40%" }));
+
+test("a device that is ALREADY READY keeps its pointer even when the queue is full", () => {
+  const me = dev({ deviceId: "me", bookStage: "ready" });
+  const fleet = [me, ...queueBusy(5)];
+  assert.deepEqual(
+    decideBookUpdate(queueEnv(), me, fleet, NOW),
+    { bookVersion: V, base: "https://signovivo.com" },
+    "a full queue revoked a verified staged copy — it would be deleted and re-downloaded",
+  );
+});
+
+test("a device MID-DOWNLOAD keeps its pointer even when the queue is full", () => {
+  const me = dev({ deviceId: "me", bookStage: "downloading:70%" });
+  const fleet = [me, ...queueBusy(5)];
+  assert.ok(decideBookUpdate(queueEnv(), me, fleet, NOW), "a partial download was thrown away mid-flight");
+});
+
+test("a device that has NOT started IS still throttled — the queue must still protect the AP", () => {
+  const me = dev({ deviceId: "me" });
+  assert.equal(decideBookUpdate(queueEnv(), me, [me, ...queueBusy(5)], NOW), null);
+});
+
+test("an unstarted device is armed once the queue drains", () => {
+  const me = dev({ deviceId: "me" });
+  assert.ok(decideBookUpdate(queueEnv(), me, [me], NOW));
+});
+
 // ─── K-at-a-time ────────────────────────────────────────────────────────────
 
 const fleetEnv = () => armedEnv({ BOOK_UPDATE_DEVICES: "*", BOOK_UPDATE_ALLOW_FLEET: "yes", BOOK_UPDATE_CONCURRENCY: "2" });
