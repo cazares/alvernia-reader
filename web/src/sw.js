@@ -256,6 +256,38 @@ const shouldCacheResponse = (response) => {
   return !cacheControl.toLowerCase().includes("no-store");
 };
 
+// PAGE-SLOT POISONING GUARD. Cloudflare Pages answers ANY unmatched path with the SPA shell —
+// HTTP 200, `content-type: text/html`, the bytes of index.html — so a request for a page image
+// that does not exist AT THIS PoP YET comes back "ok" with a document in it. Nothing else here
+// can tell that apart from real pixels: shouldCacheResponse only looks for no-store. Written
+// into PAGE_CACHE, that HTML poisons the page slot PERMANENTLY — the page branch below is
+// cache-FIRST with no revalidation, so the page renders broken online AND offline until
+// BOOK_VERSION changes, and inside the church there is no network and no remedy.
+//
+// The trigger is routine, not hypothetical: the shell (index.html / books.json / pages.json,
+// which carry totalPages) and the page assets do NOT flip atomically at a PoP. Measured on the
+// 2026-08-02 page-373 deploy, books.json read 372 at the staging alias for ~3 minutes while
+// pages.json at the same host already read 373 — a device landing in that window asks for a page
+// its PoP cannot serve and caches the SPA shell as that page, forever.
+//
+// The two predicates are deliberately ASYMMETRIC, because writing and serving carry opposite
+// risks here:
+//   - CACHING demands a POSITIVE `image/*`. A bad write is permanent and unrecoverable offline,
+//     so anything we cannot positively identify as an image is not worth persisting.
+//   - SERVING rejects only a POSITIVE non-image. A response we merely can't classify (no
+//     content-type at all) is still the best bytes we have; demoting it below a previous edition
+//     would trade fresh pixels for stale ones over a missing header.
+// Scope is the PAGE branch only. The shell/manifest paths take the same SPA fallback, but they
+// are stale-while-revalidate — a bad copy self-corrects on the next online load rather than
+// sticking — so they are deliberately left alone.
+const responseContentType = (response) =>
+  (response?.headers?.get("content-type") || "").toLowerCase().trim();
+const isCacheablePageImage = (response) => responseContentType(response).startsWith("image/");
+const isNotPageImage = (response) => {
+  const contentType = responseContentType(response);
+  return contentType !== "" && !contentType.startsWith("image/");
+};
+
 // Look for a page image in any PREVIOUS book version's page cache (kept by activate). A hit is
 // that page as of the PREVIOUS edition — right bytes for an unchanged page, stale bytes for a
 // revised one — so this runs strictly AFTER the network has had its chance: it exists so a book
@@ -272,6 +304,11 @@ const matchAnyPageCache = async (request) => {
     // and the resurrected empty husk — newest by insertion order — would later win the
     // activate keep slot over a full edition. match() never creates.
     const hit = await caches.match(request, { cacheName: key, ignoreSearch: true });
+    // A PREVIOUS edition's cache can itself hold poison: it was written by a build that shipped
+    // before the guard above existed, and a code-only deploy does NOT rotate PAGE_CACHE (the
+    // name is keyed by BOOK_VERSION, the book's hash). Skip such an entry and keep scanning —
+    // an older-but-real edition of the page is worth far more than a document.
+    if (hit && isNotPageImage(hit)) continue;
     if (hit) {
       // Tag the response so callers can TELL it is previous-edition material. Display code
       // ignores the header; app.js's cacheSinglePage treats it as a failed download so these
@@ -301,9 +338,41 @@ self.addEventListener("fetch", (event) => {
         // offline, stranding the follower on "No se pudo cargar esta página." for a cached page.
         // A hit here is CURRENT-edition bytes by construction (PAGE_CACHE is book-keyed and only
         // ever filled from the network below / app.js's precache), so serving it instantly is safe.
+        // Bare, query-stripped key. Hoisted above the cache-first read because the self-heal
+        // below has to purge it explicitly, not only via ignoreSearch.
+        const cacheKey = new Request(requestUrl.origin + requestUrl.pathname);
         const cache = await caches.open(PAGE_CACHE);
         const cached = await cache.match(event.request, { ignoreSearch: true });
-        if (cached) return cached;
+        // SELF-HEAL, before the cache-first return. A slot poisoned by an earlier build (the
+        // guard below is new; the caches on already-deployed devices are not) would otherwise be
+        // served from here forever — this branch is cache-first precisely so it never revalidates,
+        // and PAGE_CACHE is keyed by BOOK_VERSION, so shipping this file does NOT rotate it. Evict
+        // and fall through to the network: online the slot refills with real bytes on this very
+        // request; offline we land on the previous-edition fallback or the page's own retry UI,
+        // which is where a broken render already left the follower, only now it is repairable.
+        // ignoreSearch on the delete purges every ?retry=/?reload= variant of the same page.
+        // Cost on the healthy path is one header read on an already-resolved Response.
+        //
+        // AWAITED, not waitUntil: the refill below writes the SAME key, so a delete still in
+        // flight when the network lands would erase the good bytes it just replaced them with,
+        // re-arming the exact bug on the next page turn. Sequencing costs one CacheStorage
+        // delete, and only ever on the poisoned path — the healthy path never reaches here.
+        //
+        // BOTH delete forms on purpose. ignoreSearch is the one that sweeps ?retry=/?reload=
+        // variants, but it is the least-exercised corner of the Cache API on the old iPads this
+        // fleet runs; if a browser no-ops it, deleting only the exact (possibly query-bearing)
+        // request would leave the bare entry poisoned while the refill writes the bare key —
+        // and the next ignoreSearch READ could still return the stale variant first, healing and
+        // re-downloading the page on every single view. Naming the bare key explicitly makes the
+        // repair terminate no matter how ignoreSearch behaves.
+        if (cached && isNotPageImage(cached)) {
+          await Promise.all([
+            cache.delete(event.request, { ignoreSearch: true }),
+            cache.delete(cacheKey),
+          ]).catch(() => {});
+        } else if (cached) {
+          return cached;
+        }
 
         // Miss → NETWORK FIRST, then previous-edition caches. Order is load-bearing: the old
         // order (previous caches first) meant a page revised under an unchanged filename could
@@ -313,7 +382,6 @@ self.addEventListener("fetch", (event) => {
         // bounded by PAGE_NETWORK_TIMEOUT_MS, and the race is on response HEADERS (TTFB), not on
         // the full body: the winning response streams to the page while the cache write happens
         // in the background, so a slow-but-alive network never stalls a page turn on the put.
-        const cacheKey = new Request(requestUrl.origin + requestUrl.pathname);
         let networkError = null;
         const fetched = fetch(event.request).catch((error) => {
           networkError = error;
@@ -326,6 +394,9 @@ self.addEventListener("fetch", (event) => {
         // ?retry=/?reload=) to stay deduplicated and consistent with getCachedPageSet.
         const putChain = fetched.then(async (response) => {
           if (!response || !response.ok || !shouldCacheResponse(response)) return;
+          // The poisoning guard, on the only SW-side writer of PAGE_CACHE. A 200 text/html SPA
+          // fallback stops here instead of becoming this page slot's permanent contents.
+          if (!isCacheablePageImage(response)) return;
           try {
             await cache.put(cacheKey, response.clone());
           } catch (_) {
@@ -352,9 +423,13 @@ self.addEventListener("fetch", (event) => {
           fetched,
           new Promise((resolve) => setTimeout(() => resolve(timedOut), PAGE_NETWORK_TIMEOUT_MS)),
         ]);
-        if (winner !== timedOut && winner && winner.ok) return winner;
+        // A 200 text/html SPA fallback is NOT this page — treat it exactly like a non-ok
+        // response and let the previous edition below have its turn. If nothing is cached
+        // anywhere it is still returned as the last resort at the bottom, where the <img>
+        // onerror handler turns it into the page's own retry UI.
+        if (winner !== timedOut && winner && winner.ok && !isNotPageImage(winner)) return winner;
 
-        // Network failed / non-ok / slow-to-first-byte → previous edition from an older cache
+        // Network failed / non-ok / not-an-image / slow-to-first-byte → previous edition from an older cache
         // (tagged X-SV-Prev-Edition by matchAnyPageCache). A slow fetch that eventually lands
         // still reaches the cache via putChain, so the NEXT view of this page is current.
         const fallback = await matchAnyPageCache(event.request);

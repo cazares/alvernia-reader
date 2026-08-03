@@ -67,6 +67,7 @@ jobs:
           e2e/svRelayRoom.test.mjs
           e2e/svSelftest.test.mjs
           e2e/svSyncDecision.test.mjs
+          e2e/sw-page-cache.test.mjs
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
         run: node scripts/smoke-boot.mjs
@@ -78,3 +79,9 @@ jobs:
       # guard to trip.
       - name: Guard mutation test (proves the wiring guards have teeth)
         run: node scripts/verify-smoke-guards.mjs
+
+      # Same reasoning, applied to the page-slot poisoning guards in sw.js + app.js. Reverts
+      # each one against a copy of web/src and requires the matching e2e test to go RED. Reads
+      # only web/src, so it does not depend on the build above.
+      - name: Page-cache guard mutation test (proves the poisoning guards have teeth)
+        run: node scripts/verify-sw-page-cache-guards.mjs
