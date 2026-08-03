@@ -28,6 +28,7 @@
  *   node scripts/additive-gate.mjs                       # baseline = git show HEAD:web/manifest-baseline.json
  *   node scripts/additive-gate.mjs --next web/dist/bundle-manifest.json
  *   node scripts/additive-gate.mjs --baseline <file>      # escape hatch for local experiments
+ *   node scripts/additive-gate.mjs --allow-renderer-drift # CI: skip byte-identity when encoders differ
  *   ADDITIVE_OVERRIDE="yes I am changing published pages" node scripts/additive-gate.mjs
  *
  * Exit 0 = additive (or no baseline yet). Exit 1 = a published page changed.
@@ -53,9 +54,32 @@ const PAGE_RE = /^books\/[^/]+\/pages\/page-\d+\.webp$/;
  * on every build and is not policed here. `books/<id>/pages.json` legitimately changes the moment a
  * page is appended, so treating it as immutable would red every legitimate release.
  */
-export function compareManifests(baseline, next) {
+export function compareManifests(baseline, next, opts = {}) {
   const violations = [];
-  if (!baseline || !next) return { violations: ["missing manifest"], additions: {} };
+  const notes = [];
+  if (!baseline || !next) return { violations: ["missing manifest"], additions: {}, notes };
+
+  // ── Renderer drift makes BYTE-IDENTITY meaningless, but nothing else ──────────────────────────
+  //
+  // Page hashes only mean something when both sides came out of the same encoders. CI installs
+  // poppler/webp UNPINNED, so its render of an unchanged PDF legitimately differs from the build
+  // Mac's — measured 2026-08-03: pdftoppm 26.04.0 vs 26.07.0 changed exactly ONE page of 373.
+  // Failing on that is a false alarm; ignoring it wholesale would hide real changes.
+  //
+  // So: when the renderers differ AND the caller opted in (`--allow-renderer-drift`, which CI
+  // passes and scripts/release.sh deliberately does NOT), byte-identity is reported as a NOTE and
+  // every renderer-INDEPENDENT invariant is still enforced — pages disappearing, the book
+  // shrinking, songs moving to different pages, the pad width changing. Those are the ones that
+  // actually break an offline device, and none of them depend on which encoder ran.
+  //
+  // On the publish path the renderers match by construction (same machine that made the baseline),
+  // so a difference there is a REAL event: someone upgraded poppler, and the operator must
+  // re-baseline deliberately rather than have it waved through.
+  const r1 = baseline.renderer || {};
+  const r2 = next.renderer || {};
+  const rendererKeys = ["dpi", "webpQuality", "pdftoppm", "cwebp"];
+  const rendererDiffs = rendererKeys.filter((k) => r1[k] !== undefined && r1[k] !== r2[k]);
+  const skipByteIdentity = rendererDiffs.length > 0 && !!opts.allowRendererDrift;
 
   const pagesOf = (m) => new Map(
     (m.files || []).filter((f) => PAGE_RE.test(f.p)).map((f) => [f.p, f.h]),
@@ -85,11 +109,19 @@ export function compareManifests(baseline, next) {
     );
   }
   if (modified.length) {
-    violations.push(
+    const msg =
       `${modified.length} published page(s) CHANGED IN PLACE: ${summarize(modified)}. ` +
       "Every device that already cached these keeps the old bytes unless BOOK_VERSION busts it, " +
-      "and offline copies can never be corrected at all.",
-    );
+      "and offline copies can never be corrected at all.";
+    if (skipByteIdentity) {
+      notes.push(
+        `byte-identity NOT verified (renderer differs: ${rendererDiffs.join(", ")}) — ` +
+        `${modified.length} page(s) differ, which is expected across encoders and proves nothing either way. ` +
+        "Only the publish path can check this.",
+      );
+    } else {
+      violations.push(msg);
+    }
   }
 
   // 4. Song numbers are how the choir addresses the book out loud. A song that still exists but
@@ -107,14 +139,13 @@ export function compareManifests(baseline, next) {
     violations.push(`${moved.length} song(s) no longer open the same page: ${summarize(moved)}`);
   }
 
-  // 5. Renderer drift. Not a defect on its own, but it means every hash comparison above was made
-  //    across different encoders, so a clean result proves less than it appears to.
-  const r1 = baseline.renderer || {};
-  const r2 = next.renderer || {};
-  for (const k of ["dpi", "webpQuality", "pdftoppm", "cwebp"]) {
-    if (r1[k] !== undefined && r1[k] !== r2[k]) {
-      violations.push(`renderer.${k} changed: ${JSON.stringify(r1[k])} → ${JSON.stringify(r2[k])}`);
-    }
+  // 5. Renderer drift. On the publish path this is a hard failure: the baseline came off this same
+  //    machine, so a change means the toolchain moved and the operator must re-baseline knowingly.
+  //    Under --allow-renderer-drift (CI) it is a note, because there it is expected and constant.
+  for (const k of rendererDiffs) {
+    const line = `renderer.${k} changed: ${JSON.stringify(r1[k])} → ${JSON.stringify(r2[k])}`;
+    if (opts.allowRendererDrift) notes.push(line);
+    else violations.push(line);
   }
 
   // 6. The frozen page-URL pad width. Changing it renames every page image at once, which is the
@@ -138,7 +169,7 @@ export function compareManifests(baseline, next) {
 
   const addedPages = [...nextPages.keys()].filter((p) => !basePages.has(p));
   const addedSongs = [...nextPairs.keys()].filter((s) => !basePairs.has(s));
-  return { violations, additions: { pages: addedPages.length, songs: addedSongs.length } };
+  return { violations, additions: { pages: addedPages.length, songs: addedSongs.length }, notes };
 }
 
 const summarize = (list, max = 6) =>
@@ -201,14 +232,21 @@ export function runCli(argv, root) {
     );
   }
 
-  const { violations, additions } = compareManifests(baseline, next);
+  const { violations, additions, notes } = compareManifests(baseline, next, {
+    allowRendererDrift: argv.includes("--allow-renderer-drift"),
+  });
   const all = [...completeness, ...violations];
 
   console.log(`additive-gate: ${baseline.bookVersion} → ${next.bookVersion}`);
   console.log(`  ${baseline.totalPages} → ${next.totalPages} pages · +${additions.pages} page(s), +${additions.songs} song(s)`);
 
+  for (const n of notes) console.log(`  ⓘ ${n}`);
   if (all.length === 0) {
-    console.log("✅ additive — every previously published page is byte-identical and every song still opens the same page.");
+    console.log(
+      notes.length
+        ? "✅ additive as far as this path can tell — no page removed, no shrink, no song moved."
+        : "✅ additive — every previously published page is byte-identical and every song still opens the same page.",
+    );
     return 0;
   }
 

@@ -127,3 +127,58 @@ test("the override phrase is a specific typed sentence, not a truthy flag", () =
   assert.equal(OVERRIDE_PHRASE, "yes I am changing published pages");
   assert.ok(OVERRIDE_PHRASE.includes(" "));
 });
+
+// ── Renderer drift: CI renders with a different encoder than the build Mac ───
+//
+// Measured 2026-08-03 on PR #286: CI's unpinned `brew install poppler` gave pdftoppm 26.07.0 vs
+// the build Mac's 26.04.0, and that alone changed exactly ONE page of 373. Failing the PR for that
+// is a false alarm — but silently trusting page hashes across encoders would be worse. So CI
+// checks every RENDERER-INDEPENDENT invariant and skips only byte-identity.
+
+const drifted = (over = {}) => mk({ renderer: { ...mk().renderer, pdftoppm: "pdftoppm version 26.07.0" }, ...over });
+
+test("CI mode: a differing page under a differing renderer is a NOTE, not a violation", () => {
+  const next = drifted({ files: mk().files.map((f) => (f.p.endsWith("page-002.webp") ? { ...f, h: "reencoded" } : f)) });
+  const r = compareManifests(mk(), next, { allowRendererDrift: true });
+  assert.deepEqual(r.violations, [], "must not fail the PR for an encoder difference");
+  assert.ok(r.notes.some((n) => /byte-identity NOT verified/.test(n)));
+});
+
+test("PUBLISH mode: the SAME input still fails — the build path must stay strict", () => {
+  const next = drifted({ files: mk().files.map((f) => (f.p.endsWith("page-002.webp") ? { ...f, h: "reencoded" } : f)) });
+  const r = compareManifests(mk(), next); // no opt-in
+  assert.ok(r.violations.some((v) => /CHANGED IN PLACE/.test(v)));
+  assert.ok(r.violations.some((v) => /renderer\.pdftoppm changed/.test(v)));
+});
+
+test("CI mode still catches a page DISAPPEARING — that is renderer-independent", () => {
+  const next = drifted({ totalPages: 3, files: drifted().files.filter((f) => !f.p.endsWith("page-002.webp")) });
+  const r = compareManifests(mk(), next, { allowRendererDrift: true });
+  assert.ok(r.violations.some((v) => /DISAPPEARED/.test(v)));
+});
+
+test("CI mode still catches a SHRINKING book", () => {
+  const next = drifted({ totalPages: 2, files: drifted().files.filter((f) => !f.p.endsWith("page-003.webp")) });
+  assert.ok(compareManifests(mk(), next, { allowRendererDrift: true }).violations.some((v) => /SHRANK/.test(v)));
+});
+
+test("CI mode still catches a SUBSTITUTED edition (songs moved)", () => {
+  const next = drifted({ songPages: [[1, 3], [2, 4]] });
+  const r = compareManifests(mk(), next, { allowRendererDrift: true });
+  assert.ok(r.violations.some((v) => /no longer open the same page/.test(v)));
+});
+
+test("CI mode still catches a pad-width change", () => {
+  assert.ok(
+    compareManifests(mk(), drifted({ pagePadWidth: 4 }), { allowRendererDrift: true })
+      .violations.some((v) => /RENAMES every page URL/.test(v)),
+  );
+});
+
+test("the drift allowance applies ONLY when the renderer actually differs", () => {
+  // Same renderer + a changed page must still fail, even with the CI flag on — otherwise the flag
+  // would quietly disable the gate's whole reason for existing.
+  const next = mk({ files: mk().files.map((f) => (f.p.endsWith("page-002.webp") ? { ...f, h: "REVISED" } : f)) });
+  const r = compareManifests(mk(), next, { allowRendererDrift: true });
+  assert.ok(r.violations.some((v) => /CHANGED IN PLACE/.test(v)), "flag must not blanket-disable byte-identity");
+});
