@@ -68,6 +68,7 @@ jobs:
           e2e/svSelftest.test.mjs
           e2e/svSyncDecision.test.mjs
           e2e/additiveGate.test.mjs
+          e2e/bookResolve.test.mjs
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
         run: node scripts/smoke-boot.mjs

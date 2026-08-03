@@ -21,4 +21,23 @@ export const STORAGE_KEYS = {
   lastDirectorAt: "sv.sync.lastDirectorAt",
   // per-book saved position
   lastPagePrefix: "sv.book.lastPage.",
+
+  // ── Book-bundle resolution (defect D1 / D2) ───────────────────────────────
+  // The cached boot DECISION: { uri, bookVersion, builtFromShellBuild }. Parsing two manifests on
+  // the boot path is fine on one device and dangerous on eight identical aging iPads that cold-boot
+  // together and could cross a timeout together (red team A7). The fast path re-uses the last
+  // decision after one cheap existence check.
+  bookResolved: "sv.book.resolved",
+  // { bookVersion, mountedAt, provedAt, attempts } — written BEFORE a mount and proved on
+  // bridge-ready. The only net that catches a bundle which kills the process before React renders,
+  // which is the failure an old iPad under memory pressure actually produces.
+  bookBoot: "sv.book.boot",
+  // [{ bookVersion, failures, lastFailureAt }] — a COUNTER, not a tombstone.
+  bookQuarantine: "sv.book.quarantine",
+  // { setAt } — operator panic switch forcing the code-signed bundle. Auto-expires.
+  bookForceBundled: "sv.book.forceBundled",
+  // { bookVersion, at } — drives the loud, non-dismissible LIBRO ANTERIOR banner. A silent correct
+  // recovery is worse than a loud one when eight devices do it at once and split the fleet across
+  // two different songbooks (red team A4).
+  bookReverted: "sv.book.reverted",
 } as const;
