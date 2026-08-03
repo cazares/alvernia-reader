@@ -58,11 +58,50 @@ fi
 echo "==> 2/6  Rebuild web bundle (bakes v$BUILD into the badge + a content-hashed cache version)"
 node web/build.mjs >/dev/null
 
-if [ "$STAGING" = "1" ]; then
-  echo "==> 3/6  STAGING -> skip ios/WebBundle sync (web-only canary; native untouched)"
+# PUBLISH-PATH GATES. These existed ONLY on the PR path (.github/workflows/ci.yml) — not on the
+# path the artifact actually leaves the building on. `release.sh` could therefore publish a book
+# whose pages had been silently re-rendered in place (the build-377 / PR #257 defect, which shipped)
+# or whose song index points past the last rendered page. Both are unrecoverable once a device with
+# no internet has them, so they must fail HERE, loudly, before anything is uploaded. `set -euo
+# pipefail` plus the cleanup_release trap make an abort here crash-safe.
+echo "==> 2b/6 Publish gates: boot smoke + additive-only + book consistency"
+SMOKE_SKIP_BUILD=1 node scripts/smoke-boot.mjs
+node scripts/additive-gate.mjs
+node scripts/check-book-consistency.mjs
+
+# The ios/WebBundle sync is gated on whether a native archive will ACTUALLY happen — not on
+# STAGING. Under the old condition, `SKIP_NATIVE=1` (a web-only prod deploy) rewrote the WebBundle
+# tree that the next hand-run Xcode build would bake, leaving an IPA carrying a bundle no archive
+# in this pipeline ever produced. Staging still skips it, because STAGING implies SKIP_NATIVE=1.
+if [ "${SKIP_NATIVE:-0}" = "1" ]; then
+  echo "==> 3/6  No native archive this run -> leaving ios/WebBundle untouched"
 else
   echo "==> 3/6  Sync web/dist -> ios/WebBundle (native wraps the SAME bundle)"
   rm -rf ios/WebBundle && cp -R web/dist ios/WebBundle
+
+  # HARD ASSERTION (§5.14.1). ios/WebBundle is gitignored and materialized ONLY by the line above.
+  # A silent copy miss ships an IPA with NO in-IPA bundle — which makes the L1 self-heal floor
+  # nonexistent and hands the WebView a path to nothing, on a fleet with no remedy at Mass. There is
+  # no runtime fix for that and there should not be one: it is a release-pipeline defect and the
+  # pipeline is where it has to fail.
+  node -e '
+    const fs=require("fs"),path=require("path");
+    const dir="ios/WebBundle", fail=(m)=>{console.error("  ✖ ios/WebBundle: "+m);process.exit(1)};
+    if(!fs.existsSync(path.join(dir,"index.html"))) fail("index.html missing");
+    if(fs.statSync(path.join(dir,"index.html")).size<=200) fail("index.html is <= 200 B");
+    let m; try{ m=JSON.parse(fs.readFileSync(path.join(dir,"bundle-manifest.json"),"utf8")); }
+    catch(e){ fail("bundle-manifest.json missing or unparseable ("+e.message+")"); }
+    const pages=path.join(dir,"books/standard/pages");
+    const have=fs.existsSync(pages)?fs.readdirSync(pages).filter(f=>/^page-\d+\.webp$/.test(f)):[];
+    if(have.length!==m.totalPages) fail(`${have.length} page images but manifest says ${m.totalPages}`);
+    for(const n of [1,m.totalPages]){
+      const f=path.join(pages,`page-${String(n).padStart(m.pagePadWidth||3,"0")}.webp`);
+      if(!fs.existsSync(f)||fs.statSync(f).size<=0) fail(`page ${n} missing or empty`);
+    }
+    const dist=fs.readdirSync("web/dist/books/standard/pages").filter(f=>/^page-\d+\.webp$/.test(f)).length;
+    if(dist!==have.length) fail(`page count ${have.length} != web/dist ${dist}`);
+    console.log(`         ✅ in-IPA bundle verified: ${m.bookVersion}, ${m.totalPages} pages`);
+  '
 fi
 
 if [ "${SKIP_NATIVE:-0}" = "1" ]; then

@@ -269,6 +269,44 @@ try {
   const syncJs = exists("lib/svSyncDecision.js") ? read("lib/svSyncDecision.js") : "";
   check("sync-decision exposes decideRelaySnapshot", syncJs.includes("decideRelaySnapshot"), "decision entrypoint missing");
   check("app.js wires the sync-decision lib", appJs.includes("svSyncDecision") && appJs.includes("decideRelaySnapshot"), "app.js not using the sync-decision lib");
+
+  // ── 8. bundle-manifest.json — the bundle's identity ──────────────────────
+  // Without this file nothing downstream can answer "which book is this device rendering?" — the
+  // build badge answers a different question and can read v383 over a months-old book (defect D1).
+  // The native boot resolver decides between the downloaded and the code-signed bundle by comparing
+  // these manifests, so a missing or malformed one is not cosmetic: it changes which book boots.
+  check("bundle-manifest.json present", exists("bundle-manifest.json"), "the bundle has no identity");
+  if (exists("bundle-manifest.json")) {
+    let man = null;
+    try { man = JSON.parse(read("bundle-manifest.json")); } catch (e) { man = null; }
+    check("bundle-manifest.json parses", man !== null, "unparseable JSON");
+    if (man) {
+      check("manifest bookVersion is well-formed (bv_ + 16 hex)", /^bv_[0-9a-f]{16}$/.test(man.bookVersion || ""), `got ${JSON.stringify(man.bookVersion)} — the native host validates this shape and ignores anything else`);
+      check("manifest totalPages matches the rendered page count", Number(man.totalPages) === renderedCount, `manifest ${man.totalPages} vs ${renderedCount} rendered`);
+      check("manifest sourcePdfPages matches totalPages (PDF ↔ render)", Number(man.sourcePdfPages) === Number(man.totalPages), `pdfinfo says ${man.sourcePdfPages}, render produced ${man.totalPages} — a page was lost between the book and the bundle`);
+      check("manifest records renderer versions", !!(man.renderer && man.renderer.pdftoppm && man.renderer.cwebp), "without these, a toolchain change looks like 372 content changes");
+
+      // Walk-the-tree completeness: a manifest that CAN omit a file is a completeness gate that
+      // proves nothing, and the device's staging verification trusts this list.
+      const walk = (d, b = d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+        const f = path.join(d, e.name);
+        return e.isDirectory() ? walk(f, b) : [path.relative(b, f).split(path.sep).join("/")];
+      });
+      const onDisk = walk(DIST).filter((p) => p !== "bundle-manifest.json").sort();
+      const listed = (man.files || []).map((f) => f.p).sort();
+      const unlisted = onDisk.filter((p) => !listed.includes(p));
+      const phantom = listed.filter((p) => !onDisk.includes(p));
+      check("manifest lists every shipped file, and only shipped files", unlisted.length === 0 && phantom.length === 0, `${unlisted.length} unlisted (${unlisted.slice(0, 3).join(", ")}), ${phantom.length} listed-but-absent (${phantom.slice(0, 3).join(", ")})`);
+
+      // The frozen page-URL pad width, pinned on BOTH sides of the contract. Deriving it from the
+      // page count (as app.js once did) renames every page image the first time a book reaches
+      // 1000 pages, invalidating every offline copy in the field simultaneously.
+      check("page pad width is frozen at 3 in the manifest", Number(man.pagePadWidth) === 3, `manifest says ${man.pagePadWidth}`);
+      check("app.js pins PAGE_PAD_WIDTH and does not derive it from totalPages", /PAGE_PAD_WIDTH\s*=\s*3/.test(appJs) && !/padStart\(\s*pagePadWidth\(\)/.test(appJs), "app.js still derives the pad width from the live page count");
+
+      check("manifest carries song→page pairs for the additive gate", Array.isArray(man.songPages) && man.songPages.length > 0, "without these the gate cannot tell an appended book from a substituted edition");
+    }
+  }
 } catch (e) {
   // Defensive: never let the smoke test itself crash ambiguously.
   check("smoke test ran without an unexpected error", false, `threw: ${e && e.stack ? e.stack.split("\n")[0] : e}`);
