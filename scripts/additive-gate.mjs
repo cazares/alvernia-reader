@@ -35,6 +35,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -229,6 +230,38 @@ export function runCli(argv, root) {
       `manifest does not match the built directory — ${missing.length} unlisted file(s)` +
       `${missing.length ? ` (${summarize(missing)})` : ""}, ${extra.length} listed-but-absent` +
       `${extra.length ? ` (${summarize(extra)})` : ""}`,
+    );
+  }
+
+  // DOES THE MANIFEST ACTUALLY DESCRIBE THESE BYTES?
+  //
+  // Everything above compares one manifest to another. Neither side was ever checked against the
+  // files it claims to describe — so a manifest that has drifted from its own directory compares
+  // perfectly against itself and reads GREEN.
+  //
+  // That is not hypothetical: the first committed baseline here was generated from a dist whose
+  // page-005.webp had been hand-mutated by a test. The file was restored afterwards but the
+  // manifest was not regenerated, so the baseline recorded 97945 bytes for a 97944-byte page and
+  // claimed to be the book live on signovivo.com. It read green for four commits, because it was
+  // being compared against the very manifest it came from, and only surfaced on the next real
+  // rebuild. Production's own bytes settled it. This check catches that class at the source.
+  const drifted = [];
+  for (const f of next.files || []) {
+    const abs = path.join(distDir, f.p);
+    let bytes;
+    try {
+      bytes = fs.readFileSync(abs);
+    } catch {
+      continue; // already reported by the presence check above
+    }
+    if (bytes.length !== Number(f.n)) { drifted.push(`${f.p} (size ${f.n} vs ${bytes.length})`); continue; }
+    if (crypto.createHash("sha256").update(bytes).digest("hex") !== f.h) drifted.push(`${f.p} (sha256)`);
+    if (drifted.length > 8) break;
+  }
+  if (drifted.length) {
+    completeness.push(
+      `the manifest DOES NOT DESCRIBE the files it sits beside — ${summarize(drifted)}. ` +
+      "Regenerate it with `node web/build.mjs`; do not hand-edit a manifest.",
     );
   }
 
