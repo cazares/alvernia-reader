@@ -11,7 +11,7 @@ before the native OTA work landed and lists M1/M2/M4/M5 as outstanding — they 
 |---|---|
 | **Repo HEAD** | `main` @ `043b298` — everything merged, **no open PRs** |
 | **Web prod** | signovivo.com **v384**, **373-page** book, verified live. ⚠️ v384 predates M1, so prod serves **NO `bundle-manifest.json` yet** — see §6.2 |
-| **Native / TestFlight** | still **build 383**, carrying the **372-page** book. Awaiting Miguel's **Deliver** click in Transporter. **It has none of the work below.** |
+| **Native / TestFlight** | still **build 383**, carrying the **372-page** book. **It has none of the work below.** An IPA sits uploaded-but-undelivered in Transporter — **do NOT tell Miguel to Deliver it, see §6.0** |
 | **The one budgeted build** | **NOT CUT YET.** That is the next real step — see §6.1 |
 | **Downloader** | shipped **DORMANT**. Changes nothing on any device until deliberately armed |
 
@@ -176,6 +176,26 @@ sides and the gate fails on any change.
 ---
 
 ## 6. What is NOT done — pick up here
+
+### 6.0 ⚠️ Do NOT Deliver build 383
+
+`~/Desktop/SignoVivo-383.ipa` was uploaded to Transporter in an earlier session and Miguel
+never clicked **Deliver**. Leave it that way unless he says otherwise.
+
+Clicking Deliver would push build 383 to the choir, and 383:
+
+- carries the **372-page** book, not the 373-page one that is live on the web
+- contains **none** of M1/M2/M4/M5
+- still has the **D1 stale-bundle trap live** — a device that once took a mesh push renders
+  that old songbook forever while displaying the current build number
+
+Delivering it now would also make the choir do **two** TestFlight installs (383, then the
+budgeted build) instead of one, and the first would hand them a known trap. Recommendation
+given to Miguel on 2026-08-03 and he chose to go straight to the budgeted build: **skip 383
+entirely**; §6.1 supersedes it.
+
+*Note "Deliver" is the BINARY upload, not the OTA. The OTA is what the budgeted build makes
+possible afterwards — one last TestFlight round, then never again.*
 
 ### 6.1 THE ONE BUDGETED NATIVE BUILD (the main outstanding work)
 
