@@ -64,6 +64,38 @@ const need = (bin) => {
 };
 ["gs", "qpdf", "pdfinfo"].forEach(need);
 
+// ── REFUSE TO DOUBLE-STAMP ────────────────────────────────────────────────────────────
+// This script OVERLAYS; it does not replace. Running it twice on the same PDF paints the
+// second edition line directly on top of the first — same corner, same font, same size —
+// producing unreadable overlapping glyphs on the title page of the book the whole choir
+// opens. Nothing downstream catches it: the page count is unchanged, the geometry is
+// unchanged, and the verification below still passes. It renders as a smudge.
+//
+// The intended flow (docs: HANDOFF §9) never hits this, because a new PDF from the music
+// director arrives unstamped. It bites when an EXISTING shipped book is amended — appending
+// a page, say — and needs its count line refreshed. The fix is not to force it through: it
+// is to rebuild page 1 from an unstamped source, e.g.
+//
+//   qpdf --empty --pages <unstamped>.pdf 1 <stamped>.pdf 2-z -- clean.pdf
+//
+// which keeps every other page byte-identical (verify with scripts/compare-book-renders.mjs).
+const STAMP_RE = /\d{1,2}\s+de\s+\p{L}+\s+de\s+\d{4}\s*[·.]\s*\d+\s*p[áa]ginas/iu;
+if (spawnSync("which", ["pdftotext"]).status !== 0) {
+  console.warn("⚠️  pdftotext not found — could NOT check for an existing stamp. If this PDF is");
+  console.warn("    already stamped, the new line will be painted on top of the old one.");
+} else {
+  const page1 = spawnSync("pdftotext", ["-f", "1", "-l", "1", "-layout", pdfPath, "-"], { encoding: "utf8" });
+  const existing = page1.status === 0 ? (page1.stdout.match(STAMP_RE) || [])[0] : null;
+  if (existing) {
+    console.error(`❌ page 1 is ALREADY stamped: "${existing.trim()}"`);
+    console.error("   Stamping again would overlay the new line on top of it — unreadable, and");
+    console.error("   nothing downstream would catch it. Rebuild page 1 from an unstamped copy first:");
+    console.error("     qpdf --empty --pages <unstamped>.pdf 1 <this>.pdf 2-z -- clean.pdf");
+    console.error("   then stamp clean.pdf. Refusing to write.");
+    process.exit(1);
+  }
+}
+
 // ── Book facts, read from the PDF itself so the stamp can never disagree with it ──────
 const info = spawnSync("pdfinfo", [pdfPath], { encoding: "utf8" });
 if (info.status !== 0) {
