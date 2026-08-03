@@ -292,11 +292,27 @@ try {
         const f = path.join(d, e.name);
         return e.isDirectory() ? walk(f, b) : [path.relative(b, f).split(path.sep).join("/")];
       });
-      const onDisk = walk(DIST).filter((p) => p !== "bundle-manifest.json").sort();
+      // Cloudflare Pages CONFIG files ship in the deploy directory but are never served: wrangler
+      // drops them from the upload walk, so a GET returns the SPA fallback (200 text/html, ~21 KB).
+      // This list is DELIBERATELY DUPLICATED from web/build.mjs's NOT_FETCHABLE rather than read
+      // out of the manifest — a gate that takes its expectation from the artifact it is checking
+      // proves nothing (the manifest-baseline lesson). It encodes a Cloudflare platform fact, not
+      // one of our choices, so the two copies cannot legitimately drift.
+      const PAGES_CONFIG = new Set(["_headers", "_redirects", "_routes.json", "_worker.js"]);
+      const onDisk = walk(DIST)
+        .filter((p) => p !== "bundle-manifest.json" && !PAGES_CONFIG.has(p))
+        .sort();
       const listed = (man.files || []).map((f) => f.p).sort();
       const unlisted = onDisk.filter((p) => !listed.includes(p));
       const phantom = listed.filter((p) => !onDisk.includes(p));
       check("manifest lists every shipped file, and only shipped files", unlisted.length === 0 && phantom.length === 0, `${unlisted.length} unlisted (${unlisted.slice(0, 3).join(", ")}), ${phantom.length} listed-but-absent (${phantom.slice(0, 3).join(", ")})`);
+
+      // THE OTA-KILLER PIN. src/bundleUpdate queues every manifest entry and verifyStaged demands
+      // exact size AND md5, so ONE unfetchable path makes every device download the whole ~27 MB
+      // book and then fail verification — forever, on every retry — while the fleet dashboard shows
+      // it identically to "never armed". `_headers` did exactly this until 2026-08-03.
+      const servedConfig = listed.filter((p) => PAGES_CONFIG.has(p));
+      check("manifest lists NO Cloudflare Pages config file (each one would fail every OTA forever)", servedConfig.length === 0, `listed: ${servedConfig.join(", ")} — Pages never serves these; they must be excluded from bundle-manifest files[]`);
 
       // The frozen page-URL pad width, pinned on BOTH sides of the contract. Deriving it from the
       // page count (as app.js once did) renames every page image the first time a book reaches

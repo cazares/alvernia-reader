@@ -26,7 +26,7 @@
  * Bottom-LEFT on purpose: the app draws its build badge in the bottom-right.
  *
  * Usage:
- *   node scripts/stamp-book-date.mjs --pdf assets/signo_vivo_372.pdf
+ *   node scripts/stamp-book-date.mjs --pdf assets/signo_vivo_371.pdf
  *   node scripts/stamp-book-date.mjs --pdf <in> --out <out> --date 2026-08-01
  *
  * Requires: ghostscript (gs) + qpdf + poppler (pdfinfo). All already used by this repo.
@@ -79,7 +79,12 @@ const need = (bin) => {
 //   qpdf --empty --pages <unstamped>.pdf 1 <stamped>.pdf 2-z -- clean.pdf
 //
 // which keeps every other page byte-identical (verify with scripts/compare-book-renders.mjs).
-const STAMP_RE = /\d{1,2}\s+de\s+\p{L}+\s+de\s+\d{4}\s*[·.]\s*\d+\s*p[áa]ginas/iu;
+// Matches BOTH stamp generations: the original date-only form ("2 de agosto de 2026 · 373
+// páginas") and the current date+time form ("3 de agosto de 2026, 2:47 p.m. CT · 371 páginas").
+// The time group is OPTIONAL on purpose — books stamped before the clock was added must still be
+// detected, or this guard silently stops guarding exactly the older books most likely to need a
+// re-stamp.
+const STAMP_RE = /\d{1,2}\s+de\s+\p{L}+\s+de\s+\d{4}(?:\s*,\s*\d{1,2}:\d{2}\s*[ap]\.?\s*m\.?\s*[A-Z]{2,4})?\s*[·.]\s*\d+\s*p[áa]ginas/iu;
 if (spawnSync("which", ["pdftotext"]).status !== 0) {
   console.warn("⚠️  pdftotext not found — could NOT check for an existing stamp. If this PDF is");
   console.warn("    already stamped, the new line will be painted on top of the old one.");
@@ -116,7 +121,28 @@ const MESES = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ];
+// CENTRAL TIME, ALWAYS. The book is stamped for one parish and CT is the only clock that means
+// anything to them; the machine's local zone is irrelevant and would silently vary. CDT/CST is
+// resolved by the tz database via Intl, never computed by hand — a hand-rolled DST offset is a
+// once-a-year wrong stamp on the page the whole choir opens. Labeled "CT" rather than CDT/CST so
+// the line reads the same year-round.
+const CT_TZ = "America/Chicago";
+const centralNow = (dt) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: CT_TZ,
+    year: "numeric", month: "numeric", day: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  }).formatToParts(dt);
+  const get = (t) => (parts.find((p) => p.type === t) || {}).value;
+  return {
+    y: Number(get("year")), m: Number(get("month")), d: Number(get("day")),
+    hour: Number(get("hour")), minute: get("minute"),
+    ampm: String(get("dayPeriod") || "").toUpperCase().startsWith("A") ? "a.m." : "p.m.",
+  };
+};
+
 const iso = arg("--date");
+const isoTime = arg("--time");
 let d;
 if (iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
@@ -124,15 +150,36 @@ if (iso) {
     console.error("--date must be YYYY-MM-DD");
     process.exit(2);
   }
-  d = { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+  // --time is 24-hour Central, so a reproducible re-stamp needs no timezone reasoning.
+  let hour24 = 0;
+  let minute = "00";
+  if (isoTime) {
+    const t = /^(\d{1,2}):(\d{2})$/.exec(isoTime);
+    if (!t || Number(t[1]) > 23 || Number(t[2]) > 59) {
+      console.error("--time must be HH:MM, 24-hour, Central (e.g. 14:47)");
+      process.exit(2);
+    }
+    hour24 = Number(t[1]);
+    minute = t[2];
+  }
+  d = {
+    y: Number(m[1]), m: Number(m[2]), d: Number(m[3]),
+    hour: hour24 % 12 === 0 ? 12 : hour24 % 12,
+    minute,
+    ampm: hour24 < 12 ? "a.m." : "p.m.",
+  };
 } else {
-  const now = new Date();
-  d = { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+  d = centralNow(new Date());
 }
-// Spanish long form: lowercase month, "de" on both sides. "1 de agosto de 2026".
+// Spanish long form: lowercase month, "de" on both sides, then the clock.
+//   "3 de agosto de 2026, 2:47 p.m. CT · 371 páginas"
+// The TIME is what makes two same-day editions distinguishable on the title page — the date alone
+// cannot tell a morning book from the one that replaced it that afternoon, and the build badge
+// answers a different question (the shell's number, not the book's).
 const fecha = `${d.d} de ${MESES[d.m - 1]} de ${d.y}`;
-const label = `${fecha} \\267 ${pages} p\\341ginas`; // \267 = ·, \341 = á (ISOLatin1)
-const human = `${fecha} · ${pages} páginas`;
+const hora = `${d.hour}:${d.minute} ${d.ampm} CT`;
+const label = `${fecha}, ${hora} \\267 ${pages} p\\341ginas`; // \267 = ·, \341 = á (ISOLatin1)
+const human = `${fecha}, ${hora} · ${pages} páginas`;
 
 // ── Build a one-page overlay at the exact page geometry ───────────────────────────────
 // Small but readable: 14pt at the 115 DPI the book renders at is ~19px tall on device.

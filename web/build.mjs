@@ -30,7 +30,7 @@ const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60)
 // forever, across every future book size. web/src/app.js declares the same constant. Changing it
 // is a full-book rename that invalidates every offline copy in the field simultaneously.
 const PAGE_PAD_WIDTH = 3;
-const BOOK_PDF_PATH = path.join(rootDir, "assets", "signo_vivo_372.pdf");
+const BOOK_PDF_PATH = path.join(rootDir, "assets", "signo_vivo_371.pdf");
 
 // Content-address of the BOOK: the source PDF's bytes plus the two render knobs that
 // determine the output pixels. This is what keys the page-image cache (PAGE_CACHE in
@@ -826,6 +826,23 @@ const hashFile = (abs) => {
 };
 
 const MANIFEST_NAME = "bundle-manifest.json";
+// PAGES CONFIG — ships in the deploy directory, NOT fetchable over HTTP.
+//
+// Cloudflare Pages treats these as CONFIGURATION, not assets: wrangler drops `_headers`,
+// `_redirects`, `_routes.json` and `_worker.js` from the upload walk and attaches them to the
+// deployment instead. A GET for one therefore returns the SPA fallback — `200 text/html`, ~21 KB
+// — not the file. That is HANDOFF lesson 5 ("HTTP 200 is not evidence a file exists") in its most
+// expensive form, because the OTA consumes this list: src/bookUpdate.js queues EVERY manifest
+// entry and verifyStaged demands exact size AND md5 for each. Listing `_headers` (70 B) made every
+// device download the whole ~27 MB book and then fail `size:_headers` — forever, on every retry —
+// and sync-worker renders that failure identically to a device that was never armed, so it is
+// silent as well as permanent. Measured against signovivo.com 2026-08-03: 200 text/html 21841 B.
+//
+// They stay ON DISK (Pages needs them; the copy baked into ios/WebBundle is inert) but are
+// excluded from `files` and from bookVersion — a `_headers` edit is not a new book.
+// scripts/smoke-boot.mjs pins this with its OWN list rather than reading one back from the
+// manifest, per HANDOFF lesson 1.
+const NOT_FETCHABLE = new Set(["_headers", "_redirects", "_routes.json", "_worker.js"]);
 // The lowest shell build allowed to run this bundle. Bump it ONLY when a bundle starts requiring
 // native capability an older shell lacks; the device refuses to download a book it cannot run
 // rather than installing one that boots broken. 1 = any shell.
@@ -839,7 +856,7 @@ const emitBundleManifest = () => {
   // exactly totalPages + bookVersion, and any book change that moves those also moves a page file.
   // It is still hashed into `files` below with its FINAL bytes, so the completeness/integrity gates
   // and the device's own verification cover it in full.
-  const relPaths = walkFiles(distDir).filter((p) => p !== MANIFEST_NAME);
+  const relPaths = walkFiles(distDir).filter((p) => p !== MANIFEST_NAME && !NOT_FETCHABLE.has(p));
   const hashes = new Map(relPaths.map((p) => [p, hashFile(path.join(distDir, p))]));
 
   const bookVersion = "bv_" + crypto

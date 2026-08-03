@@ -220,7 +220,18 @@ export function runCli(argv, root) {
     const f = path.join(d, e.name);
     return e.isDirectory() ? walk(f, b) : [path.relative(b, f).split(path.sep).join("/")];
   });
-  const onDisk = walk(distDir).filter((p) => p !== "bundle-manifest.json").sort();
+  // Cloudflare Pages CONFIG ships in the deploy directory but is never served — wrangler drops it
+  // from the upload walk, so a GET returns the SPA fallback, and any such path listed in the
+  // manifest makes the OTA download the whole book and then fail verification forever (see
+  // web/build.mjs NOT_FETCHABLE). It is therefore excluded from files[] BY DESIGN, and this
+  // completeness check has to know that or it reds on every build from here on — and a gate that
+  // always reds is a gate everyone learns to override. Deliberately duplicated from build.mjs and
+  // smoke-boot rather than read out of the manifest: a gate that takes its expectation from the
+  // artifact it is checking proves nothing. It encodes a Cloudflare platform fact, not our choice.
+  const PAGES_CONFIG = new Set(["_headers", "_redirects", "_routes.json", "_worker.js"]);
+  const onDisk = walk(distDir)
+    .filter((p) => p !== "bundle-manifest.json" && !PAGES_CONFIG.has(p))
+    .sort();
   const listed = (next.files || []).map((f) => f.p).sort();
   const completeness = [];
   if (onDisk.length !== listed.length || onDisk.some((p, i) => p !== listed[i])) {
