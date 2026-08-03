@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "bookVersion": "bv_9a2086962099a8ee",
+  "bookVersion": "bv_47fa99cb140c181d",
   "totalPages": 373,
   "builtFromShellBuild": 384,
   "minShellBuild": 1,
-  "generatedAt": "2026-08-03T04:37:12.526Z",
+  "generatedAt": "2026-08-03T15:53:37.878Z",
   "sourcePdfSha256": "a61294a83d00e89e76567c50960de957c241370fa914a33484896da2a882eba0",
   "sourcePdfPages": 373,
   "songIndexDigest": "f24980c1cd9be55a325664516d74b943bb3b4e369bf09cefefa06bf146b3895e",
@@ -1288,9 +1288,9 @@
     },
     {
       "p": "app.js",
-      "n": 178184,
-      "h": "fe5e4952a66384edb927fd160b093d1494b4b28960223e6f9ebcaebfd0f29335",
-      "m": "981e05f7a3550513f923c20bc2a158b5"
+      "n": 181836,
+      "h": "f1605bde6a007e926c120b9e8fb3441cf53e89b04c1cf413240755c3a839bf67",
+      "m": "148e5c1eb138382c8982a7b1f2bc2619"
     },
     {
       "p": "books.json",
@@ -1330,9 +1330,9 @@
     },
     {
       "p": "books/standard/pages/page-005.webp",
-      "n": 97945,
-      "h": "f178df5cf0a0d3f2ecee9097cb66137919eb90b8362e298b0a4eba0ce96048ae",
-      "m": "236ff7dc7bae356301c03a7a65231372"
+      "n": 97944,
+      "h": "23e291d4b260d996754e3169cab00e0038004460d24ca6b3fdf876c82438009f",
+      "m": "16f69900b27122e42d9211db53904f51"
     },
     {
       "p": "books/standard/pages/page-006.webp",
@@ -3581,8 +3581,8 @@
     {
       "p": "index.html",
       "n": 21877,
-      "h": "5f50c6a17b9f7dd5f1453e7b5e3678c2e3bd1687aeda92ca9d4141d720b9e1e0",
-      "m": "ca566bf9566e80bc74aa38c3ff4217fa"
+      "h": "46c608229a79201b74f9c44df00965c7649fe7dc1fe0562a37b0d668209f1371",
+      "m": "4e4b019a067df26162c0685e7593a759"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3616,9 +3616,9 @@
     },
     {
       "p": "sw.js",
-      "n": 24192,
-      "h": "af5c448b4fd5537a372854160ab7d8222dbfa5685de8b0f0310e4783eeb7437c",
-      "m": "18d2ed1f09f2838a06d9a5e10d92b1b7"
+      "n": 29815,
+      "h": "149ccd526a8c514074e0f3af736b165fc71cbd33b0b5a101dbae2add966440ba",
+      "m": "bb419aaada775ff81ca292dc531989c3"
     }
   ]
 }
