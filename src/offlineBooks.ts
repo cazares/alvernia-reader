@@ -40,4 +40,17 @@ export const STORAGE_KEYS = {
   // recovery is worse than a loud one when eight devices do it at once and split the fleet across
   // two different songbooks (red team A4).
   bookReverted: "sv.book.reverted",
+
+  // ── Downloader (M5) ───────────────────────────────────────────────────────
+  // { bookVersion, totalPages, installedAt, source } — the book currently mounted.
+  bookActive: "sv.book.active",
+  // { bookVersion, ready, readyAt, error, … } — the staged download's state.
+  bookStaged: "sv.book.staged",
+  // ms of the last SUCCESSFUL /fleet/checkin. This is the live-internet proof the apply gate
+  // depends on: true at practice, false inside the church by definition, needing no clock and no
+  // Mass-schedule config.
+  lastCheckinOkAt: "sv.book.lastCheckinOkAt",
+  // { bookVersion, at } — when this device FIRST saw a given pointer, so the per-device stagger is
+  // measured from discovery rather than from app launch.
+  bookFirstSeen: "sv.book.firstSeen",
 } as const;

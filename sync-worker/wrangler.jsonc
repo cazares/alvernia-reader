@@ -17,7 +17,32 @@
   "vars": {
     // Skeleton: allow all so the test page works from file://. Tighten in prod to:
     // "ALLOWED_ORIGINS": "https://signovivo.com"
-    "ALLOWED_ORIGINS": "*"
+    "ALLOWED_ORIGINS": "*",
+
+    // ── Songbook OTA arming — SHIPPED DORMANT, and it must stay that way until rehearsed ──
+    //
+    // With BOOK_UPDATE_VERSION empty, the `bookUpdate` field never appears in ANY /fleet/checkin
+    // response, so no device can act on it. That is what lets this ship without a rehearsal.
+    //
+    // To arm ONE iPad (the required first step — a downloader failing silently on seven iPads
+    // looks exactly like one that succeeded):
+    //   1. read the target bookVersion from https://signovivo.com/bundle-manifest.json
+    //   2. read the device's id from the fleet dashboard's Libro column
+    //   3. set BOOK_UPDATE_VERSION + BOOK_UPDATE_DEVICES="<that one id>", then `npx wrangler deploy`
+    //   4. watch that device's Libro cell go downloading:NN% -> ready -> active, and have a HUMAN
+    //      open a named new song and confirm it out loud. No hash can catch a wrong-but-valid PDF.
+    //
+    // Fleet-wide needs BOTH "*" and BOOK_UPDATE_ALLOW_FLEET="yes" — one var alone does nothing, so
+    // a fat-fingered edit cannot reach all eight iPads at once.
+    //
+    // ABORT: set BOOK_UPDATE_VERSION back to "" and redeploy. ~20 seconds, no iPad required. That
+    // stops further arming; devices already holding a verified copy clear it themselves on the next
+    // check-in that no longer names their version.
+    "BOOK_UPDATE_VERSION": "",
+    "BOOK_UPDATE_DEVICES": "",
+    "BOOK_UPDATE_ALLOW_FLEET": "",
+    "BOOK_UPDATE_BASE": "https://signovivo.com",
+    "BOOK_UPDATE_CONCURRENCY": "2"
   }
 
   // Later, to serve from sync.signovivo.com instead of *.workers.dev, add:

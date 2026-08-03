@@ -44,6 +44,13 @@ import {
   nextHealAction,
   type BundleSource,
 } from "./src/bookResolve";
+import {
+  parseBookUpdate,
+  shouldStage,
+  canApplyNow,
+  stageBook,
+  applyStagedBundle,
+} from "./src/bookUpdate";
 import versionJson from "./version.json";
 
 // ─────────────────────────────── Constants ──────────────────────────────────
@@ -83,6 +90,21 @@ const SUPER_ADMIN_CODES = new Set<string>(
 );
 // Secret numpad code carried over from the native reader.
 const SOFT_RESET_CODE = "744668486";
+
+// ── Songbook-update operator codes ──────────────────────────────────────────
+//
+// EVERY code must be Levenshtein distance >= MIN_CODE_DISTANCE from EVERY other code. These are
+// read off a laminated card, in poor light, in a church, by someone under pressure. The originally
+// proposed apply code was 744668487 — ONE DIGIT from SOFT_RESET_CODE (red team H4), so a single
+// misread would have wiped the device's role instead of applying an update. Both of these sit at
+// distance 9 from soft-reset and from each other; e2e/bookUpdate.test.mjs pins the rule.
+const BOOK_APPLY_CODE = "265134902";
+const BOOK_FORCE_BAKED_CODE = "907315268";
+
+// BUILD-BAKED KILL SWITCH. A one-line source neuter, independent of the server, mirroring the
+// SYNC_STRICT pattern. If the downloader ever misbehaves in the field, this turns it off in the
+// NEXT build without needing the relay to be reachable — belt to the server flag's braces.
+const SV_BOOK_DL_KILL = false;
 // NEW-DIR-3: a director's mesh page arrives on a ~2s heartbeat. Treat a director as "live right now"
 // only if we've heard from them within this window — otherwise the destructive "take control" confirm
 // false-fires forever after any director ever broadcast (the ref used to be set-once-never-cleared).
@@ -126,6 +148,24 @@ export default function App() {
   // resolver depends on the quarantine writer, so the ladder reaches the resolver through a ref
   // rather than reordering ~500 lines of hooks. Assigned immediately after resolveBundleUri.
   const resolveBundleUriRef = useRef<((force?: "bundled") => Promise<string>) | null>(null);
+  // Downloader state, kept in refs because fleetCheckin is a stable useCallback that must see the
+  // CURRENT values without being re-created (re-creating it would restart the 90 s interval).
+  const bookStageRef = useRef<string>("");
+  const lastCheckinOkAtRef = useRef<number | null>(null);
+  const lastPageTurnAtRef = useRef<number | null>(null);
+  const coldBootAtRef = useRef<number>(Date.now());
+  const lastKnownRoleRef = useRef<string | null>(null);
+  // Live mesh peer count, latched from the Swift `state` event. This is the real "is a
+  // rehearsal or Mass happening right now?" signal, and it is what throttles staging and
+  // VETOES an apply — a guess would have been worse than nothing here.
+  const meshPeerCountRef = useRef(0);
+  const stagingInFlightRef = useRef(false);
+  const onCheckinResponseRef = useRef<((body: unknown) => void) | null>(null);
+  // applyStagedBook is declared far BELOW the numpad dispatch that invokes it. Referencing it
+  // directly would capture the first render's copy (it is not in that useCallback's deps) and
+  // sits in its temporal dead zone during the render pass. Same ref indirection as
+  // resolveBundleUriRef, for the same reason.
+  const applyStagedBookRef = useRef<(() => Promise<void>) | null>(null);
   // LOUD self-heal (red team A4). A silent, correct recovery is WORSE than a loud one here: a
   // defect that only reproduces on the choir's hardware fires all eight watchdogs at once, every
   // device quietly drops to the previous songbook, and the fleet is now split across two books with
@@ -227,10 +267,34 @@ export default function App() {
         // dashboard fills it from the seeded roster (never a wrong "Cantor" for a Bajo/Guitarrista).
         role: roleRef.current === "director" ? "Director" : "",
         ...(extra || {}),
+        // Which BOOK this device holds. nativeBuild is the SHELL's number and can read "current"
+        // over a songbook months old (D1), so without this the dashboard cannot answer the only
+        // question the rollout cares about: did the update actually arrive?
+        ...(activeBookVersionRef.current ? { bookVersion: activeBookVersionRef.current } : {}),
+        ...(activeBundleSourceRef.current ? { bundleSource: activeBundleSourceRef.current } : {}),
+        ...(bookStageRef.current ? { bookStage: bookStageRef.current } : {}),
+        ...(extra || {}),
       }),
-    }).catch(() => {
-      /* offline / relay unreachable — presence just isn't reported */
-    });
+    })
+      .then(async (r) => {
+        if (!r.ok) return;
+        // A SUCCESSFUL check-in is the live-internet proof the apply gate depends on. It is
+        // recorded here and nowhere else, so it can never be faked by a cached response.
+        const at = Date.now();
+        lastCheckinOkAtRef.current = at;
+        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
+        let body: unknown = null;
+        try {
+          body = await r.json();
+        } catch {
+          return;
+        }
+        onCheckinResponseRef.current?.(body);
+      })
+      .catch(() => {
+        /* offline / relay unreachable — presence just isn't reported. Inside the church this is
+           the NORMAL case and must stay completely silent: no error state, no UI. */
+      });
   }, []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
@@ -684,6 +748,32 @@ export default function App() {
       const code = digitsOnly(rawCode);
       if (!code) {
         injectEvent({ type: "role", role: "none" });
+        return;
+      }
+      // Apply a downloaded songbook. Deliberately a CODE and not an ambient prompt: an automatic
+      // modal on `ready` fires on seven devices at 12:04 with instruments in hand, and a persisted
+      // flag makes that a certainty rather than a risk. A code is an unambiguous human act.
+      if (code === BOOK_APPLY_CODE) {
+        void applyStagedBookRef.current?.();
+        return;
+      }
+      // Operator panic switch: force the code-signed bundle. Auto-expires (a forced device nobody
+      // remembers forcing is its own outage), and takes effect on the next mount.
+      if (code === BOOK_FORCE_BAKED_CODE) {
+        void (async () => {
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.bookForceBundled,
+            JSON.stringify({ setAt: Date.now() }),
+          ).catch(() => {});
+          await AsyncStorage.removeItem(STORAGE_KEYS.bookResolved).catch(() => {});
+          breadcrumb("force-baked");
+          const next = await resolveBundleUriRef.current?.("bundled");
+          webReadyRef.current = false;
+          pendingInjectRef.current = [];
+          if (next) setBundleUri(next);
+          setMountKey((k) => k + 1);
+          Alert.alert("Cancionero original", "Se restauró el cancionero incluido en la app.");
+        })();
         return;
       }
       if (code === SOFT_RESET_CODE) {
@@ -1156,6 +1246,13 @@ export default function App() {
         /* a bookkeeping failure must never block boot */
       }
 
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEYS.lastCheckinOkAt);
+        if (raw) lastCheckinOkAtRef.current = Number(raw) || null;
+      } catch {
+        /* ignore */
+      }
+
       // Restore the LIBRO ANTERIOR banner across restarts — it is non-dismissible until an operator
       // clears it precisely so that a silent fleet split cannot go unnoticed.
       try {
@@ -1193,6 +1290,233 @@ export default function App() {
       cancelled = true;
     };
   }, [breadcrumb, resolveBundleUri, sweepStaleBundles]);
+
+  // ── The songbook downloader (M5) ───────────────────────────────────────────
+  //
+  // SHIPS DORMANT. The server sends no `bookUpdate` field until BOOK_UPDATE_VERSION is set in the
+  // worker, so on every device today this code observes nothing and does nothing. That is what
+  // lets it land without a rehearsal.
+  //
+  // The decision logic is all in src/bookUpdate.js (pure, 45 tests). Everything here is I/O.
+
+  /** expo-file-system adapters, shaped for the injected `fs` the pure module expects. */
+  const bookFs = useMemo(() => {
+    const root = FileSystem.documentDirectory || "";
+    const abs = (p: string) => `${root}${p}`;
+    return {
+      stat: async (p: string) => {
+        const i: any = await FileSystem.getInfoAsync(abs(p));
+        return i?.exists ? { size: Number(i.size || 0) } : null;
+      },
+      exists: async (p: string) => !!(await FileSystem.getInfoAsync(abs(p))).exists,
+      mkdirp: async (p: string) => {
+        await FileSystem.makeDirectoryAsync(abs(p), { intermediates: true }).catch(() => {});
+      },
+      rmrf: async (p: string) => {
+        await FileSystem.deleteAsync(abs(p), { idempotent: true }).catch(() => {});
+      },
+      move: async (from: string, to: string) => FileSystem.moveAsync({ from: abs(from), to: abs(to) }),
+      readJson: async (p: string) => JSON.parse(await FileSystem.readAsStringAsync(abs(p))),
+      writeJson: async (p: string, v: unknown) => FileSystem.writeAsStringAsync(abs(p), JSON.stringify(v)),
+      walkWithHashes: async (dir: string) => {
+        // md5 comes from getInfoAsync because expo-file-system exposes md5 and not sha256. It is a
+        // CORRUPTION check only — HTTPS to our own origin is the authenticity boundary.
+        const out = new Map<string, { size: number; md5: string }>();
+        const walk = async (rel: string) => {
+          const names = await FileSystem.readDirectoryAsync(abs(rel)).catch(() => [] as string[]);
+          for (const name of names) {
+            const childRel = `${rel}/${name}`;
+            const info: any = await FileSystem.getInfoAsync(abs(childRel), { md5: true });
+            if (!info?.exists) continue;
+            if (info.isDirectory) await walk(childRel);
+            else out.set(childRel.slice(dir.length + 1), { size: Number(info.size || 0), md5: String(info.md5 || "") });
+          }
+        };
+        await walk(dir);
+        return out;
+      },
+    };
+  }, []);
+
+  const bookNet = useMemo(
+    () => ({
+      fetchJson: async (url: string) => {
+        const r = await fetch(url, { cache: "no-store" as RequestCache });
+        if (!r.ok) throw new Error(`http ${r.status}`);
+        return r.json();
+      },
+      download: async (url: string, dest: string) => {
+        const root = FileSystem.documentDirectory || "";
+        const res = await FileSystem.downloadAsync(url, `${root}${dest}`);
+        if (!res || (res.status && res.status >= 400)) throw new Error(`http ${res?.status}`);
+      },
+    }),
+    [],
+  );
+
+  const setBookStage = useCallback((stage: string) => {
+    bookStageRef.current = stage;
+  }, []);
+
+  /**
+   * Handle a /fleet/checkin response. THE POINTER IS DATA, NOT AN INSTRUCTION — parseBookUpdate
+   * validates the shape and pins the host to constants baked into the app, so a compromised or
+   * buggy worker can never aim this device at another origin.
+   */
+  const onCheckinResponse = useCallback(
+    (body: unknown) => {
+      const pointer = parseBookUpdate(body);
+
+      void (async () => {
+        const staged = await readStored(STORAGE_KEYS.bookStaged, null);
+
+        // THE ABORT IS A REAL REVOKE (red team NI6). Disarming the server only stops NEW arming; the
+        // devices already sitting on a verified copy are the problem, and the person who knows is
+        // not in the building. So: any check-in that does not name our staged version deletes it.
+        if (staged?.bookVersion && (!pointer || pointer.bookVersion !== staged.bookVersion)) {
+          breadcrumb(`staged-revoked:${staged.bookVersion}`);
+          await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
+          await bookFs.rmrf("WebBundleStaged");
+          setBookStage("");
+        }
+        if (!pointer) return;
+
+        // Stagger is measured from when this device FIRST saw this pointer, not from launch.
+        let firstSeen = await readStored(STORAGE_KEYS.bookFirstSeen, null);
+        if (!firstSeen || firstSeen.bookVersion !== pointer.bookVersion) {
+          firstSeen = { bookVersion: pointer.bookVersion, at: Date.now() };
+          await AsyncStorage.setItem(STORAGE_KEYS.bookFirstSeen, JSON.stringify(firstSeen)).catch(() => {});
+        }
+
+        if (stagingInFlightRef.current) return;
+        const quarantine = await readStored(STORAGE_KEYS.bookQuarantine, []);
+        const active = await readStored(STORAGE_KEYS.bookActive, null);
+        const decision = shouldStage({
+          killSwitch: SV_BOOK_DL_KILL,
+          bookVersion: pointer.bookVersion,
+          activeBookVersion: activeBookVersionRef.current,
+          stagedBookVersion: staged?.bookVersion ?? null,
+          stagedReady: !!staged?.ready,
+          quarantine: Array.isArray(quarantine) ? quarantine : [],
+          webReady: webReadyRef.current,
+          foreground: AppState.currentState === "active",
+          role: roleRef.current,
+          firstSeenAt: firstSeen.at,
+          deviceId: dbgDeviceRef.current,
+          now: Date.now(),
+          minShellBuild: 1,
+          shellBuild: Number(BUILD_VERSION) || 0,
+        });
+        if (!decision.stage) {
+          if (decision.reason !== "already-active" && decision.reason !== "already-staged") {
+            breadcrumb(`stage-skip:${decision.reason}`);
+          }
+          return;
+        }
+
+        stagingInFlightRef.current = true;
+        setBookStage("downloading:0%");
+        try {
+          const rec = await stageBook({
+            base: pointer.base,
+            bookVersion: pointer.bookVersion,
+            fs: bookFs,
+            net: bookNet,
+            now: () => Date.now(),
+            activeTotalPages: Number(active?.totalPages || 0),
+            shellBuild: Number(BUILD_VERSION) || 0,
+            // Mesh peers connected means practice is happening: throttle to 1, never veto. The
+            // practice room is the ONLY place these iPads have internet.
+            concurrency: meshPeerCountRef.current > 0 ? 1 : 3,
+            onProgress: (done, total) => setBookStage(`downloading:${Math.floor((done / total) * 100)}%`),
+          });
+          await AsyncStorage.setItem(STORAGE_KEYS.bookStaged, JSON.stringify(rec)).catch(() => {});
+          setBookStage(rec.ready ? "ready" : `error:${rec.error}`);
+          breadcrumb(rec.ready ? `staged-ready:${rec.bookVersion}` : `stage-failed:${rec.error}`);
+        } catch {
+          setBookStage("error:unexpected");
+        } finally {
+          stagingInFlightRef.current = false;
+        }
+      })();
+    },
+    [breadcrumb, readStored, bookFs, bookNet, setBookStage],
+  );
+  onCheckinResponseRef.current = onCheckinResponse;
+
+  /**
+   * Apply the staged bundle. Reached ONLY from an explicit human action (the numpad code) — there
+   * is no ambient modal anywhere in this design, because a persisted `ready` flag firing a prompt
+   * on seven devices at 12:04 is precisely the fleet-bricking scenario this is built to avoid.
+   */
+  const applyStagedBook = useCallback(async () => {
+    const staged = await readStored(STORAGE_KEYS.bookStaged, null);
+    const gate = canApplyNow({
+      stagedReady: !!staged?.ready,
+      stagedReadyAt: staged?.readyAt ?? null,
+      lastCheckinOkAt: lastCheckinOkAtRef.current,
+      meshPeerConnected: meshPeerCountRef.current > 0,
+      lastPageTurnAt: lastPageTurnAtRef.current,
+      lastDirectorSnapshotAt: lastDirectorSnapshotRef.current?.at ?? null,
+      role: roleRef.current,
+      lastKnownRole: lastKnownRoleRef.current,
+      coldBootAt: coldBootAtRef.current,
+      webReady: webReadyRef.current,
+      minShellBuild: Number(staged?.minShellBuild || 1),
+      shellBuild: Number(BUILD_VERSION) || 0,
+      now: Date.now(),
+    });
+    breadcrumb(`apply-gate:${gate.reason}`);
+    if (!gate.ok) {
+      Alert.alert(
+        gate.reason === "not-ready" ? "No hay libro nuevo" : "Ahora no",
+        gate.reason === "not-ready"
+          ? "Este iPad no tiene un cancionero nuevo descargado."
+          : "Hay una Misa o ensayo en curso. Actualiza después.",
+      );
+      return;
+    }
+
+    Alert.alert("¿Actualizar el cancionero?", "La app se recargará con el libro nuevo.", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Actualizar",
+        onPress: () => {
+          void (async () => {
+            // Save the reader's place so nobody loses it across the swap.
+            await AsyncStorage.setItem(
+              `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
+              String(currentPageRef.current),
+            ).catch(() => {});
+            const res = await applyStagedBundle({ fs: bookFs });
+            breadcrumb(`apply:${res.stage}`);
+            if (!res.ok) {
+              Alert.alert("No se pudo actualizar", "El cancionero anterior sigue intacto.");
+              return;
+            }
+            await AsyncStorage.setItem(
+              STORAGE_KEYS.bookActive,
+              JSON.stringify({
+                bookVersion: staged.bookVersion,
+                totalPages: staged.totalPages,
+                installedAt: Date.now(),
+                source: "http",
+              }),
+            ).catch(() => {});
+            await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
+            await AsyncStorage.removeItem(STORAGE_KEYS.bookResolved).catch(() => {});
+            setBookStage("active");
+            const next = await resolveBundleUriRef.current?.();
+            webReadyRef.current = false;
+            pendingInjectRef.current = [];
+            if (next) setBundleUri(next);
+            setMountKey((k) => k + 1);
+          })();
+        },
+      },
+    ]);
+  }, [readStored, breadcrumb, bookFs, setBookStage]);
+  applyStagedBookRef.current = applyStagedBook;
 
   // ── Pre-boot watchdog (§5.10b) ─────────────────────────────────────────────
   //
@@ -1243,6 +1567,7 @@ export default function App() {
       // cannot auto-resume). Intentional exit clears lastSyncRole, so this only fires after a crash/kill.
       AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole)
         .then((prev) => {
+          lastKnownRoleRef.current = prev ? String(prev) : null;
           if (prev === "director") {
             Alert.alert(
               "Estabas dirigiendo",
@@ -1272,6 +1597,7 @@ export default function App() {
           // Remember the director's latest snapshot (with a timestamp — NEW-DIR-3) so a reloaded/
           // foregrounded follower resyncs, and so "is a director live RIGHT NOW?" can be judged by recency.
           lastDirectorSnapshotRef.current = { page, book, at: Date.now() };
+          lastPageTurnAtRef.current = Date.now();
           // De-dupe the 2s mesh heartbeat: if we're already on this page+book it's just a
           // keepalive re-send — do nothing (no redundant renderPage). A genuinely new page, a
           // book switch, or a recovered dropped packet (page differs from ours) still syncs.
@@ -1287,6 +1613,7 @@ export default function App() {
           break;
         }
         case "state": {
+          meshPeerCountRef.current = Number(event.peerCount) || 0;
           dbgLog("mesh:state", {
             status: event.status,
             srole: event.role,
