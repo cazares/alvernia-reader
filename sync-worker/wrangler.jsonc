@@ -38,9 +38,9 @@
     // ABORT: set BOOK_UPDATE_VERSION back to "" and redeploy. ~20 seconds, no iPad required. That
     // stops further arming; devices already holding a verified copy clear it themselves on the next
     // check-in that no longer names their version.
-    "BOOK_UPDATE_VERSION": "bv_8d60e81aa9282f6b",
-    "BOOK_UPDATE_DEVICES": "*",
-    "BOOK_UPDATE_ALLOW_FLEET": "yes",
+    "BOOK_UPDATE_VERSION": "",
+    "BOOK_UPDATE_DEVICES": "",
+    "BOOK_UPDATE_ALLOW_FLEET": "",
     "BOOK_UPDATE_BASE": "https://signovivo.com",
     "BOOK_UPDATE_CONCURRENCY": "2"
   }
