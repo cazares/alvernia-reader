@@ -30,7 +30,7 @@ const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60)
 // forever, across every future book size. web/src/app.js declares the same constant. Changing it
 // is a full-book rename that invalidates every offline copy in the field simultaneously.
 const PAGE_PAD_WIDTH = 3;
-const BOOK_PDF_PATH = path.join(rootDir, "assets", "signo_vivo_371.pdf");
+const BOOK_PDF_PATH = path.join(rootDir, "assets", "signo_vivo_372.pdf");
 
 // Content-address of the BOOK: the source PDF's bytes plus the two render knobs that
 // determine the output pixels. This is what keys the page-image cache (PAGE_CACHE in

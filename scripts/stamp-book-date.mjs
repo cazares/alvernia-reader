@@ -26,7 +26,7 @@
  * Bottom-LEFT on purpose: the app draws its build badge in the bottom-right.
  *
  * Usage:
- *   node scripts/stamp-book-date.mjs --pdf assets/signo_vivo_371.pdf
+ *   node scripts/stamp-book-date.mjs --pdf assets/signo_vivo_372.pdf
  *   node scripts/stamp-book-date.mjs --pdf <in> --out <out> --date 2026-08-01
  *
  * Requires: ghostscript (gs) + qpdf + poppler (pdfinfo). All already used by this repo.

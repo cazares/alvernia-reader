@@ -13,7 +13,7 @@
  * page tells you at a glance which book a device actually holds.
  *
  * Usage:
- *   node scripts/append-number-page.mjs --pdf assets/signo_vivo_371.pdf --number 373
+ *   node scripts/append-number-page.mjs --pdf assets/signo_vivo_372.pdf --number 373
  *   node scripts/append-number-page.mjs --pdf <in> --out <out> --number 373
  *
  * Requires: ghostscript (gs) + qpdf + poppler (pdfinfo) — same set as stamp-book-date.mjs.
@@ -32,9 +32,18 @@ const arg = (name, fallback = null) => {
 };
 
 const pdfRel = arg("--pdf");
+// --number is the original canary mode: one huge digit group, readable across a room.
+// --text is the same page with arbitrary lines (split on a literal \n), for a rehearsal marker
+// that has to say WHICH update it came from — "[Song 372 goes here]" over "OTA <timestamp>".
+// A bare number carries no provenance, and during an OTA rehearsal the whole question is which
+// edition a device is holding.
 const numberText = String(arg("--number", "")).trim();
-if (!pdfRel || !/^\d{1,4}$/.test(numberText)) {
-  console.error("Usage: --pdf <path> --number <1-4 digits> [--out <path>]");
+const freeText = arg("--text", null);
+const lines = freeText !== null
+  ? String(freeText).split("\\n").map((s) => s.trim()).filter(Boolean)
+  : [numberText];
+if (!pdfRel || (freeText === null && !/^\d{1,4}$/.test(numberText)) || !lines.length) {
+  console.error("Usage: --pdf <path> (--number <1-4 digits> | --text 'line one\\nline two') [--out <path>]");
   process.exit(2);
 }
 const pdfPath = path.resolve(root, pdfRel);
@@ -61,8 +70,17 @@ if (!Number.isFinite(pagesBefore) || !sizeMatch) {
 const pageW = Number(sizeMatch[1]);
 const pageH = Number(sizeMatch[2]);
 
-// Big, centered, bold — Helvetica-Bold at ~1/3 page width per digit group.
-const FONT_SIZE = Math.floor(pageW / (numberText.length * 0.62));
+// Big, centered, bold — Helvetica-Bold sized so the LONGEST line still fits the page width, then
+// capped so a short line does not become absurdly tall on a multi-line page. The whole point is
+// legibility across a room: an operator confirms the update by looking, not by reading a hash.
+const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), "");
+const FONT_SIZE = Math.max(12, Math.min(
+  Math.floor(pageW / (Math.max(1, longest.length) * 0.62)),
+  Math.floor(pageH / (lines.length * 2.2)),
+));
+const LINE_GAP = Math.floor(FONT_SIZE * 1.35);
+// PostScript string literals: ( ) and \ are the only characters that must be escaped.
+const psEscape = (s) => s.replace(/([\\()])/g, "\\$1");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sv-append-"));
 const psPath = path.join(tmp, "page.ps");
 const pagePdf = path.join(tmp, "page.pdf");
@@ -73,10 +91,14 @@ fs.writeFileSync(
 << /PageSize [${pageW} ${pageH}] >> setpagedevice
 /Helvetica-Bold findfont ${FONT_SIZE} scalefont setfont
 0 setgray
-(${numberText}) dup stringwidth pop
-${pageW} exch sub 2 div
-${pageH} ${FONT_SIZE} sub 2 div ${FONT_SIZE} 0.28 mul add
-moveto show
+${lines
+  .map((line, i) => {
+    // Stack the block vertically centred: first line starts half a block above the middle.
+    const offset = ((lines.length - 1) / 2 - i) * LINE_GAP;
+    const y = (pageH - FONT_SIZE) / 2 + FONT_SIZE * 0.28 + offset;
+    return `(${psEscape(line)}) dup stringwidth pop\n${pageW} exch sub 2 div\n${y.toFixed(2)}\nmoveto show`;
+  })
+  .join("\n")}
 showpage
 `,
 );
@@ -111,5 +133,5 @@ if (pagesAfter !== pagesBefore + 1 || !sizeAfter || Number(sizeAfter[1]) !== pag
 
 fs.copyFileSync(merged, outPath);
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`✅ appended page ${pagesAfter} ("${numberText}") — ${pagesBefore} -> ${pagesAfter} pages, ${pageW}x${pageH} pts`);
+console.log(`✅ appended page ${pagesAfter} ("${lines.join(" / ")}") — ${pagesBefore} -> ${pagesAfter} pages, ${pageW}x${pageH} pts`);
 console.log(`   -> ${path.relative(root, outPath)}`);
