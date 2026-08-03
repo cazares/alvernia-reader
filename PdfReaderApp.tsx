@@ -1327,14 +1327,16 @@ export default function App() {
           break;
         }
         case "bundleUpdated": {
-          // A peer pushed a newer web bundle; reload from Documents/WebBundle.
-          (async () => {
-            const uri = await resolveBundleUri();
-            webReadyRef.current = false;
-            pendingInjectRef.current = [];
-            setBundleUri(uri);
-            setMountKey((k) => k + 1);
-          })();
+          // DELIBERATELY INERT. This used to re-resolve and REMOUNT THE WEBVIEW ON THE SPOT, with
+          // no human gate and no timing check — the held M-F3 nightmare, live until now. A peer
+          // arriving mid-Mass could swap the songbook out from under a singer mid-verse, on a
+          // device in a building where nothing can be rolled back.
+          //
+          // The mesh bundle-push rail is retired at its receive boundary (DirectorSyncModule.swift,
+          // four guards), so this event can no longer fire from a current build. It is kept as a
+          // no-op rather than deleted because a peer on an OLDER build can still emit it, and a
+          // silent no-op is the correct response to a rail we no longer honour.
+          breadcrumb("mesh-bundleUpdated-ignored");
           break;
         }
         default:

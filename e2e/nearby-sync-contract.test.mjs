@@ -266,3 +266,69 @@ test("edge case: director sendCurrentPageSnapshot uses reliable delivery", () =>
   assert.match(swiftSource, /with: \.reliable/);
   assert.match(swiftSource, /with: \.unreliable/);
 });
+
+// ── The peer bundle-push rail is RETIRED (plan §5.12 / Q4, red team A5) ──────
+//
+// This rail streamed a director's own WebBundle to a follower over Multipeer. It is the ONLY
+// writer of Documents/WebBundle and therefore the sole source of the D1 stale-bundle trap, and it
+// compares CFBundleVersion — the SHELL's number, which says nothing about which book either device
+// holds — so it can push a songbook BACKWARDS.
+//
+// These pin the guards at their SOURCE, because a disabled feature with no test is a feature that
+// quietly comes back. The receive side is what matters: a peer running an older build still offers
+// and still sends, so guarding only the send side would leave the rail wide open.
+const appSource = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
+
+test("mesh bundle push is disabled by a build-baked constant, not a remote flag", () => {
+  assert.match(swiftSource, /private static let meshBundlePushEnabled = false/);
+});
+
+test("GUARD 1/4 — handleBundleOffer refuses before any version comparison", () => {
+  const fn = swiftSource.slice(swiftSource.indexOf("private func handleBundleOffer"));
+  const guardIdx = fn.indexOf("guard Self.meshBundlePushEnabled else { return }");
+  const roleIdx = fn.indexOf('guard currentRole == "follower"');
+  assert.ok(guardIdx > -1, "handleBundleOffer is unguarded");
+  assert.ok(guardIdx < roleIdx, "the kill switch must come FIRST, before any other predicate");
+});
+
+test("GUARD 2/4 — handleBundleRequest refuses to serve a bundle", () => {
+  const fn = swiftSource.slice(swiftSource.indexOf("private func handleBundleRequest"));
+  assert.ok(fn.indexOf("guard Self.meshBundlePushEnabled else { return }") > -1);
+});
+
+test("GUARD 3/4 — didFinishReceivingResource drops the transfer AND deletes the temp file", () => {
+  // The site with no role guard at all, which never inspected resourceName: anything a peer chose
+  // to send landed here and went straight to installReceivedBundle.
+  const fn = swiftSource.slice(swiftSource.indexOf("didFinishReceivingResourceWithName"));
+  const guardIdx = fn.indexOf("guard Self.meshBundlePushEnabled else {");
+  assert.ok(guardIdx > -1, "the receive boundary is unguarded");
+  const body = fn.slice(guardIdx, guardIdx + 400);
+  assert.match(body, /bundleTransferInFlight = false/, "must clear the in-flight flag or transfers wedge forever");
+  assert.match(body, /removeItem\(at: localURL\)/, "must not leave ~27 MB of temp file behind");
+  // Match the CALL, not the identifier — the surrounding comment mentions the function by name.
+  const callIdx = fn.search(/\binstallReceivedBundle\(at:/);
+  assert.ok(callIdx > -1, "expected an installReceivedBundle call site in this delegate");
+  assert.ok(guardIdx < callIdx, "the guard must precede the install call");
+});
+
+test("GUARD 4/4 — installReceivedBundle itself refuses, as defence in depth", () => {
+  const fn = swiftSource.slice(swiftSource.indexOf("private func installReceivedBundle"));
+  const guardIdx = fn.indexOf("guard Self.meshBundlePushEnabled else {");
+  assert.ok(guardIdx > -1, "the last line before Documents/WebBundle is unguarded");
+  // Must precede every filesystem write in the function.
+  const firstWrite = Math.min(
+    ...["createDirectory", "moveItem", "copyItem", "FileHandle"]
+      .map((s) => fn.indexOf(s))
+      .filter((i) => i > -1),
+  );
+  assert.ok(guardIdx < firstWrite, "the guard must come before any filesystem mutation");
+});
+
+test("the JS bundleUpdated handler no longer auto-remounts the WebView", () => {
+  // It used to re-resolve and remount ON THE SPOT with no human gate and no timing check — a peer
+  // arriving mid-Mass could swap the songbook out from under a singer mid-verse.
+  const handler = appSource.slice(appSource.indexOf('case "bundleUpdated"'), appSource.indexOf('case "bundleUpdated"') + 900);
+  assert.doesNotMatch(handler, /setMountKey/, "bundleUpdated must not remount");
+  assert.doesNotMatch(handler, /setBundleUri/, "bundleUpdated must not swap the bundle");
+  assert.match(handler, /mesh-bundleUpdated-ignored/, "it should leave a breadcrumb that it was ignored");
+});
