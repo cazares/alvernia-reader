@@ -166,6 +166,9 @@ export default function App() {
   // sits in its temporal dead zone during the render pass. Same ref indirection as
   // resolveBundleUriRef, for the same reason.
   const applyStagedBookRef = useRef<(() => Promise<void>) | null>(null);
+  // Declared as a ref for the same reason applyStagedBook is: the foreground listener and the
+  // staging completion both need it, and both are defined above it.
+  const autoApplyIfSafeRef = useRef<(() => Promise<void>) | null>(null);
   // LOUD self-heal (red team A4). A silent, correct recovery is WORSE than a loud one here: a
   // defect that only reproduces on the choir's hardware fires all eight watchdogs at once, every
   // device quietly drops to the previous songbook, and the fleet is now split across two books with
@@ -1433,6 +1436,9 @@ export default function App() {
           await AsyncStorage.setItem(STORAGE_KEYS.bookStaged, JSON.stringify(rec)).catch(() => {});
           setBookStage(rec.ready ? "ready" : `error:${rec.error}`);
           breadcrumb(rec.ready ? `staged-ready:${rec.bookVersion}` : `stage-failed:${rec.error}`);
+          // Install it. Don't wait to be asked — canApplyNow decides WHEN, and if right now is a
+          // Mass or a rehearsal it defers and the next foreground/check-in retries.
+          if (rec.ready) await autoApplyIfSafeRef.current?.();
         } catch {
           setBookStage("error:unexpected");
         } finally {
@@ -1445,9 +1451,86 @@ export default function App() {
   onCheckinResponseRef.current = onCheckinResponse;
 
   /**
-   * Apply the staged bundle. Reached ONLY from an explicit human action (the numpad code) — there
-   * is no ambient modal anywhere in this design, because a persisted `ready` flag firing a prompt
-   * on seven devices at 12:04 is precisely the fleet-bricking scenario this is built to avoid.
+   * The swap itself. No dialogs, no prompts — the caller has already decided.
+   */
+  const performApplySwap = useCallback(
+    async (staged: any) => {
+      // Save the reader's place so nobody loses it across the swap.
+      await AsyncStorage.setItem(
+        `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
+        String(currentPageRef.current),
+      ).catch(() => {});
+      const res = await applyStagedBundle({ fs: bookFs });
+      breadcrumb(`apply:${res.stage}`);
+      if (!res.ok) return false;
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.bookActive,
+        JSON.stringify({
+          bookVersion: staged.bookVersion,
+          totalPages: staged.totalPages,
+          installedAt: Date.now(),
+          source: "http",
+        }),
+      ).catch(() => {});
+      await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
+      await AsyncStorage.removeItem(STORAGE_KEYS.bookResolved).catch(() => {});
+      setBookStage("active");
+      const next = await resolveBundleUriRef.current?.();
+      webReadyRef.current = false;
+      pendingInjectRef.current = [];
+      if (next) setBundleUri(next);
+      setMountKey((k) => k + 1);
+      return true;
+    },
+    [breadcrumb, bookFs, setBookStage],
+  );
+
+  /**
+   * AUTOMATIC APPLY. A new songbook installs itself — that is the entire promise of the OTA, and
+   * making a human type a secret code on eight personally-owned iPads is not "over the air", it is
+   * manual work with extra steps.
+   *
+   * canApplyNow still governs WHEN, and every one of its gates is about timing, never about
+   * consent: it refuses during a Mass or rehearsal (mesh peers connected, a director snapshot or
+   * page turn in the last moments), on a cold boot, and on a `ready` flag stale enough to have come
+   * from Saturday practice. So the swap lands in a quiet moment on its own, and if the moment is
+   * never quiet it simply waits and tries again on the next check-in.
+   *
+   * Silent by design: no modal. A prompt firing on seven devices at 12:04 is the fleet-bricking
+   * scenario this whole design avoids — the answer is to not ask, not to make someone type a code.
+   */
+  const autoApplyIfSafe = useCallback(async () => {
+    const staged = await readStored(STORAGE_KEYS.bookStaged, null);
+    if (!staged?.ready) return;
+    const gate = canApplyNow({
+      stagedReady: true,
+      stagedReadyAt: staged?.readyAt ?? null,
+      lastCheckinOkAt: lastCheckinOkAtRef.current,
+      meshPeerConnected: meshPeerCountRef.current > 0,
+      lastPageTurnAt: lastPageTurnAtRef.current,
+      lastDirectorSnapshotAt: lastDirectorSnapshotRef.current?.at ?? null,
+      role: roleRef.current,
+      lastKnownRole: lastKnownRoleRef.current,
+      coldBootAt: coldBootAtRef.current,
+      webReady: webReadyRef.current,
+      minShellBuild: Number(staged?.minShellBuild || 1),
+      shellBuild: Number(BUILD_VERSION) || 0,
+      now: Date.now(),
+    });
+    if (!gate.ok) {
+      // Not a failure — just not yet. The next check-in tries again.
+      breadcrumb(`auto-apply-waiting:${gate.reason}`);
+      return;
+    }
+    breadcrumb("auto-apply:go");
+    await performApplySwap(staged);
+  }, [readStored, breadcrumb, performApplySwap]);
+  autoApplyIfSafeRef.current = autoApplyIfSafe;
+
+  /**
+   * MANUAL FORCE (numpad code). No longer required — the book installs itself — but kept as the
+   * operator's override for the case where the timing gates keep deferring and someone wants it
+   * NOW, between Masses. This one talks back, because a human deliberately asked.
    */
   const applyStagedBook = useCallback(async () => {
     const staged = await readStored(STORAGE_KEYS.bookStaged, null);
@@ -1483,39 +1566,15 @@ export default function App() {
         text: "Actualizar",
         onPress: () => {
           void (async () => {
-            // Save the reader's place so nobody loses it across the swap.
-            await AsyncStorage.setItem(
-              `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
-              String(currentPageRef.current),
-            ).catch(() => {});
-            const res = await applyStagedBundle({ fs: bookFs });
-            breadcrumb(`apply:${res.stage}`);
-            if (!res.ok) {
-              Alert.alert("No se pudo actualizar", "El cancionero anterior sigue intacto.");
-              return;
-            }
-            await AsyncStorage.setItem(
-              STORAGE_KEYS.bookActive,
-              JSON.stringify({
-                bookVersion: staged.bookVersion,
-                totalPages: staged.totalPages,
-                installedAt: Date.now(),
-                source: "http",
-              }),
-            ).catch(() => {});
-            await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
-            await AsyncStorage.removeItem(STORAGE_KEYS.bookResolved).catch(() => {});
-            setBookStage("active");
-            const next = await resolveBundleUriRef.current?.();
-            webReadyRef.current = false;
-            pendingInjectRef.current = [];
-            if (next) setBundleUri(next);
-            setMountKey((k) => k + 1);
+            // ONE implementation of the swap, shared with the automatic path. Two copies of a
+            // sequence that rewrites the active bundle is how they drift.
+            const ok = await performApplySwap(staged);
+            if (!ok) Alert.alert("No se pudo actualizar", "El cancionero anterior sigue intacto.");
           })();
         },
       },
     ]);
-  }, [readStored, breadcrumb, bookFs, setBookStage]);
+  }, [readStored, breadcrumb, performApplySwap]);
   applyStagedBookRef.current = applyStagedBook;
 
   // ── Pre-boot watchdog (§5.10b) ─────────────────────────────────────────────
@@ -1697,6 +1756,13 @@ export default function App() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       if (next !== "active") return;
+      // EVERY FOREGROUND IS A BOOK CHECK — the CodePush shape. The 90 s check-in timer only ticks
+      // while the app is awake, so an iPad that was asleep when the new book was published would
+      // otherwise sit on the old one until someone happened to leave the app open. Checking here
+      // means "open the app" is the entire user-facing procedure. autoApplyIfSafe covers the case
+      // where a copy was already staged before the app was backgrounded.
+      fleetCheckin();
+      void autoApplyIfSafeRef.current?.();
       if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (roleRef.current === "follower") {
         requestCurrentSnapshot().catch(() => {});
@@ -1720,7 +1786,7 @@ export default function App() {
       }
     });
     return () => sub.remove();
-  }, [syncAvailable, broadcastPage, injectEvent]);
+  }, [syncAvailable, broadcastPage, injectEvent, fleetCheckin]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {

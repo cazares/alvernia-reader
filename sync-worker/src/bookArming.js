@@ -63,6 +63,23 @@ export const decideBookUpdate = (env, device, fleet, nowSec) => {
   // The second, independent switch. A "*" alone does nothing.
   if (String((env && env.BOOK_UPDATE_ALLOW_FLEET) || "") !== "yes") return null;
 
+  // THE THROTTLE GATES *STARTS*, NEVER WORK ALREADY IN PROGRESS.
+  //
+  // Returning null below is byte-identical to "disarmed", and the client treats an absent pointer
+  // as a REVOKE — PdfReaderApp.tsx:1376 deletes the staged directory outright. So throttling a
+  // device that has ALREADY downloaded does not delay it, it destroys ~27 MB of verified work and
+  // makes it start over, which is the precise opposite of what this throttle exists to do.
+  //
+  // Gate on bookStage, not bookVersion: a device reports bookVersion = the ACTIVE book
+  // (PdfReaderApp.tsx:273) and only flips it after a human applies, so a staged-and-ready device
+  // still reports the OLD version and would look unstarted here.
+  const self = (fleet || []).find((d) => d && d.deviceId === deviceId);
+  const selfStarted =
+    self &&
+    typeof self.bookStage === "string" &&
+    (self.bookStage === "ready" || self.bookStage.startsWith("downloading"));
+  if (selfStarted) return { bookVersion: version, base };
+
   // K-at-a-time. Without this, eight devices × concurrency 3 is ~24 concurrent GETs and ~216 MB on
   // one parish access point, right before Mass.
   const limit = Math.max(1, Number((env && env.BOOK_UPDATE_CONCURRENCY) || 2) || 2);
