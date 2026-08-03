@@ -185,7 +185,12 @@ const state = {
 const BOOK_ID = "standard";
 // Fallback page count used for page-filename pad width before the manifest lands (the real value
 // comes from /books/standard/pages.json → state.totalPages). Kept generous so pad width is right.
-const STANDARD_TOTAL_PAGES = 372;
+// The degraded-path page count, used only when #pages-data is missing AND pages.json cannot be
+// fetched. Baked by web/build.mjs from the book actually shipped, because a hardcoded literal
+// silently drifts every time the songbook grows: it read 372 while the shipped book was already
+// 373 pages, which would have hidden the last page from any device on the degraded path. The
+// `|| 372` keeps raw (unsubstituted) app.js valid and gives the token a sane floor.
+const STANDARD_TOTAL_PAGES = Number("__STANDARD_TOTAL_PAGES__") || 372;
 state.currentBook = BOOK_ID;
 
 let cachedSongKeys = null;
@@ -269,12 +274,20 @@ const coreAssets = () => [
 ];
 
 // ── Utilities ────────────────────────────────────────────────────────────────
-// pdftoppm zero-pads page filenames to the WIDTH of the book's total page count
-// (standard: 372 → page-001.webp). Derive the pad width from the live totalPages,
-// falling back to the known standard count before the manifest lands.
-const pagePadWidth = () => String(state.totalPages || STANDARD_TOTAL_PAGES || 0).length;
+// FROZEN pad width — page-001.webp means page 1, permanently, at every book size.
+//
+// This used to be `String(state.totalPages).length`, i.e. derived from the live page count. That is
+// stable only while the book stays in one decade of digits: the first book to reach 1000 pages would
+// have flipped every URL from page-001.webp to page-0001.webp at once. Page filenames are the key
+// that every offline copy is stored under — the SW's page cache, the previous-edition fallback
+// cache, a staged native download, an AirDropped bundle — so that rename would have invalidated the
+// entire installed base in a single deploy, silently, and the additive-only invariant
+// (docs/choir-pdf-distribution-plan.md §4 decision 7) exists precisely to make that impossible.
+// Fixed-minimum-3 padding keeps 1..999 permanent and lets page 1000+ simply be longer.
+// web/build.mjs declares the same constant on the writer side; smoke-boot pins the pair.
+const PAGE_PAD_WIDTH = 3;
 const pageFileName = (pageNumber) => {
-  const padded = String(pageNumber).padStart(pagePadWidth(), "0");
+  const padded = String(pageNumber).padStart(PAGE_PAD_WIDTH, "0");
   // Always RELATIVE and book-scoped so the same path resolves over https
   // (signovivo.com) AND file:// (native WKWebView bundle). No leading slash.
   return `books/${BOOK_ID}/pages/page-${padded}.webp`;

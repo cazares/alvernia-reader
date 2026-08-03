@@ -25,6 +25,11 @@ const parseJpegQuality = (value, fallback) => {
 // (Defined up here, before the version stamps, because they feed bookVersion below.)
 const PDF_RENDER_DPI = parsePositiveInt(process.env.ALVERNIA_PDF_RENDER_DPI, 115);
 const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60);
+// FROZEN, deliberately not an env knob and not derived from the page count. See the long note at
+// the rename site in renderPagesToWebp: this is the width that keeps page-001.webp meaning page 1
+// forever, across every future book size. web/src/app.js declares the same constant. Changing it
+// is a full-book rename that invalidates every offline copy in the field simultaneously.
+const PAGE_PAD_WIDTH = 3;
 const BOOK_PDF_PATH = path.join(rootDir, "assets", "signo_vivo_372.pdf");
 
 // Content-address of the BOOK: the source PDF's bytes plus the two render knobs that
@@ -98,15 +103,22 @@ if (fs.existsSync(libSrcDir)) {
 }
 
 const relayBase = (process.env.ALVERNIA_RELAY_BASE || "https://signovivo-sync.4j4982y8jp.workers.dev").replace(/\/+$/, "");
-const appSource = fs
-  .readFileSync(path.join(srcDir, "app.js"), "utf8")
-  .replaceAll("__CACHE_VERSION__", cacheVersion)
-  .replaceAll("__BOOK_VERSION__", bookVersion)
-  .replaceAll("__RELAY_BASE__", relayBase)
-  .replaceAll("__BUILD_NUMBER__", buildNumber);
-fs.writeFileSync(path.join(distDir, "app.js"), appSource);
+// app.js is WRITTEN LATER (just before index.html), not here: one of its tokens is the shipped
+// page count, which is not known until the book has actually been rendered. Nothing between here
+// and there reads dist/app.js, and cacheVersion hashes web/src/app.js (the source), not the
+// emitted file, so deferring the write changes no other output.
+const emitAppJs = (totalPages) => {
+  const appSource = fs
+    .readFileSync(path.join(srcDir, "app.js"), "utf8")
+    .replaceAll("__CACHE_VERSION__", cacheVersion)
+    .replaceAll("__BOOK_VERSION__", bookVersion)
+    .replaceAll("__RELAY_BASE__", relayBase)
+    .replaceAll("__BUILD_NUMBER__", buildNumber)
+    .replaceAll("__STANDARD_TOTAL_PAGES__", String(totalPages));
+  fs.writeFileSync(path.join(distDir, "app.js"), appSource);
+};
 fs.copyFileSync(path.join(srcDir, "manifest.webmanifest"), path.join(distDir, "manifest.webmanifest"));
-// index.html is written later with inlined JSON data
+// app.js and index.html are written later, once the page count exists
 
 // Icons are pre-optimized committed assets (pngquant + oxipng), NOT generated at
 // build time: sips emits unoptimized truecolor PNGs, and the SW install precache
@@ -142,15 +154,27 @@ const renderPagesToWebp = (pdfPath, pagesOutDir) => {
     throw new Error(`pdftoppm failed with exit code ${render.status ?? 1} for ${pdfPath}`);
   }
 
+  // Sort by page NUMBER, never lexically. pdftoppm's own pad width tracks the page count, so a
+  // book that crosses 1000 emits render-0001..render-1000 and a string sort puts render-1000
+  // before render-0999 — which would silently mis-map the search index below (it pairs
+  // pageFiles[idx] with page idx+1). Numeric sort is correct at every book size.
+  const pageNo = (file) => Number(file.match(/-(\d+)\.(?:png|webp)$/)[1]);
   const pngFiles = fs
     .readdirSync(pagesOutDir)
     .filter((file) => /^render-\d+\.png$/.test(file))
-    .sort((left, right) => left.localeCompare(right));
+    .sort((left, right) => pageNo(left) - pageNo(right));
 
   // Encode each rendered page to WebP (page-NNN.webp), then drop the intermediate PNG.
   console.log(`Encoding ${pngFiles.length} pages to WebP q${WEBP_QUALITY} @ ${PDF_RENDER_DPI} DPI...`);
   for (let i = 0; i < pngFiles.length; i++) {
-    const num = pngFiles[i].match(/render-(\d+)\.png$/)[1];
+    // FROZEN pad width — do NOT derive this from the page count. pdftoppm pads to the width of the
+    // total, so at 1000 pages it would emit page-0001.webp and RENAME every existing page URL. Every
+    // offline copy the additive-only invariant protects — cached page images, previous SW caches, a
+    // staged download — is keyed by that filename, so a book crossing 1000 would invalidate the
+    // entire installed base at once, silently. Padding to a FIXED minimum of 3 keeps page-001..999
+    // permanent forever and lets page 1000+ simply be longer, which is genuinely additive.
+    // web/src/app.js's PAGE_PAD_WIDTH is the reader half of this contract; smoke-boot pins both.
+    const num = String(pageNo(pngFiles[i])).padStart(PAGE_PAD_WIDTH, "0");
     const pngPath = path.join(pagesOutDir, pngFiles[i]);
     const webpOut = path.join(pagesOutDir, `page-${num}.webp`);
     const webp = spawnSync(
@@ -169,7 +193,7 @@ const renderPagesToWebp = (pdfPath, pagesOutDir) => {
   return fs
     .readdirSync(pagesOutDir)
     .filter((file) => /^page-\d+\.webp$/.test(file))
-    .sort((left, right) => left.localeCompare(right));
+    .sort((left, right) => pageNo(left) - pageNo(right));
 };
 
 // ─── Song Title Overrides ────────────────────────────────────────────────────
@@ -712,14 +736,25 @@ const defaultTotalPages = booksManifest.books[DEFAULT_BOOK].totalPages;
 //   #pages-data  — { totalPages } for the standard book, the bare minimum to paint
 //                  first frame. The song/search indexes are fetched lazily from
 //                  /books/standard/{pages,search-index}.json.
-const inlineScripts =
-  `  <script id="books-data" type="application/json">${JSON.stringify(booksManifest)}</script>\n` +
-  `  <script id="pages-data" type="application/json">${JSON.stringify({ totalPages: defaultTotalPages })}</script>\n`;
-const htmlSrc = fs.readFileSync(path.join(srcDir, "index.html"), "utf8");
-fs.writeFileSync(
-  path.join(distDir, "index.html"),
-  htmlSrc.replace("</head>", `${inlineScripts}</head>`),
-);
+// #pages-data also carries bookVersion — the identity of the book this shell was built around.
+// It is written AFTER emitBundleManifest below, because bookVersion is a content hash over the
+// finished dist and cannot be known before every file exists.
+const writeIndexHtml = (bookVersion) => {
+  const inlineScripts =
+    `  <script id="books-data" type="application/json">${JSON.stringify(booksManifest)}</script>\n` +
+    `  <script id="pages-data" type="application/json">${JSON.stringify({ totalPages: defaultTotalPages, bookVersion })}</script>\n`;
+  const htmlSrc = fs.readFileSync(path.join(srcDir, "index.html"), "utf8");
+  fs.writeFileSync(
+    path.join(distDir, "index.html"),
+    htmlSrc.replace("</head>", `${inlineScripts}</head>`),
+  );
+};
+// Write app.js (now that the page count exists) and a placeholder index.html, so BOTH exist before
+// the manifest walk — the manifest must cover every shipped file, and a manifest that can omit one
+// is a completeness gate that proves nothing. index.html is rewritten with the real bookVersion
+// immediately after, and its manifest entry is recomputed then (emitBundleManifest, pass 2).
+emitAppJs(defaultTotalPages);
+writeIndexHtml(null);
 
 // INERT BY DESIGN — this rule does nothing in production, and that is currently the SAFER
 // outcome. Cloudflare Pages rejects any `_headers` path containing more than one `*`, and
@@ -742,4 +777,147 @@ fs.writeFileSync(
   "/books/*/pages/*\n  Cache-Control: public, max-age=31536000, immutable\n",
 );
 
+// ─── bundle-manifest.json — the identity of this bundle ──────────────────────
+//
+// WHY. Until this file existed there was no way to ask a device "which book are you actually
+// rendering?" The build badge answers a different question (the native SHELL's version.json
+// number), and it can read v383 on a device rendering a book from months earlier — that is defect
+// D1 in docs/choir-pdf-distribution-plan.md §3.2, demonstrated live on a simulator. The manifest is
+// what makes the question answerable at all: it ships inside the IPA (release.sh copies web/dist to
+// ios/WebBundle) AND on signovivo.com, so the baked book and the served book cannot disagree by
+// construction.
+//
+// It also carries the evidence that hashing alone cannot supply. Every integrity check in this
+// design measures the artifact against itself, so a WRONG-but-well-formed PDF passes all of them
+// (red team A6). `sourcePdfPages` comes from pdfinfo — the PDF, not the render — so a render that
+// silently drops pages is a mismatch rather than a consistent lie, and `sourcePdfSha256` pins which
+// PDF this actually came from.
+const toolVersion = (bin, args) => {
+  // pdftoppm and cwebp both report version on stderr; merge both streams and take the first line.
+  const r = spawnSync(bin, args, { encoding: "utf8" });
+  const text = `${r.stdout || ""}${r.stderr || ""}`.trim().split("\n")[0] || "";
+  return text.trim().slice(0, 120) || "unknown";
+};
+
+const walkFiles = (dir, base = dir) => {
+  // WALK THE TREE. Never build this list in memory as files are written: a manifest that CAN omit a
+  // file is a completeness gate that proves nothing (red team A6/NI7). Anything on disk is in the
+  // manifest, or the manifest is wrong in a way the device will detect.
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(full, base));
+    else if (entry.isFile()) out.push(path.relative(base, full).split(path.sep).join("/"));
+  }
+  return out;
+};
+
+const hashFile = (abs) => {
+  const bytes = fs.readFileSync(abs);
+  return {
+    n: bytes.length,
+    // h (sha256) derives bookVersion and drives the CI additive gate.
+    h: crypto.createHash("sha256").update(bytes).digest("hex"),
+    // m (md5) is what the DEVICE verifies: expo-file-system exposes getInfoAsync({ md5: true }) and
+    // not sha256. md5 here is a CORRUPTION check only — HTTPS to our own origin is the
+    // authenticity boundary. No pod, no CryptoKit, no Swift.
+    m: crypto.createHash("md5").update(bytes).digest("hex"),
+  };
+};
+
+const MANIFEST_NAME = "bundle-manifest.json";
+// The lowest shell build allowed to run this bundle. Bump it ONLY when a bundle starts requiring
+// native capability an older shell lacks; the device refuses to download a book it cannot run
+// rather than installing one that boots broken. 1 = any shell.
+const MIN_SHELL_BUILD = 1;
+
+const emitBundleManifest = () => {
+  // Pass 1 — hash everything on disk except the manifest itself (it does not exist yet) and
+  // index.html. index.html is excluded from bookVersion ONLY, and the exclusion is load-bearing
+  // rather than cosmetic: index.html carries bookVersion inline, so including it would make the
+  // hash an input to itself. Excluding it is safe because index.html's book-dependent content is
+  // exactly totalPages + bookVersion, and any book change that moves those also moves a page file.
+  // It is still hashed into `files` below with its FINAL bytes, so the completeness/integrity gates
+  // and the device's own verification cover it in full.
+  const relPaths = walkFiles(distDir).filter((p) => p !== MANIFEST_NAME);
+  const hashes = new Map(relPaths.map((p) => [p, hashFile(path.join(distDir, p))]));
+
+  const bookVersion = "bv_" + crypto
+    .createHash("sha256")
+    .update(
+      relPaths
+        .filter((p) => p !== "index.html")
+        .sort()
+        .map((p) => `${p}:${hashes.get(p).h}`)
+        .join("\n"),
+    )
+    .digest("hex")
+    .slice(0, 16);
+
+  // Pass 2 — now index.html can be written with the real identity, and re-hashed.
+  writeIndexHtml(bookVersion);
+  hashes.set("index.html", hashFile(path.join(distDir, "index.html")));
+
+  // Book facts read from the SOURCE PDF, independent of the render — this is the cross-check that
+  // catches a render which silently lost pages, which no self-referential hash can.
+  const info = spawnSync("pdfinfo", [BOOK_PDF_PATH], { encoding: "utf8" });
+  const sourcePdfPages = Number((info.stdout?.match(/^Pages:\s+(\d+)/m) || [])[1]);
+  if (!Number.isFinite(sourcePdfPages)) {
+    throw new Error("bundle-manifest: pdfinfo could not read the source PDF page count.");
+  }
+  if (sourcePdfPages !== defaultTotalPages) {
+    throw new Error(
+      `bundle-manifest: the PDF has ${sourcePdfPages} pages but ${defaultTotalPages} were rendered. ` +
+      "Refusing to publish a bundle whose book is not the book.",
+    );
+  }
+
+  const pagesJson = JSON.parse(
+    fs.readFileSync(path.join(booksDir, DEFAULT_BOOK, "pages.json"), "utf8"),
+  );
+  const songs = pagesJson.songIndex || [];
+
+  const manifest = {
+    schema: 1,
+    bookVersion,
+    totalPages: defaultTotalPages,
+    builtFromShellBuild: Number(buildNumber) || 0,
+    minShellBuild: MIN_SHELL_BUILD,
+    generatedAt: new Date().toISOString(),
+    sourcePdfSha256: crypto.createHash("sha256").update(fs.readFileSync(BOOK_PDF_PATH)).digest("hex"),
+    sourcePdfPages,
+    // Lets the additive gate prove that song N still opens the SAME page — a wrong-but-longer PDF
+    // would otherwise read as "372 modified, 40 new" and look like an ordinary revision.
+    songIndexDigest: crypto.createHash("sha256").update(JSON.stringify(songs)).digest("hex"),
+    firstSong: songs.length ? songs[0].song : null,
+    lastSong: songs.length ? songs[songs.length - 1].song : null,
+    // Compact [song, page] pairs (~3 KB against a 27 MB bundle). The DIGEST alone cannot power the
+    // additive gate's most important assertion — that song N still opens the SAME page — because it
+    // changes whenever a song is legitimately appended. The pairs let the gate say exactly which
+    // song moved, which is the difference between "a new PDF was added to the end" and "a different
+    // edition was substituted and every song shifted by two pages."
+    songPages: songs.map((s) => [s.song, s.page]),
+    pagePadWidth: PAGE_PAD_WIDTH,
+    // Recorded so a renderer change is a LOUD explicit override instead of 372 silent hash
+    // differences. CI installs poppler/webp unpinned, so the runner and the build Mac can disagree.
+    renderer: {
+      dpi: PDF_RENDER_DPI,
+      webpQuality: WEBP_QUALITY,
+      pdftoppm: toolVersion("pdftoppm", ["-v"]),
+      cwebp: toolVersion("cwebp", ["-version"]),
+    },
+    files: [...hashes.keys()].sort().map((p) => ({ p, ...hashes.get(p) })),
+  };
+
+  fs.writeFileSync(path.join(distDir, MANIFEST_NAME), JSON.stringify(manifest, null, 2));
+  return manifest;
+};
+
+const bundleManifest = emitBundleManifest();
+
 console.log(`\nBuild complete. Default book: ${DEFAULT_BOOK} (${defaultTotalPages} pages).`);
+console.log(
+  `  bundle-manifest.json: ${bundleManifest.bookVersion} · ${bundleManifest.files.length} files · ` +
+  `shell ${bundleManifest.builtFromShellBuild} (min ${bundleManifest.minShellBuild})`,
+);
+console.log(`  renderer: ${bundleManifest.renderer.pdftoppm} | ${bundleManifest.renderer.cwebp}`);

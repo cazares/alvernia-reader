@@ -67,10 +67,22 @@ jobs:
           e2e/svRelayRoom.test.mjs
           e2e/svSelftest.test.mjs
           e2e/svSyncDecision.test.mjs
+          e2e/additiveGate.test.mjs
+          e2e/bookResolve.test.mjs
+          e2e/bookUpdate.test.mjs
           e2e/sw-page-cache.test.mjs
+          sync-worker/test/bookArming.test.mjs
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
         run: node scripts/smoke-boot.mjs
+
+      # The additive-only gate: refuse a build that revised or removed a page devices already
+      # have. Runs here AND in scripts/release.sh — CI catches it on the PR, release.sh catches
+      # it on the path the artifact actually leaves the building on. Build 377 / PR #257 shipped
+      # ~290 in-place page re-renders precisely because the gate existed only on one of those.
+      # The baseline is read with `git show HEAD:` so a same-commit edit cannot self-approve.
+      - name: Additive-only gate (published pages are immutable)
+        run: node scripts/additive-gate.mjs --allow-renderer-drift
 
       # Runs AFTER the smoke test so web/dist already exists — this one never builds.
       # Proves the smoke test's WIRING guards can actually fail: a call-site assertion that

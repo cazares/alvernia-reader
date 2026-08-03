@@ -10,6 +10,11 @@
 //   POST /r/:room/publish    (auth)       — director; set the current page, fan out to subscribers
 //
 import { DurableObject } from "cloudflare:workers";
+// Pure arming decision, kept in plain JS so node --test can cover it without a worker runtime.
+// See sync-worker/test/bookArming.test.mjs — this is the only logic here that fans out to every
+// iPad at once, and the worker otherwise has no coverage at all.
+// @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
+import { decideBookUpdate } from "./bookArming.js";
 
 export interface Env {
   SYNC_ROOM: DurableObjectNamespace<SyncRoom>;
@@ -24,6 +29,21 @@ export interface Env {
    *  via `wrangler secret put FLEET_DASHBOARD_KEY`. Deliberately NOT a transmitter code — those are
    *  hardcoded in this PUBLIC repo, so gating PII behind them would expose every number. */
   FLEET_DASHBOARD_KEY?: string;
+
+  // ── Songbook OTA arming (docs/choir-pdf-distribution-plan.md §5.3) ─────────
+  // SHIPPED DORMANT: with BOOK_UPDATE_VERSION empty the `bookUpdate` field never appears in any
+  // response, so no client can act on it. Arming requires editing wrangler.jsonc and redeploying,
+  // and reaching the WHOLE fleet requires TWO independent vars — see bookArming.js.
+  /** "" = dormant. Otherwise the bv_<16hex> every armed device should converge on. */
+  BOOK_UPDATE_VERSION?: string;
+  /** "" = nobody | "<deviceId>[,<deviceId>]" | "*" (only honoured with BOOK_UPDATE_ALLOW_FLEET). */
+  BOOK_UPDATE_DEVICES?: string;
+  /** Must be exactly "yes" before "*" means anything. */
+  BOOK_UPDATE_ALLOW_FLEET?: string;
+  /** Origin the bundle is fetched from. The CLIENT also allowlists hosts; this is not trusted alone. */
+  BOOK_UPDATE_BASE?: string;
+  /** Max devices mid-download at once under "*". Keeps 8 iPads off one parish access point. */
+  BOOK_UPDATE_CONCURRENCY?: string;
 }
 
 const PROTOCOL_VERSION = 1;
@@ -72,6 +92,12 @@ type FleetDevice = {
   totalPages?: number;
   homeScreen?: boolean; // web only — added to Home Screen (iOS keeps the cache past 7 days)
   cacheVersion?: string;
+  // Which BOOK this device holds — distinct from nativeBuild, which is the SHELL's number and can
+  // read "current" over a songbook months old (defect D1). This is the only field that answers
+  // "did the update actually arrive?"
+  bookVersion?: string;
+  bundleSource?: string; // "baked" | "documents" — where the mounted bundle came from
+  bookStage?: string; // "active" | "downloading:37%" | "ready" | "error:disk" …
   ts: number; // last check-in (unix seconds)
 };
 
@@ -277,6 +303,13 @@ export class SyncRoom extends DurableObject<Env> {
       entry.totalPages = Math.max(0, Math.min(Number(o.totalPages) || 0, 100000));
     if (o.homeScreen != null) entry.homeScreen = Boolean(o.homeScreen);
     if (o.cacheVersion != null) entry.cacheVersion = String(o.cacheVersion).slice(0, 40);
+    // Book identity, following the existing clamp idiom exactly. WITHOUT THESE the rollout's
+    // "prove it on ONE iPad first" step has nothing to observe: a downloader failing silently on
+    // seven iPads looks identical to one that succeeded. Additive by construction — an older
+    // client simply omits them and the dashboard renders "versión desconocida".
+    if (o.bookVersion != null) entry.bookVersion = String(o.bookVersion).slice(0, 32);
+    if (o.bundleSource != null) entry.bundleSource = String(o.bundleSource).slice(0, 16);
+    if (o.bookStage != null) entry.bookStage = String(o.bookStage).slice(0, 40);
     devices[deviceId] = entry;
     // Ring-cap: keep the 300 most-recently-seen devices so storage can't grow unbounded.
     const kept = Object.values(devices)
@@ -478,6 +511,17 @@ function renderFleetDashboard(
       .map((ph) => `<a href="${escHtml(telHref(ph))}">${escHtml(ph)}</a>`)
       .join(" ") || '<span class="muted">—</span>';
     const nativeCell = bestBuild > 0 ? String(bestBuild) : '<span class="muted">—</span>';
+    // LIBRO — which SONGBOOK this person's device holds. The App column is the SHELL's build
+    // number and can read "current" over a book months old (defect D1), so it cannot answer
+    // "did the update arrive?". Amber "versión desconocida" for a client that omits the field,
+    // which is every client older than this build.
+    const bookDev = ds.find((d) => d.bookVersion) || null;
+    const stage = String(bookDev?.bookStage || "");
+    const libroCell = !bookDev
+      ? '<span class="muted">versión desconocida</span>'
+      : stage.startsWith("downloading") || stage === "ready"
+        ? `<span class="tag">${escHtml(stage)}</span> ${escHtml(String(bookDev.bookVersion).slice(3, 11))}`
+        : `${escHtml(String(bookDev.bookVersion).slice(3, 11))}${bookDev.bundleSource === "documents" ? ' <span class="muted">(descargado)</span>' : ""}`;
     const webCell = webReady
       ? "✓ inicio"
       : webNoHome
@@ -489,6 +533,7 @@ function renderFleetDashboard(
       <td>${escHtml(p.name)}${p.director ? ' <span class="tag">Director</span>' : ""}</td>
       <td class="muted">${escHtml(p.role)}</td>
       <td>${nativeCell}</td>
+      <td>${libroCell}</td>
       <td>${webCell}</td>
       <td>${ds.length ? ago(lastTs) : '<span class="muted">nunca</span>'}</td>
       <td>${phoneHtml}</td>
@@ -560,7 +605,7 @@ h3{font-size:14px;color:#8b96a3;margin:18px 0 6px}
 <span class="chip warn">${warn} por revisar</span>
 <span class="chip bad">${bad} por contactar</span>
 </div>
-<table><thead><tr><th>Persona</th><th>Rol</th><th>App</th><th>signovivo.com</th><th>Visto</th><th>Teléfono</th><th>Qué hacer</th></tr></thead>
+<table><thead><tr><th>Persona</th><th>Rol</th><th>App</th><th>Libro</th><th>signovivo.com</th><th>Visto</th><th>Teléfono</th><th>Qué hacer</th></tr></thead>
 <tbody>${rows.map((r) => r.html).join("") || '<tr><td colspan="7" class="muted">Sin lista cargada todavía.</td></tr>'}</tbody></table>
 ${orphanHtml}
 ${crashHtml}
@@ -664,7 +709,24 @@ export default {
           }
           const result = await fleet.checkin(body, request.headers.get("CF-Connecting-IP") || "");
           if (result.rateLimited) return json({ ok: false, error: "rate_limited" }, 429, cors);
-          return json(result, 200, cors);
+
+          // Book-update pointer, riding the response to a call the client ALREADY makes on
+          // foreground and every 90 s. No new endpoint, no new poll, and — critically — a failed
+          // check is a structural no-op, which is the only correct behaviour in a building with no
+          // internet. See sync-worker/src/bookArming.js for why arming takes two independent vars.
+          let bookUpdate: { bookVersion: string; base: string } | null = null;
+          try {
+            const deviceId = String((body as Record<string, unknown>)?.deviceId ?? "").slice(0, 64);
+            if (deviceId && String(env.BOOK_UPDATE_VERSION || "").trim()) {
+              const { devices } = await fleet.getFleet();
+              const me = devices.find((d) => d.deviceId === deviceId) || { deviceId };
+              bookUpdate = decideBookUpdate(env, me, devices, Math.floor(Date.now() / 1000));
+            }
+          } catch {
+            // A failure to compute the pointer must never break presence reporting.
+            bookUpdate = null;
+          }
+          return json(bookUpdate ? { ...result, bookUpdate } : result, 200, cors);
         }
 
         // Everything else under /fleet exposes choir phone numbers, so it is gated by the director

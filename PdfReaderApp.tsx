@@ -37,12 +37,37 @@ import {
 import { publishPageToRelay, setRelayPublishCode, setRelayAuthErrorHandler } from "./src/directorRelaySync";
 import directorCodes from "./director-codes.json";
 import { STORAGE_KEYS, type BookId } from "./src/offlineBooks";
+import {
+  decideBundle,
+  recordBundleFailure,
+  clearBundleFailures,
+  nextHealAction,
+  type BundleSource,
+} from "./src/bookResolve";
+import {
+  parseBookUpdate,
+  shouldStage,
+  canApplyNow,
+  stageBook,
+  applyStagedBundle,
+} from "./src/bookUpdate";
 import versionJson from "./version.json";
 
 // ─────────────────────────────── Constants ──────────────────────────────────
 
 const BUILD_VERSION = String((versionJson as { buildNumber?: number }).buildNumber ?? "");
 const RELAY_BASE = "https://signovivo-sync.4j4982y8jp.workers.dev";
+
+// Hard ceiling on bundle resolution. Everything in resolveBundleUri touches the filesystem and it
+// runs on the boot path, so a wedged I/O call must never be able to leave the app with no UI. The
+// timeout mounts the code-signed bundle for THIS launch only and is deliberately non-sticky.
+const RESOLVE_TIMEOUT_MS = 1500;
+// Generous, because crossing it mounts a possibly-older book: it exists to guarantee the app is
+// never a black rectangle, not to police slow disks.
+const PREBOOT_TIMEOUT_MS = 12000;
+// The operator panic switch expires on its own. Nothing else clears it, and a forced-baked device
+// that nobody remembers forcing is an outage that looks like a mystery.
+const FORCE_BUNDLED_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Fixed Multipeer session for the parish mesh (unchanged from the native reader).
 const DIRECTOR_SESSION = "1234";
@@ -65,6 +90,21 @@ const SUPER_ADMIN_CODES = new Set<string>(
 );
 // Secret numpad code carried over from the native reader.
 const SOFT_RESET_CODE = "744668486";
+
+// ── Songbook-update operator codes ──────────────────────────────────────────
+//
+// EVERY code must be Levenshtein distance >= MIN_CODE_DISTANCE from EVERY other code. These are
+// read off a laminated card, in poor light, in a church, by someone under pressure. The originally
+// proposed apply code was 744668487 — ONE DIGIT from SOFT_RESET_CODE (red team H4), so a single
+// misread would have wiped the device's role instead of applying an update. Both of these sit at
+// distance 9 from soft-reset and from each other; e2e/bookUpdate.test.mjs pins the rule.
+const BOOK_APPLY_CODE = "265134902";
+const BOOK_FORCE_BAKED_CODE = "907315268";
+
+// BUILD-BAKED KILL SWITCH. A one-line source neuter, independent of the server, mirroring the
+// SYNC_STRICT pattern. If the downloader ever misbehaves in the field, this turns it off in the
+// NEXT build without needing the relay to be reachable — belt to the server flag's braces.
+const SV_BOOK_DL_KILL = false;
 // NEW-DIR-3: a director's mesh page arrives on a ~2s heartbeat. Treat a director as "live right now"
 // only if we've heard from them within this window — otherwise the destructive "take control" confirm
 // false-fires forever after any director ever broadcast (the ref used to be set-once-never-cleared).
@@ -98,6 +138,39 @@ export default function App() {
   const [webDead, setWebDead] = useState(false);
   const bridgeWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remountAttemptsRef = useRef(0);
+
+  // Which bundle is actually mounted right now. The watchdog closure has no other way to know what
+  // it is about to abandon, and abandoning the wrong one (the code-signed floor) would leave the
+  // device with nothing to fall back to.
+  const activeBundleSourceRef = useRef<BundleSource | null>(null);
+  const activeBookVersionRef = useRef<string | null>(null);
+  // The watchdog is declared above the resolver (it is a dependency of the mount effect), and the
+  // resolver depends on the quarantine writer, so the ladder reaches the resolver through a ref
+  // rather than reordering ~500 lines of hooks. Assigned immediately after resolveBundleUri.
+  const resolveBundleUriRef = useRef<((force?: "bundled") => Promise<string>) | null>(null);
+  // Downloader state, kept in refs because fleetCheckin is a stable useCallback that must see the
+  // CURRENT values without being re-created (re-creating it would restart the 90 s interval).
+  const bookStageRef = useRef<string>("");
+  const lastCheckinOkAtRef = useRef<number | null>(null);
+  const lastPageTurnAtRef = useRef<number | null>(null);
+  const coldBootAtRef = useRef<number>(Date.now());
+  const lastKnownRoleRef = useRef<string | null>(null);
+  // Live mesh peer count, latched from the Swift `state` event. This is the real "is a
+  // rehearsal or Mass happening right now?" signal, and it is what throttles staging and
+  // VETOES an apply — a guess would have been worse than nothing here.
+  const meshPeerCountRef = useRef(0);
+  const stagingInFlightRef = useRef(false);
+  const onCheckinResponseRef = useRef<((body: unknown) => void) | null>(null);
+  // applyStagedBook is declared far BELOW the numpad dispatch that invokes it. Referencing it
+  // directly would capture the first render's copy (it is not in that useCallback's deps) and
+  // sits in its temporal dead zone during the render pass. Same ref indirection as
+  // resolveBundleUriRef, for the same reason.
+  const applyStagedBookRef = useRef<(() => Promise<void>) | null>(null);
+  // LOUD self-heal (red team A4). A silent, correct recovery is WORSE than a loud one here: a
+  // defect that only reproduces on the choir's hardware fires all eight watchdogs at once, every
+  // device quietly drops to the previous songbook, and the fleet is now split across two books with
+  // nobody aware. This banner survives restarts until an operator clears it.
+  const [revertedBook, setRevertedBook] = useState<string | null>(null);
 
   const roleRef = useRef<SyncRole>("off");
   // Bumped at the top of every role-entry path. A become*() captures this at entry and bails
@@ -194,10 +267,34 @@ export default function App() {
         // dashboard fills it from the seeded roster (never a wrong "Cantor" for a Bajo/Guitarrista).
         role: roleRef.current === "director" ? "Director" : "",
         ...(extra || {}),
+        // Which BOOK this device holds. nativeBuild is the SHELL's number and can read "current"
+        // over a songbook months old (D1), so without this the dashboard cannot answer the only
+        // question the rollout cares about: did the update actually arrive?
+        ...(activeBookVersionRef.current ? { bookVersion: activeBookVersionRef.current } : {}),
+        ...(activeBundleSourceRef.current ? { bundleSource: activeBundleSourceRef.current } : {}),
+        ...(bookStageRef.current ? { bookStage: bookStageRef.current } : {}),
+        ...(extra || {}),
       }),
-    }).catch(() => {
-      /* offline / relay unreachable — presence just isn't reported */
-    });
+    })
+      .then(async (r) => {
+        if (!r.ok) return;
+        // A SUCCESSFUL check-in is the live-internet proof the apply gate depends on. It is
+        // recorded here and nowhere else, so it can never be faked by a cached response.
+        const at = Date.now();
+        lastCheckinOkAtRef.current = at;
+        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
+        let body: unknown = null;
+        try {
+          body = await r.json();
+        } catch {
+          return;
+        }
+        onCheckinResponseRef.current?.(body);
+      })
+      .catch(() => {
+        /* offline / relay unreachable — presence just isn't reported. Inside the church this is
+           the NORMAL case and must stay completely silent: no error state, no UI. */
+      });
   }, []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
@@ -283,6 +380,55 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * Take the Documents bundle out of play by RENAMING it — never deleting it.
+   *
+   * Two reasons it is a rename. It is the forensic evidence for *why* a bundle failed to boot, on a
+   * device we will never have in front of us; and deleting ~27 MB of user-visible state on a
+   * heuristic is exactly the irreversible move that should never be automatic. The boot sweep keeps
+   * only the newest quarantined copy, so this cannot grow without bound.
+   *
+   * Declared here, above the watchdog, because the self-heal ladder calls it directly.
+   */
+  const quarantineDocumentsBundle = useCallback(
+    async (bookVersion?: string | null) => {
+      const docDir = FileSystem.documentDirectory || "";
+      if (!docDir) return;
+      const from = `${docDir}WebBundle`;
+      const to = `${docDir}WebBundle.bad-${Date.now()}`;
+      try {
+        const info = await FileSystem.getInfoAsync(from);
+        if (!info.exists) return;
+        await FileSystem.moveAsync({ from, to });
+        breadcrumb(`quarantine:${bookVersion || "unknown"}`);
+      } catch {
+        breadcrumb("quarantine-failed");
+        return;
+      }
+      // The cached decision now points at a directory that no longer exists — drop it so the next
+      // resolve runs the full table instead of trusting a stale answer.
+      await AsyncStorage.removeItem(STORAGE_KEYS.bookResolved).catch(() => {});
+      if (bookVersion) {
+        try {
+          const raw = await AsyncStorage.getItem(STORAGE_KEYS.bookQuarantine);
+          const list = raw ? JSON.parse(raw) : [];
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.bookQuarantine,
+            JSON.stringify(recordBundleFailure(Array.isArray(list) ? list : [], bookVersion, Date.now())),
+          );
+        } catch {
+          /* best-effort: a bookkeeping failure must not block the recovery itself */
+        }
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.bookReverted,
+          JSON.stringify({ bookVersion, at: Date.now() }),
+        ).catch(() => {});
+        setRevertedBook(bookVersion);
+      }
+    },
+    [breadcrumb],
+  );
+
   // Slice B: watchdog for the bridge-ready handshake. Armed on every WebView (re)load; cleared
   // when bridge-ready arrives. If it fires, the bundle never booted (broken/blank/crash-loop) →
   // escalate: up to 2 bounded remounts (cheap; fixes a transient WKWebView wedge), then the
@@ -293,21 +439,59 @@ export default function App() {
     bridgeWatchdogRef.current = setTimeout(() => {
       bridgeWatchdogRef.current = null;
       if (webReadyRef.current) return; // bridge-ready arrived in time — healthy boot
-      breadcrumb(`bridge-timeout:${remountAttemptsRef.current}`);
-      if (remountAttemptsRef.current < 2) {
-        remountAttemptsRef.current += 1;
-        pendingInjectRef.current = []; // stale injects must not flush into the fresh page
-        setMountKey((k) => k + 1); // bounded remount from scratch (re-arms via the mount effect)
-      } else {
-        setWebDead(true); // exhausted → native "Reintentar" floor (never a black screen)
+      const attempt = remountAttemptsRef.current;
+      const source = activeBundleSourceRef.current;
+      breadcrumb(`bridge-timeout:${attempt}:${source || "?"}`);
+
+      // THE SELF-HEAL LADDER (defect D2). The old behaviour was two bounded remounts of the SAME
+      // uri and then a "Reintentar" button that remounted the same uri again — an unbounded
+      // human-driven loop with no escape, which never once tried the code-signed copy sitting right
+      // there on disk. Now: remount (a transient WKWebView wedge is still the cheapest hypothesis),
+      // then abandon the bundle we just failed on and re-resolve, then the native floor.
+      //
+      // Crucially the Multipeer session is never torn down by any of this, so a follower keeps
+      // following the director through the entire recovery.
+      const { action, quarantineCurrent } = nextHealAction(attempt, source);
+      remountAttemptsRef.current = attempt + 1;
+      pendingInjectRef.current = []; // stale injects must not flush into a fresh page
+
+      if (action === "remount") {
+        setMountKey((k) => k + 1); // re-arms via the mount effect
+        return;
       }
+      if (action === "give-up") {
+        // The floor is now guaranteed to be showing over a code-signed, read-only bundle that no
+        // downloader can corrupt.
+        setWebDead(true);
+        return;
+      }
+
+      // fall-back: stop trusting this bundle, re-resolve, remount onto whatever the table picks.
+      (async () => {
+        try {
+          if (quarantineCurrent) await quarantineDocumentsBundle(activeBookVersionRef.current);
+          const next = await resolveBundleUriRef.current?.();
+          if (next) {
+            webReadyRef.current = false;
+            setBundleUri(next);
+          }
+          setMountKey((k) => k + 1);
+        } catch {
+          setWebDead(true); // never leave the user with no UI because recovery itself threw
+        }
+      })();
     }, 6000);
-  }, [breadcrumb]);
+  }, [breadcrumb, quarantineDocumentsBundle]);
 
   // Arm the watchdog whenever a WebView (re)mounts (initial boot + every mountKey remount). A
   // fresh mount hasn't handshaked yet, so reset webReadyRef; bridge-ready clears the timer.
   useEffect(() => {
-    if (!booted || !bundleUri || webDead) return;
+    if (!booted || !bundleUri) return;
+    // `webDead` is deliberately NOT a guard or a dependency any more. The floor is an overlay now,
+    // so the WebView stays mounted underneath it and a Reintentar remount must still be WATCHED —
+    // otherwise a retry onto a bundle that also fails would sit there forever with the ladder
+    // disarmed. Keeping webDead out of the deps also stops the watchdog re-arming merely because
+    // the overlay was shown or hidden.
     webReadyRef.current = false;
     armBridgeWatchdog();
     return () => {
@@ -316,7 +500,7 @@ export default function App() {
         bridgeWatchdogRef.current = null;
       }
     };
-  }, [mountKey, booted, bundleUri, webDead, armBridgeWatchdog]);
+  }, [mountKey, booted, bundleUri, armBridgeWatchdog]);
 
   // ── Relay-auth warning bridge ────────────────────────────────────────────────
   // The relay silently rejects a publish when the director's X-Director-Code is bad (401).
@@ -540,6 +724,15 @@ export default function App() {
     explicitTransmitterRef.current = false;
     webReadyRef.current = false;
     pendingInjectRef.current = [];
+    // RIDER: re-resolve before remounting. A soft reset is a recovery action, so it must be able to
+    // move OFF a bad bundle — remounting the same broken URI was one of the one-way doors that made
+    // a bad Documents/WebBundle unrecoverable without reinstalling the app.
+    try {
+      const next = await resolveBundleUriRef.current?.();
+      if (next) setBundleUri(next);
+    } catch {
+      /* keep the current URI rather than leaving the app with none */
+    }
     setMountKey((k) => k + 1); // remount the WebView from scratch
   }, [breadcrumb, stopDirectorHeartbeat]);
 
@@ -555,6 +748,32 @@ export default function App() {
       const code = digitsOnly(rawCode);
       if (!code) {
         injectEvent({ type: "role", role: "none" });
+        return;
+      }
+      // Apply a downloaded songbook. Deliberately a CODE and not an ambient prompt: an automatic
+      // modal on `ready` fires on seven devices at 12:04 with instruments in hand, and a persisted
+      // flag makes that a certainty rather than a risk. A code is an unambiguous human act.
+      if (code === BOOK_APPLY_CODE) {
+        void applyStagedBookRef.current?.();
+        return;
+      }
+      // Operator panic switch: force the code-signed bundle. Auto-expires (a forced device nobody
+      // remembers forcing is its own outage), and takes effect on the next mount.
+      if (code === BOOK_FORCE_BAKED_CODE) {
+        void (async () => {
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.bookForceBundled,
+            JSON.stringify({ setAt: Date.now() }),
+          ).catch(() => {});
+          await AsyncStorage.removeItem(STORAGE_KEYS.bookResolved).catch(() => {});
+          breadcrumb("force-baked");
+          const next = await resolveBundleUriRef.current?.("bundled");
+          webReadyRef.current = false;
+          pendingInjectRef.current = [];
+          if (next) setBundleUri(next);
+          setMountKey((k) => k + 1);
+          Alert.alert("Cancionero original", "Se restauró el cancionero incluido en la app.");
+        })();
         return;
       }
       if (code === SOFT_RESET_CODE) {
@@ -621,6 +840,10 @@ export default function App() {
       switch (msg.type) {
         case "bridge-ready": {
           webReadyRef.current = true;
+          // The recovery floor is dismissed HERE and nowhere else. Reintentar deliberately leaves
+          // it up: a mount that has not handshaked is not a recovery, and hiding the only working
+          // control before we know that would be the black-rectangle bug all over again.
+          setWebDead(false);
           // Slice B: the web booted — disarm the watchdog and reset the remount budget so a
           // LATER crash gets its full escalation ladder again.
           if (bridgeWatchdogRef.current) {
@@ -628,6 +851,34 @@ export default function App() {
             bridgeWatchdogRef.current = null;
           }
           remountAttemptsRef.current = 0;
+
+          // PROVE THE BUNDLE. Reaching bridge-ready is the only evidence that the bundle we chose
+          // actually boots, so it is what clears the hard-crash counter and the quarantine strikes
+          // against this bookVersion. Without the explicit reset (red team NI5), three transient
+          // failures spread over months would blacklist a book that works fine today — permanently,
+          // by content hash, on the device that can least afford it.
+          void (async () => {
+            const bookVersion = activeBookVersionRef.current;
+            try {
+              await AsyncStorage.setItem(
+                STORAGE_KEYS.bookBoot,
+                JSON.stringify({ bookVersion, mountedAt: Date.now(), provedAt: Date.now(), attempts: 0 }),
+              );
+              if (bookVersion) {
+                const raw = await AsyncStorage.getItem(STORAGE_KEYS.bookQuarantine);
+                const list = raw ? JSON.parse(raw) : [];
+                if (Array.isArray(list) && list.length) {
+                  await AsyncStorage.setItem(
+                    STORAGE_KEYS.bookQuarantine,
+                    JSON.stringify(clearBundleFailures(list, bookVersion)),
+                  );
+                }
+              }
+            } catch {
+              /* best-effort */
+            }
+          })();
+
           // A3: a DIRECTOR/transmitter is authoritative for the page across a WebView reload. A
           // content-process reload boots the web to its DEFAULT page (2) and reports it here; adopting
           // that (and re-broadcasting below) would yank the WHOLE congregation to the boot page — the
@@ -793,21 +1044,181 @@ export default function App() {
     ],
   );
 
-  // ── Resolve the bundle URI (prefer a peer-pushed update in Documents) ───────
-  const resolveBundleUri = useCallback(async (): Promise<string> => {
-    const docDir = FileSystem.documentDirectory;
-    if (docDir) {
-      const docIndex = `${docDir}WebBundle/index.html`;
-      try {
-        const info = await FileSystem.getInfoAsync(docIndex);
-        if (info.exists) return docIndex;
-      } catch {
-        /* fall through to bundled copy */
+  // ── Resolve which songbook bundle to boot ───────────────────────────────────
+  //
+  // The decision table itself lives in src/bookResolve.js (pure, node-tested — see
+  // e2e/bookResolve.test.mjs). Everything here is I/O around it.
+  //
+  // WHAT THIS REPLACES: the old resolver returned Documents/WebBundle on mere existence, with no
+  // version compare and no health check, and returned the baked path without even stat'ing it.
+  // Nothing in the app ever deleted that directory, so an iPad that once took a mesh bundle push
+  // rendered that book FOREVER while the badge showed the current build number — invisible to the
+  // fleet dashboard and ineligible for a corrective push. Verified live on a simulator: a planted
+  // stale Documents/WebBundle made build 383 silently render the previous songbook.
+
+  /**
+   * Boot sweep. Runs once per launch AFTER first paint, so it can never delay the reader.
+   *
+   * Keeps the newest quarantined bundle (forensics) and removes older ones, plus the legacy
+   * `WebBundle_new-*` staging directories the Swift mesh rail creates. Nothing has ever swept
+   * those: a process kill between unpack and swap orphans one permanently, and each is up to
+   * ~27 MB on a device whose free space is the reason a download can fail in the first place.
+   */
+  const sweepStaleBundles = useCallback(async () => {
+    const docDir = FileSystem.documentDirectory || "";
+    if (!docDir) return;
+    try {
+      const entries = await FileSystem.readDirectoryAsync(docDir);
+      const bad = entries.filter((n) => n.startsWith("WebBundle.bad-")).sort();
+      const doomed = [
+        ...bad.slice(0, Math.max(0, bad.length - 1)), // keep only the newest
+        ...entries.filter((n) => n.startsWith("WebBundle_new-")), // legacy Swift orphans
+        ...entries.filter((n) => n === "WebBundle.prev.tmp"), // interrupted swap scratch
+      ];
+      for (const name of doomed) {
+        await FileSystem.deleteAsync(`${docDir}${name}`, { idempotent: true }).catch(() => {});
       }
+      if (doomed.length) breadcrumb(`sweep:${doomed.length}`);
+    } catch {
+      /* best-effort housekeeping — never surfaced, never blocking */
     }
-    const bundleDir = FileSystem.bundleDirectory || "";
-    return `${bundleDir}WebBundle/index.html`;
+  }, [breadcrumb]);
+
+  const readJsonFile = useCallback(async (uri: string): Promise<unknown | null> => {
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (!info.exists) return null;
+      return JSON.parse(await FileSystem.readAsStringAsync(uri));
+    } catch {
+      return null; // missing OR unparseable are the same answer: we cannot identify this bundle
+    }
   }, []);
+
+  const readStored = useCallback(async (key: string, fallback: unknown): Promise<any> => {
+    try {
+      const raw = await AsyncStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
+  }, []);
+
+  const resolveBundleUri = useCallback(
+    async (force?: "bundled"): Promise<string> => {
+      const bundleDir = FileSystem.bundleDirectory || "";
+      const bakedUri = `${bundleDir}WebBundle/index.html`;
+      const docDir = FileSystem.documentDirectory || "";
+      const docUri = `${docDir}WebBundle/index.html`;
+
+      // TOTAL AND TIME-BOUNDED BY CONSTRUCTION (red team H1). Everything below touches the
+      // filesystem, and this runs on the boot path: a slow or wedged I/O call must never be able to
+      // strand the app with no UI at all. Whatever happens, we return a URI within 1.5 s.
+      const decide = async (): Promise<string> => {
+        // Fast path (red team A7): reuse the last decision after ONE cheap existence check.
+        // Eight identical aging iPads cold-booting together must not all parse two manifests and
+        // cross a timeout together into a correlated silent downgrade.
+        if (!force) {
+          const cached = await readStored(STORAGE_KEYS.bookResolved, null);
+          if (cached?.uri) {
+            try {
+              const info = await FileSystem.getInfoAsync(cached.uri);
+              if (info.exists) {
+                activeBundleSourceRef.current = cached.uri === bakedUri ? "bundled" : "documents";
+                return cached.uri;
+              }
+            } catch {
+              /* fall through to the full table */
+            }
+          }
+        }
+
+        const [bakedInfo, docInfo] = await Promise.all([
+          FileSystem.getInfoAsync(bakedUri).catch(() => ({ exists: false })),
+          FileSystem.getInfoAsync(docUri).catch(() => ({ exists: false })),
+        ]);
+
+        const forceRec = await readStored(STORAGE_KEYS.bookForceBundled, null);
+        const forceBundled =
+          force === "bundled" ||
+          // Auto-expires (red team H4): nothing else clears it, and a panic switch nobody can see
+          // and nobody remembers setting is its own outage.
+          (!!forceRec?.setAt && Date.now() - Number(forceRec.setAt) < FORCE_BUNDLED_TTL_MS);
+
+        const boot = await readStored(STORAGE_KEYS.bookBoot, null);
+        const quarantine = await readStored(STORAGE_KEYS.bookQuarantine, []);
+
+        const [docManifest, bakedManifest] = await Promise.all([
+          docInfo.exists ? readJsonFile(`${docDir}WebBundle/bundle-manifest.json`) : Promise.resolve(null),
+          bakedInfo.exists ? readJsonFile(`${bundleDir}WebBundle/bundle-manifest.json`) : Promise.resolve(null),
+        ]);
+
+        const decision = decideBundle({
+          docExists: !!docInfo.exists,
+          docManifest: docManifest as any,
+          bakedManifest: bakedManifest as any,
+          bakedExists: !!bakedInfo.exists,
+          forceBundled,
+          bootAttempts: Number(boot?.attempts || 0),
+          bootProved: boot?.provedAt != null,
+          quarantine: Array.isArray(quarantine) ? quarantine : [],
+        });
+
+        breadcrumb(`resolve:${decision.source}:${decision.reason}`);
+
+        if (decision.quarantineDoc && docInfo.exists) {
+          // Rename, never delete (global rule §18) — it is the forensic evidence for WHY it failed.
+          await quarantineDocumentsBundle((docManifest as any)?.bookVersion);
+        }
+
+        if (decision.source === "none") {
+          // Both bundles gone. There is no runtime remedy; say so in a breadcrumb and hand back the
+          // baked path so the WebView's own failure is at least attributable.
+          breadcrumb("FATAL:no-bundle-anywhere");
+          activeBundleSourceRef.current = "bundled";
+          return bakedUri;
+        }
+
+        const uri = decision.source === "documents" ? docUri : bakedUri;
+        activeBundleSourceRef.current = decision.source;
+        const chosenManifest = (decision.source === "documents" ? docManifest : bakedManifest) as any;
+        activeBookVersionRef.current = chosenManifest?.bookVersion ?? null;
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.bookResolved,
+          JSON.stringify({
+            uri,
+            bookVersion: chosenManifest?.bookVersion ?? null,
+            builtFromShellBuild: chosenManifest?.builtFromShellBuild ?? null,
+          }),
+        ).catch(() => {});
+        return uri;
+      };
+
+      let settled = false;
+      return Promise.race([
+        decide().then((u) => {
+          settled = true;
+          return u;
+        }).catch(() => {
+          settled = true;
+          activeBundleSourceRef.current = "bundled";
+          return bakedUri;
+        }),
+        new Promise<string>((resolve) =>
+          setTimeout(() => {
+            if (settled) return;
+            // NON-STICKY (red team A7): this mounts the baked bundle for THIS launch only. It must
+            // never quarantine anything and never write sv_book_active — a slow disk is not a bad
+            // bundle, and treating it as one would downgrade the whole fleet after one bad morning.
+            breadcrumb("preboot-timeout");
+            activeBundleSourceRef.current = "bundled";
+            resolve(bakedUri);
+          }, RESOLVE_TIMEOUT_MS),
+        ),
+      ]);
+    },
+    [breadcrumb, readJsonFile, readStored, quarantineDocumentsBundle],
+  );
+  resolveBundleUriRef.current = resolveBundleUri;
 
   // ── Boot: restore book + role, resolve bundle, render WebView ───────────────
   useEffect(() => {
@@ -818,16 +1229,320 @@ export default function App() {
       const startBook: BookId = "standard";
       currentBookRef.current = startBook;
 
+      // THE HARD-CRASH COUNTER (§5.10b). The in-session watchdog cannot see a bundle that kills the
+      // process before React renders — which is exactly the failure an old iPad under memory
+      // pressure produces, and the one that used to be unrecoverable without reinstalling the app.
+      // Increment BEFORE mounting and flush immediately, so a jetsam between here and first paint
+      // is still counted. resolveBundleUri reads this and bails to the code-signed bundle at two.
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEYS.bookBoot);
+        const boot = raw ? JSON.parse(raw) : null;
+        if (boot && boot.provedAt == null && boot.mountedAt) {
+          const attempts = Number(boot.attempts || 0) + 1;
+          await AsyncStorage.setItem(STORAGE_KEYS.bookBoot, JSON.stringify({ ...boot, attempts }));
+          breadcrumb(`boot-unproved:${attempts}`);
+        }
+      } catch {
+        /* a bookkeeping failure must never block boot */
+      }
+
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEYS.lastCheckinOkAt);
+        if (raw) lastCheckinOkAtRef.current = Number(raw) || null;
+      } catch {
+        /* ignore */
+      }
+
+      // Restore the LIBRO ANTERIOR banner across restarts — it is non-dismissible until an operator
+      // clears it precisely so that a silent fleet split cannot go unnoticed.
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEYS.bookReverted);
+        const rec = raw ? JSON.parse(raw) : null;
+        if (rec?.bookVersion && !cancelled) setRevertedBook(String(rec.bookVersion));
+      } catch {
+        /* ignore */
+      }
+
       const uri = await resolveBundleUri();
       if (cancelled) return;
+
+      // Record the mount attempt BEFORE the WebView exists, so the counter above can see it.
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.bookBoot,
+        JSON.stringify({
+          bookVersion: activeBookVersionRef.current,
+          mountedAt: Date.now(),
+          provedAt: null,
+          attempts: 0,
+        }),
+      ).catch(() => {});
+
       setInitialBook(startBook);
       setBundleUri(uri);
       setBooted(true);
+
+      // Boot sweep, AFTER first paint so it never delays the reader: drop stray quarantined copies
+      // beyond the newest, and the legacy WebBundle_new-* orphans the Swift mesh rail leaves behind
+      // (nothing has ever swept those, and each one is up to ~27 MB).
+      void sweepStaleBundles();
     })();
     return () => {
       cancelled = true;
     };
-  }, [breadcrumb, resolveBundleUri]);
+  }, [breadcrumb, resolveBundleUri, sweepStaleBundles]);
+
+  // ── The songbook downloader (M5) ───────────────────────────────────────────
+  //
+  // SHIPS DORMANT. The server sends no `bookUpdate` field until BOOK_UPDATE_VERSION is set in the
+  // worker, so on every device today this code observes nothing and does nothing. That is what
+  // lets it land without a rehearsal.
+  //
+  // The decision logic is all in src/bookUpdate.js (pure, 45 tests). Everything here is I/O.
+
+  /** expo-file-system adapters, shaped for the injected `fs` the pure module expects. */
+  const bookFs = useMemo(() => {
+    const root = FileSystem.documentDirectory || "";
+    const abs = (p: string) => `${root}${p}`;
+    return {
+      stat: async (p: string) => {
+        const i: any = await FileSystem.getInfoAsync(abs(p));
+        return i?.exists ? { size: Number(i.size || 0) } : null;
+      },
+      exists: async (p: string) => !!(await FileSystem.getInfoAsync(abs(p))).exists,
+      mkdirp: async (p: string) => {
+        await FileSystem.makeDirectoryAsync(abs(p), { intermediates: true }).catch(() => {});
+      },
+      rmrf: async (p: string) => {
+        await FileSystem.deleteAsync(abs(p), { idempotent: true }).catch(() => {});
+      },
+      move: async (from: string, to: string) => FileSystem.moveAsync({ from: abs(from), to: abs(to) }),
+      readJson: async (p: string) => JSON.parse(await FileSystem.readAsStringAsync(abs(p))),
+      writeJson: async (p: string, v: unknown) => FileSystem.writeAsStringAsync(abs(p), JSON.stringify(v)),
+      walkWithHashes: async (dir: string) => {
+        // md5 comes from getInfoAsync because expo-file-system exposes md5 and not sha256. It is a
+        // CORRUPTION check only — HTTPS to our own origin is the authenticity boundary.
+        const out = new Map<string, { size: number; md5: string }>();
+        const walk = async (rel: string) => {
+          const names = await FileSystem.readDirectoryAsync(abs(rel)).catch(() => [] as string[]);
+          for (const name of names) {
+            const childRel = `${rel}/${name}`;
+            const info: any = await FileSystem.getInfoAsync(abs(childRel), { md5: true });
+            if (!info?.exists) continue;
+            if (info.isDirectory) await walk(childRel);
+            else out.set(childRel.slice(dir.length + 1), { size: Number(info.size || 0), md5: String(info.md5 || "") });
+          }
+        };
+        await walk(dir);
+        return out;
+      },
+    };
+  }, []);
+
+  const bookNet = useMemo(
+    () => ({
+      fetchJson: async (url: string) => {
+        const r = await fetch(url, { cache: "no-store" as RequestCache });
+        if (!r.ok) throw new Error(`http ${r.status}`);
+        return r.json();
+      },
+      download: async (url: string, dest: string) => {
+        const root = FileSystem.documentDirectory || "";
+        const res = await FileSystem.downloadAsync(url, `${root}${dest}`);
+        if (!res || (res.status && res.status >= 400)) throw new Error(`http ${res?.status}`);
+      },
+    }),
+    [],
+  );
+
+  const setBookStage = useCallback((stage: string) => {
+    bookStageRef.current = stage;
+  }, []);
+
+  /**
+   * Handle a /fleet/checkin response. THE POINTER IS DATA, NOT AN INSTRUCTION — parseBookUpdate
+   * validates the shape and pins the host to constants baked into the app, so a compromised or
+   * buggy worker can never aim this device at another origin.
+   */
+  const onCheckinResponse = useCallback(
+    (body: unknown) => {
+      const pointer = parseBookUpdate(body);
+
+      void (async () => {
+        const staged = await readStored(STORAGE_KEYS.bookStaged, null);
+
+        // THE ABORT IS A REAL REVOKE (red team NI6). Disarming the server only stops NEW arming; the
+        // devices already sitting on a verified copy are the problem, and the person who knows is
+        // not in the building. So: any check-in that does not name our staged version deletes it.
+        if (staged?.bookVersion && (!pointer || pointer.bookVersion !== staged.bookVersion)) {
+          breadcrumb(`staged-revoked:${staged.bookVersion}`);
+          await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
+          await bookFs.rmrf("WebBundleStaged");
+          setBookStage("");
+        }
+        if (!pointer) return;
+
+        // Stagger is measured from when this device FIRST saw this pointer, not from launch.
+        let firstSeen = await readStored(STORAGE_KEYS.bookFirstSeen, null);
+        if (!firstSeen || firstSeen.bookVersion !== pointer.bookVersion) {
+          firstSeen = { bookVersion: pointer.bookVersion, at: Date.now() };
+          await AsyncStorage.setItem(STORAGE_KEYS.bookFirstSeen, JSON.stringify(firstSeen)).catch(() => {});
+        }
+
+        if (stagingInFlightRef.current) return;
+        const quarantine = await readStored(STORAGE_KEYS.bookQuarantine, []);
+        const active = await readStored(STORAGE_KEYS.bookActive, null);
+        const decision = shouldStage({
+          killSwitch: SV_BOOK_DL_KILL,
+          bookVersion: pointer.bookVersion,
+          activeBookVersion: activeBookVersionRef.current,
+          stagedBookVersion: staged?.bookVersion ?? null,
+          stagedReady: !!staged?.ready,
+          quarantine: Array.isArray(quarantine) ? quarantine : [],
+          webReady: webReadyRef.current,
+          foreground: AppState.currentState === "active",
+          role: roleRef.current,
+          firstSeenAt: firstSeen.at,
+          deviceId: dbgDeviceRef.current,
+          now: Date.now(),
+          minShellBuild: 1,
+          shellBuild: Number(BUILD_VERSION) || 0,
+        });
+        if (!decision.stage) {
+          if (decision.reason !== "already-active" && decision.reason !== "already-staged") {
+            breadcrumb(`stage-skip:${decision.reason}`);
+          }
+          return;
+        }
+
+        stagingInFlightRef.current = true;
+        setBookStage("downloading:0%");
+        try {
+          const rec = await stageBook({
+            base: pointer.base,
+            bookVersion: pointer.bookVersion,
+            fs: bookFs,
+            net: bookNet,
+            now: () => Date.now(),
+            activeTotalPages: Number(active?.totalPages || 0),
+            shellBuild: Number(BUILD_VERSION) || 0,
+            // Mesh peers connected means practice is happening: throttle to 1, never veto. The
+            // practice room is the ONLY place these iPads have internet.
+            concurrency: meshPeerCountRef.current > 0 ? 1 : 3,
+            onProgress: (done, total) => setBookStage(`downloading:${Math.floor((done / total) * 100)}%`),
+          });
+          await AsyncStorage.setItem(STORAGE_KEYS.bookStaged, JSON.stringify(rec)).catch(() => {});
+          setBookStage(rec.ready ? "ready" : `error:${rec.error}`);
+          breadcrumb(rec.ready ? `staged-ready:${rec.bookVersion}` : `stage-failed:${rec.error}`);
+        } catch {
+          setBookStage("error:unexpected");
+        } finally {
+          stagingInFlightRef.current = false;
+        }
+      })();
+    },
+    [breadcrumb, readStored, bookFs, bookNet, setBookStage],
+  );
+  onCheckinResponseRef.current = onCheckinResponse;
+
+  /**
+   * Apply the staged bundle. Reached ONLY from an explicit human action (the numpad code) — there
+   * is no ambient modal anywhere in this design, because a persisted `ready` flag firing a prompt
+   * on seven devices at 12:04 is precisely the fleet-bricking scenario this is built to avoid.
+   */
+  const applyStagedBook = useCallback(async () => {
+    const staged = await readStored(STORAGE_KEYS.bookStaged, null);
+    const gate = canApplyNow({
+      stagedReady: !!staged?.ready,
+      stagedReadyAt: staged?.readyAt ?? null,
+      lastCheckinOkAt: lastCheckinOkAtRef.current,
+      meshPeerConnected: meshPeerCountRef.current > 0,
+      lastPageTurnAt: lastPageTurnAtRef.current,
+      lastDirectorSnapshotAt: lastDirectorSnapshotRef.current?.at ?? null,
+      role: roleRef.current,
+      lastKnownRole: lastKnownRoleRef.current,
+      coldBootAt: coldBootAtRef.current,
+      webReady: webReadyRef.current,
+      minShellBuild: Number(staged?.minShellBuild || 1),
+      shellBuild: Number(BUILD_VERSION) || 0,
+      now: Date.now(),
+    });
+    breadcrumb(`apply-gate:${gate.reason}`);
+    if (!gate.ok) {
+      Alert.alert(
+        gate.reason === "not-ready" ? "No hay libro nuevo" : "Ahora no",
+        gate.reason === "not-ready"
+          ? "Este iPad no tiene un cancionero nuevo descargado."
+          : "Hay una Misa o ensayo en curso. Actualiza después.",
+      );
+      return;
+    }
+
+    Alert.alert("¿Actualizar el cancionero?", "La app se recargará con el libro nuevo.", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Actualizar",
+        onPress: () => {
+          void (async () => {
+            // Save the reader's place so nobody loses it across the swap.
+            await AsyncStorage.setItem(
+              `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
+              String(currentPageRef.current),
+            ).catch(() => {});
+            const res = await applyStagedBundle({ fs: bookFs });
+            breadcrumb(`apply:${res.stage}`);
+            if (!res.ok) {
+              Alert.alert("No se pudo actualizar", "El cancionero anterior sigue intacto.");
+              return;
+            }
+            await AsyncStorage.setItem(
+              STORAGE_KEYS.bookActive,
+              JSON.stringify({
+                bookVersion: staged.bookVersion,
+                totalPages: staged.totalPages,
+                installedAt: Date.now(),
+                source: "http",
+              }),
+            ).catch(() => {});
+            await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
+            await AsyncStorage.removeItem(STORAGE_KEYS.bookResolved).catch(() => {});
+            setBookStage("active");
+            const next = await resolveBundleUriRef.current?.();
+            webReadyRef.current = false;
+            pendingInjectRef.current = [];
+            if (next) setBundleUri(next);
+            setMountKey((k) => k + 1);
+          })();
+        },
+      },
+    ]);
+  }, [readStored, breadcrumb, bookFs, setBookStage]);
+  applyStagedBookRef.current = applyStagedBook;
+
+  // ── Pre-boot watchdog (§5.10b) ─────────────────────────────────────────────
+  //
+  // While `!booted || !bundleUri` the app renders a plain black View, and the bridge watchdog
+  // returns early in exactly that state — so a boot that never settles is a permanent black
+  // rectangle with NO native floor at all and no way out but force-quitting. resolveBundleUri is
+  // already time-bounded, but the boot effect also awaits AsyncStorage, and "should not hang" is
+  // not a fallback strategy on hardware we never see.
+  //
+  // NON-STICKY BY DESIGN (red team A7). This mounts the code-signed bundle for THIS launch only.
+  // It must never quarantine anything and never mark a book bad — eight identical aging iPads
+  // cold-booting together on a slow morning must not be able to talk themselves into a
+  // fleet-wide downgrade. The breadcrumb is deliberately distinct from `bridge-timeout` so a
+  // slow-disk episode is never mistaken for a broken bundle when reading forensics later.
+  useEffect(() => {
+    if (booted) return;
+    const t = setTimeout(() => {
+      if (booted) return;
+      breadcrumb("preboot-watchdog");
+      const bundleDir = FileSystem.bundleDirectory || "";
+      activeBundleSourceRef.current = "bundled";
+      setBundleUri(`${bundleDir}WebBundle/index.html`);
+      setBooted(true);
+    }, PREBOOT_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [booted, breadcrumb]);
 
   // ── Multipeer permissions + role bootstrap + event listener ─────────────────
   useEffect(() => {
@@ -852,6 +1567,7 @@ export default function App() {
       // cannot auto-resume). Intentional exit clears lastSyncRole, so this only fires after a crash/kill.
       AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole)
         .then((prev) => {
+          lastKnownRoleRef.current = prev ? String(prev) : null;
           if (prev === "director") {
             Alert.alert(
               "Estabas dirigiendo",
@@ -881,6 +1597,7 @@ export default function App() {
           // Remember the director's latest snapshot (with a timestamp — NEW-DIR-3) so a reloaded/
           // foregrounded follower resyncs, and so "is a director live RIGHT NOW?" can be judged by recency.
           lastDirectorSnapshotRef.current = { page, book, at: Date.now() };
+          lastPageTurnAtRef.current = Date.now();
           // De-dupe the 2s mesh heartbeat: if we're already on this page+book it's just a
           // keepalive re-send — do nothing (no redundant renderPage). A genuinely new page, a
           // book switch, or a recovered dropped packet (page differs from ours) still syncs.
@@ -896,6 +1613,7 @@ export default function App() {
           break;
         }
         case "state": {
+          meshPeerCountRef.current = Number(event.peerCount) || 0;
           dbgLog("mesh:state", {
             status: event.status,
             srole: event.role,
@@ -936,14 +1654,16 @@ export default function App() {
           break;
         }
         case "bundleUpdated": {
-          // A peer pushed a newer web bundle; reload from Documents/WebBundle.
-          (async () => {
-            const uri = await resolveBundleUri();
-            webReadyRef.current = false;
-            pendingInjectRef.current = [];
-            setBundleUri(uri);
-            setMountKey((k) => k + 1);
-          })();
+          // DELIBERATELY INERT. This used to re-resolve and REMOUNT THE WEBVIEW ON THE SPOT, with
+          // no human gate and no timing check — the held M-F3 nightmare, live until now. A peer
+          // arriving mid-Mass could swap the songbook out from under a singer mid-verse, on a
+          // device in a building where nothing can be rolled back.
+          //
+          // The mesh bundle-push rail is retired at its receive boundary (DirectorSyncModule.swift,
+          // four guards), so this event can no longer fire from a current build. It is kept as a
+          // no-op rather than deleted because a peer on an OLDER build can still emit it, and a
+          // silent no-op is the correct response to a rail we no longer honour.
+          breadcrumb("mesh-bundleUpdated-ignored");
           break;
         }
         default:
@@ -1029,36 +1749,45 @@ export default function App() {
     return <View style={styles.blank} />;
   }
 
-  // Slice B: the WebView is confirmed dead (never handshaked after bounded remounts). Show a
-  // native recovery screen — the web's own boot-guard card can't run when the WebView process
-  // is gone, so this native floor guarantees the app is never a silent black rectangle.
-  if (webDead) {
-    return (
-      <View style={styles.fallback}>
-        <StatusBar hidden />
-        <Text style={styles.fallbackTitle}>Signo Vivo se está recuperando</Text>
-        <Text style={styles.fallbackMsg}>La app no cargó bien. Toca para reintentar.</Text>
-        <TouchableOpacity
-          style={styles.fallbackBtn}
-          accessibilityRole="button"
-          onPress={() => {
-            breadcrumb("native-fallback-retry");
-            remountAttemptsRef.current = 0;
-            webReadyRef.current = false;
-            pendingInjectRef.current = [];
-            setWebDead(false);
-            setMountKey((k) => k + 1); // fresh WebView; the mount effect re-arms the watchdog
-          }}
-        >
-          <Text style={styles.fallbackBtnText}>Reintentar</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.root}>
       <StatusBar hidden />
+      {/*
+        LIBRO ANTERIOR (red team A4). The self-heal ladder is silent and correct, and that is the
+        danger: a defect that only reproduces on the choir's hardware fires all eight watchdogs at
+        once, every device quietly drops to the previous songbook, and the fleet is now split across
+        two books with nobody aware — during Mass, with no internet and no way to find out. This
+        banner is deliberately non-dismissible and survives restarts.
+      */}
+      {revertedBook ? (
+        <TouchableOpacity
+          style={styles.revertBanner}
+          accessibilityRole="button"
+          // Non-dismissible by ACCIDENT, clearable by an OPERATOR. The plan parks the clear action
+          // inside DIAGNÓSTICO, which is not in this build — so without this the banner would stick
+          // on the device forever with no way off it, which is its own small outage. A deliberate
+          // tap plus a confirm is the same "an operator decided" bar, reachable today.
+          onPress={() => {
+            Alert.alert(
+              "Cancionero anterior",
+              "Este iPad volvió a una versión anterior del cancionero. Avísale al director antes de quitar el aviso.",
+              [
+                { text: "Dejar el aviso", style: "cancel" },
+                {
+                  text: "Ya avisé",
+                  onPress: () => {
+                    void AsyncStorage.removeItem(STORAGE_KEYS.bookReverted).catch(() => {});
+                    setRevertedBook(null);
+                    breadcrumb("reverted-banner-cleared");
+                  },
+                },
+              ],
+            );
+          }}
+        >
+          <Text style={styles.revertBannerText}>LIBRO ANTERIOR · avísale al director</Text>
+        </TouchableOpacity>
+      ) : null}
       <WebView
         key={`webbundle-${mountKey}`}
         ref={webViewRef}
@@ -1074,8 +1803,19 @@ export default function App() {
           breadcrumb("webview-terminated");
           webReadyRef.current = false;
           pendingInjectRef.current = []; // drop stale queued injects so they don't flush into the fresh page
-          webViewRef.current?.reload();
-          armBridgeWatchdog(); // Slice B: if the reload also never handshakes, escalate to remount/fallback
+          // RIDER: a hard content-process crash must ESCALATE. This used to reload the same URI
+          // without touching the counter, so a crash-loop on a bad bundle recycled forever and
+          // never reached the ladder — the loop had no exit at all.
+          remountAttemptsRef.current += 1;
+          void (async () => {
+            try {
+              const next = await resolveBundleUriRef.current?.();
+              if (next) setBundleUri(next);
+            } catch {
+              /* keep the current URI */
+            }
+            setMountKey((k) => k + 1); // full remount; the mount effect re-arms the watchdog
+          })();
         }}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
@@ -1090,6 +1830,43 @@ export default function App() {
         style={styles.web}
         {...(Platform.OS === "ios" ? { allowsBackForwardNavigationGestures: false } : {})}
       />
+      {/*
+        The native recovery floor, now an OVERLAY rather than a replacement for the WebView.
+        It used to be an early `return`, which made Reintentar unsafe: it cleared webDead and THEN
+        remounted, so once resolution became async a hung filesystem call would remove the only UI
+        on screen and leave a black rectangle with no way back (red team H1). As an overlay, the
+        WebView is always mounted underneath and the floor stays visible until the fresh mount
+        actually posts bridge-ready — which is the only real evidence that recovery worked.
+      */}
+      {webDead ? (
+        <View style={styles.fallback}>
+          <Text style={styles.fallbackTitle}>Signo Vivo se está recuperando</Text>
+          <Text style={styles.fallbackMsg}>La app no cargó bien. Toca para reintentar.</Text>
+          <TouchableOpacity
+            style={styles.fallbackBtn}
+            accessibilityRole="button"
+            onPress={() => {
+              breadcrumb("native-fallback-retry");
+              remountAttemptsRef.current = 0;
+              webReadyRef.current = false;
+              pendingInjectRef.current = [];
+              // Deliberately NOT setWebDead(false) here — bridge-ready clears it. Until the new
+              // mount proves itself, the user keeps a working button instead of a black screen.
+              void (async () => {
+                try {
+                  const next = await resolveBundleUriRef.current?.();
+                  if (next) setBundleUri(next);
+                } catch {
+                  /* keep the current URI rather than leaving the app with none */
+                }
+                setMountKey((k) => k + 1);
+              })();
+            }}
+          >
+            <Text style={styles.fallbackBtnText}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1098,8 +1875,32 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   blank: { flex: 1, backgroundColor: "#000" },
   web: { flex: 1, backgroundColor: "#000" },
-  // Slice B native recovery floor.
-  fallback: { flex: 1, backgroundColor: "#0d0d1a", alignItems: "center", justifyContent: "center", padding: 24 },
+  // Slice B native recovery floor — an absolute overlay so the WebView underneath stays mounted
+  // and there is never a frame with no UI at all.
+  fallback: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#0d0d1a",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  // LIBRO ANTERIOR: deliberately loud and non-dismissible. pointerEvents="none" so it can never
+  // swallow a page turn mid-Mass — being informative must not cost the choir a tap.
+  revertBanner: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    backgroundColor: "#8a2f00",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  revertBannerText: { color: "#fff", fontSize: 13, fontWeight: "700", textAlign: "center" },
   fallbackTitle: { color: "#fff", fontSize: 20, fontWeight: "700", textAlign: "center", marginBottom: 8 },
   fallbackMsg: { color: "#c8c8dc", fontSize: 16, textAlign: "center", marginBottom: 20 },
   fallbackBtn: { backgroundColor: "#3b6df6", paddingVertical: 13, paddingHorizontal: 28, borderRadius: 12 },

@@ -53,5 +53,44 @@ if (maxIndexedPage && maxIndexedPage < actual) {
   console.warn(`⚠️  Last indexed song is on page ${maxIndexedPage} but the PDF has ${actual} pages — the final page(s) may not be jump-reachable by song number.`);
 }
 
+// ── Three-way cross-check: PDF ↔ render ↔ manifest ───────────────────────────
+// Every integrity check in the distribution design hashes the artifact against itself, so a
+// self-consistent WRONG book passes all of them (red team A6). The one genuinely independent
+// measurement available is pdfinfo's page count, taken from the SOURCE PDF rather than from the
+// render. Requiring PDF == rendered images == manifest.totalPages means a render that silently
+// dropped pages, or a manifest describing a different build, is a mismatch instead of a consistent
+// lie. Skipped (not failed) when web/dist has not been built — this script also runs as a preflight
+// before the build exists.
+const distPagesDir = path.join(root, "web/dist/books/standard/pages");
+const manifestPath = path.join(root, "web/dist/bundle-manifest.json");
+if (fs.existsSync(distPagesDir) && fs.existsSync(manifestPath)) {
+  const rendered = fs.readdirSync(distPagesDir).filter((f) => /^page-\d+\.webp$/.test(f)).length;
+  let manifest = null;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch (e) {
+    console.error(`❌ web/dist/bundle-manifest.json is unparseable: ${e.message}`);
+    ok = false;
+  }
+  if (manifest) {
+    if (rendered !== actual) {
+      console.error(`❌ the PDF has ${actual} pages but ${rendered} page image(s) were rendered.`);
+      console.error("   A page that exists in the book but not in the bundle is a blank during Mass.");
+      ok = false;
+    }
+    if (Number(manifest.totalPages) !== actual) {
+      console.error(`❌ bundle-manifest.json says totalPages=${manifest.totalPages}, the PDF has ${actual}.`);
+      ok = false;
+    }
+    if (Number(manifest.sourcePdfPages) !== actual) {
+      console.error(`❌ bundle-manifest.json records sourcePdfPages=${manifest.sourcePdfPages}, pdfinfo now reads ${actual} — the manifest describes a DIFFERENT PDF than the one on disk.`);
+      ok = false;
+    }
+    if (ok) {
+      console.log(`✅ PDF ↔ render ↔ manifest agree — ${actual} pages, ${manifest.bookVersion}.`);
+    }
+  }
+}
+
 if (!ok) process.exit(1);
 console.log(`✅ book consistency OK — ${songCount} songs, max indexed page ${maxIndexedPage} ≤ PDF pages ${actual}.`);

@@ -9,6 +9,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let serviceType = "signovivo"
   private static let eventName = "DirectorSyncEvent"
   private static let protocolVersion = 1
+
+  /// PEER BUNDLE PUSH IS RETIRED. Build-baked, deliberately not remotely toggleable.
+  ///
+  /// This rail let a director stream its own `WebBundle` to a follower over Multipeer. Three
+  /// reasons it is off:
+  ///
+  ///  1. It is the ONLY writer of `Documents/WebBundle`, and therefore the sole source of the D1
+  ///     stale-bundle trap — a device that took one push rendered that songbook forever while
+  ///     reporting the current build number. The boot resolver now refuses those copies, but the
+  ///     honest fix is to stop creating them.
+  ///  2. It can push a book BACKWARDS. The offer compares CFBundleVersion — the shell's number —
+  ///     which says nothing about which book either device holds, so a director on an older
+  ///     songbook and a newer shell overwrites a follower's newer book.
+  ///  3. Its job is being taken over by an HTTPS downloader that verifies against a manifest and
+  ///     applies only on an explicit human action.
+  ///
+  /// Guarded at the RECEIVE boundary rather than only at the send, because the guards must hold
+  /// against peers running OLDER builds that still offer and still send. `didFinishReceivingResource`
+  /// in particular had no role guard at all and never inspected the resource name.
+  private static let meshBundlePushEnabled = false
   // Handshake generation — incremented whenever the who-invites-whom rule changes.
   // Advertised in discoveryInfo so peers can see it before connecting.
   // Build ≤226: no "hgen" key → legacy (director initiates).
@@ -703,6 +723,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// pull the updated web bundle over the mesh. Uses the same reliable control-send helper
   /// as the takeover_* messages.
   private func sendBundleOffer(to peerID: MCPeerID) {
+    // Stop the traffic at the source too. This is NOT one of the four load-bearing guards — a peer
+    // on an older build still offers, which is exactly why the receive side is guarded — but there
+    // is no reason for a current build to advertise a rail it will not serve.
+    guard Self.meshBundlePushEnabled else { return }
     guard currentRole == "director" else { return }
     let payload: [String: Any] = [
       "v": Self.protocolVersion,
@@ -715,6 +739,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// FOLLOWER side. On receiving a `bundle_offer`, compare versions numerically; if the
   /// director's is newer and no transfer is already in flight, request the bundle once.
   private func handleBundleOffer(version offeredVersion: String, from peerID: MCPeerID) {
+    guard Self.meshBundlePushEnabled else { return } // GUARD 1/4 — never request a peer bundle
     guard currentRole == "follower" else { return }
     guard !bundleTransferInFlight else { return }
     let offered = Int(offeredVersion) ?? 0
@@ -751,6 +776,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// stream it to the requesting peer via MCSession.sendResource (NOT subject to the 8 KB
   /// control-payload cap). Cleans up the temp file on completion.
   private func handleBundleRequest(from peerID: MCPeerID) {
+    guard Self.meshBundlePushEnabled else { return } // GUARD 2/4 — never serve a peer bundle
     guard currentRole == "director" else { return }
     let version = currentBundleVersion
     guard let session = mcSessions.first(where: { $0.connectedPeers.contains(peerID) }) else { return }
@@ -878,6 +904,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// whole archive into memory.
   private func installReceivedBundle(at localURL: URL) {
     let fm = FileManager.default
+    // GUARD 4/4 — the last line before anything touches Documents/WebBundle. Defence in depth: if
+    // any future call path reaches here, it still cannot write the directory that caused D1.
+    guard Self.meshBundlePushEnabled else {
+      try? fm.removeItem(at: localURL)
+      DispatchQueue.main.async { self.bundleTransferInFlight = false }
+      return
+    }
     // This runs on a background utility queue, but bundleTransferInFlight is otherwise only ever
     // touched on the main queue (beginBundleTransfer, the offer guard, the watchdog, resetTransport,
     // the resource delegates). Marshal the clear back to main to avoid an unsynchronized write.
@@ -1884,6 +1917,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
     DispatchQueue.main.async {
+      // GUARD 3/4 — the actual receive boundary, and the one that matters most: this delegate had
+      // NO role guard and never inspected `resourceName`, so anything a peer chose to send landed
+      // here and went straight to installReceivedBundle. A peer running an older build will still
+      // offer and still send; the transfer is dropped on the floor here and the temp file removed.
+      guard Self.meshBundlePushEnabled else {
+        self.bundleTransferInFlight = false
+        if let localURL = localURL { try? FileManager.default.removeItem(at: localURL) }
+        return
+      }
       guard self.mcSessions.contains(where: { $0 === session }) else {
         self.bundleTransferInFlight = false
         return
