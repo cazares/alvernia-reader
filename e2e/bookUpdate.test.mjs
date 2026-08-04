@@ -123,8 +123,18 @@ test("does not re-stage what is already active or already staged-and-ready", () 
   assert.equal(shouldStage(stageCtx({ stagedBookVersion: BV, stagedReady: true })).reason, "already-staged");
 });
 
-test("waits out its stagger slot", () => {
-  assert.equal(shouldStage(stageCtx({ deviceId: "slow", firstSeenAt: 0, now: 0 })).stage, false);
+test("NO client stagger — an armed device downloads immediately (owner decision, 2026-08-03)", () => {
+  // Inverted. The old rule delayed by hash(deviceId) % 20 minutes, invisibly, so a working rollout
+  // was indistinguishable from a dead one for up to 19 minutes. BOOK_UPDATE_CONCURRENCY in the
+  // worker caps concurrent downloads instead — same protection, server-tunable, no build to change.
+  for (const deviceId of ["slow", "fast", "zzdiag", ""]) {
+    const r = shouldStage(stageCtx({ deviceId, firstSeenAt: 0, now: 0 }));
+    assert.equal(r.stage, true, `deviceId=${deviceId} must stage immediately`);
+    assert.equal(r.reason, "ok");
+  }
+  // firstSeenAt is no longer an input at all — a device that has never seen the pointer before
+  // still stages on the very first check-in.
+  assert.equal(shouldStage(stageCtx({ firstSeenAt: null, now: 0 })).stage, true);
 });
 
 // ─── canApplyNow — it can only ever say NO ──────────────────────────────────
@@ -164,8 +174,6 @@ test("the NON-role gates still refuse a director's iPad exactly like anyone else
   const asDirector = (over) => canApplyNow(applyCtx({ role: "director", ...over }));
   assert.equal(asDirector({ stagedReady: false }).reason, "not-ready");
   assert.equal(asDirector({ meshPeerConnected: true }).reason, "mesh-peer");
-  assert.equal(asDirector({ lastPageTurnAt: 1990, now: 2000 }).reason, "recent-page-turn");
-  assert.equal(asDirector({ lastDirectorSnapshotAt: 1000, now: 2000 }).reason, "director-active");
   assert.equal(asDirector({ webReady: false }).reason, "bridge-not-ready");
   assert.equal(asDirector({ minShellBuild: 99999 }).reason, "shell-too-old");
   assert.equal(asDirector({ lastCheckinOkAt: null }).reason, "no-live-internet");
@@ -179,19 +187,47 @@ test("a connected mesh peer means a rehearsal or Mass is happening: NO", () => {
   assert.equal(canApplyNow(applyCtx({ meshPeerConnected: true })).reason, "mesh-peer");
 });
 
-test("a page turn in the last minute means someone is SINGING: NO", () => {
-  assert.equal(canApplyNow(applyCtx({ lastPageTurnAt: 1990, now: 2000 })).reason, "recent-page-turn");
+test("AN UPDATE NEVER WAITS FOR THE USER TO STOP TOUCHING THE DEVICE (owner decision, 2026-08-03)", () => {
+  // THE bug from the user's side: typing a song number to check whether the update arrived IS a
+  // page turn, which re-armed a 60-second lockout every single time. Looking at it prevented it.
+  // A page turn one millisecond ago must not defer the apply.
+  assert.equal(canApplyNow(applyCtx({ lastPageTurnAt: 1999, now: 2000 })).ok, true);
+  assert.equal(canApplyNow(applyCtx({ lastPageTurnAt: 2000, now: 2000 })).ok, true);
+  // Nor may a live director in the room, nor a device that was directing before a restart.
+  assert.equal(canApplyNow(applyCtx({ lastDirectorSnapshotAt: 1999, now: 2000 })).ok, true);
+  assert.equal(
+    canApplyNow(applyCtx({ lastKnownRole: "director", coldBootAt: 1999, now: 2000 })).ok,
+    true,
+  );
+  // No reason string anywhere may still describe a wait-for-quiet veto.
+  for (const ctx of [
+    { lastPageTurnAt: 1999 },
+    { lastDirectorSnapshotAt: 1999 },
+    { lastKnownRole: "director", coldBootAt: 1999 },
+  ]) {
+    const r = canApplyNow(applyCtx({ ...ctx, now: 2000 }));
+    assert.ok(
+      !["recent-page-turn", "director-active", "director-cold-boot-cooldown"].includes(r.reason),
+      `a wait-for-quiet veto came back: ${r.reason}`,
+    );
+  }
 });
 
-test("a director snapshot in the last 10 minutes means a director is live: NO", () => {
-  assert.equal(canApplyNow(applyCtx({ lastDirectorSnapshotAt: 1000, now: 2000 })).reason, "director-active");
+test("mesh-peer STILL defers — it clears itself and never asks anything of the user", () => {
+  // The one survivor. A connected peer means a rehearsal or Mass is actively running and the whole
+  // room would blink at once. It is not a "hold still" gate: it goes away when the session ends.
+  assert.equal(canApplyNow(applyCtx({ meshPeerConnected: true })).reason, "mesh-peer");
 });
 
-test("NI3: a device that WAS directing boots as a follower, so the role veto is disarmed — the cold-boot cooldown closes it", () => {
-  // 11:52 in the parking lot: the one device the role check was written to protect is the one it
-  // cannot see, because role auto-restore is deliberately refused on boot.
+test("NI3 is CLOSED BY DECISION, not by a cooldown — a device that was directing still updates", () => {
+  // The old NI3 answer was a 90-minute cold-boot cooldown, on the reasoning that role auto-restore
+  // is refused on boot so `role` reads "follower" on the device that was directing 30 seconds ago.
+  // Under the 2026-08-03 decision there is nothing left to protect: every role updates, and no gate
+  // may hold an update waiting for the room to go quiet. Kept as a test so the cooldown cannot
+  // return silently.
   const r = canApplyNow(applyCtx({ role: "follower", lastKnownRole: "director", coldBootAt: 1000, now: 2000 }));
-  assert.equal(r.reason, "director-cold-boot-cooldown");
+  assert.equal(r.ok, true);
+  assert.notEqual(r.reason, "director-cold-boot-cooldown");
 });
 
 test("that cooldown expires, so the device is not locked out forever", () => {
