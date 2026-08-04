@@ -165,6 +165,41 @@ else
   fi
 fi
 
+# PRE-DEPLOY COMPLETENESS GATE (added after the 2026-08-03 outage).
+#
+# web/dist is built at step 2 and verified only INDIRECTLY, via the ios/WebBundle assertion at
+# step 3 — which is skipped entirely when SKIP_NATIVE=1, and which runs BEFORE the ~10-minute
+# archive. On 2026-08-03 web/dist was emptied somewhere between step 3 and here, and this line
+# happily deployed 24 files instead of 389: signovivo.com served the shell with EVERY page image
+# 404, and nothing in the pipeline noticed. wrangler exits 0 — publishing an empty directory is a
+# perfectly successful deploy as far as it is concerned.
+#
+# The tell was the upload count and only the upload count, which no human reads. So assert it here,
+# immediately before the bytes leave, against the manifest's own totalPages. This is the last
+# moment anything can be checked.
+echo "==> 4b/6 Pre-deploy gate: web/dist is a COMPLETE book"
+node -e '
+  const fs=require("fs"),path=require("path");
+  const dir="web/dist", fail=(m)=>{console.error("  ✖ web/dist: "+m);process.exit(1)};
+  if(!fs.existsSync(path.join(dir,"index.html"))) fail("index.html missing");
+  if(!fs.existsSync(path.join(dir,"app.js"))) fail("app.js missing");
+  if(!fs.existsSync(path.join(dir,"sw.js"))) fail("sw.js missing");
+  let m; try{ m=JSON.parse(fs.readFileSync(path.join(dir,"bundle-manifest.json"),"utf8")); }
+  catch(e){ fail("bundle-manifest.json missing or unparseable ("+e.message+")"); }
+  const pagesDir=path.join(dir,"books/standard/pages");
+  if(!fs.existsSync(pagesDir)) fail("books/standard/pages/ missing entirely");
+  const have=fs.readdirSync(pagesDir).filter(f=>/^page-\d+\.webp$/.test(f));
+  if(have.length!==m.totalPages) fail(`${have.length} page images but the manifest says ${m.totalPages}`);
+  for(const n of [1,m.totalPages]){
+    const f=path.join(pagesDir,`page-${String(n).padStart(m.pagePadWidth||3,"0")}.webp`);
+    if(!fs.existsSync(f)||fs.statSync(f).size<=0) fail(`page ${n} missing or empty`);
+  }
+  // Every entry the OTA will later demand byte-exact must exist on disk NOW.
+  const missing=m.files.map(f=>f.p).filter(p=>!fs.existsSync(path.join(dir,p)));
+  if(missing.length) fail(`${missing.length} manifest file(s) absent from disk, e.g. ${missing.slice(0,3).join(", ")}`);
+  console.log(`         ✅ ${m.bookVersion}, ${m.totalPages} pages, ${m.files.length} files — complete`);
+'
+
 if [ "$STAGING" = "1" ]; then
   echo "==> 5/6  Deploy web to the ISOLATED Pages preview branch '$DEPLOY_BRANCH' (NOT signovivo.com)"
 else
