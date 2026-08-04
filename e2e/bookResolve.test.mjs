@@ -62,40 +62,31 @@ test("D1: a bookVersion of the wrong SHAPE is not a manifest", () => {
 
 // ── Prefer known-good over newer ─────────────────────────────────────────────
 
-test("a TestFlight install always wins: an OLDER documents shell boots the baked copy", () => {
+test("a TestFlight install always wins: baked shell >= documents shell boots the baked copy", () => {
   const d = decideBundle(baseCtx({
     docManifest: man({ bookVersion: "bv_cccccccccccccccc", builtFromShellBuild: 380 }),
     bakedManifest: man({ builtFromShellBuild: 384 }),
   }));
   assert.equal(d.source, "bundled");
-  assert.equal(d.reason, "baked-is-newer-shell");
+  assert.equal(d.reason, "baked-is-newer-or-equal-shell");
 });
 
-// The rule here used to be `bakedShell >= docShell -> bundled`, which ALSO refused the equal case.
-// That made a songbook-only deploy impossible to land, because builtFromShellBuild only moves when
-// a binary is cut (web/build.mjs:901) — see e2e/bookOtaSeam.test.mjs for the full story. Equal
-// shells now break the tie on generatedAt, so the contract is "prefer code-signed UNLESS the
-// downloaded book is demonstrably newer", not "always prefer code-signed".
-
-test("equal shell builds prefer the code-signed copy when neither can prove it is newer", () => {
-  const d = decideBundle(baseCtx({
-    docManifest: man({ bookVersion: "bv_cccccccccccccccc", builtFromShellBuild: 384 }),
-    bakedManifest: man({ builtFromShellBuild: 384 }),
-  }));
-  assert.equal(d.source, "bundled");
-  assert.equal(d.reason, "baked-not-older");
-});
-
-test("equal shell builds DO boot a downloaded book with a newer build stamp", () => {
+// THE EQUAL CASE IS LOAD-BEARING, not an oversight. It was changed to tie-break on generatedAt on
+// 2026-08-04 and reverted the same night: the justification was that a songbook-only deploy would
+// produce doc == baked, but `SKIP_NATIVE=1 scripts/release.sh` still bumps (scripts/bump-build.mjs),
+// so a web-only update always arrives with doc > baked. What actually produces the equal case is two
+// tabs releasing at once — which shipped two different books both numbered v391 on 2026-08-03 — and
+// there the code-signed copy is precisely the one to trust.
+test("equal shell builds also prefer the code-signed copy", () => {
   const d = decideBundle(baseCtx({
     docManifest: man({
       bookVersion: "bv_cccccccccccccccc", builtFromShellBuild: 384,
-      generatedAt: "2026-09-01T00:00:00.000Z",
+      generatedAt: "2026-09-01T00:00:00.000Z", // a NEWER stamp must not win the tie
     }),
     bakedManifest: man({ builtFromShellBuild: 384, generatedAt: "2026-08-04T00:00:00.000Z" }),
   }));
-  assert.equal(d.source, "documents", `a PDF-only update was refused: ${d.reason}`);
-  assert.equal(d.reason, "documents-newer");
+  assert.equal(d.source, "bundled");
+  assert.equal(d.reason, "baked-is-newer-or-equal-shell");
 });
 
 test("the shell catching up makes the Documents copy redundant", () => {
