@@ -109,14 +109,6 @@ const SV_BOOK_DL_KILL = false;
 // only if we've heard from them within this window — otherwise the destructive "take control" confirm
 // false-fires forever after any director ever broadcast (the ref used to be set-once-never-cleared).
 const LIVE_DIRECTOR_WINDOW_MS = 8000;
-// H3: how long a foreground waits for mesh state to come back before it lets an apply be
-// considered. meshPeerCountRef is latched from the Swift `state` event, so a device that was asleep
-// in a live room wakes up holding a STALE, QUIET peer count — the one moment `mesh-peer` and
-// `room-active` are both guaranteed to read wrong. An iPad unlocked mid-song would otherwise swap
-// its songbook and remount the WebView on the spot. Browsing + reconnect + the first `state` event
-// is a low-single-digit-seconds affair on a LAN; nothing is lost by waiting, because the very next
-// check-in (90 s) retries the apply anyway.
-const FOREGROUND_APPLY_SETTLE_MS = 4000;
 // The app is single-book: the only book is the standard (Alvernia) manual. Its id is pinned
 // everywhere so the mesh/relay Snapshot's bookId stays a stable "standard" for backward compat.
 const DEFAULT_BOOK: BookId = "standard";
@@ -160,29 +152,9 @@ export default function App() {
   // CURRENT values without being re-created (re-creating it would restart the 90 s interval).
   const bookStageRef = useRef<string>("");
   const lastCheckinOkAtRef = useRef<number | null>(null);
-  // ── The two room-activity clocks that gate an apply ────────────────────────────────────────────
-  //
-  // Same instant, two decay rates: 60 s says "someone is SINGING", 10 min says "this room is still
-  // IN SESSION" (bookUpdate.js ROOM_ACTIVE_WINDOW_MS). Both are facts about the ROOM, never about
-  // this device's role — that is the whole point of the names.
-  //
-  // H2: these used to be stamped ONLY by the mesh page-RECEIVE handler, which a director breaks out
-  // of before reaching them (it ignores its own echoes) — so on the one device the 2026-08-03
-  // owner decision newly exposed to the swap, both gates were structurally dead. They are now
-  // stamped by noteRoomPageActivity() from BOTH directions: a page arriving over the mesh, and this
-  // device's own page turn. Neither writer asks what role we are.
-  //
-  // THEY ARE DELIBERATELY NEVER CLEARED ON A ROLE TRANSITION. A follower that becomes director (or
-  // the reverse, or a soft-reset to "off") carries its timestamps across, and that is CORRECT: they
-  // record that a page moved in this room N seconds ago, which is still true a millisecond after
-  // the role flipped. Clearing them would OPEN both gates at the exact moment the room got busier —
-  // someone just took the podium — which is the one direction that can hurt. They need no reset
-  // because they expire on their own, against the same wall clock every other gate here uses.
-  // e2e/bookUpdate.test.mjs pins that nothing ever assigns null to either ref.
   const lastPageTurnAtRef = useRef<number | null>(null);
-  const lastMeshPageAtRef = useRef<number | null>(null);
-  // (No coldBootAtRef / lastKnownRoleRef here any more: they existed only to feed the 90-minute
-  // director cold-boot apply cooldown, removed by owner decision 2026-08-03 — every role applies.)
+  const coldBootAtRef = useRef<number>(Date.now());
+  const lastKnownRoleRef = useRef<string | null>(null);
   // Live mesh peer count, latched from the Swift `state` event. This is the real "is a
   // rehearsal or Mass happening right now?" signal, and it is what throttles staging and
   // VETOES an apply — a guess would have been worse than nothing here.
@@ -197,10 +169,6 @@ export default function App() {
   // Declared as a ref for the same reason applyStagedBook is: the foreground listener and the
   // staging completion both need it, and both are defined above it.
   const autoApplyIfSafeRef = useRef<(() => Promise<void>) | null>(null);
-  // H3's deferred foreground apply. Held in a ref so a rapid background→foreground→background flap
-  // cannot leave a timer armed against an unmounted component, and so a second foreground re-arms
-  // rather than stacking a second apply attempt.
-  const foregroundApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // LOUD self-heal (red team A4). A silent, correct recovery is WORSE than a loud one here: a
   // defect that only reproduces on the choir's hardware fires all eight watchdogs at once, every
   // device quietly drops to the previous songbook, and the fleet is now split across two books with
@@ -234,20 +202,6 @@ export default function App() {
   const didBootstrapRef = useRef(false);
 
   const syncAvailable = useMemo(() => isNearbyDirectorSyncAvailable(), []);
-
-  /**
-   * A page just moved in this room. Stamp both room-activity clocks (see the refs above).
-   *
-   * THE SINGLE WRITER, on purpose: two decay rates reading two independently-maintained timestamps
-   * is how one of them silently goes stale and its gate turns into dead code — which is exactly the
-   * H2 regression this replaces. It takes no role, reads no role, and every caller reaches it from
-   * a code path that is already role-agnostic about the fact a page moved.
-   */
-  const noteRoomPageActivity = useCallback(() => {
-    const at = Date.now();
-    lastPageTurnAtRef.current = at;
-    lastMeshPageAtRef.current = at;
-  }, []);
 
   // ── Breadcrumb (lightweight crash forensics; survives a hard restart) ──────
   const breadcrumb = useCallback((tag: string) => {
@@ -1002,19 +956,6 @@ export default function App() {
             `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
             String(page),
           ).catch(() => {});
-          // H2: THIS DEVICE just turned a page — the room is active, whoever we are. Stamped here,
-          // beside broadcastPage, because this is the ONE place a locally-originated page turn is
-          // observed for every role: a director (whose own mesh echoes it deliberately ignores), a
-          // transmitter-only device with no mesh at all, and a plain "off" reader. Without it the
-          // 60 s and 10 min apply gates could never fire on a directing iPad, and the songbook
-          // could swap out from under the person leading the room mid-verse.
-          //
-          // `webReadyRef` gates it, NOT a role: the web posts its unsolicited BOOT render as a
-          // page-changed BEFORE bridge-ready (the A3 guard above drops that only for a
-          // director/transmitter), and a boot render is the app waking up, not a human turning a
-          // page. Counting it would make every WebView remount — including the one an apply itself
-          // performs — look like ten minutes of room activity.
-          if (webReadyRef.current) noteRoomPageActivity();
           broadcastPage(page, currentBookRef.current);
           break;
         }
@@ -1103,7 +1044,6 @@ export default function App() {
       onDirectorCode,
       becomeFollower,
       stopDirectorHeartbeat,
-      noteRoomPageActivity,
     ],
   );
 
@@ -1460,14 +1400,10 @@ export default function App() {
           activeBookVersion: activeBookVersionRef.current,
           stagedBookVersion: staged?.bookVersion ?? null,
           stagedReady: !!staged?.ready,
-          // M1: without this, an expired record reads as "already staged" forever while canApplyNow
-          // refuses it as "stale-ready" forever — a verified copy that can never be used and can
-          // never be refreshed, on a device the dashboard cheerfully reports as ready.
-          stagedReadyAt: staged?.readyAt ?? null,
           quarantine: Array.isArray(quarantine) ? quarantine : [],
           webReady: webReadyRef.current,
           foreground: AppState.currentState === "active",
-          // No role is passed: every device downloads (owner decision, 2026-08-03).
+          role: roleRef.current,
           firstSeenAt: firstSeen.at,
           deviceId: dbgDeviceRef.current,
           now: Date.now(),
@@ -1478,16 +1414,6 @@ export default function App() {
           if (decision.reason !== "already-active" && decision.reason !== "already-staged") {
             breadcrumb(`stage-skip:${decision.reason}`);
           }
-          // M1, the other half: A COPY THAT IS ALREADY STAGED IS A COPY THAT IS NOT INSTALLED YET.
-          // The apply used to be attempted only in the seconds right after a download finished —
-          // i.e. at practice, the one moment the mesh is guaranteed up and `mesh-peer` is
-          // guaranteed to veto. A device whose gates all opened LATER (practice ends, peers leave,
-          // ten quiet minutes pass, internet still live, app never backgrounded so no foreground
-          // event ever fires) would sail past this `return` every 90 s and never once ask. That is
-          // the same dead end as the stale-ready one, reached from the other side.
-          //
-          // canApplyNow remains the only thing that decides, and it can only ever say no.
-          if (decision.reason === "already-staged") await autoApplyIfSafeRef.current?.();
           return;
         }
 
@@ -1564,17 +1490,11 @@ export default function App() {
    * making a human type a secret code on eight personally-owned iPads is not "over the air", it is
    * manual work with extra steps.
    *
-   * canApplyNow still governs WHEN, and every one of its gates is about timing or capability, never
-   * about consent and never about ROLE: it refuses during a Mass or rehearsal (mesh peers connected,
-   * a page turn in the last minute, any page movement in this room in the last ten minutes), without
-   * proof of live internet, and on a `ready` flag stale enough to have come from Saturday practice.
-   * So the swap lands in a quiet moment on its own, and if the moment is never quiet it simply waits
-   * and tries again on the next check-in — and the staged copy is re-verified rather than left to
-   * expire into an un-appliable dead end (M1, `shouldStage`'s freshness check).
-   *
-   * EVERY ROLE INSTALLS — director, follower and "off" alike (owner decision, 2026-08-03). The
-   * director's iPad used to be exempt from both the download and the swap; it no longer is, because
-   * an update that skips the device leading the room splits the fleet across two songbooks.
+   * canApplyNow still governs WHEN, and every one of its gates is about timing, never about
+   * consent: it refuses during a Mass or rehearsal (mesh peers connected, a director snapshot or
+   * page turn in the last moments), on a cold boot, and on a `ready` flag stale enough to have come
+   * from Saturday practice. So the swap lands in a quiet moment on its own, and if the moment is
+   * never quiet it simply waits and tries again on the next check-in.
    *
    * Silent by design: no modal. A prompt firing on seven devices at 12:04 is the fleet-bricking
    * scenario this whole design avoids — the answer is to not ask, not to make someone type a code.
@@ -1588,7 +1508,10 @@ export default function App() {
       lastCheckinOkAt: lastCheckinOkAtRef.current,
       meshPeerConnected: meshPeerCountRef.current > 0,
       lastPageTurnAt: lastPageTurnAtRef.current,
-      lastMeshPageAt: lastMeshPageAtRef.current,
+      lastDirectorSnapshotAt: lastDirectorSnapshotRef.current?.at ?? null,
+      role: roleRef.current,
+      lastKnownRole: lastKnownRoleRef.current,
+      coldBootAt: coldBootAtRef.current,
       webReady: webReadyRef.current,
       minShellBuild: Number(staged?.minShellBuild || 1),
       shellBuild: Number(BUILD_VERSION) || 0,
@@ -1605,29 +1528,6 @@ export default function App() {
   autoApplyIfSafeRef.current = autoApplyIfSafe;
 
   /**
-   * H3 — the ONLY way an apply reaches a foreground, and it is deliberately late.
-   *
-   * `meshPeerCountRef` and both room-activity clocks are latched from events. A device that was
-   * asleep in a live room wakes up holding the values it had when it went under: quiet, and wrong.
-   * That is the exact moment `mesh-peer` and `room-active` are guaranteed to mis-read, and an iPad
-   * unlocked mid-song would swap its bundle and remount the WebView underneath the singer.
-   *
-   * So the foreground kicks rediscovery FIRST and calls this AFTER, and this waits again for the
-   * Swift `state` event to actually land. A deferral, never a veto: if the room really is quiet the
-   * swap happens a few seconds later, and the 90 s check-in retries it regardless.
-   */
-  const scheduleForegroundApply = useCallback(() => {
-    if (foregroundApplyTimerRef.current) clearTimeout(foregroundApplyTimerRef.current);
-    foregroundApplyTimerRef.current = setTimeout(() => {
-      foregroundApplyTimerRef.current = null;
-      // Re-checked at FIRE time, not at arm time: a device that went back to sleep in the meantime
-      // must not swap its songbook in the background, where nothing can observe the result.
-      if (AppState.currentState !== "active") return;
-      void autoApplyIfSafeRef.current?.();
-    }, FOREGROUND_APPLY_SETTLE_MS);
-  }, []);
-
-  /**
    * MANUAL FORCE (numpad code). No longer required — the book installs itself — but kept as the
    * operator's override for the case where the timing gates keep deferring and someone wants it
    * NOW, between Masses. This one talks back, because a human deliberately asked.
@@ -1640,7 +1540,10 @@ export default function App() {
       lastCheckinOkAt: lastCheckinOkAtRef.current,
       meshPeerConnected: meshPeerCountRef.current > 0,
       lastPageTurnAt: lastPageTurnAtRef.current,
-      lastMeshPageAt: lastMeshPageAtRef.current,
+      lastDirectorSnapshotAt: lastDirectorSnapshotRef.current?.at ?? null,
+      role: roleRef.current,
+      lastKnownRole: lastKnownRoleRef.current,
+      coldBootAt: coldBootAtRef.current,
       webReady: webReadyRef.current,
       minShellBuild: Number(staged?.minShellBuild || 1),
       shellBuild: Number(BUILD_VERSION) || 0,
@@ -1723,6 +1626,7 @@ export default function App() {
       // cannot auto-resume). Intentional exit clears lastSyncRole, so this only fires after a crash/kill.
       AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole)
         .then((prev) => {
+          lastKnownRoleRef.current = prev ? String(prev) : null;
           if (prev === "director") {
             Alert.alert(
               "Estabas dirigiendo",
@@ -1752,10 +1656,7 @@ export default function App() {
           // Remember the director's latest snapshot (with a timestamp — NEW-DIR-3) so a reloaded/
           // foregrounded follower resyncs, and so "is a director live RIGHT NOW?" can be judged by recency.
           lastDirectorSnapshotRef.current = { page, book, at: Date.now() };
-          // A page arrived from the room. Stamped BEFORE the keepalive de-dupe below, deliberately:
-          // a director's 1 s re-send is still proof the room is live even when the page has not
-          // moved, and that is precisely what the 10-minute window is for.
-          noteRoomPageActivity();
+          lastPageTurnAtRef.current = Date.now();
           // De-dupe the 2s mesh heartbeat: if we're already on this page+book it's just a
           // keepalive re-send — do nothing (no redundant renderPage). A genuinely new page, a
           // book switch, or a recovered dropped packet (page differs from ours) still syncs.
@@ -1844,7 +1745,6 @@ export default function App() {
     injectEvent,
     resolveBundleUri,
     stopDirectorHeartbeat,
-    noteRoomPageActivity,
   ]);
 
   // ── Foreground: nudge mesh rediscovery + pull a fresh snapshot ──────────────
@@ -1862,21 +1762,8 @@ export default function App() {
       // means "open the app" is the entire user-facing procedure. autoApplyIfSafe covers the case
       // where a copy was already staged before the app was backgrounded.
       fleetCheckin();
-      // H3 — ORDER IS LOAD-BEARING HERE. The apply used to run on this line, BEFORE rediscovery,
-      // so both in-room gates (`mesh-peer`, `room-active`) read state latched before the device
-      // went to sleep: reliably quiet, reliably wrong. Rediscovery goes FIRST; the apply is handed
-      // to scheduleForegroundApply, which waits for the mesh to answer before it decides anything.
-      if (syncAvailable) {
-        // `.finally`, not `.then`: a discovery call that REJECTS tells us nothing about the room,
-        // and dropping the apply on the floor would strand the update on this device. Wait out the
-        // settle window either way — "no answer" is not "no room".
-        refreshNearbyDiscovery().catch(() => {}).finally(scheduleForegroundApply);
-      } else {
-        // No mesh hardware/entitlement on this device at all: there is no `state` event to wait
-        // for and meshPeerCountRef can never be anything but 0. Still routed through the same
-        // scheduler, so there is exactly ONE way an apply reaches a foreground.
-        scheduleForegroundApply();
-      }
+      void autoApplyIfSafeRef.current?.();
+      if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (roleRef.current === "follower") {
         requestCurrentSnapshot().catch(() => {});
         // Re-assert the director's last-known snapshot immediately so the view is correct on
@@ -1898,15 +1785,8 @@ export default function App() {
         broadcastPage(currentPageRef.current, currentBookRef.current);
       }
     });
-    return () => {
-      sub.remove();
-      // Never leave a bundle swap armed against a torn-down component.
-      if (foregroundApplyTimerRef.current) {
-        clearTimeout(foregroundApplyTimerRef.current);
-        foregroundApplyTimerRef.current = null;
-      }
-    };
-  }, [syncAvailable, broadcastPage, injectEvent, fleetCheckin, scheduleForegroundApply]);
+    return () => sub.remove();
+  }, [syncAvailable, broadcastPage, injectEvent, fleetCheckin]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {

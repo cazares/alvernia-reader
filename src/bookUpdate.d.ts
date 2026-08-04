@@ -18,11 +18,10 @@ export type ShouldStageContext = {
   activeBookVersion?: string | null;
   stagedBookVersion?: string | null;
   stagedReady?: boolean;
-  /** Absent counts as EXPIRED (M1) — an un-ageable record must not read as "already staged". */
-  stagedReadyAt?: number | null;
   quarantine?: readonly { bookVersion: string; failures: number }[];
   webReady?: boolean;
   foreground?: boolean;
+  role?: string;
   firstSeenAt?: number | null;
   deviceId?: string;
   now?: number;
@@ -30,16 +29,16 @@ export type ShouldStageContext = {
   shellBuild?: number;
 };
 
-// No role field on either context, deliberately (owner decision, 2026-08-03): every role stages and
-// applies. Re-adding one here is how the exemption comes back by accident.
 export type CanApplyContext = {
   stagedReady?: boolean;
   stagedReadyAt?: number | null;
   lastCheckinOkAt?: number | null;
   meshPeerConnected?: boolean;
   lastPageTurnAt?: number | null;
-  /** Room activity, not identity: the last time a page moved in this room, whoever moved it. */
-  lastMeshPageAt?: number | null;
+  lastDirectorSnapshotAt?: number | null;
+  role?: string;
+  lastKnownRole?: string | null;
+  coldBootAt?: number | null;
   webReady?: boolean;
   minShellBuild?: number;
   shellBuild?: number;
@@ -75,7 +74,7 @@ export const ALLOWED_HOSTS: string[];
 export const BOOK_VERSION_RE: RegExp;
 export const STAGED_READY_TTL_MS: number;
 export const LIVE_INTERNET_WINDOW_MS: number;
-export const ROOM_ACTIVE_WINDOW_MS: number;
+export const DIRECTOR_COLD_BOOT_COOLDOWN_MS: number;
 export const STAGGER_WINDOW_MIN: number;
 export const MIN_CODE_DISTANCE: number;
 

@@ -398,8 +398,7 @@ disarm):
 
 Stage iff **all** hold: `!SV_BOOK_DL_KILL`; `bookVersion !== sv_book_active.bookVersion`; not
 blacklisted (3 lifetime failures) and not failed today; `webReadyRef.current === true` (**never on the
-boot path** — §5.10b); app foregrounded; ~~`roleRef.current !== "director"`~~ (**REMOVED 2026-08-03,
-see the amendment below**); and the **stagger** has
+boot path** — §5.10b); app foregrounded; `roleRef.current !== "director"`; and the **stagger** has
 elapsed: `delayMs = (hash(sv_devid) % 20) * 60_000` since this device first saw this `bookVersion`
 (red team A2 — identical devices otherwise arrive within the same 20 seconds).
 
@@ -410,8 +409,8 @@ Therefore:
 
 | Predicate | STAGING (writing bytes nothing reads) | APPLY (swapping the live bundle) |
 |---|---|---|
-| ~~`roleRef.current === "director"`~~ | **no longer a predicate — 2026-08-03** | **no longer a predicate — 2026-08-03** |
-| ~~director snapshot within 10 min~~ → **any page movement in the room within 10 min** | not a predicate | veto (`room-active`) — restored role-neutrally, 2026-08-03 (H1) |
+| `roleRef.current === "director"` | veto | veto, never overridable |
+| director snapshot within 10 min | veto | veto |
 | any mesh **peer connected** | *throttle*, not veto: concurrency 3 → 1 | veto |
 | mesh page event in last 30 s | pause downloads 30 s | veto (page turn within 60 s) |
 | free disk below threshold | veto | veto |
@@ -506,66 +505,12 @@ following the shipped `svSyncDecision.js` pattern. **It can only ever say NO.** 
    usually fails it too.
 2. Any mesh peer connected.
 3. A page turn within 60 s.
-4. ~~A director snapshot within 10 min.~~ Replaced 2026-08-03 by **`room-active`: any page movement
-   in this room within `ROOM_ACTIVE_WINDOW_MS` (10 min)** — same window, role-neutral signal. See
-   the amendments below.
-5. ~~`roleRef.current === "director"` — never overridable.~~ **REMOVED 2026-08-03.**
-6. ~~Cold-boot cool-down: 90 minutes for a last-known-director device.~~ **REMOVED 2026-08-03.**
+4. A director snapshot within 10 min.
+5. `roleRef.current === "director"` — never overridable. The director's iPad is the last device on
+   earth that may swap.
+6. Cold-boot cool-down: refuse for 90 minutes after a cold boot on a device whose last recorded role
+   was director.
 7. WebView not bridge-ready; `minShellBuild > BUILD_VERSION`.
-
-> ### ⚖️ AMENDMENT — OWNER DECISION, 2026-08-03: NO ROLE IS EXEMPT
->
-> **Every role — director, follower, and `off` — both DOWNLOADS and APPLIES the songbook.** The
-> device's role is no longer an input to `shouldStage` or `canApplyNow`, and neither is any
-> director-derived state. Four predicates were deleted: the two `role === "director"` vetoes
-> (staging and apply), the `director-active` 10-minute snapshot veto, and the 90-minute
-> `director-cold-boot-cooldown` (`DIRECTOR_COLD_BOOT_COOLDOWN_MS` is gone with it).
->
-> **This deliberately reverses §5.4, §5.6 items 4–6, and the NI3 answer above.** The original
-> rationale — "the director's iPad is the last device on earth that may swap" — was put to the owner
-> in full and **overridden**: an update that skips the device leading the room leaves the fleet split
-> across two songbooks, which the owner judges the worse failure. Do not restore these vetoes as a
-> "regression fix"; changing it back requires a new owner decision.
->
-> **Unchanged and still load-bearing for every device, director included:** `stagedReady`, the 12 h
-> stale-`ready` TTL, the live-internet proof (§5.6 item 1), a connected mesh peer, a page turn within
-> 60 s, room activity within 10 min, bridge-ready, and `minShellBuild`. The authoritative, and
-> self-enforcing, list of both gates' full veto sets lives in the header of `src/bookUpdate.js`;
-> `e2e/bookUpdate.test.mjs` reds if a gate is added without documenting it there.
-
-> ### 🩹 SECOND AMENDMENT, 2026-08-03: the three regressions the first one shipped
->
-> An adversarial review of the amendment above found that deleting the role vetoes took three things
-> with it that were **not** role vetoes. All three are repaired; none of the repairs reintroduces a
-> role check, and `role` remains absent from both context types.
->
-> - **H1 — the room-activity window was collapsed from 10 minutes to 60 seconds, on every device.**
->   `director-active` read `lastDirectorSnapshotAt`, which the mesh page-*receive* handler writes —
->   so it fired on **followers**, never on a director, and was never a role check. It and
->   `recent-page-turn` were the same instant at two decay rates, so removing it silently cut the
->   in-room quiet window an apply must clear. Restored as `lastMeshPageAt` / `ROOM_ACTIVE_WINDOW_MS`
->   → reason `room-active`. Sixty seconds of quiet is a gap between two songs, not the end of a Mass.
-> - **H2 — `recent-page-turn` was dead code on a directing device** (this is the item the first
->   amendment flagged as "known consequence, not fixed"; it is now fixed). Both clocks are stamped by
->   a single `noteRoomPageActivity()` writer called from **two** sites: the mesh page-receive case
->   *and* the web `page-changed` case, i.e. the device's own page turns. They are ROOM facts, not
->   ROLE facts, and are deliberately never cleared on a role transition — clearing them would open
->   both gates at the instant someone took the podium.
-> - **H3 — the foreground applied before it refreshed mesh state.** `autoApplyIfSafe` ran on the line
->   above `refreshNearbyDiscovery()`, so `mesh-peer` and `room-active` both read a peer count latched
->   before the device went to sleep — quiet, and wrong, exactly when a device rejoins a live room. An
->   iPad unlocked mid-song could swap its bundle and remount the WebView. Rediscovery now goes first
->   and the apply is deferred through `scheduleForegroundApply` (`FOREGROUND_APPLY_SETTLE_MS`), which
->   re-checks `AppState` at fire time. A deferral, never a veto.
->
-> **M1 — a stale-ready staged copy was a permanent dead end.** Practice is the only window with
-> internet and the mesh is up for nearly all of it, so a device typically stages at practice and is
-> vetoed from applying. After the 12 h TTL the record read `stale-ready` forever while `shouldStage`
-> answered `already-staged` forever: a verified 27 MB copy that could never be used *and* never be
-> refreshed, on a device the fleet dashboard reported as **ready** while it rendered the **old** book.
-> `already-staged` now holds only while the record is fresh; an expired one is re-verified (files
-> already at the exact size are not re-downloaded) and gets a new `readyAt` — reason
-> `restage-expired`. A **missing** `stagedReadyAt` counts as expired in both gates: fail closed.
 
 On refusal: `Alert.alert("Ahora no", "Hay una Misa o ensayo en curso. Actualiza después.")`, change
 nothing.
@@ -960,7 +905,7 @@ partially answered.
 | A3 | The additive-only gate is on the **PR** path, not the **publish** path; `release.sh` never runs `smoke-boot.mjs` — and a same-commit baseline lets the gate diff against itself | fleet-bricking | §5.14.3–4: gate moved into `release.sh` before `wrangler pages deploy`; baseline read via `git show HEAD:`; renderer versions recorded and gated |
 | A5 | §5.12's guards, as originally scoped, missed `handleBundleRequest` (`:753`) and `didFinishReceivingResourceWithName` (`:1885`) — which has **no role guard** and never inspects `resourceName` | degraded Mass | §5.12: guard at the **receive boundary**, four guards not two, all regex-pinned; §5.8: dashboard `bookVersion` re-read from the mounted bundle so a clobber is visible |
 | NI2 | Decision 1 freezes the baked book forever; every L1/L2 fallback then lands on a book that decays for years. A self-healing **director** silently drops the whole choir's new songs | fleet-bricking | §5.2/§5.7: `WebBundle.prev` kept permanently as the middle rung; §6 L2: per-file resolution active → prev → baked; §5.10: director-specific Alert. **OPEN RISK — see below** |
-| NI3 | 11:52 in the parking lot: the device boots as a *follower* (role auto-restore is refused), so the `role !== director` veto is disarmed on the one device it protects | fleet-bricking | §5.6: live-internet veto; no ambient modal; ~~90-minute cold-boot cool-down for a last-known-director device~~ **(cool-down REMOVED 2026-08-03 — owner decision, §5.6 amendment: no role is exempt. The live-internet veto now carries this case alone.)** |
+| NI3 | 11:52 in the parking lot: the device boots as a *follower* (role auto-restore is refused), so the `role !== director` veto is disarmed on the one device it protects | fleet-bricking | §5.6: live-internet veto; no ambient modal; 90-minute cold-boot cool-down for a last-known-director device; apply reachable only from the strip/DIAGNÓSTICO |
 | NI1 | A stale device is dragged back to its last page by the 1 s heartbeat, forever, and cannot even navigate manually — on exactly the songs the update was published for | degraded Mass | §5.11: consume the `totalPages` already on the mesh payload; freeze instead of fight; suppress re-drive; loud native banner |
 | H1 | `Reintentar` clears `webDead` and then awaits a now-async `resolveBundleUri` — the recovery UI disappears; if any I/O hangs the iPad is a black rectangle | fleet-bricking | §5.10 riders: keep the floor rendered until `bridge-ready`; never null `bundleUri` post-boot; §5.9: `Promise.race` 1500 ms so the resolver is total |
 | NI4 / H2 | Staging and applying share a veto set; the mesh is up for the entire practice, which is the only window with internet ⇒ the downloader never runs where it is needed | degraded Mass | §5.4: split predicate table — staging throttles on mesh activity, apply keeps the full veto set |
@@ -1093,8 +1038,7 @@ open "$APP/Documents"
 | **Corrupt download** | Serve one page byte-modified from the local origin | `error:file-hash`, one retry, abort. No swap |
 | **Missing page** | Delete one page from the local origin's `dist` | Completeness gate fails on the `1..totalPages` assertion. No swap |
 | **Shrunk book** | Serve a manifest with `totalPages: 300` | Rejected — decision 7 |
-| **Apply veto** | Simulate a mesh peer / a page turn within 60 s / room activity within 10 min / a check-in older than 5 min (who the device *is* is **no longer** a veto — 2026-08-03) | *"Ahora no"*, nothing changes |
-| **Stale-ready recovery** (M1) | Stage a copy, let `readyAt` age past the 12 h TTL, then check in | `restage-expired` → the copy is re-verified and gets a fresh `readyAt`; it must **not** sit at `already-staged`/`stale-ready` forever |
+| **Apply veto** | Simulate a director snapshot / mesh peer / a check-in older than 5 min | *"Ahora no"*, nothing changes |
 | **Apply happy path** | All vetoes clear, tap the strip | `Actualizando…`, swap, remount, `bridge-ready`, `sv_book_active` written, `prev` promoted, resume at `sv_lastpage` |
 | **Mid-swap crash** | Kill the app between the two moves (breakpoint or an injected throw) | Relaunch boots the **baked** bundle; sweep cleans `.tmp`; apply again works |
 | **Server revoke** | Clear `BOOK_UPDATE_VERSION` on the local worker, foreground | `sv_book_staged` cleared, `WebBundleStaged/` deleted |
