@@ -115,8 +115,14 @@ export const shouldStage = (ctx) => {
   // NEVER on the boot path: staging competes for I/O with the thing the user is waiting for.
   if (!webReady) return { stage: false, reason: "not-web-ready" };
   if (!foreground) return { stage: false, reason: "background" };
-  // The director's iPad never downloads. It is the one device the room depends on.
-  if (role === "director") return { stage: false, reason: "director" };
+  // OWNER DECISION, 2026-08-03: NO ROLE IS EXEMPT. Every device — director, follower, "off",
+  // transmitter-only — downloads the book. The previous rule here refused the director's iPad
+  // outright ("the one device the room depends on"), which meant the director could never receive
+  // an update at all, by any path: nothing staged, so nothing to apply and nothing a numpad force
+  // could act on. Reverting this needs a new owner decision, not a "regression fix".
+  //
+  // The device's role is NOT an input to this function. Every remaining gate below is about
+  // TIMING or CAPABILITY and applies to every device identically.
   if (firstSeenAt == null) return { stage: false, reason: "stagger-not-started" };
   if (now - firstSeenAt < staggerDelayMs(deviceId)) return { stage: false, reason: "stagger-waiting" };
   return { stage: true, reason: "ok" };
@@ -218,8 +224,14 @@ export const canApplyNow = (ctx) => {
   if (lastCheckinOkAt == null || now - lastCheckinOkAt > LIVE_INTERNET_WINDOW_MS) {
     return { ok: false, reason: "no-live-internet" };
   }
-  // Never overridable: the director's iPad is the last device on earth that may swap.
-  if (role === "director") return { ok: false, reason: "director" };
+  // OWNER DECISION, 2026-08-03: NO ROLE IS EXEMPT — see the matching note in shouldStage. The
+  // previous rule here refused the director's iPad unconditionally. It is gone deliberately.
+  //
+  // What did NOT change, and must not be stripped as "leftover director machinery": every gate
+  // below is about TIMING (is the room busy right now) or CAPABILITY (can this shell run this
+  // book), never about who the device is. `director-active` in particular is a ROOM-ACTIVITY gate
+  // keyed on the last director snapshot — it fires on followers too, and deleting it would collapse
+  // the in-room quiet window from 10 minutes to 60 seconds for everyone.
   if (meshPeerConnected) return { ok: false, reason: "mesh-peer" };
   if (lastPageTurnAt != null && now - lastPageTurnAt < 60_000) return { ok: false, reason: "recent-page-turn" };
   if (lastDirectorSnapshotAt != null && now - lastDirectorSnapshotAt < 10 * 60_000) {

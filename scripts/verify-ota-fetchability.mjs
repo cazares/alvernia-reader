@@ -77,12 +77,16 @@ const main = async () => {
         const buf = Buffer.from(await r.arrayBuffer());
         const gotSize = buf.length;
         const gotMd5 = md5(buf);
-        const sizeOk = f.s === undefined || gotSize === f.s;
+        // Size lives under `n`, NOT `s` (manifest entries are {p,n,h,m}). The first version of
+        // this gate read f.s, which is always undefined — so the size check silently never ran and
+        // every mismatch report printed "want size=undefined". md5 still caught the real failure,
+        // but a gate whose check quietly no-ops is worse than no gate: it reads as coverage.
+        const sizeOk = f.n === undefined || gotSize === f.n;
         const md5Ok = !f.m || gotMd5 === f.m;
         if (!sizeOk || !md5Ok) {
           bad.push({
             p: f.p,
-            want: { size: f.s, md5: f.m },
+            want: { size: f.n, md5: f.m },
             got: { size: gotSize, md5: gotMd5 },
             cf: r.headers.get("cf-cache-status"),
             age: r.headers.get("age"),

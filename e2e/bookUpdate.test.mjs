@@ -92,8 +92,15 @@ test("REFUSES on the boot path — staging must never compete with the reader fo
   assert.equal(shouldStage(stageCtx({ webReady: false })).reason, "not-web-ready");
 });
 
-test("the DIRECTOR's iPad never downloads", () => {
-  assert.equal(shouldStage(stageCtx({ role: "director" })).reason, "director");
+test("EVERY role downloads, the DIRECTOR included (owner decision, 2026-08-03)", () => {
+  // Inverted, not deleted. The old rule refused the director outright, so that iPad could never
+  // receive a book by ANY path. If a future change reintroduces a role veto in shouldStage, this
+  // goes red. Role is passed explicitly to pin that it is IGNORED, not merely absent.
+  for (const role of ["director", "follower", "off", null, undefined]) {
+    const r = shouldStage(stageCtx({ role }));
+    assert.equal(r.stage, true, `role=${String(role)} must stage`);
+    assert.equal(r.reason, "ok", `role=${String(role)} must not be vetoed`);
+  }
 });
 
 test("the build-baked kill switch stops everything, first", () => {
@@ -145,8 +152,27 @@ test("a ready flag from Saturday practice EXPIRES before Sunday Mass", () => {
   assert.equal(r.reason, "stale-ready");
 });
 
-test("the DIRECTOR may never apply — the one device the room depends on", () => {
-  assert.equal(canApplyNow(applyCtx({ role: "director" })).reason, "director");
+test("EVERY role applies, the DIRECTOR included (owner decision, 2026-08-03)", () => {
+  for (const role of ["director", "follower", "off", null, undefined]) {
+    assert.equal(canApplyNow(applyCtx({ role })).ok, true, `role=${String(role)} must apply`);
+  }
+});
+
+test("the NON-role gates still refuse a director's iPad exactly like anyone else's", () => {
+  // The other half of the owner decision: removing the ROLE veto must not have removed any TIMING
+  // or CAPABILITY veto. If any of these ever answers ok, the removal went further than asked.
+  const asDirector = (over) => canApplyNow(applyCtx({ role: "director", ...over }));
+  assert.equal(asDirector({ stagedReady: false }).reason, "not-ready");
+  assert.equal(asDirector({ meshPeerConnected: true }).reason, "mesh-peer");
+  assert.equal(asDirector({ lastPageTurnAt: 1990, now: 2000 }).reason, "recent-page-turn");
+  assert.equal(asDirector({ lastDirectorSnapshotAt: 1000, now: 2000 }).reason, "director-active");
+  assert.equal(asDirector({ webReady: false }).reason, "bridge-not-ready");
+  assert.equal(asDirector({ minShellBuild: 99999 }).reason, "shell-too-old");
+  assert.equal(asDirector({ lastCheckinOkAt: null }).reason, "no-live-internet");
+  // Staging side, same principle.
+  assert.equal(shouldStage(stageCtx({ role: "director", webReady: false })).reason, "not-web-ready");
+  assert.equal(shouldStage(stageCtx({ role: "director", foreground: false })).reason, "background");
+  assert.equal(shouldStage(stageCtx({ role: "director", minShellBuild: 999 })).reason, "shell-too-old");
 });
 
 test("a connected mesh peer means a rehearsal or Mass is happening: NO", () => {
