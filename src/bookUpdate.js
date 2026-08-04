@@ -121,10 +121,21 @@ export const shouldStage = (ctx) => {
   // an update at all, by any path: nothing staged, so nothing to apply and nothing a numpad force
   // could act on. Reverting this needs a new owner decision, not a "regression fix".
   //
-  // The device's role is NOT an input to this function. Every remaining gate below is about
-  // TIMING or CAPABILITY and applies to every device identically.
-  if (firstSeenAt == null) return { stage: false, reason: "stagger-not-started" };
-  if (now - firstSeenAt < staggerDelayMs(deviceId)) return { stage: false, reason: "stagger-waiting" };
+  // The device's role is NOT an input to this function.
+  //
+  // OWNER DECISION, 2026-08-03 (second amendment): THE CLIENT STAGGER IS GONE.
+  //
+  // It delayed the download by hash(deviceId) % 20 minutes so eight iPads would not hit one parish
+  // access point at once. Two problems. It is invisible — a device sat doing nothing for up to 19
+  // minutes with no way to tell that from a failure, which is exactly how a working rollout reads
+  // as a broken one. And it is REDUNDANT: `BOOK_UPDATE_CONCURRENCY` in the worker already caps how
+  // many devices may be mid-download (default 2, and it gates STARTS only), which is the same
+  // protection — except it is server-tunable, applies to the real fleet rather than to each device
+  // guessing in isolation, and can be raised or lowered without a TestFlight round.
+  //
+  // A named single device being armed for a rehearsal should never wait on a window sized for
+  // eight. `staggerDelayMs` is kept and still exported: it is pure, tested, and is the right
+  // building block if a future client-side spread is ever wanted again.
   return { stage: true, reason: "ok" };
 };
 
@@ -224,25 +235,26 @@ export const canApplyNow = (ctx) => {
   if (lastCheckinOkAt == null || now - lastCheckinOkAt > LIVE_INTERNET_WINDOW_MS) {
     return { ok: false, reason: "no-live-internet" };
   }
-  // OWNER DECISION, 2026-08-03: NO ROLE IS EXEMPT — see the matching note in shouldStage. The
-  // previous rule here refused the director's iPad unconditionally. It is gone deliberately.
+  // OWNER DECISION, 2026-08-03 (second amendment): AN UPDATE MUST NEVER REQUIRE THE USER TO STOP
+  // TOUCHING THE DEVICE.
   //
-  // What did NOT change, and must not be stripped as "leftover director machinery": every gate
-  // below is about TIMING (is the room busy right now) or CAPABILITY (can this shell run this
-  // book), never about who the device is. `director-active` in particular is a ROOM-ACTIVITY gate
-  // keyed on the last director snapshot — it fires on followers too, and deleting it would collapse
-  // the in-room quiet window from 10 minutes to 60 seconds for everyone.
+  // What was here: `recent-page-turn` (60 s after any page turn), `director-active` (10 min after a
+  // director snapshot), and a 90-minute director cold-boot cooldown. Together they meant a device
+  // someone was actually USING could defer forever — and the only way to land the update was to put
+  // the iPad down and wait. On a real device that reads as "the update is broken", because from the
+  // user's side it is: checking whether it arrived (typing a song number) IS a page turn, which
+  // re-armed the 60-second lockout on every single check. Looking at it prevented it.
+  //
+  // Gone deliberately. Reverting needs a new owner decision, not a "regression fix".
+  //
+  // ACCEPTED CONSEQUENCE, stated plainly: the swap remounts the WebView, so it can now land while
+  // someone is reading — a blank screen for a beat, then the new book. The owner was told and
+  // chose this over an update that never arrives.
+  //
+  // `meshPeerConnected` STAYS, and it is not a "wait quietly" gate: a connected mesh peer means a
+  // rehearsal or Mass is actively running and the whole room would blink at once. It clears on its
+  // own the moment the session ends — it never asks anything of the user.
   if (meshPeerConnected) return { ok: false, reason: "mesh-peer" };
-  if (lastPageTurnAt != null && now - lastPageTurnAt < 60_000) return { ok: false, reason: "recent-page-turn" };
-  if (lastDirectorSnapshotAt != null && now - lastDirectorSnapshotAt < 10 * 60_000) {
-    return { ok: false, reason: "director-active" };
-  }
-  // A device that was directing before a restart boots as a FOLLOWER (role auto-restore is refused
-  // by design), so the role veto above is disarmed on the one device it was written to protect
-  // (red team NI3). This closes that window.
-  if (lastKnownRole === "director" && coldBootAt != null && now - coldBootAt < DIRECTOR_COLD_BOOT_COOLDOWN_MS) {
-    return { ok: false, reason: "director-cold-boot-cooldown" };
-  }
   if (!webReady) return { ok: false, reason: "bridge-not-ready" };
   if (Number(minShellBuild) > Number(shellBuild)) return { ok: false, reason: "shell-too-old" };
   return { ok: true, reason: "ok" };
