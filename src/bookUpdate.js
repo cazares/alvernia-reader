@@ -25,6 +25,68 @@
 //    the failure mode this feature introduces is *the whole choir at once, in the one place where
 //    nothing can be fixed*.
 //
+// ─── AMENDMENT — OWNER DECISION, 2026-08-03: NO ROLE IS EXEMPT ──────────────────────────────────
+//
+// Rules 1 and 3 stand unchanged. What changed is WHO the update reaches: EVERY role — director,
+// follower, and "off" — now both DOWNLOADS and APPLIES the songbook. There is no director exemption
+// left anywhere in this file, and `role` is no longer an input to either gate.
+//
+// What this replaced: the director's iPad refused to stage at all; `canApplyNow` refused it outright
+// ("the last device on earth that may swap"); a device whose LAST known role was director refused to
+// apply for 90 minutes after any cold boot; and every follower refused to apply for 10 minutes after
+// hearing a live director's mesh page. All four are gone.
+//
+// WHY it changed: the rationale for the exemption was put to the owner in full and OVERRIDDEN. An
+// update that skips the one device leading the room leaves the fleet split across two books —
+// followers on the new songbook, the director on the old one — and the owner judges that outcome
+// worse than the swap the exemption was avoiding. Every device gets the same book.
+//
+// WHAT DID NOT CHANGE, and must not be stripped by anyone reading the above as "the gates came out":
+// every veto that is about TIMING or CAPABILITY still applies, and now applies to all roles equally.
+// This list is EXHAUSTIVE — it is the whole veto set of both gates, and it is checked by
+// e2e/bookUpdate.test.mjs ("every veto reason of both gates is named in the header amendment"), so
+// adding a gate without adding it here REDS THE SUITE. An authoritative list that is quietly wrong
+// is worse than no list at all.
+//
+//   shouldStage:  kill-switch · bad-version · already-active · already-staged (while FRESH — see the
+//                 M1 amendment) · shell-too-old · quarantined · not-web-ready · background ·
+//                 stagger-not-started · stagger-waiting
+//                 — and its two YES answers: ok, restage-expired.
+//   canApplyNow:  not-ready · stale-ready · no-live-internet · mesh-peer · recent-page-turn ·
+//                 room-active · bridge-not-ready · shell-too-old
+//
+// A director's iPad is subject to exactly those and to nothing else.
+//
+// ─── SECOND AMENDMENT, 2026-08-03: THE THREE REGRESSIONS THE FIRST ONE SHIPPED ──────────────────
+//
+// An adversarial review of the amendment above found that removing the role vetoes took three
+// things with it that were NOT role vetoes. All three are repaired here; none of the repairs
+// reintroduces a role check, and `role` remains absent from both context types.
+//
+// H1 — THE ROOM-ACTIVITY WINDOW WAS COLLAPSED FROM 10 MINUTES TO 60 SECONDS, ON EVERY DEVICE. The
+//      deleted `director-active` veto read `lastDirectorSnapshotAt`, which is written by the mesh
+//      page-RECEIVE handler — it fired on FOLLOWERS, not on directors, and it was never a role
+//      check. It and `recent-page-turn` were the same timestamp at two decay rates, so deleting it
+//      silently cut the in-room quiet window an apply must clear from 10 min to 60 s for everyone.
+//      Restored as `lastMeshPageAt` / ROOM_ACTIVE_WINDOW_MS: "did a page move in this room
+//      recently", never "who is this device".
+//
+// H2 — `recent-page-turn` WAS DEAD CODE ON A DIRECTING DEVICE. `lastPageTurnAt` was fed only by the
+//      mesh page-RECEIVE handler, which a director breaks out of before reaching it (it ignores its
+//      own echoes) — so the gate was structurally unreachable on the one device the owner's
+//      decision newly exposed. PdfReaderApp.tsx now stamps BOTH timestamps on the device's OWN page
+//      turns as well, so the gate is live for every role. (The timestamps are ROOM facts, not ROLE
+//      facts, and are deliberately never cleared on a role transition — see the note there.)
+//
+// M1 — A STALE-READY STAGED COPY WAS A PERMANENT DEAD END. Practice is the only window with
+//      internet, and the mesh is up for nearly all of it, so a device typically stages at practice
+//      and is vetoed from applying. After STAGED_READY_TTL_MS the record turns `stale-ready`
+//      forever while `shouldStage` answered `already-staged` and never refreshed it: a verified
+//      27 MB copy that could never be used, on a device the dashboard reported as "ready" while it
+//      rendered the OLD book. `already-staged` now only holds while the record is FRESH, so an
+//      expired one is re-verified (files already at the exact size are not re-downloaded) and gets
+//      a new `readyAt`. A MISSING `stagedReadyAt` counts as EXPIRED in both gates — fail closed.
+//
 // The apply sequence deliberately mirrors DirectorSyncModule.swift's installReceivedBundle in ORDER
 // and in its fail(stage:) vocabulary. That code is battle-tested; this is not. Do not invent a
 // second sequence.
@@ -39,8 +101,16 @@ export const BOOK_VERSION_RE = /^bv_[0-9a-f]{16}$/;
 export const STAGED_READY_TTL_MS = 12 * 60 * 60 * 1000;
 /** How recently a check-in must have succeeded for an apply to count as "real internet". */
 export const LIVE_INTERNET_WINDOW_MS = 5 * 60 * 1000;
-/** After a cold boot, a device whose last role was director refuses to apply for this long. */
-export const DIRECTOR_COLD_BOOT_COOLDOWN_MS = 90 * 60 * 1000;
+/**
+ * How long a room stays "in session" after the last page moved in it.
+ *
+ * ROLE-NEUTRAL BY CONSTRUCTION (H1). This is the window the deleted `director-active` veto used to
+ * carry, restored under a name that describes the SIGNAL rather than a device: a page moved in this
+ * room recently, whoever moved it. Ten minutes, not sixty seconds, because the gap between two
+ * songs — announcements, a reading, retuning — routinely exceeds a minute, and a bundle swap that
+ * remounts the WebView in that gap is the same accident as one mid-verse.
+ */
+export const ROOM_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
 /** Deterministic per-device spread so eight identical devices do not all start within 20 seconds. */
 export const STAGGER_WINDOW_MIN = 20;
 
@@ -85,6 +155,15 @@ export const staggerDelayMs = (deviceId) => {
  * these iPads have internet, and the mesh is up for essentially all of it — so a "no mesh peer
  * connected" staging veto would mean the downloader never runs where it is needed. Mesh activity
  * throttles staging; it does not forbid it.
+ *
+ * THE DEVICE'S ROLE IS NOT AN INPUT (owner decision, 2026-08-03). Director, follower and "off" all
+ * download. Everything below is about the book, the shell, the disk and the clock.
+ *
+ * IT IS ALSO THE ONLY WAY OUT OF A STALE-READY DEAD END (M1). `already-staged` holds only while the
+ * staged record is still FRESH by the same TTL `canApplyNow` enforces; once it expires this gate
+ * says YES again, the stage re-verifies (files already at the exact size are skipped, so this is a
+ * re-hash, not a 27 MB re-download) and writes a new `readyAt`. Without that, a copy that expired
+ * before it could ever be applied would be un-appliable AND un-refreshable — permanently.
  */
 export const shouldStage = (ctx) => {
   const {
@@ -93,10 +172,10 @@ export const shouldStage = (ctx) => {
     activeBookVersion = null,
     stagedBookVersion = null,
     stagedReady = false,
+    stagedReadyAt = null,
     quarantine = [],
     webReady = false,
     foreground = true,
-    role = "off",
     firstSeenAt = null,
     deviceId = "",
     now = 0,
@@ -107,7 +186,12 @@ export const shouldStage = (ctx) => {
   if (killSwitch) return { stage: false, reason: "kill-switch" };
   if (!BOOK_VERSION_RE.test(bookVersion)) return { stage: false, reason: "bad-version" };
   if (bookVersion === activeBookVersion) return { stage: false, reason: "already-active" };
-  if (stagedBookVersion === bookVersion && stagedReady) return { stage: false, reason: "already-staged" };
+  // M1. A record whose readyAt has expired — or that never had one, which fails CLOSED — is exactly
+  // the record `canApplyNow` is about to refuse as `stale-ready`. Treating it as "already staged"
+  // is what turned that refusal into a permanent dead end, so it does not count here.
+  const haveStaged = stagedBookVersion === bookVersion && stagedReady;
+  const stagedExpired = stagedReadyAt == null || now - stagedReadyAt > STAGED_READY_TTL_MS;
+  if (haveStaged && !stagedExpired) return { stage: false, reason: "already-staged" };
   if (Number(minShellBuild) > Number(shellBuild)) return { stage: false, reason: "shell-too-old" };
   // A book that has repeatedly failed to boot is not downloaded again.
   const q = (quarantine || []).find((e) => e && e.bookVersion === bookVersion);
@@ -115,11 +199,11 @@ export const shouldStage = (ctx) => {
   // NEVER on the boot path: staging competes for I/O with the thing the user is waiting for.
   if (!webReady) return { stage: false, reason: "not-web-ready" };
   if (!foreground) return { stage: false, reason: "background" };
-  // The director's iPad never downloads. It is the one device the room depends on.
-  if (role === "director") return { stage: false, reason: "director" };
   if (firstSeenAt == null) return { stage: false, reason: "stagger-not-started" };
   if (now - firstSeenAt < staggerDelayMs(deviceId)) return { stage: false, reason: "stagger-waiting" };
-  return { stage: true, reason: "ok" };
+  // A distinct reason so the breadcrumb says WHY a device that already has this book is downloading
+  // it again — "restage-expired" on the dashboard is a device recovering, not a device thrashing.
+  return { stage: true, reason: haveStaged ? "restage-expired" : "ok" };
 };
 
 // ─── The completeness gate ──────────────────────────────────────────────────────────────────────
@@ -187,8 +271,12 @@ export const verifyStaged = (manifest, onDisk, activeTotalPages = 0) => {
  *
  * IT CAN ONLY EVER SAY NO. There is no ambient modal anywhere in this design: a persisted `ready`
  * flag firing a prompt on seven devices at 12:04 was killed three separate ways by the red team,
- * and a modal is a demand for a decision handed to eight people holding instruments. Apply is
- * reachable only from an explicit human action, and this function is the veto on top of it.
+ * and a modal is a demand for a decision handed to eight people holding instruments. This function
+ * decides WHEN the swap happens, never WHETHER it is allowed to happen at all.
+ *
+ * THE DEVICE'S ROLE IS NOT AN INPUT (owner decision, 2026-08-03). Every veto below is about TIMING
+ * or CAPABILITY, and every one of them applies to a director's iPad exactly as it applies to a
+ * follower's. See the amendment at the top of this file for what was removed and why.
  */
 export const canApplyNow = (ctx) => {
   const {
@@ -197,10 +285,7 @@ export const canApplyNow = (ctx) => {
     lastCheckinOkAt = null,
     meshPeerConnected = false,
     lastPageTurnAt = null,
-    lastDirectorSnapshotAt = null,
-    role = "off",
-    lastKnownRole = null,
-    coldBootAt = null,
+    lastMeshPageAt = null,
     webReady = false,
     minShellBuild = 1,
     shellBuild = 0,
@@ -209,8 +294,10 @@ export const canApplyNow = (ctx) => {
 
   if (!stagedReady) return { ok: false, reason: "not-ready" };
   // A `ready` flag persisted from Saturday practice must not still be applicable in the church on
-  // Sunday (red team A1).
-  if (stagedReadyAt != null && now - stagedReadyAt > STAGED_READY_TTL_MS) {
+  // Sunday (red team A1). A record that claims `ready` with NO `readyAt` cannot be aged, so it is
+  // treated as expired rather than waved through (M1): the unknown case fails CLOSED, and
+  // `shouldStage` will re-verify it and mint a real `readyAt` rather than leave it stuck.
+  if (stagedReadyAt == null || now - stagedReadyAt > STAGED_READY_TTL_MS) {
     return { ok: false, reason: "stale-ready" };
   }
   // THE LOAD-BEARING ONE. Proof of real, sustained internet. True at practice; false inside the
@@ -218,18 +305,22 @@ export const canApplyNow = (ctx) => {
   if (lastCheckinOkAt == null || now - lastCheckinOkAt > LIVE_INTERNET_WINDOW_MS) {
     return { ok: false, reason: "no-live-internet" };
   }
-  // Never overridable: the director's iPad is the last device on earth that may swap.
-  if (role === "director") return { ok: false, reason: "director" };
+  // A rehearsal or a Mass is happening RIGHT NOW: peers are connected this instant. Fires on every
+  // device, including the one that is directing.
   if (meshPeerConnected) return { ok: false, reason: "mesh-peer" };
+  // Someone is SINGING. Fed by the mesh page-RECEIVE handler AND by this device's own page turns
+  // (H2) — a director used to be invisible to this gate because it breaks out of the receive case
+  // before the stamp, which made it dead code on the one device the 2026-08-03 decision newly
+  // exposed. It is a TIMING gate and always was; it is now simply reachable from every role.
   if (lastPageTurnAt != null && now - lastPageTurnAt < 60_000) return { ok: false, reason: "recent-page-turn" };
-  if (lastDirectorSnapshotAt != null && now - lastDirectorSnapshotAt < 10 * 60_000) {
-    return { ok: false, reason: "director-active" };
-  }
-  // A device that was directing before a restart boots as a FOLLOWER (role auto-restore is refused
-  // by design), so the role veto above is disarmed on the one device it was written to protect
-  // (red team NI3). This closes that window.
-  if (lastKnownRole === "director" && coldBootAt != null && now - coldBootAt < DIRECTOR_COLD_BOOT_COOLDOWN_MS) {
-    return { ok: false, reason: "director-cold-boot-cooldown" };
+  // THE ROOM IS STILL IN SESSION (H1). The longer decay of the same signal: sixty seconds of quiet
+  // is a gap between two songs, not the end of a Mass. `meshPeerConnected` covers only the instant
+  // — Multipeer drops and re-forms constantly in a stone building — so without this window an apply
+  // could land in a flap between two verses. This is the window the deleted `director-active` veto
+  // actually carried; it fired on FOLLOWERS (they are the ones who RECEIVE a director's page) and
+  // was never a role check, which is why removing the role vetoes must not have removed it.
+  if (lastMeshPageAt != null && now - lastMeshPageAt < ROOM_ACTIVE_WINDOW_MS) {
+    return { ok: false, reason: "room-active" };
   }
   if (!webReady) return { ok: false, reason: "bridge-not-ready" };
   if (Number(minShellBuild) > Number(shellBuild)) return { ok: false, reason: "shell-too-old" };
