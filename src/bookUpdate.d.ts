@@ -72,6 +72,8 @@ export type InjectedNet = {
 
 export const ALLOWED_HOSTS: string[];
 export const BOOK_VERSION_RE: RegExp;
+/** Must match web/build.mjs's MANIFEST_NAME and the path PdfReaderApp.tsx:1154 reads. */
+export const BUNDLE_MANIFEST_NAME: string;
 export const STAGED_READY_TTL_MS: number;
 export const LIVE_INTERNET_WINDOW_MS: number;
 export const DIRECTOR_COLD_BOOT_COOLDOWN_MS: number;
