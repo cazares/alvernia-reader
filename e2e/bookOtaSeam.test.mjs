@@ -21,7 +21,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { stageBook, applyStagedBundle, BUNDLE_MANIFEST_NAME } from "../src/bookUpdate.js";
+import {
+  stageBook,
+  applyStagedBundle,
+  shouldStage,
+  canApplyNow,
+  BUNDLE_MANIFEST_NAME,
+  STAGED_READY_TTL_MS,
+} from "../src/bookUpdate.js";
 import { decideBundle } from "../src/bookResolve.js";
 
 const BV_NEW = "bv_0123456789abcdef";
@@ -69,7 +76,10 @@ const fakeFs = (initial = {}) => {
  * web/build.mjs:859 filters MANIFEST_NAME out of files[]. Faking a manifest that lists itself would
  * make this whole file pass vacuously.
  */
-const serverBundle = ({ pages = 3, bookVersion = BV_NEW, builtFromShellBuild = 394 } = {}) => {
+const serverBundle = ({
+  pages = 3, bookVersion = BV_NEW, builtFromShellBuild = 394,
+  generatedAt = "2026-08-04T04:59:48.417Z",
+} = {}) => {
   const body = { "index.html": "x".repeat(500) };
   for (let i = 1; i <= pages; i += 1) {
     body[`books/standard/pages/page-${String(i).padStart(3, "0")}.webp`] = `page${i}-bytes`;
@@ -80,6 +90,7 @@ const serverBundle = ({ pages = 3, bookVersion = BV_NEW, builtFromShellBuild = 3
     pagePadWidth: 3,
     minShellBuild: 1,
     builtFromShellBuild,
+    generatedAt,
     files: Object.entries(body).map(([p, v]) => ({ p, n: v.length, h: "sha", m: md5(v) })),
   };
   assert.ok(
@@ -130,6 +141,7 @@ const stageApplyResolve = async ({ bakedManifest, quarantine = [] } = {}) => {
         bookVersion: BV_BAKED,
         totalPages: 2,
         builtFromShellBuild: 393,
+        generatedAt: "2026-08-04T04:37:07.525Z",
       },
       bakedExists: true,
       quarantine,
@@ -199,10 +211,62 @@ test("an INCOMPLETE stage never gains an identity", async () => {
 
 test("rule 7 still refuses a book from an OLDER shell than the baked one", async () => {
   const { decision } = await stageApplyResolve({
-    bakedManifest: { bookVersion: BV_BAKED, totalPages: 2, builtFromShellBuild: 999 },
+    bakedManifest: {
+      bookVersion: BV_BAKED, totalPages: 2, builtFromShellBuild: 999,
+      generatedAt: "2020-01-01T00:00:00.000Z", // older date must NOT rescue an older shell
+    },
   });
   assert.equal(decision.source, "bundled");
-  assert.equal(decision.reason, "baked-is-newer-or-equal-shell");
+  assert.equal(decision.reason, "baked-is-newer-shell");
+});
+
+// ─── B: a songbook-only deploy must be able to land ─────────────────────────
+//
+// `builtFromShellBuild` is version.json's buildNumber at web-build time (web/build.mjs:901), so it
+// moves ONLY when a binary is cut. Every PDF-only deploy therefore produces doc == baked. The old
+// `bakedShell >= docShell -> bundled` rule refused exactly that case, which made binary-free book
+// updates structurally impossible. It was never caught because the first OTA ever attempted had a
+// TestFlight round between the two books and took the `<` branch by luck.
+
+const sameShell = (docGeneratedAt, bakedGeneratedAt) =>
+  decideBundle({
+    docExists: true,
+    docManifest: {
+      bookVersion: BV_NEW, totalPages: 374, builtFromShellBuild: 395, generatedAt: docGeneratedAt,
+    },
+    bakedManifest: {
+      bookVersion: BV_BAKED, totalPages: 373, builtFromShellBuild: 395, generatedAt: bakedGeneratedAt,
+    },
+    bakedExists: true,
+  });
+
+test("THE GOAL: a PDF-only deploy on the SAME shell build lands", () => {
+  const d = sameShell("2026-09-01T00:00:00.000Z", "2026-08-04T00:00:00.000Z");
+  assert.equal(
+    d.source,
+    "documents",
+    `a songbook-only update was refused (${d.reason}) — binary-free updates are the whole feature`,
+  );
+  assert.equal(d.reason, "documents-newer");
+});
+
+test("same shell, but the downloaded book is OLDER — refuse it", () => {
+  const d = sameShell("2026-08-01T00:00:00.000Z", "2026-08-04T00:00:00.000Z");
+  assert.equal(d.source, "bundled");
+  assert.equal(d.reason, "baked-not-older");
+});
+
+test("same shell, identical timestamps — a tie is not newer, so refuse", () => {
+  const d = sameShell("2026-08-04T00:00:00.000Z", "2026-08-04T00:00:00.000Z");
+  assert.equal(d.source, "bundled");
+  assert.equal(d.reason, "baked-not-older");
+});
+
+test("unknown provenance never wins: a missing or unparseable date falls back to code-signed", () => {
+  for (const bad of [undefined, null, "", "not-a-date", 12345, {}]) {
+    assert.equal(sameShell(bad, "2026-08-04T00:00:00.000Z").source, "bundled", `doc date ${bad}`);
+    assert.equal(sameShell("2026-09-01T00:00:00.000Z", bad).source, "bundled", `baked date ${bad}`);
+  }
 });
 
 test("rule 5 still refuses a quarantined book even though it is now identifiable", async () => {
@@ -211,4 +275,62 @@ test("rule 5 still refuses a quarantined book even though it is now identifiable
   });
   assert.equal(decision.source, "bundled");
   assert.equal(decision.reason, "quarantined");
+});
+
+// ─── C: the stale-ready deadlock ────────────────────────────────────────────
+//
+// ANOTHER SEAM, ANOTHER PAIR OF INDIVIDUALLY-CORRECT GATES. canApplyNow refuses a `ready` flag
+// older than STAGED_READY_TTL_MS ("must re-verify before it may be applied"); shouldStage refused
+// to re-stage a book it already had. Nothing in the app performs that re-verification, so past the
+// TTL the device was pinned: the apply refused for being stale, the re-stage refused for already
+// existing, and NEITHER state emits a breadcrumb. Each function passes its own suite.
+
+const BOTH_GATES = (ageMs) => {
+  const now = 1_000_000_000_000;
+  const stagedReadyAt = now - ageMs;
+  const ctx = {
+    bookVersion: BV_NEW, stagedBookVersion: BV_NEW, stagedReady: true, stagedReadyAt, now,
+    minShellBuild: 1, shellBuild: 395,
+  };
+  return {
+    stage: shouldStage({ ...ctx, activeBookVersion: BV_BAKED, webReady: true, foreground: true }),
+    apply: canApplyNow({ ...ctx, lastCheckinOkAt: now, webReady: true }),
+  };
+};
+
+test("fresh staged book: apply is allowed, re-staging is correctly skipped", () => {
+  const { stage, apply } = BOTH_GATES(60_000);
+  assert.equal(apply.ok, true, `apply refused: ${apply.reason}`);
+  assert.equal(stage.stage, false);
+  assert.equal(stage.reason, "already-staged");
+});
+
+test("THE DEADLOCK: past the TTL, at least one gate must still let the device make progress", () => {
+  const { stage, apply } = BOTH_GATES(STAGED_READY_TTL_MS + 60_000);
+  assert.equal(apply.ok, false);
+  assert.equal(apply.reason, "stale-ready");
+  assert.equal(
+    stage.stage,
+    true,
+    `both gates refused (apply=${apply.reason}, stage=${stage.reason}) — the device can never ` +
+      `apply and can never re-verify, so this book is permanently unreachable`,
+  );
+  assert.equal(stage.reason, "ok");
+});
+
+test("a stale record still yields to the gates that outrank it", () => {
+  const stale = STAGED_READY_TTL_MS + 60_000;
+  const now = 1_000_000_000_000;
+  const base = {
+    bookVersion: BV_NEW, stagedBookVersion: BV_NEW, stagedReady: true,
+    stagedReadyAt: now - stale, now, webReady: true, foreground: true, activeBookVersion: BV_BAKED,
+    minShellBuild: 1, shellBuild: 395,
+  };
+  assert.equal(shouldStage({ ...base, killSwitch: true }).reason, "kill-switch");
+  assert.equal(shouldStage({ ...base, activeBookVersion: BV_NEW }).reason, "already-active");
+  assert.equal(
+    shouldStage({ ...base, quarantine: [{ bookVersion: BV_NEW, failures: 3 }] }).reason,
+    "quarantined",
+  );
+  assert.equal(shouldStage({ ...base, webReady: false }).reason, "not-web-ready");
 });

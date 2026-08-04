@@ -1400,6 +1400,9 @@ export default function App() {
           activeBookVersion: activeBookVersionRef.current,
           stagedBookVersion: staged?.bookVersion ?? null,
           stagedReady: !!staged?.ready,
+          // Without this, `already-staged` outlives the apply gate's staleness TTL and the device
+          // deadlocks: nothing applies it and nothing re-verifies it.
+          stagedReadyAt: staged?.readyAt ?? null,
           quarantine: Array.isArray(quarantine) ? quarantine : [],
           webReady: webReadyRef.current,
           foreground: AppState.currentState === "active",

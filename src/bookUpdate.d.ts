@@ -18,6 +18,8 @@ export type ShouldStageContext = {
   activeBookVersion?: string | null;
   stagedBookVersion?: string | null;
   stagedReady?: boolean;
+  /** Required: without it `already-staged` outlives the apply gate's TTL and deadlocks the device. */
+  stagedReadyAt?: number | null;
   quarantine?: readonly { bookVersion: string; failures: number }[];
   webReady?: boolean;
   foreground?: boolean;

@@ -102,6 +102,7 @@ export const shouldStage = (ctx) => {
     activeBookVersion = null,
     stagedBookVersion = null,
     stagedReady = false,
+    stagedReadyAt = null,
     quarantine = [],
     webReady = false,
     foreground = true,
@@ -116,7 +117,18 @@ export const shouldStage = (ctx) => {
   if (killSwitch) return { stage: false, reason: "kill-switch" };
   if (!BOOK_VERSION_RE.test(bookVersion)) return { stage: false, reason: "bad-version" };
   if (bookVersion === activeBookVersion) return { stage: false, reason: "already-active" };
-  if (stagedBookVersion === bookVersion && stagedReady) return { stage: false, reason: "already-staged" };
+  // A ready copy of the book we were told to fetch means there is nothing to do — UNLESS it has
+  // gone stale. `canApplyNow` refuses a `ready` flag older than STAGED_READY_TTL_MS ("must
+  // re-verify before it may be applied") and NOTHING in the app ever performs that re-verification.
+  // So returning "already-staged" past the TTL pinned the device in a permanent deadlock: the apply
+  // refused for being stale, the re-stage refused for already existing, and neither state emitted a
+  // breadcrumb. Re-staging IS the re-verification the TTL always intended — stageBook resumes,
+  // skipping every file already at the right size, so it costs a walk and a hash rather than 27 MB.
+  const stagedIsStale =
+    stagedReadyAt != null && Number(now) - Number(stagedReadyAt) > STAGED_READY_TTL_MS;
+  if (stagedBookVersion === bookVersion && stagedReady && !stagedIsStale) {
+    return { stage: false, reason: "already-staged" };
+  }
   if (Number(minShellBuild) > Number(shellBuild)) return { stage: false, reason: "shell-too-old" };
   // A book that has repeatedly failed to boot is not downloaded again.
   const q = (quarantine || []).find((e) => e && e.bookVersion === bookVersion);
