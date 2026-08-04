@@ -213,68 +213,45 @@ test("rule 7 still refuses a book from an OLDER shell than the baked one", async
   const { decision } = await stageApplyResolve({
     bakedManifest: {
       bookVersion: BV_BAKED, totalPages: 2, builtFromShellBuild: 999,
-      generatedAt: "2020-01-01T00:00:00.000Z", // older date must NOT rescue an older shell
     },
   });
   assert.equal(decision.source, "bundled");
-  assert.equal(decision.reason, "baked-is-newer-shell");
+  assert.equal(decision.reason, "baked-is-newer-or-equal-shell");
 });
 
-// ─── B: a songbook-only deploy must be able to land ─────────────────────────
+// ─── B: how a songbook-only deploy actually reaches a device ────────────────
 //
-// `builtFromShellBuild` is version.json's buildNumber at web-build time (web/build.mjs:901), so it
-// moves ONLY when a binary is cut. Every PDF-only deploy therefore produces doc == baked. The old
-// `bakedShell >= docShell -> bundled` rule refused exactly that case, which made binary-free book
-// updates structurally impossible. It was never caught because the first OTA ever attempted had a
-// TestFlight round between the two books and took the `<` branch by luck.
+// A CORRECTION, KEPT ON PURPOSE. It looked like rule 7 (`bakedShell >= docShell -> bundled`) made
+// binary-free updates impossible, since builtFromShellBuild only moves when a binary is cut
+// (web/build.mjs:901). It does not: `SKIP_NATIVE=1 scripts/release.sh` still runs
+// scripts/bump-build.mjs, so EVERY production web deploy increments the number and a songbook-only
+// update always arrives with doc > baked. These tests pin that real path so the false premise
+// cannot be re-derived from the code alone.
 
-const sameShell = (docGeneratedAt, bakedGeneratedAt) =>
+const shells = (docShell, bakedShell) =>
   decideBundle({
     docExists: true,
-    docManifest: {
-      bookVersion: BV_NEW, totalPages: 374, builtFromShellBuild: 395, generatedAt: docGeneratedAt,
-    },
-    bakedManifest: {
-      bookVersion: BV_BAKED, totalPages: 373, builtFromShellBuild: 395, generatedAt: bakedGeneratedAt,
-    },
+    docManifest: { bookVersion: BV_NEW, totalPages: 374, builtFromShellBuild: docShell },
+    bakedManifest: { bookVersion: BV_BAKED, totalPages: 373, builtFromShellBuild: bakedShell },
     bakedExists: true,
   });
 
-test("THE GOAL: a PDF-only deploy on the SAME shell build lands", () => {
-  const d = sameShell("2026-09-01T00:00:00.000Z", "2026-08-04T00:00:00.000Z");
-  assert.equal(
-    d.source,
-    "documents",
-    `a songbook-only update was refused (${d.reason}) — binary-free updates are the whole feature`,
-  );
+test("THE REAL PATH: a web-only deploy bumps the build, so the OTA arrives doc > baked and lands", () => {
+  const d = shells(396, 395); // device installed 395; `SKIP_NATIVE=1 release.sh` published 396
+  assert.equal(d.source, "documents", `a songbook-only update was refused: ${d.reason}`);
   assert.equal(d.reason, "documents-newer");
 });
 
-test("same shell, but the downloaded book is OLDER — refuse it", () => {
-  const d = sameShell("2026-08-01T00:00:00.000Z", "2026-08-04T00:00:00.000Z");
+test("equal shells still prefer the code-signed copy — that is the two-tab race, not an update", () => {
+  const d = shells(395, 395);
   assert.equal(d.source, "bundled");
-  assert.equal(d.reason, "baked-not-older");
+  assert.equal(d.reason, "baked-is-newer-or-equal-shell");
 });
 
-test("same shell, identical timestamps — a tie is not newer, so refuse", () => {
-  const d = sameShell("2026-08-04T00:00:00.000Z", "2026-08-04T00:00:00.000Z");
+test("a downloaded book from an older shell never wins", () => {
+  const d = shells(394, 395);
   assert.equal(d.source, "bundled");
-  assert.equal(d.reason, "baked-not-older");
-});
-
-test("unknown provenance never wins: a missing or unparseable date falls back to code-signed", () => {
-  for (const bad of [undefined, null, "", "not-a-date", 12345, {}]) {
-    assert.equal(sameShell(bad, "2026-08-04T00:00:00.000Z").source, "bundled", `doc date ${bad}`);
-    assert.equal(sameShell("2026-09-01T00:00:00.000Z", bad).source, "bundled", `baked date ${bad}`);
-  }
-});
-
-test("rule 5 still refuses a quarantined book even though it is now identifiable", async () => {
-  const { decision } = await stageApplyResolve({
-    quarantine: [{ bookVersion: BV_NEW, failures: 3 }],
-  });
-  assert.equal(decision.source, "bundled");
-  assert.equal(decision.reason, "quarantined");
+  assert.equal(d.reason, "baked-is-newer-or-equal-shell");
 });
 
 // ─── C: the stale-ready deadlock ────────────────────────────────────────────

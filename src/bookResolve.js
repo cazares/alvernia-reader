@@ -67,19 +67,6 @@ export const clearBundleFailures = (quarantine, bookVersion) =>
   (quarantine || []).filter((q) => q && q.bookVersion !== bookVersion);
 
 /**
- * An ISO build stamp, or null if this manifest cannot say when it was built.
- *
- * STRINGS ONLY. `Date.parse` happily reads a bare number as a YEAR — `Date.parse("12345")` is a
- * valid date in the year 12345 — so coercing an arbitrary value would let a junk field out-rank a
- * real timestamp by four millennia.
- */
-export const parseBuildStamp = (v) => {
-  if (typeof v !== "string") return null;
-  const t = Date.parse(v);
-  return Number.isFinite(t) ? t : null;
-};
-
-/**
  * THE DECISION TABLE. Order is load-bearing; each rule is commented with what it defends.
  *
  * ctx: {
@@ -155,39 +142,26 @@ export const decideBundle = (ctx) => {
   //    redundant. Prefer the code-signed one — it cannot be corrupted by a downloader.
   if (docManifest.bookVersion === bakedManifest.bookVersion) return bundled("shell-caught-up");
 
-  // 7. PREFER KNOWN-GOOD OVER OLDER. A book built by an OLDER shell than the one baked in is the
-  //    leftover of a previous install: the app has since been updated and this artifact predates
-  //    it. Boot the code-signed bytes. This half of the old rule was always right.
-  if (Number(docManifest.builtFromShellBuild) < Number(bakedManifest.builtFromShellBuild)) {
-    return bundled("baked-is-newer-shell");
-  }
-
-  // 7b. SAME SHELL — the case this entire feature exists to serve, and the one the old rule broke.
+  // 7. PREFER KNOWN-GOOD OVER NEWER. If the baked bundle came from the same shell build or later,
+  //    the app was just installed/updated and the downloaded copy is the older artifact — or at
+  //    best an unproven one. Boot the code-signed bytes; the device re-downloads the newer book at
+  //    the next check-in with real internet, which costs a practice-day download and never a Mass.
   //
-  //     What was here: `bakedShell >= docShell -> bundled`. But `builtFromShellBuild` is
-  //     version.json's buildNumber read at web-build time (web/build.mjs:901), so it moves ONLY
-  //     when a binary is cut. A songbook-only deploy — the entire point of the OTA — therefore
-  //     always produces doc == baked, and `>=` refused it. Binary-free book updates were
-  //     structurally impossible, which is the exact opposite of this module's purpose.
+  //    THE EQUAL CASE IS DELIBERATE, and it was briefly changed and reverted on 2026-08-04. The
+  //    reasoning for the change was that `builtFromShellBuild` only moves when a binary is cut
+  //    (web/build.mjs:901), so a songbook-only deploy would produce doc == baked and be refused
+  //    here — making binary-free updates impossible. THAT PREMISE IS FALSE: `SKIP_NATIVE=1
+  //    scripts/release.sh` still runs scripts/bump-build.mjs, so every production web deploy
+  //    increments the number and a songbook-only update always arrives with doc > baked and takes
+  //    the path below. Nothing in the supported tooling produces the equal case.
   //
-  //     It survived review because the first OTA ever attempted happened to have a TestFlight
-  //     round between the two books (baked 393, doc 394), so it took the `<` branch by luck and
-  //     the same-shell case was never once exercised on a device.
-  //
-  //     Ties break on generatedAt, which advances on EVERY web build. A missing or unparseable
-  //     date on either side compares false and falls through to the code-signed bytes — a bundle
-  //     of unknown provenance never wins, which keeps the fail-closed posture of the old rule.
-  //
-  //     SCOPED TO THE TIE DELIBERATELY. When the Documents copy comes from a strictly NEWER shell
-  //     it is unambiguously the later artifact and boots on that alone, exactly as before — making
-  //     generatedAt load-bearing there would newly refuse any older manifest that predates the
-  //     field, i.e. break a case that has always worked.
-  if (Number(docManifest.builtFromShellBuild) === Number(bakedManifest.builtFromShellBuild)) {
-    const docAt = parseBuildStamp(docManifest.generatedAt);
-    const bakedAt = parseBuildStamp(bakedManifest.generatedAt);
-    if (!(docAt !== null && bakedAt !== null && docAt > bakedAt)) {
-      return bundled("baked-not-older");
-    }
+  //    What DOES produce it is two tabs releasing concurrently — which happened on 2026-08-03 and
+  //    shipped two different books both numbered v391. In that situation the code-signed copy is
+  //    exactly the one to prefer: it is the artifact a human installed, on a fleet that has no
+  //    remedy during Mass. Tie-breaking on a build timestamp would hand the race to whichever tab
+  //    finished last. Keep the `>=`.
+  if (Number(bakedManifest.builtFromShellBuild) >= Number(docManifest.builtFromShellBuild)) {
+    return bundled("baked-is-newer-or-equal-shell");
   }
 
   // 8. A manifest-identified, non-quarantined book from a newer shell than the one baked in. This
