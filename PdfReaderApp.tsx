@@ -1127,6 +1127,14 @@ export default function App() {
               const info = await FileSystem.getInfoAsync(cached.uri);
               if (info.exists) {
                 activeBundleSourceRef.current = cached.uri === bakedUri ? "bundled" : "documents";
+                // The slow path sets this (below); the fast path did not, so any cold boot that hit
+                // the cache left activeBookVersion null. Two consequences, both of which read as
+                // "the OTA is broken": /fleet/checkin omits bookVersion entirely (it is written
+                // conditionally), so the dashboard cannot see which book the device holds; and
+                // shouldStage's `already-active` check compares the pointer against null, never
+                // matches, and re-downloads the whole 27 MB bundle — then re-applies it, remounting
+                // the WebView — on EVERY cold boot. The value is already persisted here.
+                activeBookVersionRef.current = cached.bookVersion ?? null;
                 return cached.uri;
               }
             } catch {
@@ -1400,6 +1408,9 @@ export default function App() {
           activeBookVersion: activeBookVersionRef.current,
           stagedBookVersion: staged?.bookVersion ?? null,
           stagedReady: !!staged?.ready,
+          // Without this, `already-staged` outlives the apply gate's staleness TTL and the device
+          // deadlocks: nothing applies it and nothing re-verifies it.
+          stagedReadyAt: staged?.readyAt ?? null,
           quarantine: Array.isArray(quarantine) ? quarantine : [],
           webReady: webReadyRef.current,
           foreground: AppState.currentState === "active",

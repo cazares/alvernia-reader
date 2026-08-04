@@ -35,6 +35,15 @@ export const ALLOWED_HOSTS = ["signovivo.com", "alvernia-reader.pages.dev"];
 /** `bv_` + 16 lowercase hex. Anything else is not a book version and is ignored in silence. */
 export const BOOK_VERSION_RE = /^bv_[0-9a-f]{16}$/;
 
+/**
+ * The file that lets an applied bundle say what it is.
+ *
+ * MUST match web/build.mjs's MANIFEST_NAME and the path decideBundle's caller reads
+ * (PdfReaderApp.tsx:1154). It is excluded from the manifest's own `files[]` by construction, so
+ * `stageBook` has to write it explicitly — see step 7.
+ */
+export const BUNDLE_MANIFEST_NAME = "bundle-manifest.json";
+
 /** A staged bundle that has sat unconfirmed this long must re-verify before it may be applied. */
 export const STAGED_READY_TTL_MS = 12 * 60 * 60 * 1000;
 /** How recently a check-in must have succeeded for an apply to count as "real internet". */
@@ -93,6 +102,7 @@ export const shouldStage = (ctx) => {
     activeBookVersion = null,
     stagedBookVersion = null,
     stagedReady = false,
+    stagedReadyAt = null,
     quarantine = [],
     webReady = false,
     foreground = true,
@@ -107,7 +117,18 @@ export const shouldStage = (ctx) => {
   if (killSwitch) return { stage: false, reason: "kill-switch" };
   if (!BOOK_VERSION_RE.test(bookVersion)) return { stage: false, reason: "bad-version" };
   if (bookVersion === activeBookVersion) return { stage: false, reason: "already-active" };
-  if (stagedBookVersion === bookVersion && stagedReady) return { stage: false, reason: "already-staged" };
+  // A ready copy of the book we were told to fetch means there is nothing to do — UNLESS it has
+  // gone stale. `canApplyNow` refuses a `ready` flag older than STAGED_READY_TTL_MS ("must
+  // re-verify before it may be applied") and NOTHING in the app ever performs that re-verification.
+  // So returning "already-staged" past the TTL pinned the device in a permanent deadlock: the apply
+  // refused for being stale, the re-stage refused for already existing, and neither state emitted a
+  // breadcrumb. Re-staging IS the re-verification the TTL always intended — stageBook resumes,
+  // skipping every file already at the right size, so it costs a walk and a hash rather than 27 MB.
+  const stagedIsStale =
+    stagedReadyAt != null && Number(now) - Number(stagedReadyAt) > STAGED_READY_TTL_MS;
+  if (stagedBookVersion === bookVersion && stagedReady && !stagedIsStale) {
+    return { stage: false, reason: "already-staged" };
+  }
   if (Number(minShellBuild) > Number(shellBuild)) return { stage: false, reason: "shell-too-old" };
   // A book that has repeatedly failed to boot is not downloaded again.
   const q = (quarantine || []).find((e) => e && e.bookVersion === bookVersion);
@@ -375,9 +396,39 @@ export const stageBook = async (opts) => {
   } catch {
     return fail("verify-walk");
   }
-  onDisk.delete(".stage.json"); // our own bookkeeping is not part of the bundle
+  // Our own bookkeeping is not part of the bundle. BUNDLE_MANIFEST_NAME is excluded for the same
+  // reason AND because a resumed stage finds the copy step 7 wrote last time — without this the
+  // count check below fails by exactly one on every retry.
+  onDisk.delete(".stage.json");
+  onDisk.delete(BUNDLE_MANIFEST_NAME);
   const verdict = verifyStaged(manifest, onDisk, activeTotalPages);
   if (!verdict.ok) return fail("verify", verdict.problems.slice(0, 8));
+
+  // 7. IDENTITY — the step whose absence made this whole feature a no-op.
+  //
+  // `bundle-manifest.json` is deliberately absent from its own `files[]` (web/build.mjs:859 — a
+  // manifest cannot contain its own hash), so step 5 never downloads it. Nothing else writes it
+  // either: its only other producers are the web build and the Swift mesh installer.
+  //
+  // So without this write, a PERFECT download applies into Documents/WebBundle as a bundle that
+  // cannot say what it is — byte-identical in shape to the legacy mesh-pushed copies that
+  // decideBundle rule 3 exists to evict (src/bookResolve.js:130). The device then downloads 27 MB,
+  // verifies all 389 files, renames the directory into place, and boots the BAKED-IN book anyway,
+  // reporting the old bookVersion to the fleet dashboard. Measured on Miguel's iPad across builds
+  // 391/392/393: every server-side check passed and the book never once landed.
+  //
+  // Worse, it never settles: performApplySwap clears sv_book_staged and resolveBundleUri re-points
+  // activeBookVersion at the baked book, so the next check-in sees an un-staged, not-yet-active
+  // pointer and downloads the entire bundle again, indefinitely.
+  //
+  // Written AFTER verifyStaged deliberately: the gate asserts onDisk.size === files.length, and a
+  // manifest present during the walk would fail that count by one. An incomplete stage therefore
+  // never carries an identity, which is exactly the invariant rule 3 relies on.
+  try {
+    await fs.writeJson(`${stagedDir}/${BUNDLE_MANIFEST_NAME}`, manifest);
+  } catch {
+    return fail("manifest-write");
+  }
 
   return {
     bookVersion,
