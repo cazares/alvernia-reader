@@ -3812,20 +3812,56 @@ const initReader = async () => {
   });
 };
 
-// Resolve the build to display: native injects __SIGNO_VINO_NATIVE_BUNDLE_VERSION; web bakes
-// BUILD_NUMBER at build time. The `[0] !== "_"` guard rejects an un-replaced "__BUILD_NUMBER__" token.
-const resolvedBuild =
-  window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION ||
-  (BUILD_NUMBER && BUILD_NUMBER[0] !== "_" ? BUILD_NUMBER : "");
-if (appVersionLabel && resolvedBuild) {
-  appVersionLabel.textContent = `Versión ${resolvedBuild}`;
+// THREE INDEPENDENT NUMBERS, NEVER COLLAPSED INTO ONE.
+//
+// What was here: `nativeBuild || webBuild` — the native value REPLACED the web one, so a device
+// showed a single bare number with nothing saying what it counted. That cost a full debugging
+// session on 2026-08-05: a native app on build 393 and the web app on build 396 were
+// indistinguishable on screen, and an iPad was mistaken for an iPhone for over an hour.
+//
+// It also hid defect D1 in plain sight. The native number is the SHELL's, and a shell can render a
+// months-old songbook (that is the entire reason bookVersion exists) — so "395" could sit above a
+// book from June and look perfectly current.
+//
+// Now every surface answers four questions at a glance:
+//   PAD   which DEVICE — "PAD"/"PHN", injected by native; absent on web
+//   395b  which BINARY  — absent on web, where it reads "web" instead, so the surface is explicit
+//   396w  which WEB bundle — the OTA-updatable half; this is what a songbook update actually moves
+//   374p  which BOOK — pages in the bundle that is CURRENTLY MOUNTED, not what the shell believes
+//
+// A mismatch is now readable rather than invisible: `395b · 396w` means the web half was updated
+// over the air past its binary, which is exactly what a working OTA looks like.
+//
+// DEVICE KIND IS NEVER GUESSED HERE. iPadOS 13+ reports itself as Macintosh to a WebView — no
+// "iPad" in the UA, `navigator.platform` is "MacIntel" — so any browser-side check is a
+// maxTouchPoints heuristic that can label an iPad wrongly, which is the exact error this is meant
+// to eliminate. Only the OS's own answer is trusted (PdfReaderApp.tsx DEVICE_KIND). On the web the
+// slot is simply absent, and "web" already says what that surface is.
+const strip = (v) => (typeof v === "string" && v && v[0] !== "_" ? v : ""); // reject un-replaced tokens
+const nativeBuild = String(window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION || "");
+const deviceKind = window.__SIGNO_VIVO_DEVICE_KIND === "PAD" || window.__SIGNO_VIVO_DEVICE_KIND === "PHN"
+  ? window.__SIGNO_VIVO_DEVICE_KIND
+  : "";
+const webBuild = strip(BUILD_NUMBER);
+const baseVersion = strip("__BASE_VERSION__");
+const bookPages = Number(STANDARD_TOTAL_PAGES) || 0;
+
+const buildParts = [];
+if (deviceKind) buildParts.push(deviceKind);
+buildParts.push(nativeBuild ? `${nativeBuild}b` : "web");
+if (webBuild) buildParts.push(`${webBuild}w`);
+if (bookPages) buildParts.push(`${bookPages}p`);
+const buildLabel = buildParts.join(" · ");
+
+if (appVersionLabel) {
+  appVersionLabel.textContent = baseVersion ? `Versión ${baseVersion} (${buildLabel})` : `Versión ${buildLabel}`;
 }
-// Small always-visible build badge — shown on BOTH web and native (rendered in the WebView, so it
+// Small always-visible badge — shown on BOTH web and native (rendered in the WebView, so it
 // respects env(safe-area-inset-bottom) via viewport-fit=cover and never tucks under the iPhone home
-// indicator). Just the number — the only person who reads it already knows what it means.
+// indicator).
 const buildBadge = document.getElementById("build-badge");
-if (buildBadge && resolvedBuild) {
-  buildBadge.textContent = resolvedBuild;
+if (buildBadge) {
+  buildBadge.textContent = baseVersion ? `${baseVersion} · ${buildLabel}` : buildLabel;
   buildBadge.classList.add("is-shown");
 }
 

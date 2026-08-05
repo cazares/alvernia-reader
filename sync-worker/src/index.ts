@@ -86,6 +86,8 @@ type FleetDevice = {
   label: string; // self-entered name ("Rita")
   role: string; // Cantor | Cantor/Guitarrista | Bajo/Guitarrón | Director
   surface: "web" | "native";
+  /** "PAD" | "PHN" — native only, resolved by the OS (Platform.isPad), never guessed from a UA. */
+  deviceKind?: string;
   nativeBuild?: number; // native only
   webCached?: boolean; // web only — offline bundle fully cached
   pagesCached?: number; // web only
@@ -303,6 +305,12 @@ export class SyncRoom extends DurableObject<Env> {
       entry.totalPages = Math.max(0, Math.min(Number(o.totalPages) || 0, 100000));
     if (o.homeScreen != null) entry.homeScreen = Boolean(o.homeScreen);
     if (o.cacheVersion != null) entry.cacheVersion = String(o.cacheVersion).slice(0, 40);
+    // WHICH KIND of native device. `surface` separates native from web; this separates two NATIVE
+    // devices, which nothing here could do before — deviceId is an opaque 6-char random, so an iPad
+    // on an old build was read as the owner's iPhone for an hour on 2026-08-05 while diagnosing a
+    // live rollout. Whitelisted rather than clamped: only the two values the client can send are
+    // stored, so a malformed or hostile body cannot put arbitrary text on the dashboard.
+    if (o.deviceKind === "PAD" || o.deviceKind === "PHN") entry.deviceKind = o.deviceKind;
     // Book identity, following the existing clamp idiom exactly. WITHOUT THESE the rollout's
     // "prove it on ONE iPad first" step has nothing to observe: a downloader failing silently on
     // seven iPads looks identical to one that succeeded. Additive by construction — an older
@@ -554,7 +562,7 @@ function renderFleetDashboard(
     ? `<h3>Sin coincidencia en la lista (${orphans.length})</h3><table><thead><tr><th>Etiqueta</th><th>Rol</th><th>Origen</th><th>App</th><th>Web</th><th>Visto</th></tr></thead><tbody>${orphans
         .map(
           (d) =>
-            `<tr><td>${escHtml(d.label) || '<span class="muted">(sin nombre)</span>'}</td><td class="muted">${escHtml(d.role)}</td><td>${escHtml(d.surface)}</td><td>${d.nativeBuild ? escHtml(d.nativeBuild) : '<span class="muted">—</span>'}</td><td>${d.webCached ? (d.homeScreen ? "✓ inicio" : "caché") : '<span class="muted">—</span>'}</td><td>${ago(Number(d.ts) || 0)}</td></tr>`,
+            `<tr><td>${escHtml(d.label) || '<span class="muted">(sin nombre)</span>'}</td><td class="muted">${escHtml(d.role)}</td><td>${escHtml(d.surface)}${d.deviceKind ? ` <b>${escHtml(d.deviceKind)}</b>` : ""}</td><td>${d.nativeBuild ? escHtml(d.nativeBuild) : '<span class="muted">—</span>'}</td><td>${d.webCached ? (d.homeScreen ? "✓ inicio" : "caché") : '<span class="muted">—</span>'}</td><td>${ago(Number(d.ts) || 0)}</td></tr>`,
         )
         .join("")}</tbody></table>`
     : "";
