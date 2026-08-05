@@ -105,9 +105,38 @@ echo
 
 # PRE-ARM GATE. Arming a version the base cannot serve byte-exact means the device pulls ~27 MB,
 # fails verifyStaged, and shows on the dashboard exactly like a device that was never armed.
+# RETRY, BECAUSE THE ALIAS LAGS THE DEPLOYMENT. Measured 2026-08-05: this gate refused on the
+# FIRST attempt after every one of three consecutive deploys (v403, v405, v406) and passed on the
+# next try, always on index.html — same byte SIZE, different md5, because index.html carries the
+# bookVersion inline and signovivo.com had not finished swapping to the new deployment. The unique
+# per-deployment URL is current instantly; the alias is not.
+#
+# Retrying is not papering over it. A one-shot failure here trains the operator that this red is
+# normal and can be re-run — which is exactly how a REAL stale-edge mismatch, the thing this gate
+# exists to catch, gets waved through. Retry silently while it is plausibly propagation, then fail
+# loudly and for good.
 if [ "$SKIP_VERIFY" = "0" ]; then
   echo "==> Pre-arm: verifying $BASE serves $VERSION byte-exact"
-  node scripts/verify-ota-fetchability.mjs --all --base "$BASE" | tail -4
+  VERIFY_OK=0
+  for attempt in 1 2 3 4 5 6; do
+    if node scripts/verify-ota-fetchability.mjs --all --base "$BASE" >/tmp/sv-fetchability.log 2>&1; then
+      tail -3 /tmp/sv-fetchability.log
+      [ "$attempt" -gt 1 ] && echo "   (clean on attempt $attempt — the alias had been mid-swap)"
+      VERIFY_OK=1
+      break
+    fi
+    if [ "$attempt" -lt 6 ]; then
+      echo "   attempt $attempt: mismatch — likely the alias still swapping, retrying in 15s…"
+      sleep 15
+    fi
+  done
+  if [ "$VERIFY_OK" != "1" ]; then
+    echo "✖ ABORT — $BASE still does not serve $VERSION byte-exact after 6 attempts (~75s)." >&2
+    echo "  This is no longer propagation. Full report:" >&2
+    tail -30 /tmp/sv-fetchability.log >&2
+    echo "  If cf-cache-status is HIT with a large age, purge those paths at the CDN first." >&2
+    exit 1
+  fi
   SERVED=$(curl -sS "$BASE/bundle-manifest.json?cb=$$" -H 'cache-control: no-cache' \
     | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).bookVersion)}catch(e){process.stdout.write('PARSE_FAIL')}})")
   if [ "$SERVED" != "$VERSION" ]; then

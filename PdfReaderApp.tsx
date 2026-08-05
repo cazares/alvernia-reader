@@ -190,6 +190,12 @@ export default function App() {
   // Declared as a ref for the same reason applyStagedBook is: the foreground listener and the
   // staging completion both need it, and both are defined above it.
   const autoApplyIfSafeRef = useRef<(() => Promise<void>) | null>(null);
+  // MANUAL-ONLY BOOK UPDATES (owner decision, 2026-08-05). `pendingPointer` is what the last
+  // check-in offered; `manualRefresh` is true ONLY while a ⟳ tap is being serviced. Staging reads
+  // that flag, so a routine check-in records the offer and downloads nothing.
+  const pendingPointerRef = useRef<{ bookVersion: string; base: string } | null>(null);
+  const manualRefreshRef = useRef(false);
+  const refreshBookNowRef = useRef<(() => Promise<void>) | null>(null);
   // LOUD self-heal (red team A4). A silent, correct recovery is WORSE than a loud one here: a
   // defect that only reproduces on the choir's hardware fires all eight watchdogs at once, every
   // device quietly drops to the previous songbook, and the fleet is now split across two books with
@@ -1006,6 +1012,11 @@ export default function App() {
           // A follower tapped the ⟳ button in the web UI. The web relay is off in the shell,
           // so do the NATIVE resync: re-request the director's current snapshot over the mesh
           // and re-assert the last-known one immediately (mirrors the foreground resync).
+          // ⟳ IS ALSO THE BOOK UPDATE (owner decision, 2026-08-05). Fired without awaiting, so the
+          // mesh resync below stays instant — a ~27 MB download must never make the button feel
+          // broken. Useful whether or not a background check also runs: this is the "do it NOW"
+          // affordance, and it is the only one that exists.
+          void refreshBookNowRef.current?.();
           // If somehow stranded in "off" (e.g. a prior soft-reset left sync off while the web
           // still shows the follower ⟳), re-join the mesh as a follower first so ⟳ recovers it.
           if (roleRef.current === "off" && syncAvailable) becomeFollower();
@@ -1432,12 +1443,19 @@ export default function App() {
         }
         if (!pointer) return;
 
-        // Stagger is measured from when this device FIRST saw this pointer, not from launch.
-        let firstSeen = await readStored(STORAGE_KEYS.bookFirstSeen, null);
-        if (!firstSeen || firstSeen.bookVersion !== pointer.bookVersion) {
-          firstSeen = { bookVersion: pointer.bookVersion, at: Date.now() };
-          await AsyncStorage.setItem(STORAGE_KEYS.bookFirstSeen, JSON.stringify(firstSeen)).catch(() => {});
-        }
+        // OWNER DECISION, 2026-08-05 (fourth amendment): IT UPDATES WHEN YOU OPEN IT, AND ⟳ FORCES
+        // IT. Two triggers, one sentence each. No third path, and nothing decides on its own
+        // whether now is a good moment.
+        //
+        // What was deleted to make this safe to run automatically was the GATING, not the
+        // automation: canApplyNow went from seven conditions to two (both physics — nothing
+        // downloaded, no bridge to swap under), and shouldStage lost the role veto, the stagger and
+        // the cooldowns. Those were what made a working rollout and a dead one look identical,
+        // because every one of them refused silently.
+        //
+        // `pendingPointer` is recorded so ⟳ can act on an offer seen earlier even if the tap's own
+        // check-in cannot reach the relay — the button must work in a bad-signal parking lot.
+        pendingPointerRef.current = pointer;
 
         if (stagingInFlightRef.current) return;
         const quarantine = await readStored(STORAGE_KEYS.bookQuarantine, []);
@@ -1455,7 +1473,8 @@ export default function App() {
           webReady: webReadyRef.current,
           foreground: AppState.currentState === "active",
           role: roleRef.current,
-          firstSeenAt: firstSeen.at,
+          // firstSeenAt fed the client stagger, which was removed on 2026-08-03 — shouldStage no
+          // longer reads it, and the AsyncStorage write that produced it went with this amendment.
           deviceId: dbgDeviceRef.current,
           now: Date.now(),
           minShellBuild: 1,
@@ -1577,6 +1596,36 @@ export default function App() {
     await performApplySwap(staged);
   }, [readStored, breadcrumb, performApplySwap]);
   autoApplyIfSafeRef.current = autoApplyIfSafe;
+
+  /**
+   * ⟳ — THE ONLY THING THAT UPDATES THE SONGBOOK (owner decision, 2026-08-05).
+   *
+   * One sentence: tap it, and the device reconnects and installs the latest book if there is one.
+   *
+   * It raises `manualRefresh` for the duration, so the check-in it fires is allowed to download —
+   * a routine check-in is not. Staging then applies on completion through the existing path. The
+   * flag is cleared in `finally`, so a thrown fetch can never leave the device silently
+   * auto-updating afterwards.
+   */
+  const refreshBookNow = useCallback(async () => {
+    if (manualRefreshRef.current) return; // already servicing a tap
+    manualRefreshRef.current = true;
+    breadcrumb("manual-refresh:start");
+    try {
+      await fleetCheckin();
+      // A pointer seen on an earlier routine check-in was recorded but deliberately not acted on.
+      // Honour it now, so ⟳ works even if this tap's check-in cannot reach the relay.
+      if (!stagingInFlightRef.current && pendingPointerRef.current) {
+        await onCheckinResponseRef.current?.({ bookUpdate: pendingPointerRef.current });
+      }
+    } catch {
+      breadcrumb("manual-refresh:network");
+    } finally {
+      manualRefreshRef.current = false;
+      breadcrumb("manual-refresh:end");
+    }
+  }, [breadcrumb, fleetCheckin]);
+  refreshBookNowRef.current = refreshBookNow;
 
   /**
    * MANUAL FORCE (numpad code). No longer required — the book installs itself — but kept as the
@@ -1807,13 +1856,17 @@ export default function App() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       if (next !== "active") return;
-      // EVERY FOREGROUND IS A BOOK CHECK — the CodePush shape. The 90 s check-in timer only ticks
-      // while the app is awake, so an iPad that was asleep when the new book was published would
-      // otherwise sit on the old one until someone happened to leave the app open. Checking here
-      // means "open the app" is the entire user-facing procedure. autoApplyIfSafe covers the case
-      // where a copy was already staged before the app was backgrounded.
+      // IT UPDATES WHEN YOU OPEN IT (owner decision, 2026-08-05). The 90 s check-in timer only
+      // ticks while the app is awake, so an iPad asleep when a book was published would otherwise
+      // sit on the old one until someone happened to leave it open. Checking here means "open the
+      // app" is the whole procedure, and ⟳ is the "do it NOW" force on top of it.
+      //
+      // This is safe to run unattended only because the GATING is gone, not because the automation
+      // was ever the problem: canApplyNow is down to two physical impossibilities, so a device that
+      // does nothing now really is a device that had nothing to do.
       fleetCheckin();
       void autoApplyIfSafeRef.current?.();
+      if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (roleRef.current === "follower") {
         requestCurrentSnapshot().catch(() => {});

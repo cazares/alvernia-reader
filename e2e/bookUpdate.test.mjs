@@ -174,17 +174,19 @@ test("allows an apply at practice: real internet, no mesh, not directing", () =>
   assert.equal(canApplyNow(applyCtx()).ok, true);
 });
 
-test("THE LOAD-BEARING VETO: no successful check-in in 5 minutes means no internet means NO", () => {
-  // True at practice; FALSE INSIDE THE CHURCH BY DEFINITION. No clock, no calendar, no config.
-  const r = canApplyNow(applyCtx({ lastCheckinOkAt: 1000, now: 1000 + LIVE_INTERNET_WINDOW_MS + 1 }));
-  assert.equal(r.ok, false);
-  assert.equal(r.reason, "no-live-internet");
-  assert.equal(canApplyNow(applyCtx({ lastCheckinOkAt: null })).reason, "no-live-internet");
+test("the live-internet veto is GONE (owner decision, 2026-08-05: NO LOGIC AROUND DELIVERY)", () => {
+  // Was "THE LOAD-BEARING VETO": no successful check-in within 5 minutes meant no internet meant NO.
+  // Removed with every other deferring condition. A device applies whatever it has finished
+  // downloading, whenever it next foregrounds, regardless of how long ago it last reached the relay.
+  assert.equal(canApplyNow(applyCtx({ lastCheckinOkAt: 1000, now: 1000 + LIVE_INTERNET_WINDOW_MS + 1 })).ok, true);
+  assert.equal(canApplyNow(applyCtx({ lastCheckinOkAt: null })).ok, true);
 });
 
-test("a ready flag from Saturday practice EXPIRES before Sunday Mass", () => {
-  const r = canApplyNow(applyCtx({ stagedReadyAt: 0, lastCheckinOkAt: STAGED_READY_TTL_MS + 1, now: STAGED_READY_TTL_MS + 1 }));
-  assert.equal(r.reason, "stale-ready");
+test("the stale-ready expiry is GONE — an old staged copy still applies", () => {
+  // Was: a `ready` flag older than 12 h was refused so a copy staged at Saturday practice would not
+  // apply on Sunday (red team A1). ACCEPTED CONSEQUENCE of the 2026-08-05 decision: it applies now,
+  // however old it is. shouldStage still re-stages a stale copy, which is the real re-verification.
+  assert.equal(canApplyNow(applyCtx({ stagedReadyAt: 0, now: STAGED_READY_TTL_MS * 100 })).ok, true);
 });
 
 test("EVERY role applies, the DIRECTOR included (owner decision, 2026-08-03)", () => {
@@ -197,19 +199,21 @@ test("the NON-role gates still refuse a director's iPad exactly like anyone else
   // The other half of the owner decision: removing the ROLE veto must not have removed any TIMING
   // or CAPABILITY veto. If any of these ever answers ok, the removal went further than asked.
   const asDirector = (over) => canApplyNow(applyCtx({ role: "director", ...over }));
+  // Only the two PHYSICAL impossibilities survive: nothing downloaded, and no bridge to swap under.
   assert.equal(asDirector({ stagedReady: false }).reason, "not-ready");
-  assert.equal(asDirector({ meshPeerConnected: true }).reason, "mesh-peer");
   assert.equal(asDirector({ webReady: false }).reason, "bridge-not-ready");
-  assert.equal(asDirector({ minShellBuild: 99999 }).reason, "shell-too-old");
-  assert.equal(asDirector({ lastCheckinOkAt: null }).reason, "no-live-internet");
+  // Every DEFERRING gate is gone — a director's iPad applies under all of these.
+  assert.equal(asDirector({ meshPeerConnected: true }).ok, true);
+  assert.equal(asDirector({ minShellBuild: 99999 }).ok, true);
+  assert.equal(asDirector({ lastCheckinOkAt: null }).ok, true);
   // Staging side, same principle.
   assert.equal(shouldStage(stageCtx({ role: "director", webReady: false })).reason, "not-web-ready");
   assert.equal(shouldStage(stageCtx({ role: "director", foreground: false })).reason, "background");
   assert.equal(shouldStage(stageCtx({ role: "director", minShellBuild: 999 })).reason, "shell-too-old");
 });
 
-test("a connected mesh peer means a rehearsal or Mass is happening: NO", () => {
-  assert.equal(canApplyNow(applyCtx({ meshPeerConnected: true })).reason, "mesh-peer");
+test("the mesh-peer defer is GONE — an update lands even mid-rehearsal", () => {
+  assert.equal(canApplyNow(applyCtx({ meshPeerConnected: true })).ok, true);
 });
 
 test("AN UPDATE NEVER WAITS FOR THE USER TO STOP TOUCHING THE DEVICE (owner decision, 2026-08-03)", () => {
@@ -238,10 +242,22 @@ test("AN UPDATE NEVER WAITS FOR THE USER TO STOP TOUCHING THE DEVICE (owner deci
   }
 });
 
-test("mesh-peer STILL defers — it clears itself and never asks anything of the user", () => {
-  // The one survivor. A connected peer means a rehearsal or Mass is actively running and the whole
-  // room would blink at once. It is not a "hold still" gate: it goes away when the session ends.
-  assert.equal(canApplyNow(applyCtx({ meshPeerConnected: true })).reason, "mesh-peer");
+test("NO gate defers an update any more — mesh-peer was the last survivor and it is gone", () => {
+  // mesh-peer was kept through the 2026-08-03 amendment because a connected peer means a rehearsal
+  // or Mass is running and the whole room would blink at once. The 2026-08-05 decision removed it
+  // anyway, knowingly: that blink is now an ACCEPTED CONSEQUENCE. This test exists so the gate
+  // cannot creep back without someone deleting an explicit assertion that it stays gone.
+  for (const over of [
+    { meshPeerConnected: true },
+    { lastCheckinOkAt: null },
+    { stagedReadyAt: 0, now: STAGED_READY_TTL_MS * 100 },
+    { minShellBuild: 99999 },
+    { lastPageTurnAt: 2000, now: 2000 },
+    { lastDirectorSnapshotAt: 2000, now: 2000 },
+    { coldBootAt: 2000, now: 2000 },
+  ]) {
+    assert.equal(canApplyNow(applyCtx(over)).ok, true, `deferred on ${JSON.stringify(over)}`);
+  }
 });
 
 test("NI3 is CLOSED BY DECISION, not by a cooldown — a device that was directing still updates", () => {
@@ -263,9 +279,15 @@ test("that cooldown expires, so the device is not locked out forever", () => {
   assert.equal(r.ok, true);
 });
 
-test("refuses when the bridge is not ready or the shell is too old", () => {
+test("refuses ONLY when there is nothing to apply or no bridge to apply it under", () => {
+  // The complete surviving list. Both are physics, not policy: you cannot apply a book you have not
+  // finished downloading, and swapping the bundle under a WebView that never signalled ready renders
+  // a permanent blank screen — the worst outcome in this app.
+  assert.equal(canApplyNow(applyCtx({ stagedReady: false })).reason, "not-ready");
   assert.equal(canApplyNow(applyCtx({ webReady: false })).reason, "bridge-not-ready");
-  assert.equal(canApplyNow(applyCtx({ minShellBuild: 99999 })).reason, "shell-too-old");
+  // shell-too-old moved out: shouldStage refuses the DOWNLOAD, which is the right place for it.
+  assert.equal(canApplyNow(applyCtx({ minShellBuild: 99999 })).ok, true);
+  assert.equal(shouldStage(stageCtx({ minShellBuild: 99999 })).reason, "shell-too-old");
 });
 
 test("an empty context never throws and never says yes", () => {
