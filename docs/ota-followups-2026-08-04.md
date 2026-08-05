@@ -61,18 +61,36 @@ the panic switch and then an OTA arrives the same day, it silently loses.
 for diagnosing a rollout — it was the first thing reached for on 2026-08-03 and it would have
 misled.
 
+### 5. A right-size / wrong-bytes file wedges staging permanently — **highest severity open item**
+
+**Status: VERIFIED 2026-08-04 (both halves read directly).** Two individually-reasonable behaviours
+combine into a trap with no exit:
+
+- `bookNet.download` (`PdfReaderApp.tsx:1351-1355`) throws only on `status >= 400`. Any 200 carrying
+  a wrong body — a captive portal, a truncated proxy response, a CDN error page — is written to disk
+  as though it were the file.
+- `stageBook`'s resume path (`src/bookUpdate.js:352-360`) re-fetches a file **only when its size
+  differs** from the manifest: `if (!info || Number(info.size) !== Number(f.n))`. Size matches,
+  bytes wrong → never re-fetched, on this attempt or any future one.
+
+`verifyStaged` then fails on md5 forever. Every retry re-walks 390 files, re-hashes ~27 MB, fails on
+the same file, and reports `error:verify`. The device never converges and never self-heals — and
+because `stageBook` returns `ready:false`, nothing is ever applied, so from outside it looks exactly
+like the bug 395 just fixed.
+
+*Fix sketch:* on a `verify` failure, delete the files named in `verdict.problems[]` before
+returning, so the resume path is forced to re-fetch them. A blanket `rmrf(stagedDir)` after two
+consecutive verify failures is the cheap version and cannot be got wrong.
+
+This one is worth doing next. It is the only open item that produces a permanently stuck device
+from an ordinary transient network fault.
+
 ---
 
 ## Audit-confirmed, NOT independently re-verified
 
 Re-derive before acting on any of these.
 
-- **`stageBook`'s resume path skips files on size alone.** A file that is the right size with wrong
-  bytes is never re-fetched, so `verifyStaged` fails its md5 forever without converging.
-  `src/bookUpdate.js:353`. Long-standing; flagged by an earlier review and still open.
-- **`FileSystem.downloadAsync` writes a wrong-but-200 body silently** — only `status >= 400` throws,
-  so a bad body is caught 27 MB later at verify and retried without convergence. Interacts badly
-  with the item above.
 - **The free-disk guard is dead code** — `stageBook` accepts `freeDiskBytes` but its only caller
   never passes it (`:1423-1435`), so the disk check never runs on a device.
 - **A failed `Promise.all` leaves orphan download workers running** after `stageBook` has returned
