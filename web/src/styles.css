@@ -1001,52 +1001,50 @@ button:disabled {
   padding: 0.85rem 1rem 1rem;
 }
 
-/* ── ⌕ opens search as a FULL-WIDTH DROPDOWN that drops down from the top (reuses the
+/* ── ⌕ opens search as a COMPACT DROPDOWN anchored under the fab, top-right (reuses the
    search-fullscreen drawer mode + all its existing search logic). Scoped to .as-dropdown so it
    applies ONLY when launched from the ⌕ fab — the left-edge browse drawer's Buscar tab is
-   unaffected. Spans the full width (minus tiny edge gutters) instead of the old skinny box. ── */
+   unaffected.
+
+   THIS IS THE CLASSIC GEOMETRY, restored (build 350 / 13ff88b). Between builds 362-365 it was
+   inflated in four steps — full-width (f94b1ae), slide-down keyframe (fd71988), full-height
+   (119efeb), then a 28px exit ring (e7fd289) — until it was a 97%x95% modal that covered the page
+   the director was reading. A director searches WHILE looking at the music; a panel that hides the
+   book defeats the point. Small, anchored, and the page stays visible beside it.
+
+   The wide margin that e7fd289 added existed only so some backdrop remained tappable; at 380px the
+   whole rest of the screen is backdrop, so that reason retires with the geometry. The ⇅ Mejor/No/A-Z
+   sort toggle (07a00c6) is orthogonal and stays. ── */
 .navigation-drawer.as-dropdown.search-fullscreen {
   /* !important + pinned height: the base drawer's full-height flex layout otherwise collapses
      the auto-height dropdown to nothing, and a cascade rule overrides plain width/max-height. */
-  /* Minimal-but-tappable margins on every side: the #drawer-backdrop shows through this ring, and
-     tapping it closes search (drawerBackdrop → closeDrawer). Big panel, small exit border. */
-  top: max(1.75rem, calc(env(safe-area-inset-top, 0px) + 0.75rem)) !important;
-  bottom: max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem)) !important;
-  left: max(1.75rem, calc(env(safe-area-inset-left, 0px) + 0.75rem)) !important;
-  right: max(1.75rem, calc(env(safe-area-inset-right, 0px) + 0.75rem)) !important;
-  width: auto !important; /* left + right pinned → spans the width minus the tappable margin */
-  height: auto !important; /* top + bottom pinned → spans the height minus the tappable margin */
-  min-height: 0 !important;
-  max-height: none !important;
+  top: max(0.55rem, env(safe-area-inset-top, 0px)) !important;
+  bottom: auto !important;
+  left: auto !important;
+  right: max(0.55rem, env(safe-area-inset-right, 0px)) !important;
+  width: min(380px, 92vw) !important;
+  height: min(72vh, 560px) !important;
+  min-height: min(42vh, 320px) !important;
+  max-height: min(72vh, 560px) !important;
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
-  /* Rest at translateY(0) (specificity beats the base drawer's translateX(-100%) slide), and put
-     ONLY opacity on the transition so the transform can't animate that left-slide diagonally. The
-     open SLIDE-DOWN is a keyframe animation (below): a keyframe plays from its own values regardless
-     of the base transform, so it drops straight down from the top — no left-sweep — every time. */
-  transform: translateY(0);
+  /* Fade + scale up from just under the fab. The transform here also beats the base drawer's
+     translateX(-100%) slide, so it can never sweep in from the left edge. */
+  transform: translateY(-10px) scale(0.985);
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: transform 200ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 170ms ease;
 }
 .overlay-controls.drawer-open .navigation-drawer.as-dropdown.search-fullscreen {
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
   opacity: 1;
-  animation: sv-search-drop 260ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-/* Slide down + fade in from just above — reads as a dropdown unfurling from the top. */
-@keyframes sv-search-drop {
-  from { transform: translateY(-22px); opacity: 0; }
-  to   { transform: translateY(0); opacity: 1; }
 }
 /* Hide the full-drawer chrome — the dropdown shows only the search row + results */
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-top-bar,
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-nav-row,
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-mode-switch { display: none; }
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-pane-content {
-  max-height: none;   /* fill the now-tall panel; results scroll within */
-  flex: 1 1 auto;
-  min-height: 0;
+  max-height: min(60vh, 540px);
 }
 
 /* ── Back button: shown inside search fullscreen ────────────────────────────── */
