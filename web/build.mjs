@@ -856,7 +856,23 @@ const NOT_FETCHABLE = new Set(["_headers", "_redirects", "_routes.json", "_worke
 // The lowest shell build allowed to run this bundle. Bump it ONLY when a bundle starts requiring
 // native capability an older shell lacks; the device refuses to download a book it cannot run
 // rather than installing one that boots broken. 1 = any shell.
-const MIN_SHELL_BUILD = 1;
+/**
+ * The oldest shell allowed to DOWNLOAD this book. Both gates read it: `shouldStage` refuses with
+ * `shell-too-old` before a byte moves, and `stageBook` refuses again after fetching the manifest.
+ *
+ * RAISED FROM 1 TO 395 on 2026-08-05, and this is a safety gate, not a nicety. Builds 391-393 lack
+ * the fix that writes `bundle-manifest.json` into a staged bundle, so on those shells an OTA
+ * downloads ~26 MB, applies it, and `decideBundle` rule 3 then evicts it as unidentifiable — which
+ * leaves activeBookVersion pointing at the baked book, so the very next check-in stages the whole
+ * thing again. A permanent re-download loop, on every pre-395 device, over one parish access point.
+ * Measured on the owner's iPad on 2026-08-04.
+ *
+ * With this set, those devices never start: they are simply told nothing they can act on.
+ *
+ * RAISE THIS whenever a book depends on native behaviour an older shell does not have. Lowering it
+ * is what needs justification, not raising it.
+ */
+const MIN_SHELL_BUILD = 395;
 
 const emitBundleManifest = () => {
   // Pass 1 — hash everything on disk except the manifest itself (it does not exist yet) and

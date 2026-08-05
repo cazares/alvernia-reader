@@ -13,6 +13,7 @@ import {
   clearBundleFailures,
   isValidManifest,
   nextHealAction,
+  readAccessDirFor,
   MAX_BOOT_ATTEMPTS,
   QUARANTINE_FAILURE_LIMIT,
 } from "../src/bookResolve.js";
@@ -228,4 +229,35 @@ test("heal ladder: remount once, then abandon the source, then give up to the na
 test("heal ladder: a failing BAKED bundle is never quarantined — it is the code-signed floor", () => {
   // Quarantining the floor would leave the device with nothing to fall back to.
   assert.equal(nextHealAction(1, "bundled").quarantineCurrent, false);
+});
+
+// ── The WebView read-access scope (2026-08-05) ───────────────────────────────
+//
+// WKWebView's loadFileURL:allowingReadAccessToURL: exposes only the single FILE when handed a file
+// URL. react-native-webview defaults that scope to the page URL itself, so an OTA-applied bundle
+// could read index.html and was DENIED styles.css, app.js and lib/*.js. It rendered as raw unstyled
+// HTML, bridge-ready never arrived, and the watchdog quarantined a bundle whose 390 files were all
+// byte-perfect on disk. Off-by-one here silently reintroduces exactly that.
+
+test("read-access scope is the DIRECTORY, with its trailing slash — never the file", () => {
+  assert.equal(
+    readAccessDirFor("file:///var/mobile/Containers/Data/Application/X/Documents/WebBundle/index.html"),
+    "file:///var/mobile/Containers/Data/Application/X/Documents/WebBundle/",
+  );
+  assert.equal(readAccessDirFor("file:///app/WebBundle/index.html"), "file:///app/WebBundle/");
+});
+
+test("read-access scope never returns the index.html itself (that IS the bug)", () => {
+  const uri = "file:///a/WebBundle/index.html";
+  const dir = readAccessDirFor(uri);
+  assert.notEqual(dir, uri, "handing the WebView the file re-denies every sibling asset");
+  assert.ok(dir.endsWith("/"), "a directory scope must end in a slash");
+  assert.ok(uri.startsWith(dir), "the page must live inside its own read-access scope");
+});
+
+test("read-access scope degrades to empty rather than to a nonsense scope", () => {
+  for (const bad of ["", null, undefined, "index.html", "/", 42, {}]) {
+    const d = readAccessDirFor(bad);
+    assert.ok(d === "" || d.endsWith("/"), `bad scope for ${JSON.stringify(bad)}: ${d}`);
+  }
 });

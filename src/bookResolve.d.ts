@@ -56,3 +56,9 @@ export const clearBundleFailures: (
 ) => QuarantineEntry[];
 export const decideBundle: (ctx: DecideBundleContext) => BundleDecision;
 export const nextHealAction: (attempt: number, source: BundleSource | null) => HealAction;
+
+/**
+ * The DIRECTORY scope the WebView must be granted for a file:// bundle — never the index.html
+ * itself, which exposes only that one file and denies every sibling asset. "" when unusable.
+ */
+export const readAccessDirFor: (uri: string | null | undefined) => string;
