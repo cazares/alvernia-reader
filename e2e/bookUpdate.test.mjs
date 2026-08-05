@@ -50,6 +50,31 @@ test("the allowlist is a baked constant, not something read from a response", ()
   assert.deepEqual(ALLOWED_HOSTS, ["signovivo.com", "alvernia-reader.pages.dev"]);
 });
 
+test("a per-deployment Pages subdomain is REFUSED — which is why --base rollback does not work", () => {
+  // Documents a real limitation rather than a wish. scripts/ota-arm.sh's header claims pointing
+  // BOOK_UPDATE_BASE at an immutable per-deployment URL is "what makes ROLLBACK possible at all".
+  // It is not: ALLOWED_HOSTS matches by exact equality, so these are rejected — and a rejected
+  // pointer is the REVOKE path (PdfReaderApp.tsx), which DELETES a staged bundle. If someone later
+  // makes rollback work by allowing subdomains, this test fails and forces them to notice that the
+  // revoke semantics and the ota-arm.sh guard both have to move with it.
+  for (const base of [
+    "https://8f7cbc00.alvernia-reader.pages.dev",
+    "https://staging.alvernia-reader.pages.dev",
+  ]) {
+    assert.equal(parseBookUpdate({ bookUpdate: { bookVersion: BV, base } }), null, `accepted ${base}`);
+  }
+});
+
+test("scripts/ota-arm.sh's --base guard lists exactly ALLOWED_HOSTS — they must not drift", () => {
+  // The guard is a duplicated list by necessity (shell cannot import the JS constant). Duplication
+  // is safe only while something proves the copies agree; without this, the shell list silently
+  // rots and the guard starts passing bases the client will revoke on.
+  const sh = fs.readFileSync(new URL("../scripts/ota-arm.sh", import.meta.url), "utf8");
+  const branch = /^\s*(signovivo\.com\|alvernia-reader\.pages\.dev)\)\s*;;\s*$/m.exec(sh);
+  assert.ok(branch, "ota-arm.sh has no `signovivo.com|alvernia-reader.pages.dev)` case branch");
+  assert.deepEqual(branch[1].split("|"), ALLOWED_HOSTS);
+});
+
 test("REFUSES a malformed bookVersion", () => {
   for (const v of ["", "bv_", "bv_XYZ", "bv_0123456789ABCDEF", "bv_0123456789abcde", "../../etc"]) {
     assert.equal(parseBookUpdate({ bookUpdate: { bookVersion: v, base: "https://signovivo.com" } }), null, v);

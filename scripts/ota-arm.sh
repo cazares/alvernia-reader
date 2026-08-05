@@ -58,6 +58,38 @@ fi
 echo "$VERSION" | grep -qE '^bv_[0-9a-f]{16}$' || {
   echo "✖ --version must match bv_[0-9a-f]{16} — got '$VERSION'" >&2; exit 2; }
 
+# THE HOST GUARD — the client rejects more bases than this script used to.
+#
+# src/bookUpdate.js:79 matches ALLOWED_HOSTS by EXACT string equality, then rebuilds the origin
+# from hostname alone (:80), discarding port and path. So a per-deployment Pages URL like
+# https://8f7cbc00.alvernia-reader.pages.dev is REJECTED, and so is staging.alvernia-reader.pages.dev.
+#
+# A rejected pointer is NOT ignored. parseBookUpdate returns null, and PdfReaderApp.tsx:1427 treats
+# an absent pointer as a REVOKE: it deletes the staged bundle. So arming a disallowed base does not
+# merely fail — it destroys ~27 MB of verified work on every device holding a staged copy.
+#
+# The pre-arm gate below CANNOT catch this. It only proves the origin SERVES the version, and a
+# per-deployment URL serves it perfectly. Every signal on this Mac reads green while the fleet
+# silently revokes. That is why this check is here, before anything is deployed.
+#
+# NOTE this also means the "base per version" rollback described in this file's own header does NOT
+# work on the shipped client. Rolling back needs either an ALLOWED_HOSTS change (a native constant —
+# reaches devices only via TestFlight) or the republish-forward path in scripts/rollback-web.sh.
+# Keep this list identical to src/bookUpdate.js ALLOWED_HOSTS; e2e/bookUpdate.test.mjs pins them together.
+printf '%s' "$BASE" | grep -qE '^https://' || {
+  echo "✖ --base must be https:// — got '$BASE'" >&2; exit 2; }
+BASE_HOST=$(printf '%s' "$BASE" | sed -E 's#^https://([^/:]+).*#\1#')
+case "$BASE_HOST" in
+  signovivo.com|alvernia-reader.pages.dev) ;;
+  *)
+    echo "✖ --base host '$BASE_HOST' is NOT one the app will accept." >&2
+    echo "  src/bookUpdate.js:33 ALLOWED_HOSTS permits exactly: signovivo.com, alvernia-reader.pages.dev" >&2
+    echo "  It matches by EXACT equality, so per-deployment and staging subdomains are refused." >&2
+    echo "  A refused pointer is a REVOKE — arming this would DELETE staged bundles fleet-wide," >&2
+    echo "  while the pre-arm gate below would still report green. Not arming." >&2
+    exit 2;;
+esac
+
 if [ "$DEVICES" = "*" ] && [ "$ALLOW_FLEET" != "yes" ]; then
   echo "✖ '*' without --allow-fleet does nothing (both switches are required by design)." >&2
   echo "  Prove it on ONE named device first — named devices bypass the fleet throttle." >&2
