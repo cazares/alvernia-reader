@@ -67,6 +67,24 @@ export const clearBundleFailures = (quarantine, bookVersion) =>
   (quarantine || []).filter((q) => q && q.bookVersion !== bookVersion);
 
 /**
+ * The DIRECTORY a bundle's index.html lives in — the read-access scope the WebView must be given.
+ *
+ * WKWebView's `loadFileURL:allowingReadAccessToURL:` exposes only the single FILE when handed a
+ * file URL, and the whole directory only when handed a directory. react-native-webview defaults
+ * that scope to the page URL itself, so without this the WebView reads index.html and is denied
+ * styles.css, app.js and lib/*.js — the page renders as raw unstyled HTML, `bridge-ready` never
+ * arrives, and the watchdog quarantines a bundle whose files are all byte-perfect on disk.
+ *
+ * Returns "" for anything that is not a usable path, so a caller can omit the prop rather than
+ * hand the WebView a nonsense scope.
+ */
+export const readAccessDirFor = (uri) => {
+  const s = String(uri || "");
+  const cut = s.lastIndexOf("/");
+  return cut <= 0 ? "" : s.slice(0, cut + 1);
+};
+
+/**
  * THE DECISION TABLE. Order is load-bearing; each rule is commented with what it defends.
  *
  * ctx: {

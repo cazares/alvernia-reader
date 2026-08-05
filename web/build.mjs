@@ -856,7 +856,31 @@ const NOT_FETCHABLE = new Set(["_headers", "_redirects", "_routes.json", "_worke
 // The lowest shell build allowed to run this bundle. Bump it ONLY when a bundle starts requiring
 // native capability an older shell lacks; the device refuses to download a book it cannot run
 // rather than installing one that boots broken. 1 = any shell.
-const MIN_SHELL_BUILD = 1;
+/**
+ * The oldest shell allowed to DOWNLOAD this book. Both gates read it: `shouldStage` refuses with
+ * `shell-too-old` before a byte moves, and `stageBook` refuses again after fetching the manifest.
+ *
+ * RAISED FROM 1 TO 398 on 2026-08-05, and this is a safety gate, not a nicety. TWO separate native
+ * fixes are required before a shell can survive an OTA, and a device missing EITHER is harmed by
+ * being offered one:
+ *
+ *   <= 394  no bundle-manifest.json written into the staged bundle, so an applied book is
+ *           unidentifiable, decideBundle rule 3 evicts it, activeBookVersion stays on the baked
+ *           book, and the next check-in re-stages the whole ~26 MB. A permanent loop.
+ *   <= 397  no allowingReadAccessToURL on the WebView, so an applied bundle can read index.html
+ *           and is DENIED styles.css/app.js/lib/*. It renders as raw HTML, never reaches
+ *           bridge-ready, and the watchdog quarantines a byte-perfect bundle and reverts.
+ *
+ * It was briefly set to 395 here — correct for the first defect, WRONG for the second, which would
+ * have admitted exactly the build (395) that was measured breaking on the owner's iPhone.
+ *
+ * With this set, older devices never start: they are simply told nothing they can act on. THIS IS
+ * WHAT MAKES A FLEET-WIDE ARM SAFE while the fleet is still mixed.
+ *
+ * RAISE THIS whenever a book depends on native behaviour an older shell lacks. Lowering it is what
+ * needs justification, not raising it.
+ */
+const MIN_SHELL_BUILD = 398;
 
 const emitBundleManifest = () => {
   // Pass 1 — hash everything on disk except the manifest itself (it does not exist yet) and

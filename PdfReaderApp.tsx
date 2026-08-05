@@ -41,6 +41,7 @@ import {
   decideBundle,
   recordBundleFailure,
   clearBundleFailures,
+  readAccessDirFor,
   nextHealAction,
   type BundleSource,
 } from "./src/bookResolve";
@@ -901,6 +902,21 @@ export default function App() {
                   );
                 }
               }
+              // …AND RETIRE THE BANNER, for the same reason and at the same moment.
+              //
+              // The failure COUNTER was cleared here on a proven boot; the LIBRO ANTERIOR banner
+              // was not, and its only other exit is an operator tapping it. So a device that
+              // reverted once — then updated, healed, and booted cleanly every day since — kept
+              // showing a permanent red warning about something that had stopped being true. It
+              // survives app updates too (AsyncStorage does), so a 393-era revert was still on
+              // screen after installing 395.
+              //
+              // The banner's job is "this device is silently on an older book, tell the director".
+              // A proven boot of the CURRENT book is exactly the evidence that is no longer so.
+              // It stays fully intact while the condition holds: nothing here fires unless the
+              // bundle actually reached bridge-ready.
+              await AsyncStorage.removeItem(STORAGE_KEYS.bookReverted).catch(() => {});
+              setRevertedBook(null);
             } catch {
               /* best-effort */
             }
@@ -1894,6 +1910,24 @@ export default function App() {
         key={`webbundle-${mountKey}`}
         ref={webViewRef}
         source={{ uri: bundleUri }}
+        // GRANT READ ACCESS TO THE BUNDLE DIRECTORY, NOT JUST index.html.
+        //
+        // Without this prop react-native-webview falls back to `request.URL` as the read-access
+        // scope (RNCWebViewImpl.m: `readAccessUrl = allowingReadAccessToURL ? … : request.URL`),
+        // and Apple's contract for loadFileURL:allowingReadAccessToURL: is that a FILE URL exposes
+        // ONLY that file — a DIRECTORY URL is what exposes its contents. So the WebView could read
+        // index.html and was denied styles.css, app.js and lib/*.js.
+        //
+        // The failure looks nothing like a permissions error: the page renders as raw unstyled
+        // HTML with every hidden loader state visible at once, app.js never runs, `bridge-ready`
+        // never arrives, and the watchdog concludes the bundle is broken — quarantining a bundle
+        // whose 390 files are all byte-perfect on disk (verifyStaged proved that before the swap).
+        // Observed on an iPad, 2026-08-05, after an OTA applied successfully.
+        //
+        // `allowFileAccessFromFileURLs` / `allowUniversalAccessFromFileURLs` do NOT cover this:
+        // they relax same-origin for scripted reads (XHR/fetch), while <link> and <script src>
+        // subresources are gated by the sandbox extension issued from the read-access URL.
+        allowingReadAccessToURL={readAccessDirFor(bundleUri)}
         originWhitelist={["*"]}
         allowFileAccess
         allowFileAccessFromFileURLs
