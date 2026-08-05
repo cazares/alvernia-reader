@@ -173,6 +173,28 @@ export const shouldStage = (ctx) => {
  * `onDisk` is a Map<path, {size, md5}> the caller gathered by walking the staged directory — the
  * files as they ACTUALLY are, never a bookkeeping list of what we believe we wrote.
  */
+/**
+ * The highest page any song points at, or null if this manifest cannot say.
+ *
+ * `songPages` is an array of [songNumber, page] pairs (web/build.mjs). This is the floor a book may
+ * never shrink below: below it, typing a song number lands on a page that no longer exists.
+ * Anything above it is trailing matter — canaries, blanks — that no index references.
+ *
+ * Returns null rather than 0 for an unusable manifest so callers can tell "no songs reach any page"
+ * apart from "I don't know", and fail closed on the latter.
+ */
+export const highestSongPage = (manifest) => {
+  const pairs = manifest && Array.isArray(manifest.songPages) ? manifest.songPages : null;
+  if (!pairs || !pairs.length) return null;
+  let max = 0;
+  for (const entry of pairs) {
+    if (!Array.isArray(entry) || entry.length < 2) continue;
+    const page = Number(entry[1]);
+    if (Number.isFinite(page) && page > max) max = page;
+  }
+  return max > 0 ? max : null;
+};
+
 export const verifyStaged = (manifest, onDisk, activeTotalPages = 0) => {
   const problems = [];
   if (!manifest || !Array.isArray(manifest.files)) return { ok: false, problems: ["no-manifest"] };
@@ -208,11 +230,30 @@ export const verifyStaged = (manifest, onDisk, activeTotalPages = 0) => {
     problems.push(`count:${onDisk.size}!=${manifest.files.length}`);
   }
 
-  // ADDITIVE-ONLY, ENFORCED ON THE DEVICE. A book that SHRANK would invalidate every cached page
-  // above the new count, every prior SW cache, and every AirDropped copy — reject it outright
-  // rather than discover it during Mass.
-  if (activeTotalPages && total < Number(activeTotalPages)) {
-    problems.push(`shrank:${activeTotalPages}->${total}`);
+  // A BOOK MAY SHRINK — but only by dropping pages NO SONG POINTS AT.
+  //
+  // What this used to be: any `total < activeTotalPages` was refused outright. The stated fear was
+  // stale caches above the new count, but the fear that actually matters is narrower and concrete:
+  // a singer types a number and lands on a page that is no longer there. That can only happen if
+  // the shrink removes a page the SONG INDEX references.
+  //
+  // The blanket rule made the book a one-way ratchet. Appending three throwaway canary pages to
+  // prove the OTA worked permanently cost the ability to remove them again without a TestFlight
+  // round — which is the exact opposite of what an over-the-air songbook is for. The owner named
+  // this on 2026-08-05 and he is right: shrinking to the number of known songs must be allowed.
+  //
+  // So: compare against the incoming book's own song index. Every page a song can reach must still
+  // exist; trailing matter beyond the last song is the book's to drop. Fails CLOSED — a manifest
+  // with no usable songPages keeps the old strict behaviour, because a book that cannot say which
+  // pages its songs live on has not earned the benefit of the doubt.
+  const shrinking = activeTotalPages && total < Number(activeTotalPages);
+  if (shrinking) {
+    const lastSongPage = highestSongPage(manifest);
+    if (lastSongPage == null) {
+      problems.push(`shrank:${activeTotalPages}->${total}`);
+    } else if (total < lastSongPage) {
+      problems.push(`shrank-past-songs:${activeTotalPages}->${total}<${lastSongPage}`);
+    }
   }
 
   return { ok: problems.length === 0, problems };
