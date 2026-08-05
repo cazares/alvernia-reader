@@ -70,6 +70,7 @@ jobs:
           e2e/additiveGate.test.mjs
           e2e/bookResolve.test.mjs
           e2e/bookUpdate.test.mjs
+          e2e/bookOtaSeam.test.mjs
           e2e/sw-page-cache.test.mjs
           sync-worker/test/bookArming.test.mjs
 
