@@ -286,39 +286,33 @@ export const canApplyNow = (ctx) => {
     now = 0,
   } = ctx || {};
 
+  // OWNER DECISION, 2026-08-05 (third amendment): NO LOGIC AROUND DELIVERY.
+  //
+  // Every conditional that could DEFER an update is gone. What remains are the two things that are
+  // not policy but physics: you cannot apply a book you have not finished downloading, and you
+  // cannot swap the bundle out from under a WebView that has not signalled ready — that one renders
+  // as a permanent blank screen, which is the single worst outcome in this app.
+  //
+  // REMOVED, and why each one was there:
+  //   stale-ready       a `ready` flag older than 12 h was refused, so a copy staged at Saturday
+  //                     practice would not apply on Sunday (red team A1).
+  //   no-live-internet  required a successful check-in within 5 minutes as proof of real internet.
+  //                     This was described in-file as "THE LOAD-BEARING ONE".
+  //   mesh-peer         refused while a rehearsal or Mass was actively running, so the whole room
+  //                     would not blink at once.
+  //   shell-too-old     duplicated the staging gate; it stays in shouldStage, which is where a
+  //                     device is told not to download in the first place.
+  //
+  // ACCEPTED CONSEQUENCES, stated plainly and owned:
+  //   - The swap remounts the WebView, so an update CAN now land mid-Mass, on every device at once,
+  //     blanking each screen for a beat before the new book appears.
+  //   - A copy staged days ago now applies whenever it is next foregrounded, however old it is.
+  //
+  // The owner asked for this three times, in these words: "everyone should get same update",
+  // "remove any special logic of delivery", "NO LOGIC AROUND DELIVERY". Reverting any of it needs a
+  // new owner decision, not a "regression fix".
   if (!stagedReady) return { ok: false, reason: "not-ready" };
-  // A `ready` flag persisted from Saturday practice must not still be applicable in the church on
-  // Sunday (red team A1).
-  if (stagedReadyAt != null && now - stagedReadyAt > STAGED_READY_TTL_MS) {
-    return { ok: false, reason: "stale-ready" };
-  }
-  // THE LOAD-BEARING ONE. Proof of real, sustained internet. True at practice; false inside the
-  // church by definition; a parking-lot hotspot usually fails it too. No clock, no calendar.
-  if (lastCheckinOkAt == null || now - lastCheckinOkAt > LIVE_INTERNET_WINDOW_MS) {
-    return { ok: false, reason: "no-live-internet" };
-  }
-  // OWNER DECISION, 2026-08-03 (second amendment): AN UPDATE MUST NEVER REQUIRE THE USER TO STOP
-  // TOUCHING THE DEVICE.
-  //
-  // What was here: `recent-page-turn` (60 s after any page turn), `director-active` (10 min after a
-  // director snapshot), and a 90-minute director cold-boot cooldown. Together they meant a device
-  // someone was actually USING could defer forever — and the only way to land the update was to put
-  // the iPad down and wait. On a real device that reads as "the update is broken", because from the
-  // user's side it is: checking whether it arrived (typing a song number) IS a page turn, which
-  // re-armed the 60-second lockout on every single check. Looking at it prevented it.
-  //
-  // Gone deliberately. Reverting needs a new owner decision, not a "regression fix".
-  //
-  // ACCEPTED CONSEQUENCE, stated plainly: the swap remounts the WebView, so it can now land while
-  // someone is reading — a blank screen for a beat, then the new book. The owner was told and
-  // chose this over an update that never arrives.
-  //
-  // `meshPeerConnected` STAYS, and it is not a "wait quietly" gate: a connected mesh peer means a
-  // rehearsal or Mass is actively running and the whole room would blink at once. It clears on its
-  // own the moment the session ends — it never asks anything of the user.
-  if (meshPeerConnected) return { ok: false, reason: "mesh-peer" };
   if (!webReady) return { ok: false, reason: "bridge-not-ready" };
-  if (Number(minShellBuild) > Number(shellBuild)) return { ok: false, reason: "shell-too-old" };
   return { ok: true, reason: "ok" };
 };
 
