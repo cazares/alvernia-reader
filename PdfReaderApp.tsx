@@ -56,6 +56,26 @@ import versionJson from "./version.json";
 // ─────────────────────────────── Constants ──────────────────────────────────
 
 const BUILD_VERSION = String((versionJson as { buildNumber?: number }).buildNumber ?? "");
+
+/**
+ * Which KIND of device this is — "PAD" | "PHN" | "" (unknown).
+ *
+ * THE FRONTEND CANNOT WORK THIS OUT, which is why it is resolved here and injected. iPadOS 13+
+ * reports itself as Macintosh to any WebView: `navigator.platform` is "MacIntel" and the UA carries
+ * no "iPad" at all, so a browser-side check is a `maxTouchPoints` guess. `Platform.isPad` is the
+ * OS answering about itself.
+ *
+ * This exists because on 2026-08-05 an iPad still on build 393 was read as the owner's iPhone for
+ * over an hour: two native devices, and NOTHING anywhere — badge, check-in, or dashboard — could
+ * tell them apart. Both surfaces now carry it: the badge (for whoever is holding the device) and
+ * /fleet/checkin (for whoever is reading telemetry from somewhere else).
+ *
+ * Three letters, not two: "PH"/"PA" would be one edit apart, and this repo already learned that
+ * lesson the hard way (MIN_CODE_DISTANCE, src/bookUpdate.js) when a proposed operator code sat one
+ * digit from the soft-reset code. These get read aloud across a choir loft.
+ */
+const DEVICE_KIND: "PAD" | "PHN" | "" =
+  Platform.OS === "ios" ? ((Platform as { isPad?: boolean }).isPad ? "PAD" : "PHN") : "";
 const RELAY_BASE = "https://signovivo-sync.4j4982y8jp.workers.dev";
 
 // Hard ceiling on bundle resolution. Everything in resolveBundleUri touches the filesystem and it
@@ -265,6 +285,10 @@ export default function App() {
         deviceId,
         surface: "native",
         nativeBuild: Number(BUILD_VERSION) || 0,
+        // "PAD" | "PHN". `surface` already separates native from web; this separates two NATIVE
+        // devices, which nothing could do before — an iPad on an old build read as the owner's
+        // iPhone for an hour on 2026-08-05 because the deviceId is an opaque 6-char random.
+        ...(DEVICE_KIND ? { deviceKind: DEVICE_KIND } : {}),
         label: fleetLabelRef.current || "",
         // Native only knows director/follower — report "Director" or leave role blank so the
         // dashboard fills it from the seeded roster (never a wrong "Cantor" for a Bajo/Guitarrista).
@@ -1816,6 +1840,7 @@ export default function App() {
       [
         "window.__SIGNO_VINO_NATIVE_FILE_MODE = true;",
         `window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION = ${JSON.stringify(BUILD_VERSION)};`,
+        `window.__SIGNO_VIVO_DEVICE_KIND = ${JSON.stringify(DEVICE_KIND)};`,
         `window.__SIGNO_VINO_INITIAL_BOOK = ${JSON.stringify(initialBook)};`,
         "true;",
       ].join("\n"),

@@ -79,6 +79,15 @@ const buildNumber = (() => {
     return "";
   }
 })();
+/** Marketing version ("1.0.4"), so the badge can read `1.0.4 · 395b · 396w · 374p`. */
+const baseVersion = (() => {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(rootDir, "version.json"), "utf8"));
+    return String(v.baseVersion ?? "");
+  } catch {
+    return "";
+  }
+})();
 
 fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
@@ -114,6 +123,7 @@ const emitAppJs = (totalPages) => {
     .replaceAll("__BOOK_VERSION__", bookVersion)
     .replaceAll("__RELAY_BASE__", relayBase)
     .replaceAll("__BUILD_NUMBER__", buildNumber)
+    .replaceAll("__BASE_VERSION__", baseVersion)
     .replaceAll("__STANDARD_TOTAL_PAGES__", String(totalPages));
   fs.writeFileSync(path.join(distDir, "app.js"), appSource);
 };
