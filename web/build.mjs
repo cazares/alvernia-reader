@@ -860,7 +860,7 @@ const NOT_FETCHABLE = new Set(["_headers", "_redirects", "_routes.json", "_worke
  * The oldest shell allowed to DOWNLOAD this book. Both gates read it: `shouldStage` refuses with
  * `shell-too-old` before a byte moves, and `stageBook` refuses again after fetching the manifest.
  *
- * RAISED FROM 1 TO 398 on 2026-08-05, and this is a safety gate, not a nicety. TWO separate native
+ * RAISED TO 400 on 2026-08-05 (was 1, then briefly 398), and this is a safety gate, not a nicety. TWO separate native
  * fixes are required before a shell can survive an OTA, and a device missing EITHER is harmed by
  * being offered one:
  *
@@ -870,6 +870,9 @@ const NOT_FETCHABLE = new Set(["_headers", "_redirects", "_routes.json", "_worke
  *   <= 397  no allowingReadAccessToURL on the WebView, so an applied bundle can read index.html
  *           and is DENIED styles.css/app.js/lib/*. It renders as raw HTML, never reaches
  *           bridge-ready, and the watchdog quarantines a byte-perfect bundle and reverts.
+ *   <= 399  verifyStaged still refuses EVERY shrink, so the 371-page book this gate ships with
+ *           fails `shrank:374->371` — and a verify failure re-stages on the next check-in, so it
+ *           is a ~26 MB loop, not a clean refusal.
  *
  * It was briefly set to 395 here — correct for the first defect, WRONG for the second, which would
  * have admitted exactly the build (395) that was measured breaking on the owner's iPhone.
@@ -880,7 +883,7 @@ const NOT_FETCHABLE = new Set(["_headers", "_redirects", "_routes.json", "_worke
  * RAISE THIS whenever a book depends on native behaviour an older shell lacks. Lowering it is what
  * needs justification, not raising it.
  */
-const MIN_SHELL_BUILD = 398;
+const MIN_SHELL_BUILD = 400;
 
 const emitBundleManifest = () => {
   // Pass 1 — hash everything on disk except the manifest itself (it does not exist yet) and

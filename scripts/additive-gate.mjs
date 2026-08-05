@@ -88,15 +88,52 @@ export function compareManifests(baseline, next, opts = {}) {
   const basePages = pagesOf(baseline);
   const nextPages = pagesOf(next);
 
-  // 1. The book must never shrink. A shorter book invalidates every cached page above the new
-  //    count, every prior SW cache, and every AirDropped copy — and strands any song indexed there.
+  // 1. A book may shrink — but only by dropping pages NO SONG POINTS AT.
+  //
+  //    This was a blanket refusal. The fear that actually matters is narrow and concrete: a singer
+  //    types a number and lands on a page that is gone. That needs the shrink to remove a page the
+  //    SONG INDEX references. Trailing matter past the last song — canaries, blanks — is the book's
+  //    to drop, and forbidding that made the songbook a one-way ratchet: three throwaway canary
+  //    pages added to prove the OTA worked could then only be removed by a TestFlight round, which
+  //    is precisely what an over-the-air songbook exists to avoid.
+  //
+  //    Mirrors verifyStaged's rule in src/bookUpdate.js so the release gate and the DEVICE agree —
+  //    a shrink this gate waves through must be one every device will also accept. Fails CLOSED:
+  //    no usable songPages ⇒ the old strict behaviour.
+  const songFloor = (() => {
+    const pairs = Array.isArray(next.songPages) ? next.songPages : null;
+    if (!pairs || !pairs.length) return null;
+    let max = 0;
+    for (const e of pairs) {
+      if (!Array.isArray(e) || e.length < 2) continue;
+      const pg = Number(e[1]);
+      if (Number.isFinite(pg) && pg > max) max = pg;
+    }
+    return max > 0 ? max : null;
+  })();
+  const pageNumOf = (p) => {
+    const m = /page-(\d+)\.webp$/.exec(p);
+    return m ? Number(m[1]) : NaN;
+  };
+
   if (Number(next.totalPages) < Number(baseline.totalPages)) {
-    violations.push(
-      `book SHRANK: ${baseline.totalPages} → ${next.totalPages} pages. Existing page numbers are permanent.`,
-    );
+    if (songFloor == null) {
+      violations.push(
+        `book SHRANK: ${baseline.totalPages} → ${next.totalPages} pages, and the new manifest has no ` +
+          `usable songPages, so it cannot prove no song was stranded.`,
+      );
+    } else if (Number(next.totalPages) < songFloor) {
+      violations.push(
+        `book SHRANK PAST ITS SONGS: ${baseline.totalPages} → ${next.totalPages} pages, but a song ` +
+          `still points at page ${songFloor}. Typing that number would land on nothing.`,
+      );
+    }
   }
 
   // 2/3. Every published page must still exist, byte-for-byte. This is the #257 check.
+  //      Pages ABOVE the song floor are exempt from the "disappeared" half — that is the whole
+  //      point of rule 1 above — but a MODIFIED page is still a violation at any page number,
+  //      because a device that already cached it would silently keep the old bytes forever.
   const removed = [];
   const modified = [];
   for (const [p, h] of basePages) {
@@ -104,9 +141,18 @@ export function compareManifests(baseline, next, opts = {}) {
     if (nh === undefined) removed.push(p);
     else if (nh !== h) modified.push(p);
   }
-  if (removed.length) {
+  const strandedByRemoval = songFloor == null ? removed : removed.filter((p) => {
+    const n = pageNumOf(p);
+    return !Number.isFinite(n) || n <= songFloor;
+  });
+  if (strandedByRemoval.length) {
     violations.push(
-      `${removed.length} published page(s) DISAPPEARED: ${summarize(removed)}`,
+      `${strandedByRemoval.length} published page(s) DISAPPEARED: ${summarize(strandedByRemoval)}`,
+    );
+  } else if (removed.length) {
+    console.log(
+      `  note: dropped ${removed.length} trailing page(s) above the last song page (${songFloor}) — ` +
+        `no song points at them: ${summarize(removed)}`,
     );
   }
   if (modified.length) {

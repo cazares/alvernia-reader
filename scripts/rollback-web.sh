@@ -8,11 +8,14 @@
 # deploys, deletes, or changes anything. You run the printed step yourself.
 #
 # Cloudflare Pages keeps every deployment, so rollback is instant and does not need a
-# rebuild. wrangler 4.x has no `pages rollback` subcommand, so there are two paths:
+# rebuild. wrangler 4.x has no `pages rollback` subcommand, so there are three paths:
 #
-#   A) DASHBOARD (instant, recommended): open the project, find the last-good
-#      deployment, and click its "…" -> "Rollback to this deployment".
-#   B) CLI (rebuild a known-good commit and redeploy) — printed below.
+#   C) REPUBLISH FORWARD (the one to use when native devices are on the OTA): put the
+#      old CONTENT back and publish it at a HIGHER build number. Restoring an old
+#      deployment restores its old builtFromShellBuild, and decideBundle rule 7 then
+#      makes every native device ignore the rollback while signovivo.com obeys it.
+#   A) DASHBOARD (instant, WEB ONLY): find the last-good deployment, "Rollback to this".
+#   B) CLI (rebuild a known-good commit, WEB ONLY, bypasses the publish gates).
 #
 # Usage:  bash scripts/rollback-web.sh
 #
@@ -43,15 +46,44 @@ else
 fi
 
 cat <<EOF
+⚠  READ THIS FIRST IF ANY NATIVE DEVICE IS ON THE OTA.
+
+   A rollback that RESTORES AN OLD DEPLOYMENT (path A or B) also restores that book's
+   OLD builtFromShellBuild. decideBundle rule 7 (src/bookResolve.js) then compares it
+   against the build baked into the app and refuses anything at or below it — so the
+   iPads keep booting their BAKED book and silently ignore the rollback, while
+   signovivo.com correctly shows the old one. Web and native disagree, quietly.
+
+   For a fleet on the OTA, use path C. It publishes the SAME OLD CONTENT FORWARD at a
+   HIGHER build number, so rule 7 is never tripped and every device takes it.
+   A rollback here is a forward deploy of older bytes.
+
+   Paths A and B remain correct when only signovivo.com matters (no native fleet, or
+   the fleet is deliberately staying put).
+
 HOW TO ROLL BACK (pick one):
 
-  A) DASHBOARD — instant, most reliable, no rebuild:
+  C) REPUBLISH FORWARD — the one to use when native devices are on the OTA:
+       1. Put the OLD content back in the working tree (git checkout <GOOD_SHA> --
+          assets/ web/src/  — content only, NOT version.json).
+       2. node web/build.mjs
+       3. SKIP_NATIVE=1 bash scripts/release.sh
+          (bumps version.json, so builtFromShellBuild goes UP while the book goes BACK,
+           and every publish gate still runs — unlike path B)
+       4. Re-arm at the NEW bookVersion printed by the release:
+            bash scripts/ota-arm.sh --version bv_xxxxxxxx --devices '*' --allow-fleet
+          The pointer must name the bookVersion prod is actually serving, or stageBook
+          aborts with version-mismatch and nothing moves.
+
+  A) DASHBOARD — instant, no rebuild.  WEB ONLY; see the warning above:
        1. https://dash.cloudflare.com  ->  Workers & Pages  ->  $PROJECT  ->  Deployments
        2. Find the last deployment that was GOOD (before the bad one).
        3. Click its "…" menu  ->  "Rollback to this deployment".
      Online followers pick up the reverted shell within ~60s (stale-while-revalidate).
 
-  B) CLI — rebuild a known-good commit and redeploy to prod:
+  B) CLI — rebuild a known-good commit and redeploy to prod.  WEB ONLY, and it also
+     BYPASSES every publish gate (boot smoke, additive, consistency, completeness)
+     that release.sh runs. Prefer C:
        Recent commits on this branch:
 $(git log --oneline -6 | sed 's/^/         /')
 

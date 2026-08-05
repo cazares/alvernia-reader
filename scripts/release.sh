@@ -207,6 +207,22 @@ else
 fi
 npx wrangler pages deploy web/dist --project-name alvernia-reader --branch "$DEPLOY_BRANCH" --commit-dirty=true
 
+# REFRESH THE ADDITIVE BASELINE — production deploys only.
+#
+# additive-gate.mjs compares the next book against `git show HEAD:web/manifest-baseline.json`, and
+# NOTHING updated that file: not this script, not CI. On 2026-08-05 it was found two releases stale
+# (372 pages while prod served 374), so the gate was silently comparing against a book nobody was
+# running — which is exactly how an in-place page edit (the #257 defect it exists to catch) slips
+# through unnoticed.
+#
+# Written AFTER the deploy succeeds, so the baseline always means "what production is actually
+# serving". It is a tracked file: commit it with the release, or the next run compares against a
+# stale HEAD again. Staging never touches it — prod is the only thing devices download.
+if [ "$STAGING" != "1" ]; then
+  cp web/dist/bundle-manifest.json web/manifest-baseline.json
+  echo "         additive baseline refreshed -> $(node -e "process.stdout.write(require('./web/manifest-baseline.json').bookVersion)") (COMMIT THIS with the release)"
+fi
+
 if [ "$STAGING" = "1" ]; then
   echo "==> 6/6  DONE — staging preview deployed. Prove it on the canary iPad (open the preview URL"
   echo "         printed above, or signovivo.com?env=staging once promoted), THEN promote to prod:"

@@ -26,6 +26,8 @@ import {
   applyStagedBundle,
   shouldStage,
   canApplyNow,
+  verifyStaged,
+  highestSongPage,
   BUNDLE_MANIFEST_NAME,
   STAGED_READY_TTL_MS,
 } from "../src/bookUpdate.js";
@@ -310,4 +312,66 @@ test("a stale record still yields to the gates that outrank it", () => {
     "quarantined",
   );
   assert.equal(shouldStage({ ...base, webReady: false }).reason, "not-web-ready");
+});
+
+// ── A book may shrink to its song count (2026-08-05) ─────────────────────────
+//
+// The old rule refused ANY shrink, which made the songbook a one-way ratchet: three canary pages
+// appended to prove the OTA worked could then only be removed by a TestFlight round — the exact
+// thing an over-the-air songbook exists to avoid. The fear that actually matters is narrow: a
+// singer types a number and lands on a page that is gone. That requires removing a page the SONG
+// INDEX references. Trailing matter past the last song is the book's to drop.
+
+const bookOf = (totalPages, lastSongPage) => ({
+  bookVersion: BV_NEW, totalPages, pagePadWidth: 3, minShellBuild: 1,
+  songPages: [[2, 2], [99, Math.max(2, lastSongPage - 1)], [371, lastSongPage]],
+  files: [],
+});
+const onDiskFor = (m) => {
+  const map = new Map([["index.html", { size: 500, md5: "x" }]]);
+  for (let i = 1; i <= m.totalPages; i += 1) {
+    map.set(`books/standard/pages/page-${String(i).padStart(3, "0")}.webp`, { size: 9, md5: "y" });
+  }
+  m.files = [...map].map(([p, v]) => ({ p, n: v.size, m: v.md5 }));
+  return map;
+};
+
+test("THE RATCHET IS GONE: 374 -> 371 is allowed when no song points above 371", () => {
+  const m = bookOf(371, 371);
+  const v = verifyStaged(m, onDiskFor(m), 374);
+  assert.ok(v.ok, `a safe shrink was refused: ${JSON.stringify(v.problems)}`);
+});
+
+test("but a shrink that strands a song is still refused", () => {
+  const m = bookOf(365, 371); // a song still points at 371
+  const v = verifyStaged(m, onDiskFor(m), 374);
+  assert.equal(v.ok, false);
+  assert.ok(
+    v.problems.some((p) => String(p).startsWith("shrank-past-songs:")),
+    `expected shrank-past-songs, got ${JSON.stringify(v.problems)}`,
+  );
+});
+
+test("fails CLOSED: a manifest that cannot name its song pages may not shrink at all", () => {
+  for (const songPages of [undefined, null, [], "nope", [[1]], [["a", "b"]]]) {
+    const m = { ...bookOf(371, 371), songPages };
+    const v = verifyStaged(m, onDiskFor(m), 374);
+    assert.equal(v.ok, false, `unprovable manifest allowed to shrink: ${JSON.stringify(songPages)}`);
+    assert.ok(v.problems.some((p) => String(p).startsWith("shrank:")));
+  }
+});
+
+test("growing and staying level are unaffected", () => {
+  for (const [total, active] of [[374, 374], [375, 374], [374, 0]]) {
+    const m = bookOf(total, 371);
+    const v = verifyStaged(m, onDiskFor(m), active);
+    assert.ok(v.ok, `${active} -> ${total} refused: ${JSON.stringify(v.problems)}`);
+  }
+});
+
+test("highestSongPage reads the [song, page] pairs, and says null when it cannot", () => {
+  assert.equal(highestSongPage({ songPages: [[2, 2], [10, 371], [5, 40]] }), 371);
+  for (const bad of [null, undefined, {}, { songPages: [] }, { songPages: "x" }, { songPages: [[1]] }]) {
+    assert.equal(highestSongPage(bad), null, JSON.stringify(bad));
+  }
 });

@@ -79,9 +79,38 @@ test("FIRES: a published page disappeared", () => {
   assert.match(v, /omits page/); // and the self-consistency check catches it independently
 });
 
-test("FIRES: the book shrank", () => {
+// A book may shrink to its song count (2026-08-05). The old rule refused EVERY shrink, which made
+// the songbook a one-way ratchet: canary pages appended to prove an OTA landed could then only be
+// removed by a TestFlight round. The fear that actually matters is narrower — a singer types a
+// number and lands on a page that is gone — so the floor is the last page a song points at.
+// mk()'s songPages are [[1,1],[2,2]], so its floor is page 2.
+
+test("ALLOWS: shrinking to the last song page — the ratchet is gone", () => {
   const next = mk({ totalPages: 2, files: mk().files.filter((f) => !f.p.endsWith("page-003.webp")) });
-  assert.match(compareManifests(mk(), next).violations.join(" | "), /book SHRANK: 3 → 2/);
+  const r = compareManifests(mk(), next);
+  assert.deepEqual(r.violations, [], "dropping a page no song points at must be allowed");
+});
+
+test("FIRES: the book shrank PAST its songs", () => {
+  const next = mk({
+    totalPages: 1,
+    files: mk().files.filter((f) => !/page-00[23]\.webp/.test(f.p)),
+  });
+  assert.match(
+    compareManifests(mk(), next).violations.join(" | "),
+    /SHRANK PAST ITS SONGS/,
+    "a song still points at page 2 — typing that number would land on nothing",
+  );
+});
+
+test("FIRES: a shrink is refused outright when the manifest cannot name its song pages", () => {
+  const next = mk({
+    totalPages: 2,
+    songPages: [],
+    files: mk().files.filter((f) => !f.p.endsWith("page-003.webp")),
+  });
+  assert.match(compareManifests(mk(), next).violations.join(" | "), /book SHRANK/,
+    "fails CLOSED: no usable songPages means no proof nothing was stranded");
 });
 
 test("FIRES: a substituted edition where every song shifted (red team A6)", () => {
@@ -157,9 +186,15 @@ test("CI mode still catches a page DISAPPEARING — that is renderer-independent
   assert.ok(r.violations.some((v) => /DISAPPEARED/.test(v)));
 });
 
-test("CI mode still catches a SHRINKING book", () => {
-  const next = drifted({ totalPages: 2, files: drifted().files.filter((f) => !f.p.endsWith("page-003.webp")) });
-  assert.ok(compareManifests(mk(), next, { allowRendererDrift: true }).violations.some((v) => /SHRANK/.test(v)));
+test("CI mode still catches a book that shrank PAST its songs", () => {
+  const next = drifted({
+    totalPages: 1,
+    files: drifted().files.filter((f) => !/page-00[23]\.webp/.test(f.p)),
+  });
+  assert.ok(
+    compareManifests(mk(), next, { allowRendererDrift: true }).violations.some((v) => /SHRANK/.test(v)),
+    "the renderer-drift allowance must never excuse stranding a song",
+  );
 });
 
 test("CI mode still catches a SUBSTITUTED edition (songs moved)", () => {
