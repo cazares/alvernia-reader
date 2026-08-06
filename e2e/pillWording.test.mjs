@@ -99,7 +99,8 @@ test("both ways of taking the role name the same outcome", () => {
   const plain = (a) => a.replace(/[✕▶]\s*/, "").trim();
   assert.equal(plain(s.following.action), plain(s.nobody.action),
     "the two paths to directing describe different outcomes, but the outcome is identical");
-  assert.match(plain(s.nobody.action), /coro/i, "the action does not say what is being directed");
+  // Must name the ROLE, not just a verb — that is what "Tomar" lacked.
+  assert.match(plain(s.nobody.action), /director/i, "the action does not name the role being taken");
 });
 
 test("no label is a bare verb with no object", () => {
