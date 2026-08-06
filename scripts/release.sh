@@ -81,6 +81,29 @@ else
   node scripts/bump-build.mjs
   BUILD=$(node -e "process.stdout.write(String(require('./version.json').buildNumber))")
   echo "         build = $BUILD"
+
+  # A BUILD NUMBER IS SPENT THE MOMENT IT IS UPLOADED. App Store Connect refuses a duplicate, so the
+  # archive succeeds, ~10 minutes pass, Transporter rejects it, and you start over — twice in one
+  # evening on 2026-08-06 (412, then 413).
+  #
+  # Nothing in this repo has ever recorded what was UPLOADED, only what was BUILT, so the check came
+  # down to somebody remembering. The IPA on the Desktop is the best local evidence there is: this
+  # script writes exactly one per build, and a build that exists is a number that was very likely
+  # delivered. Treat its presence as "spent" and make the operator say otherwise.
+  IPA_OUT="$HOME/Desktop/SignoVivo-${BUILD}.ipa"
+  if [ -e "$IPA_OUT" ] && [ "${ALLOW_REUSED_BUILD:-0}" != "1" ]; then
+    echo "" >&2
+    echo "✖ Build $BUILD already has an IPA on your Desktop:" >&2
+    echo "    $IPA_OUT   ($(date -r "$IPA_OUT" '+%b %e %H:%M'))" >&2
+    echo "" >&2
+    echo "  If that one was uploaded, App Store Connect will REFUSE this build after the archive" >&2
+    echo "  finishes — about ten wasted minutes. Bump past it:" >&2
+    echo "    node scripts/bump-build.mjs && bash scripts/release.sh" >&2
+    echo "" >&2
+    echo "  If it was never uploaded and you mean to replace it:" >&2
+    echo "    ALLOW_REUSED_BUILD=1 bash scripts/release.sh" >&2
+    exit 1
+  fi
 fi
 
 echo "==> 2/6  Rebuild web bundle (bakes v$BUILD into the badge + a content-hashed cache version)"
