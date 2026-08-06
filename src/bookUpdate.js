@@ -409,7 +409,14 @@ export const stageBook = async (opts) => {
       if (!info || Number(info.size) !== Number(f.n)) {
         try {
           await fs.mkdirp(dest.slice(0, dest.lastIndexOf("/")));
-          await net.download(`${base}/${f.p}`, dest);
+          // ?v= FOR THE SAME REASON THE MANIFEST FETCH HAS ONE. Cloudflare holds these assets at
+          // s-maxage=604800 — seven days — and a book update rewrites files at UNCHANGED paths
+          // (app.js, index.html, sw.js on every version bump; any page whose content changed).
+          // Without a cache-buster the edge can hand back the PREVIOUS bytes at the same URL, which
+          // fails verifyStaged on md5, evicts the bundle, and re-downloads ~27 MB — forever, because
+          // the next attempt gets the same stale bytes. Keying on bookVersion makes every URL unique
+          // per book, so a device can never be served a file from the book it is replacing.
+          await net.download(`${base}/${f.p}?v=${encodeURIComponent(bookVersion)}`, dest);
         } catch {
           throw new Error(`download:${f.p}`);
         }

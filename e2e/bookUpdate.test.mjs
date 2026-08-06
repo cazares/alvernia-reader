@@ -409,7 +409,11 @@ const serverBundle = (pages = 2) => {
 const fakeNet = ({ manifest, body, failOn = null }) => ({
   fetchJson: async () => manifest,
   download: async (url, dest) => {
-    const rel = url.replace("https://signovivo.com/", "");
+    // Strip the ?v=<bookVersion> cache-buster the downloader appends (src/bookUpdate.js). A real
+    // origin keys on the path and ignores the query; this fake has to do the same or every
+    // download 404s. The assertion that the buster is actually SENT lives in its own test below —
+    // swallowing it here must not mean nobody checks for it.
+    const rel = url.replace("https://signovivo.com/", "").replace(/\?v=[^&]*$/, "");
     if (failOn === rel) throw new Error("net");
     if (!(rel in body)) throw new Error("404");
     fsRef.files.set(dest, body[rel]);
@@ -426,6 +430,29 @@ test("stageBook downloads, verifies, and reports ready", async () => {
   });
   assert.equal(rec.ready, true, JSON.stringify(rec));
   assert.equal(rec.totalPages, 3);
+});
+
+test("every downloaded file carries the ?v= cache-buster", async () => {
+  // Cloudflare holds these assets at s-maxage=604800 and a book update rewrites files at UNCHANGED
+  // paths, so a bare URL can be served the PREVIOUS bytes: verifyStaged fails on md5, the bundle is
+  // evicted, ~27 MB is pulled again, and the retry gets the same stale bytes. Forever.
+  //
+  // This lives in its own test because fakeNet STRIPS the query to resolve its body map — without
+  // an explicit assertion, deleting the cache-buster from src/bookUpdate.js would keep every other
+  // test in this file green. The fix is only as durable as the thing that notices it is gone.
+  const { body, manifest } = serverBundle(3);
+  fsRef = fakeFs();
+  const seen = [];
+  const net = fakeNet({ manifest, body });
+  const spy = { ...net, download: async (url, dest) => { seen.push(url); return net.download(url, dest); } };
+  const rec = await stageBook({
+    base: "https://signovivo.com", bookVersion: BV, fs: fsRef,
+    net: spy, now: () => 111, shellBuild: 384, activeTotalPages: 2,
+  });
+  assert.equal(rec.ready, true, JSON.stringify(rec));
+  assert.ok(seen.length > 0, "nothing was downloaded — the assertion below would pass vacuously");
+  const bare = seen.filter((u) => !u.includes(`?v=${BV}`));
+  assert.deepEqual(bare, [], `these downloaded without a cache-buster: ${bare.join(", ")}`);
 });
 
 test("stageBook REFUSES when the CDN hands back a different edition", async () => {
