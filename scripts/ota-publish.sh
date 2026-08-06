@@ -52,10 +52,16 @@ fi
 
 # ── 2. Keep the song index honest ────────────────────────────────────────────────────────────────
 # A page is not a song. songIndex is a hand-maintained [song, page] list (web/build.mjs reads it),
-# and check-book-consistency fails the build if a song points past the last page. When a book grows
-# by pages APPENDED AT THE END, the new songs are [N, N] and can be added mechanically. Anything
-# else — songs inserted in the middle, renumbered, removed — changes existing mappings and CANNOT
-# be guessed; the gates will catch it and this script says so rather than inventing entries.
+# and check-book-consistency fails the build if a song points past the last page. Both directions
+# are mechanical: a book that GREW gets [N, N] appended, a book that SHRANK gets every entry past
+# the last page dropped. Neither is a judgement call, so neither stops the run.
+#
+# This step deliberately does NOT decide whether the resulting book is publishable — it only keeps
+# the index arithmetically consistent with the PDF in front of it. The additive gate in
+# ota-deploy.sh is what refuses a shrink, and it stays. The split is about what is recoverable:
+# a wrong PDF here costs `git checkout assets/songbook.pdf`, while a shrink that reaches the iPads
+# strands offline copies inside a church with no internet. Cheap-to-undo gets out of your way;
+# impossible-to-undo does not.
 say "2/4  Song index"
 IDX_MAX=$(node -e '
   const fs=require("fs");
@@ -74,10 +80,23 @@ if [ "$NEW_PAGES" -gt "$IDX_MAX" ]; then
   ' "$INDEX" "$((IDX_MAX+1))" "$NEW_PAGES"
   echo "     ✅ index now covers $NEW_PAGES"
 elif [ "$NEW_PAGES" -lt "$IDX_MAX" ]; then
-  echo "  ✖ the book has $NEW_PAGES pages but the song index points at page $IDX_MAX." >&2
-  echo "    Songs were removed or renumbered — that is not something this script may guess." >&2
-  echo "    Edit $INDEX, then re-run." >&2
-  exit 1
+  echo "     dropping index entries past page $NEW_PAGES"
+  # Rewrites the whole array rather than regexing entries out one at a time, so the 10-per-line
+  # shape survives. Scoped to the RAW_SONG_INDEX literal: matching [n, n] across the entire file
+  # would also chew on anything else bracket-shaped that lands in here later.
+  node -e '
+    const fs=require("fs"); const [file,max]=process.argv.slice(1);
+    const s=fs.readFileSync(file,"utf8");
+    const block=/(const RAW_SONG_INDEX = \[)[\s\S]*?(\n\];)/;
+    if(!block.test(s)){ console.error("  ✖ could not find the RAW_SONG_INDEX literal in "+file); process.exit(1); }
+    const keep=[...s.match(block)[0].matchAll(/\[(\d+),\s*(\d+)\]/g)]
+      .map(x=>[+x[1],+x[2]]).filter(([,p])=>p<=+max);
+    const rows=[]; for(let i=0;i<keep.length;i+=10)
+      rows.push("  "+keep.slice(i,i+10).map(([g,p])=>`[${g}, ${p}]`).join(", ")+",");
+    fs.writeFileSync(file, s.replace(block, "$1\n"+rows.join("\n")+"$2"));
+    process.stdout.write(String(keep.length));
+  ' "$INDEX" "$NEW_PAGES" >/tmp/ota-index-kept || exit 1
+  echo "     ✅ index now covers $NEW_PAGES ($(cat /tmp/ota-index-kept) songs kept)"
 else
   echo "     ✅ already matches"
 fi
