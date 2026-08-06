@@ -617,11 +617,15 @@ const themeIndex = THEMES.map(({ id, label, emoji }) => ({ id, label, emoji }));
 // pdftotext, derive titles/themes/keys/intro/complexity, and emit the four
 // per-book manifests. Mirrors the original single-book build exactly.
 const buildStandardManifests = ({ pageFiles, pdfPath, bookOutDir }) => {
-  const songIndexSource = fs.readFileSync(path.join(rootDir, "src", "alverniaManual2SongIndex.js"), "utf8");
-  const songIndex = [];
-  for (const match of songIndexSource.matchAll(/\[(\d+),\s*(\d+)\]/g)) {
-    songIndex.push({ song: Number(match[1]), page: Number(match[2]) });
-  }
+  // A SONG NUMBER IS A PAGE NUMBER. Owner's call, 2026-08-05: "the reader should associate with
+  // PAGES not song numbers." This used to be parsed out of a hand-maintained [song, page] list in
+  // src/alverniaManual2SongIndex.js, which had to be edited by hand for every new book — the single
+  // thing standing between "here is a PDF" and a published songbook. It is now derived: page n is
+  // song n, for however many pages the PDF has. Nothing to maintain, and any PDF works.
+  //
+  // The shape is unchanged on purpose, so app.js and the native reader keep consuming it as they
+  // always have. What changed is only that song and page are now the same number.
+  const songIndex = pageFiles.map((_, i) => ({ song: i + 1, page: i + 1 }));
 
   // ─── PDF Text Extraction ──────────────────────────────────────────────────
 
