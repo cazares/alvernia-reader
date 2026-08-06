@@ -7,9 +7,9 @@
 #   scripts/ota-rollback.sh --to <sha>      # go back to a specific one
 #
 # GIT IS THE LEDGER. A "rollback ledger" mapping bookVersion → Cloudflare deployment URL was
-# proposed and is a WRITE-ONLY FILE — see below. It is also unnecessary: every published book is a
-# commit of assets/*.pdf plus src/alverniaManual2SongIndex.js, so the history already records every
-# book that ever shipped, in order, with its date and message. This script reads that.
+# proposed and is a WRITE-ONLY FILE — see below. It is also unnecessary: ota-deploy.sh commits
+# assets/songbook.pdf with every release, so the history already records every book that ever
+# shipped, in order, with its date and message. This script reads that.
 #
 # ROLLBACK IS REPUBLISH-FORWARD. There is no other kind, and this is not a shortcut:
 #
@@ -32,14 +32,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BOOK=assets/songbook.pdf
-INDEX=src/alverniaManual2SongIndex.js
 TARGET=""
 LIST=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --list) LIST=1; shift;;
     --to)   TARGET="$2"; shift 2;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0;;
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
@@ -115,8 +114,8 @@ echo "     from : $NOW_PAGES pages (published now)"
 echo "     to   : $TARGET_PAGES pages — $TARGET  $TARGET_SUBJ"
 [ -n "$TARGET_PAGES" ] || { echo "✖ $TARGET has no $BOOK" >&2; exit 1; }
 
-if [ -n "$(git status --porcelain "$BOOK" "$INDEX")" ]; then
-  echo "✖ $BOOK / $INDEX have uncommitted changes. Commit or discard them first —" >&2
+if [ -n "$(git status --porcelain "$BOOK")" ]; then
+  echo "✖ $BOOK has uncommitted changes. Commit or discard them first —" >&2
   echo "  a rollback must start from a known published book, not a half-edited one." >&2
   exit 1
 fi
@@ -124,9 +123,13 @@ fi
 # ── Restore the old book + its song index ────────────────────────────────────────────────────────
 # Restore from the path the book HAD at that commit — pre-rename targets are not at $BOOK — and
 # write it to today's name. git checkout cannot rename, so the PDF goes through git show.
+# The song index is NOT restored. src/alverniaManual2SongIndex.js stopped being read on 2026-08-05
+# — web/build.mjs derives song n = page n from the render — so checking it out changed nothing about
+# the published book. Worse, it was self-defeating: that write left the file dirty, and the dirty
+# check above (which used to include it) then refused the NEXT rollback until someone committed a
+# file with no effect on anything.
 git show "${TARGET}:${TARGET_PATH}" > "$BOOK"
-git checkout "$TARGET" -- "$INDEX"
-echo "     restored $BOOK (from ${TARGET_PATH}) and $INDEX @ $TARGET"
+echo "     restored $BOOK (from ${TARGET_PATH}) @ $TARGET"
 
 # The restored book goes back EXACTLY as it shipped, page 1 included. The version that lived here
 # rebuilt page 1 and re-stamped it with today's date, by grafting a title page out of an old commit
