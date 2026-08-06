@@ -1188,6 +1188,21 @@ const syncPillState = () => {
   return "following";
 };
 
+// PAGE 1 ONLY. The badge answers "which build and which book is this device holding?" — a question
+// asked once while checking a device, not something anyone needs floating over the music for the
+// other 372 pages. Page 1 is where a person already looks to identify the book, so it costs nothing
+// there and stops being clutter everywhere else.
+//
+// A hoisted declaration, and it re-reads the element each time. renderPage calls this from ~2600
+// lines above where the badge is built, and a `const` arrow would sit in the temporal dead zone if
+// anything ever calls renderPage at module top level. Today nothing does; this makes that a
+// non-question instead of a trap for whoever adds the first one.
+const BUILD_BADGE_PAGE = 1;
+function syncBuildBadgeVisibility() {
+  const el = document.getElementById("build-badge");
+  if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE);
+}
+
 const renderDirectorModeBadge = () => {
   const isDirector = state.nativeSyncRole === "director";
   // Drive the control layout: followers (web + any non-director native) get ⟳ resync + ♪;
@@ -1542,6 +1557,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     }
 
     state.currentPage = nextPage;
+    syncBuildBadgeVisibility();
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
     if (loadState === "timeout") {
@@ -4133,7 +4149,7 @@ if (buildBadge) {
   buildBadge.textContent = baseVersion
     ? `v${baseVersion} (${buildLabel})${kindSuffix}`
     : `${buildLabel}${kindSuffix}`;
-  buildBadge.classList.add("is-shown");
+  syncBuildBadgeVisibility();
 }
 
 // Screen wake lock (P7): keep the screen awake while the reader is open, so a follower's
