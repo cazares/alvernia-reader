@@ -29,7 +29,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --devices) PASSTHRU+=("$1" "$2"); shift 2;;
     --dry-run|--no-arm) PASSTHRU+=("$1"); shift;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     -*) echo "unknown arg: $1" >&2; exit 2;;
     *) SRC="$1"; shift;;
   esac
