@@ -151,6 +151,21 @@ button:disabled {
 
 /* Director badge — tappable EXIT button. Top-LEFT so it never sits behind the top-right ♪/⌕
    cluster (⟳ is hidden for directors, so the left corner is free). Shows only in director mode. */
+/* State tints. Following is deliberately the quietest thing on screen — it is the normal case and
+   must not compete with the music. Nobody-directing is the only one that raises its voice, because
+   it is the only one that needs a human to act. */
+.director-mode-badge.is-following { background: rgba(26, 26, 46, 0.22); }
+.director-mode-badge.is-nobody {
+  background: rgba(180, 83, 9, 0.82);   /* amber — attention, not alarm; red is for real failures */
+  animation: sv-pill-in 220ms ease-out;
+}
+@keyframes sv-pill-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.director-mode-badge.is-nobody .director-mode-badge-title { color: #fff; }
+.director-mode-badge.is-nobody .director-mode-badge-exit { color: rgba(255, 255, 255, 0.92); }
+/* No action line while following: the state is the information, and a permanently visible
+   "take control" invites the mis-tap the confirm dialog then has to catch. */
+.director-mode-badge.is-following .director-mode-badge-exit { display: none; }
+
 .director-mode-badge {
   position: absolute;
   top: max(0.55rem, env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */

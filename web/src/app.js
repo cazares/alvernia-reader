@@ -1155,13 +1155,66 @@ const flashSongDisplay = (msg, kind) => {
 
 // The native shell reports director/follower role over the bridge; the only surviving
 // surface is the tiny "Modo activo / DIRECTOR" badge — show it when this device directs.
+// ── The sync pill: what the ROOM is doing, and the control for it ───────────────────────────────
+//
+// The director role here is not a permission, it is the state of the room: one iPad drives and the
+// rest follow. A permission can hide behind a gate; a room state has to be legible from every seat.
+//
+// It used to be legible from exactly one. The badge appeared only for the director, so the state
+// most worth shouting about — NOBODY IS DIRECTING — rendered identically to everything being fine:
+// follower controls, no badge, and the ⟳ spinner going quiet, which reads as "connected, settled".
+// Eight iPads could sit through a whole Mass each turning its own pages with nothing on any screen
+// saying the seat was empty. Every signal needed to know already crossed the native bridge; the web
+// simply threw it away.
+const SYNC_PILL = {
+  directing: { cls: "", title: "DIRECTOR", action: "✕ Salir" },
+  following: { cls: "is-following", title: "SIGUIENDO", action: "" },
+  nobody:    { cls: "is-nobody", title: "NADIE DIRIGE", action: "▶ Dirigir" },
+};
+
+// A director's mesh heartbeat is ~1s. Well past that but well under a page's worth of silence, so a
+// brief radio hiccup does not flash "nobody is directing" at the choir mid-hymn.
+const DIRECTOR_SEEN_WINDOW_MS = 15000;
+let lastDirectorPageAt = 0;
+let lastMeshStatus = "";
+
+const syncPillState = () => {
+  if (state.nativeSyncRole === "director") return "directing";
+  if (Date.now() - lastDirectorPageAt < DIRECTOR_SEEN_WINDOW_MS) return "following";
+  // ONLY the native mesh's own verdict flips this to "nobody". Guessing from silence would light
+  // the pill during the ~10s of boot discovery on every device, every Sunday, and a warning that
+  // cries wolf at the start of every Mass is one nobody reads by the third week.
+  if (lastMeshStatus === "self-directed") return "nobody";
+  return "following";
+};
+
 const renderDirectorModeBadge = () => {
   const isDirector = state.nativeSyncRole === "director";
   // Drive the control layout: followers (web + any non-director native) get ⟳ resync + ♪;
   // a director gets ♪ + ⌕ search. Default "follower" so signovivo.com is right from boot.
   document.documentElement.dataset.role = isDirector ? "director" : "follower";
   if (!directorModeBadge) return;
-  directorModeBadge.classList.toggle("is-hidden", !isDirector);
+  // Native shell only. On signovivo.com there is no mesh and no role to take, so the pill would be
+  // describing a room the viewer is not in.
+  const inShell = NATIVE_FILE_MODE || hasNativeBridge();
+  if (!inShell) {
+    directorModeBadge.classList.add("is-hidden");
+    return;
+  }
+  const st = SYNC_PILL[syncPillState()];
+  directorModeBadge.classList.remove("is-following", "is-nobody");
+  if (st.cls) directorModeBadge.classList.add(st.cls);
+  directorModeBadge.classList.remove("is-hidden");
+  const titleEl = document.getElementById("sync-pill-title");
+  const actionEl = document.getElementById("sync-pill-action");
+  if (titleEl) titleEl.textContent = st.title;
+  if (actionEl) actionEl.textContent = st.action;
+  directorModeBadge.setAttribute(
+    "aria-label",
+    st.title === "DIRECTOR" ? "Estás dirigiendo. Tocar para salir."
+      : st.title === "NADIE DIRIGE" ? "Nadie está dirigiendo. Tocar para dirigir."
+      : "Estás siguiendo al director. Tocar para tomar el control.",
+  );
 };
 
 // ── Sync "working" indicator ──────────────────────────────────────────────────
@@ -1396,11 +1449,20 @@ const applyNativeSyncEvent = async (payload) => {
 
     // Connection lifecycle from the native mesh → drive the "working" spinner.
     if (event.type === "state") {
-      setSyncWorking(String(event.status || ""));
+      const status = String(event.status || "");
+      lastMeshStatus = status;
+      // "self-directed" is the mesh saying it waited its full timeout and found no director. It was
+      // reaching the web already and being dropped on the floor.
+      setSyncWorking(status);
+      renderDirectorModeBadge();
       return;
     }
 
     if (event.type === "page" && Number.isFinite(event.page)) {
+      // A page arriving over the mesh is proof a director is alive right now — the only such proof
+      // this layer gets, and enough to keep the pill honest without any new plumbing.
+      lastDirectorPageAt = Date.now();
+      renderDirectorModeBadge();
       // Single-book app: ignore any event.book and just render the director's page.
       renderPage(event.page, { pushToHistory: false });
     }
@@ -2898,13 +2960,25 @@ const bindReaderEvents = () => {
   // ⛶ fullscreen fab (bottom-right) — same toggle as the legacy hidden button
   if (fullscreenFab) fullscreenFab.addEventListener("click", () => { haptic(); toggleFullscreen().catch(() => {}); });
 
-  // Director badge = tap-to-EXIT director mode (native only — the badge never shows on the web).
-  // Confirm first so a mid-Mass mistap doesn't drop the director; the shell does the soft reset.
+  // ONE control, three meanings — whatever the pill is showing is what tapping it acts on. The
+  // affordance sits on the information, so nobody has to go looking in a modal named "IR A CANTO"
+  // for the way to direct a choir.
+  //
+  // Taking the role goes through the native confirm (request-director → onDirectorCode), which is
+  // where the "someone is already directing" warning lives. Stepping down keeps its own confirm so
+  // a mid-Mass mistap cannot silently drop the director.
   if (directorModeBadge) directorModeBadge.addEventListener("click", () => {
     haptic();
-    if (window.confirm("¿Salir del modo director?\n\nDejarás de dirigir y volverás a seguidor.")) {
-      postNativeBridge({ type: "exit-director" });
+    const st = syncPillState();
+    if (st === "directing") {
+      if (window.confirm("¿Salir del modo director?\n\nDejarás de dirigir y volverás a seguidor.")) {
+        postNativeBridge({ type: "exit-director" });
+      }
+      return;
     }
+    // "following" and "nobody" both land here; native decides which dialog to show, because only it
+    // knows whether a director is live on the mesh RIGHT NOW.
+    postNativeBridge({ type: "request-director" });
   });
 
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });
