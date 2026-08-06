@@ -139,12 +139,30 @@ else
 
   cp ios/Pods/Manifest.lock ios/Podfile.lock         # pod-guard workaround (Ruby 4.0.1 pod install is broken)
   # Bake the REAL standard-director codes (gitignored PII) into the RN bundle for this archive only.
+  # FAIL CLOSED. This used to print a WARNING and archive anyway, producing an IPA in which nobody
+  # can become director — which is exactly how the 2026-07-01 outage reached Mass. The build looks
+  # perfect, installs perfectly, and rejects every code typed, because PdfReaderApp.tsx reads
+  # `standardDirectorCodes || []`. A warning inside a ten-minute log is not a signal anyone sees.
+  # verify-director-codes.mjs also catches the quiet ways a PRESENT file is still unusable: a
+  # misspelled key, an empty list, or a super-admin code missing from the standard list (rejected at
+  # PdfReaderApp.tsx:820 before the super-admin branch is ever reached).
   if [ -f director-codes.private.json ]; then
+    node scripts/verify-director-codes.mjs director-codes.private.json || {
+      echo "         ✖ refusing to archive a build nobody can direct. Fix the file above, or set" >&2
+      echo "           ALLOW_NO_DIRECTOR_CODES=1 if you deliberately want a director-less build." >&2
+      exit 1; }
     cp director-codes.json director-codes.committed.bak
     cp director-codes.private.json director-codes.json
     echo "         baked director-codes.private.json into the bundle"
+  elif [ "${ALLOW_NO_DIRECTOR_CODES:-0}" = "1" ]; then
+    echo "         ⚠️  director-codes.private.json missing, ALLOW_NO_DIRECTOR_CODES=1 — NOBODY CAN DIRECT this build"
   else
-    echo "         WARNING: director-codes.private.json missing — standard-director entry disabled in this build"
+    echo "         ✖ director-codes.private.json is missing." >&2
+    echo "           Archiving without it yields an IPA where NOBODY CAN BECOME DIRECTOR — the app" >&2
+    echo "           builds and installs fine and silently rejects every code. That is the" >&2
+    echo "           2026-07-01 Mass outage. It lives only in the main checkout and is gitignored." >&2
+    echo "           Deliberate? ALLOW_NO_DIRECTOR_CODES=1 bash scripts/release.sh" >&2
+    exit 1
   fi
   rm -rf build
   if ! xcodebuild -workspace ios/SignoVivo.xcworkspace -scheme SignoVivo -configuration Release \
