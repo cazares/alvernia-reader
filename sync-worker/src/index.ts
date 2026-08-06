@@ -7,7 +7,7 @@
 // Endpoints (see README.md):
 //   GET  /r/:room/subscribe  (WebSocket)  — followers; receive current snapshot + every update
 //   GET  /r/:room/state                   — followers; poll fallback / initial paint (tiny JSON)
-//   POST /r/:room/publish    (auth)       — director; set the current page, fan out to subscribers
+//   POST /r/:room/publish    (open)       — director; set the current page, fan out to subscribers
 //
 import { DurableObject } from "cloudflare:workers";
 // Pure arming decision, kept in plain JS so node --test can cover it without a worker runtime.
@@ -22,12 +22,9 @@ export interface Env {
   RELAY_DIRECTOR_TOKEN: string;
   /** Comma-separated allow-list for CORS on /state. "*" allows all (fine — no credentials). */
   ALLOWED_ORIGINS?: string;
-  /** Comma-separated transmitter access codes accepted via the `X-Director-Code` header.
-   *  Gates who may publish (page numbers only). Any listed code may publish. */
-  TRANSMITTER_CODES?: string;
   /** Secret gating the /fleet readiness dashboard + roster (which expose choir phone numbers). Set
-   *  via `wrangler secret put FLEET_DASHBOARD_KEY`. Deliberately NOT a transmitter code — those are
-   *  hardcoded in this PUBLIC repo, so gating PII behind them would expose every number. */
+   *  via `wrangler secret put FLEET_DASHBOARD_KEY`. This one STAYS: it guards a page listing the
+   *  parish's devices and phone numbers, which is a different thing from a page number. */
   FLEET_DASHBOARD_KEY?: string;
 
   // ── Songbook OTA arming (docs/choir-pdf-distribution-plan.md §5.3) ─────────
@@ -410,7 +407,7 @@ function corsHeaders(origin: string | null, env: Env): Record<string, string> {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     // X-Director-Code is required so the web app (inside the native file:// WebView, or
     // signovivo.com) can POST /publish without the preflight stripping the auth header.
-    "Access-Control-Allow-Headers": "Authorization,Content-Type,X-Director-Code",
+    "Access-Control-Allow-Headers": "Authorization,Content-Type",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -423,18 +420,10 @@ function json(data: unknown, status: number, cors: Record<string, string>): Resp
   });
 }
 
-// The valid transmitter / director access codes — gate /publish (directing). Override via
-// env.TRANSMITTER_CODES (comma-separated). Any listed code may publish page numbers.
-function validTransmitterCodes(env: Env): Set<string> {
-  // Source of truth is the TRANSMITTER_CODES secret (`wrangler secret put`). NO plaintext fallback —
-  // the real phone-number director codes must never live in this PUBLIC repo. Fail-closed if unset.
-  return new Set(
-    (env.TRANSMITTER_CODES || "")
-      .split(",")
-      .map((c) => c.trim())
-      .filter(Boolean),
-  );
-}
+// There is no transmitter/director code any more. TRANSMITTER_CODES and its lookup were deleted
+// on 2026-08-06 along with the /publish gate that used them — see the publish route below. The
+// secret can be removed with `npx wrangler secret delete TRANSMITTER_CODES`; leaving it set is
+// harmless, nothing reads it.
 
 const ROUTE = /^\/r\/([A-Za-z0-9_-]{1,64})\/(subscribe|publish|state|unlock)$/;
 
@@ -844,18 +833,26 @@ export default {
         if (request.method !== "POST") {
           return json({ ok: false, error: "method_not_allowed" }, 405, cors);
         }
-        // Authorized by EITHER the bearer token (scripts/testing) OR a valid
-        // transmitter access code in X-Director-Code (the native app — matches the
-        // memorable director codes already used in-app).
-        const auth = request.headers.get("Authorization") || "";
-        const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-        const code = (request.headers.get("X-Director-Code") || "").replace(/[^0-9]/g, "");
-        const validCodes = validTransmitterCodes(env);
-        const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && token === env.RELAY_DIRECTOR_TOKEN;
-        const codeOk = code.length > 0 && validCodes.has(code);
-        if (!tokenOk && !codeOk) {
-          return json({ ok: false, error: "unauthorized" }, 401, cors);
-        }
+        // NO CODE. Publishing a page number is open.
+        //
+        // This gate matched X-Director-Code against the TRANSMITTER_CODES secret, fail-closed with
+        // no fallback — and it was a trap with no upside. The code the app sends is a constant in
+        // the binary; the set it is checked against is a secret nobody can read from the repo.
+        // Nothing anywhere verified they matched, and on 2026-08-06 they did not: DIRECTOR_CODE
+        // "333444555" was rejected by prod. Cutting that build would have frozen every
+        // signovivo.com follower for a whole Mass, announced only by a one-shot banner.
+        //
+        // What it was protecting is a PAGE NUMBER, in a room whose name ships in a public bundle,
+        // for a congregation that can see the same number by looking up. What it cost was an
+        // invisible coupling between a compiled constant and a Cloudflare secret that had to be
+        // kept in sync by memory, forever, or the web half of the app died silently.
+        //
+        // Removed at the owner's instruction, 2026-08-06. The in-church mesh never touched this
+        // path — that is Multipeer, peer-to-peer, no relay. Accepted: anyone who knows the worker
+        // URL and the room can push a page to web followers.
+        //
+        // The fleet dashboard is deliberately NOT changed: FLEET_DASHBOARD_KEY guards a page
+        // listing the parish's devices, which is a different thing from a page number.
         // Reject oversized bodies early (a snapshot is a few hundred bytes). Cloudflare's own
         // body-size limit otherwise rejects request.json() with a non-SyntaxError that would
         // escape as an HTML 500; this returns a clean 413 first.

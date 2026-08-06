@@ -13,14 +13,13 @@ const RELAY_BASE = "https://signovivo-sync.4j4982y8jp.workers.dev";
 const RELAY_ROOM = "alvernia-main";
 const PROTOCOL_VERSION = 1;
 
-// The credential sent as X-Director-Code so the relay authorizes this device's publishes. It's set
-// to the code the director actually entered — a real director number — via setRelayPublishCode()
-// when they become director. No code is hardcoded here; any valid transmitter code may publish.
-let relayPublishCode = "";
+// NO CREDENTIAL IS SENT. /publish is open as of 2026-08-06 — the relay was checking a header
+// against a Cloudflare secret that nothing kept in sync with the constant in the binary, and on
+// that day they had already diverged. See sync-worker/src/index.ts on the publish route.
 
 // One-time bridge to the director's UI when the relay REJECTS this device's publish. A resolved
-// fetch() is NOT proof of success: the relay authorizes every publish by X-Director-Code, so an
-// unknown/retired code (HTTP 401) comes back !ok WITHOUT throwing. Left unchecked that failure is
+// fetch() is NOT proof of success: a rejected publish (401/403 — from a WAF rule, a future gate, or
+// anything else upstream) comes back !ok WITHOUT throwing. Left unchecked that failure is
 // swallowed silently — the director's
 // app shows nothing while EVERY signovivo.com follower freezes on the last page for the whole Mass
 // (the relay is the only sync path to web phones; the Multipeer mesh doesn't reach them). The native
@@ -33,10 +32,22 @@ export const setRelayAuthErrorHandler = (fn) => {
 };
 let authErrorNotified = false;
 
-export const setRelayPublishCode = (code) => {
-  relayPublishCode = String(code || "").replace(/[^0-9]/g, "");
-  // A fresh code entry is a NEW attempt: re-arm the one-time auth warning so, if this code is
-  // also rejected, the director is told again (and a corrected code that now works never warns).
+// WHETHER THIS DEVICE MAY PUBLISH AT ALL — a local gate, not a credential.
+//
+// This replaces setRelayPublishCode, and it is load-bearing for a reason that is easy to miss.
+// Clearing the code on step-down was not bookkeeping: publishes are coalesced, so an in-flight one
+// can drain a final straggler frame AFTER a director has stepped down. With the old gate that
+// straggler was REJECTED by the relay (401) and never applied. Now that /publish is open it would
+// SUCCEED, shoving the ex-director's stale page onto every web follower — the exact thing the old
+// code was quietly preventing.
+//
+// So the refusal moved to where it should always have been: this device decides locally whether it
+// is allowed to publish, instead of depending on a server to say no.
+let publishEnabled = false;
+export const setRelayPublishing = (enabled) => {
+  publishEnabled = Boolean(enabled);
+  // A role change is a NEW attempt: re-arm the one-time warning so a genuine later rejection
+  // (403, a WAF rule, anything upstream) can still surface once.
   authErrorNotified = false;
 };
 
@@ -72,10 +83,7 @@ const doPublish = async (payload) => {
   try {
     const res = await fetch(`${RELAY_BASE}/r/${RELAY_ROOM}/publish`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Director-Code": relayPublishCode,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: controller ? controller.signal : undefined,
     });
@@ -109,6 +117,10 @@ const doPublish = async (payload) => {
 };
 
 export const publishPageToRelay = (page, totalPages = 0, context = {}) => {
+  // A device that is not directing never publishes. Checked FIRST, before the payload is built or
+  // anything is coalesced, so a straggler frame draining after a step-down is dropped here rather
+  // than landing on every web follower. /publish is open now — nothing upstream will refuse it.
+  if (!publishEnabled) return;
   const payload = {
     v: PROTOCOL_VERSION,
     page: Math.max(1, Number(page) || 1),

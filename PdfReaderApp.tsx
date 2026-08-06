@@ -34,7 +34,7 @@ import {
   startNearbyDirector,
   startNearbyFollower,
 } from "./src/nearbyDirectorSync";
-import { publishPageToRelay, setRelayPublishCode, setRelayAuthErrorHandler } from "./src/directorRelaySync";
+import { publishPageToRelay, setRelayPublishing, setRelayAuthErrorHandler } from "./src/directorRelaySync";
 import { STORAGE_KEYS, type BookId } from "./src/offlineBooks";
 import {
   decideBundle,
@@ -747,11 +747,12 @@ export default function App() {
     roleRef.current = "follower";
     explicitTransmitterRef.current = false;
     stopDirectorHeartbeat(); // a follower must never re-broadcast
-    // C3: clear the relay publish code on step-down. directorRelaySync coalesces publishes and an
-    // in-flight one can drain a final straggler frame AFTER we've stepped down; with no code it 401s
-    // (rejected, never applied) instead of shoving the ex-director's stale page onto web followers.
-    // becomeDirector re-sets the code, so a legit re-direct is unaffected.
-    setRelayPublishCode("");
+    // C3: stop publishing on step-down. Publishes are coalesced, so an in-flight one can drain a
+    // final straggler frame AFTER we have stepped down. That used to be caught by the relay (no
+    // code → 401 → never applied); /publish is open now, so the refusal has to happen HERE or the
+    // ex-director's stale page lands on every web follower. becomeDirector re-enables it, so a
+    // legitimate re-direct is unaffected.
+    setRelayPublishing(false);
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower");
       if (myGen !== roleGenerationRef.current) return; // superseded while persisting
@@ -779,9 +780,9 @@ export default function App() {
       // Claim this role transition; a later flip bumps the generation and supersedes us.
       const myGen = ++roleGenerationRef.current;
       becomeDirectorInFlightRef.current = true;
-      // The relay authorizes this director's publishes with the exact code they entered.
-      // Set BEFORE any broadcast.
-      setRelayPublishCode(code);
+      // Allow this device to publish. BEFORE any broadcast, or the first frame is dropped by the
+      // gate in directorRelaySync. No credential is involved — the relay stopped authorizing.
+      setRelayPublishing(true);
       dbgLog("become:director", { wasFollower: roleRef.current === "follower", syncAvailable });
       if (!syncAvailable) {
         // No mesh on this device — still act as an online transmitter to the relay.
