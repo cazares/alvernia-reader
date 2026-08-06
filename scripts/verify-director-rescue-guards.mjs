@@ -32,7 +32,7 @@ import path from "node:path";
 
 const REPO = path.resolve(process.argv[2] || process.cwd());
 const FILES = ["PdfReaderApp.tsx", "web/src/app.js", "web/src/index.html", "web/src/styles.css", "src/offlineBooks.ts", "ios/SignoVivo/DirectorSyncModule.swift"];
-const TESTS = ["e2e/directorButton.test.mjs", "e2e/directorResume.test.mjs", "e2e/rescueAndDiagnostics.test.mjs"];
+const TESTS = ["e2e/directorButton.test.mjs", "e2e/directorResume.test.mjs", "e2e/rescueAndDiagnostics.test.mjs", "e2e/pillWording.test.mjs"];
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "sv-guardmut-"));
 for (const rel of [...FILES, ...TESTS]) {
@@ -45,8 +45,8 @@ const restore = () => FILES.forEach((f) => fs.writeFileSync(path.join(ROOT, f), 
 const sub = (a, b) => (s) => s.replace(a, b);
 
 const MUTATIONS = [
-  ["director button no longer gated on the native shell (appears on public signovivo.com)", "web/src/app.js",
-   sub('!(inShell && state.nativeSyncRole !== "director")', '!(state.nativeSyncRole !== "director")')],
+  ["the sync PILL no longer gated on the native shell (appears on public signovivo.com)", "web/src/app.js",
+   sub("  if (!inShell) {\n    directorModeBadge.classList.add(\"is-hidden\");\n    return;\n  }", "")],
   ["rescue block no longer gated on the shell (panic switches on the public web)", "web/src/app.js",
    sub('rescueWrap.classList.toggle("is-hidden", !inShell)', 'rescueWrap.classList.toggle("is-hidden", false)')],
   ["a rotated DIRECTOR_CODE leaks into the public web bundle", "web/src/app.js",
