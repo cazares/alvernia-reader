@@ -120,50 +120,21 @@ if [ "${SKIP_NATIVE:-0}" = "1" ]; then
   echo "==> 4/6  SKIP_NATIVE=1 -> skipping the native archive"
 else
   echo "==> 4/6  Build native IPA (Release archive + export) — logging to $LOG"
-  # Crash-safe cleanup (audit A4 + B-RESTORE). The archive swaps gitignored PII (real
-  # director phone numbers) into the TRACKED director-codes.json and overwrites the
-  # TRACKED ios/Podfile.lock. cleanup_release restores BOTH; it is idempotent (keyed on
-  # the backup's existence) and ALWAYS returns 0, so it can never abort the script under
-  # `set -e`. It is armed via `trap ... EXIT INT TERM` BEFORE any mutation, so a Ctrl-C,
-  # crash, or error at ANY point — including the ~10-minute archive — can never leave real
-  # phone numbers in the committable file (the previous version had no trap: a mid-archive
-  # Ctrl-C left PII staged for the next `git add`).
+  # Crash-safe cleanup. The archive overwrites the TRACKED ios/Podfile.lock; this restores it.
+  # Idempotent and ALWAYS returns 0, so it can never abort the script under `set -e`. Armed via
+  # `trap ... EXIT INT TERM` BEFORE any mutation, so a Ctrl-C or crash mid-archive still restores.
+  # (It also used to restore director-codes.json, which no longer gets swapped — see below.)
   cleanup_release() {
-    if [ -f director-codes.committed.bak ]; then
-      mv -f director-codes.committed.bak director-codes.json
-    fi
     git checkout -- ios/Podfile.lock 2>/dev/null || true
     return 0
   }
   trap cleanup_release EXIT INT TERM
 
   cp ios/Pods/Manifest.lock ios/Podfile.lock         # pod-guard workaround (Ruby 4.0.1 pod install is broken)
-  # Bake the REAL standard-director codes (gitignored PII) into the RN bundle for this archive only.
-  # FAIL CLOSED. This used to print a WARNING and archive anyway, producing an IPA in which nobody
-  # can become director — which is exactly how the 2026-07-01 outage reached Mass. The build looks
-  # perfect, installs perfectly, and rejects every code typed, because PdfReaderApp.tsx reads
-  # `standardDirectorCodes || []`. A warning inside a ten-minute log is not a signal anyone sees.
-  # verify-director-codes.mjs also catches the quiet ways a PRESENT file is still unusable: a
-  # misspelled key, an empty list, or a super-admin code missing from the standard list (rejected at
-  # PdfReaderApp.tsx:820 before the super-admin branch is ever reached).
-  if [ -f director-codes.private.json ]; then
-    node scripts/verify-director-codes.mjs director-codes.private.json || {
-      echo "         ✖ refusing to archive a build nobody can direct. Fix the file above, or set" >&2
-      echo "           ALLOW_NO_DIRECTOR_CODES=1 if you deliberately want a director-less build." >&2
-      exit 1; }
-    cp director-codes.json director-codes.committed.bak
-    cp director-codes.private.json director-codes.json
-    echo "         baked director-codes.private.json into the bundle"
-  elif [ "${ALLOW_NO_DIRECTOR_CODES:-0}" = "1" ]; then
-    echo "         ⚠️  director-codes.private.json missing, ALLOW_NO_DIRECTOR_CODES=1 — NOBODY CAN DIRECT this build"
-  else
-    echo "         ✖ director-codes.private.json is missing." >&2
-    echo "           Archiving without it yields an IPA where NOBODY CAN BECOME DIRECTOR — the app" >&2
-    echo "           builds and installs fine and silently rejects every code. That is the" >&2
-    echo "           2026-07-01 Mass outage. It lives only in the main checkout and is gitignored." >&2
-    echo "           Deliberate? ALLOW_NO_DIRECTOR_CODES=1 bash scripts/release.sh" >&2
-    exit 1
-  fi
+  # NOTHING IS BAKED IN HERE ANY MORE. This used to swap a gitignored file of real director phone
+  # numbers over a tracked empty one, archive, and restore — and an archive made without that file
+  # produced an IPA nobody could direct (the 2026-07-01 Mass outage). The director code is now a
+  # plain constant in PdfReaderApp.tsx, so any checkout can archive and there is nothing to forget.
   rm -rf build
   if ! xcodebuild -workspace ios/SignoVivo.xcworkspace -scheme SignoVivo -configuration Release \
         -archivePath build/SignoVivo.xcarchive -sdk iphoneos -allowProvisioningUpdates clean archive >"$LOG" 2>&1; then
