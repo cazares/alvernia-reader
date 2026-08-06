@@ -136,9 +136,9 @@ say "5/5  Done — now go look at a device"
 cat <<EOF
      Open the app (that is the whole procedure — it checks on foreground), or tap ⟳ to force it.
 
-     Expect the badge to read:   <native>b · ${BUILD}w · ${BOOK_PAGES}p
-       the 'b' must NOT change — the binary never moved
-       the 'w' moving to ${BUILD} is the proof it came over the air
+     Expect the badge to read:   v<base> (<binary>-${BUILD}-${BOOK_PAGES})
+       the FIRST number must NOT change — the binary never moved
+       the SECOND moving to ${BUILD} is the proof it came over the air
 
      Then ♪ → 999 → Abrir should land on the last page of the new book.
 

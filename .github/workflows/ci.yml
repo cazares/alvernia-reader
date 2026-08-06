@@ -72,6 +72,7 @@ jobs:
           e2e/bookUpdate.test.mjs
           e2e/directorResume.test.mjs
           e2e/directorButton.test.mjs
+          e2e/buildBadgeFormat.test.mjs
           e2e/rescueAndDiagnostics.test.mjs
           e2e/bookOtaSeam.test.mjs
           e2e/sw-page-cache.test.mjs
