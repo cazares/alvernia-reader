@@ -106,7 +106,11 @@ let fsRef;
 const fakeNet = ({ manifest, body }) => ({
   fetchJson: async () => manifest,
   download: async (url, dest) => {
-    const rel = url.replace("https://signovivo.com/", "");
+    // Strip the ?v=<bookVersion> cache-buster src/bookUpdate.js appends. A real origin keys on the
+    // path and ignores the query; this fake must too, or every download 404s. (Missed when the
+    // cache-buster landed — bookUpdate.test.mjs's stub was fixed and this one was not, which took
+    // this whole file red without anyone noticing.)
+    const rel = url.replace("https://signovivo.com/", "").replace(/\?v=[^&]*$/, "");
     if (!(rel in body)) throw new Error("404");
     fsRef.files.set(dest, body[rel]);
   },
@@ -284,17 +288,18 @@ test("fresh staged book: apply is allowed, re-staging is correctly skipped", () 
   assert.equal(stage.reason, "already-staged");
 });
 
-test("THE DEADLOCK: past the TTL, at least one gate must still let the device make progress", () => {
-  const { stage, apply } = BOTH_GATES(STAGED_READY_TTL_MS + 60_000);
-  assert.equal(apply.ok, false);
-  assert.equal(apply.reason, "stale-ready");
-  assert.equal(
-    stage.stage,
-    true,
-    `both gates refused (apply=${apply.reason}, stage=${stage.reason}) — the device can never ` +
-      `apply and can never re-verify, so this book is permanently unreachable`,
-  );
-  assert.equal(stage.reason, "ok");
+test("THE DEADLOCK is now structurally impossible: a stale staged book still applies", () => {
+  // This used to assert apply was REFUSED past the TTL with reason "stale-ready", and leaned on
+  // shouldStage to re-verify so the device was not stuck between two refusals. The stale-ready gate
+  // was deliberately deleted on 2026-08-05 (HANDOFF §5) along with six other silent refusals, so
+  // there is no longer a deadlock to guard against — the apply simply proceeds.
+  //
+  // Kept rather than deleted, inverted to pin the CURRENT contract: a copy staged days ago applies
+  // whenever the device is next foregrounded. That is an accepted consequence of the removal, and
+  // if stale-ready ever creeps back this goes red and someone has to make the decision again.
+  const { apply } = BOTH_GATES(STAGED_READY_TTL_MS + 60_000);
+  assert.equal(apply.ok, true, `a stale staged book was refused: ${apply.reason}`);
+  assert.notEqual(apply.reason, "stale-ready", "the stale-ready gate came back");
 });
 
 test("a stale record still yields to the gates that outrank it", () => {

@@ -148,6 +148,9 @@ const DIRECTOR_RESUME_WINDOW_MS = 5 * 60 * 1000;
 const DIRECTOR_RESUME_SETTLE_MS = 3500;
 // The heartbeat ticks every second; this is how often it may touch AsyncStorage.
 const DIRECTOR_STAMP_THROTTLE_MS = 20000;
+// How many breadcrumbs to keep. Sized to cover a whole Mass plus the boot before it, while staying
+// small enough that serialising the array on every crumb is free.
+const BREADCRUMB_LIMIT = 200;
 // The app is single-book: the only book is the standard (Alvernia) manual. Its id is pinned
 // everywhere so the mesh/relay Snapshot's bookId stays a stable "standard" for backward compat.
 const DEFAULT_BOOK: BookId = "standard";
@@ -253,12 +256,62 @@ export default function App() {
   const syncAvailable = useMemo(() => isNearbyDirectorSyncAvailable(), []);
 
   // ── Breadcrumb (lightweight crash forensics; survives a hard restart) ──────
+  // A RING BUFFER, not a single value. This wrote one key and overwrote it every call, so exactly
+  // ONE breadcrumb survived — the last one, which is almost never the interesting one. There is no
+  // internet inside the church and no MDM on these iPads, so when a device misbehaves at Mass the
+  // dbgLog telemetry below cannot reach the worker and nothing else is written down. "It froze"
+  // stayed unanswerable forever.
+  //
+  // Kept deliberately small and dumb: a bounded array of strings in one AsyncStorage key, written
+  // best-effort, read back by the diagnostics bridge. No timers, no flush logic, nothing that can
+  // itself fail during Mass. The single-value key is still written so anything reading `sv_bc`
+  // keeps working.
+  const breadcrumbsRef = useRef<string[]>([]);
+  // Until the previous session's crumbs are read back, persisting would OVERWRITE them with a
+  // one-element array — destroying the history at exactly the moment it matters, since the first
+  // crumb after a crash lands within milliseconds of boot. Buffer in memory, persist once loaded.
+  const breadcrumbsLoadedRef = useRef(false);
   const breadcrumb = useCallback((tag: string) => {
     try {
+      const next = breadcrumbsRef.current;
+      next.push(`${new Date().toISOString()} ${tag}`);
+      if (next.length > BREADCRUMB_LIMIT) next.splice(0, next.length - BREADCRUMB_LIMIT);
       AsyncStorage.setItem("sv_bc", `${tag} @ ${Date.now()}`).catch(() => {});
+      if (breadcrumbsLoadedRef.current) {
+        AsyncStorage.setItem(STORAGE_KEYS.breadcrumbs, JSON.stringify(next)).catch(() => {});
+      }
     } catch {
-      /* ignore */
+      /* a diagnostic must never be able to break the thing it is diagnosing */
     }
+  }, []);
+
+  // Read back the previous session's crumbs, keeping anything logged during this boot AFTER them.
+  // A session boundary is marked so a reader can see where the restart happened — the line before
+  // it is usually the last thing that worked.
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(STORAGE_KEYS.breadcrumbs)
+      .then((raw) => {
+        if (cancelled) return;
+        let prev: string[] = [];
+        try {
+          const parsed = JSON.parse(raw || "[]");
+          if (Array.isArray(parsed)) prev = parsed.filter((x) => typeof x === "string");
+        } catch {
+          /* a corrupt buffer is not worth failing over — start fresh */
+        }
+        const merged = [...prev, `${new Date().toISOString()} ── app start ──`, ...breadcrumbsRef.current];
+        breadcrumbsRef.current = merged.slice(-BREADCRUMB_LIMIT);
+        breadcrumbsLoadedRef.current = true;
+        AsyncStorage.setItem(STORAGE_KEYS.breadcrumbs, JSON.stringify(breadcrumbsRef.current)).catch(() => {});
+      })
+      .catch(() => {
+        // Could not read; allow persistence anyway so THIS session is at least recorded.
+        breadcrumbsLoadedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ── Remote sync telemetry → CF /log ─────────────────────────────────────────
@@ -1054,6 +1107,51 @@ export default function App() {
         // nothing. Native first, web whenever.
         case "request-director":
           onDirectorCode(DIRECTOR_CODE);
+          break;
+        // ── The two panic switches, reachable without remembering a number ──────────────────────
+        // These exist for the five minutes before Mass when something has already gone wrong: a
+        // device holding a broken book, or one whose role is wedged. Requiring a memorised 9-digit
+        // code in exactly that moment is the same defect the director button removed, and worse
+        // here — becoming director is routine enough to learn, while these fire once a year, under
+        // pressure, when nobody can look anything up.
+        //
+        // Both CONFIRM first (unlike the raw codes, which are already an unambiguous act by the
+        // time they are typed) because a button is easier to hit than nine specific digits.
+        // BOOK_FORCE_BAKED_CODE and SOFT_RESET_CODE still work and are unchanged.
+        case "request-force-baked":
+          Alert.alert(
+            "¿Usar el cancionero original?",
+            "Se descartará el cancionero descargado y volverá el que viene con la app. Úsalo si el actual no abre bien.",
+            [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Sí, usar el original", onPress: () => onDirectorCode(BOOK_FORCE_BAKED_CODE) },
+            ],
+          );
+          break;
+        // Hand the crumb buffer to the web layer to render. Native only captures and serves it —
+        // the viewer is web, so it can be improved over the air without another binary.
+        case "request-diagnostics":
+          // book + pages are here on purpose: with no internet, "which songbook is this device
+          // holding?" had no answer once the title-page stamp was deleted. This answers it, from
+          // the device's own resolved state rather than from ink on a page that can disagree.
+          injectEvent({
+            type: "diagnostics",
+            build: BUILD_VERSION,
+            role: roleRef.current,
+            book: activeBookVersionRef.current || "(incluido en la app)",
+            pages: totalPagesRef.current || 0,
+            lines: breadcrumbsRef.current.slice(-BREADCRUMB_LIMIT),
+          });
+          break;
+        case "request-soft-reset":
+          Alert.alert(
+            "¿Reparar este dispositivo?",
+            "Se reinicia la conexión y este dispositivo deja de dirigir o seguir. No borra el cancionero. Úsalo si la sincronización se quedó atascada.",
+            [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Sí, reparar", style: "destructive", onPress: () => onDirectorCode(SOFT_RESET_CODE) },
+            ],
+          );
           break;
         case "resync": {
           // A follower tapped the ⟳ button in the web UI. The web relay is off in the shell,

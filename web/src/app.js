@@ -129,6 +129,12 @@ const songJumpBackdrop = document.getElementById("song-jump-backdrop");
 const songJumpTrigger  = document.getElementById("song-jump-trigger");
 const songCancelButton = document.getElementById("song-cancel");
 const directButton = document.getElementById("direct-button");
+const rescueWrap = document.getElementById("rescue-wrap");
+const rescueToggle = document.getElementById("rescue-toggle");
+const rescueActions = document.getElementById("rescue-actions");
+const rescueBaked = document.getElementById("rescue-baked");
+const rescueReset = document.getElementById("rescue-reset");
+const rescueDiag = document.getElementById("rescue-diag");
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const PREFS_KEY = "nc-sort-prefs";
@@ -1280,6 +1286,38 @@ const showSyncNotice = (text) => {
   syncNoticeTimer = setTimeout(() => syncNoticeEl && syncNoticeEl.classList.remove("is-on"), 12000);
 };
 
+// ── Diagnostics dump ──────────────────────────────────────────────────────────
+// Renders the native crumb ring buffer full-screen, selectable, newest LAST so it reads as a
+// timeline. Deliberately ugly and text-only: its job is to be read over the phone by someone
+// standing in a church, or copied into a message afterwards.
+let diagEl = null;
+const showDiagnostics = (payload) => {
+  if (!diagEl) {
+    diagEl = document.createElement("div");
+    diagEl.id = "sv-diag";
+    const header = document.createElement("header");
+    const label = document.createElement("span");
+    label.className = "sv-diag-label";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "Cerrar";
+    close.addEventListener("click", () => diagEl.classList.remove("is-on"));
+    header.appendChild(label);
+    header.appendChild(close);
+    const pre = document.createElement("pre");
+    pre.className = "sv-diag-body";
+    diagEl.appendChild(header);
+    diagEl.appendChild(pre);
+    document.body.appendChild(diagEl);
+  }
+  const lines = Array.isArray(payload.lines) ? payload.lines : [];
+  diagEl.querySelector(".sv-diag-label").textContent =
+    `build ${payload.build || "?"} · ${payload.pages || "?"} pág · ${payload.role || "?"} · ${lines.length} eventos\n${payload.book || "?"}`;
+  diagEl.querySelector(".sv-diag-body").textContent =
+    lines.length ? lines.join("\n") : "Sin eventos registrados todavía.";
+  diagEl.classList.add("is-on");
+};
+
 const applyNativeSyncEvent = async (payload) => {
   // Whole-body guard (M2 Slice C): the native shell calls this via evaluateJavaScript on
   // EVERY mesh sync event. A throw from any branch (a malformed payload, or a downstream
@@ -1324,6 +1362,13 @@ const applyNativeSyncEvent = async (payload) => {
     // refused because another device picked it up during the reboot.
     if (payload.type === "toast") {
       showSyncNotice(payload.text);
+      return;
+    }
+
+    // The crumb log, rendered for a human to read or read ALOUD over the phone. There is no
+    // internet in the church, so this is the only account of what a device did during Mass.
+    if (payload.type === "diagnostics") {
+      showDiagnostics(payload);
       return;
     }
 
@@ -1525,10 +1570,15 @@ const openSongJump = () => {
   // Offer to direct only where it can work (the native shell owns the mesh) and only to a device
   // that is not already directing. Re-evaluated on every open rather than once at boot, because the
   // role changes mid-session — a director who steps down must be able to take it back.
+  const inShell = NATIVE_FILE_MODE || hasNativeBridge();
   if (directButton) {
-    const canOffer = (NATIVE_FILE_MODE || hasNativeBridge()) && state.nativeSyncRole !== "director";
-    directButton.classList.toggle("is-hidden", !canOffer);
+    directButton.classList.toggle("is-hidden", !(inShell && state.nativeSyncRole !== "director"));
   }
+  // Rescue is shell-only too — nothing here means anything to a browser on signovivo.com, which has
+  // no mesh, no staged bundle and no crumb log. Always re-collapsed, so it cannot be left open.
+  if (rescueWrap) rescueWrap.classList.toggle("is-hidden", !inShell);
+  if (rescueActions) rescueActions.classList.add("is-hidden");
+  if (rescueToggle) rescueToggle.setAttribute("aria-expanded", "false");
   songJumpModal.classList.remove("is-hidden");
   state.songJumpOpen = true;
 };
@@ -2793,6 +2843,24 @@ const bindReaderEvents = () => {
     haptic();
     closeSongJump();
     postNativeBridge({ type: "request-director" });
+  });
+
+  // Rescue block. The toggle only expands; each action confirms NATIVELY before doing anything, so
+  // a stray tap in here still cannot change the device.
+  if (rescueToggle) rescueToggle.addEventListener("click", () => {
+    haptic();
+    // classList.toggle returns whether the class is now PRESENT — i.e. now hidden, not now open.
+    const nowHidden = rescueActions.classList.toggle("is-hidden");
+    rescueToggle.setAttribute("aria-expanded", String(!nowHidden));
+  });
+  if (rescueBaked) rescueBaked.addEventListener("click", () => {
+    haptic(); closeSongJump(); postNativeBridge({ type: "request-force-baked" });
+  });
+  if (rescueReset) rescueReset.addEventListener("click", () => {
+    haptic(); closeSongJump(); postNativeBridge({ type: "request-soft-reset" });
+  });
+  if (rescueDiag) rescueDiag.addEventListener("click", () => {
+    haptic(); closeSongJump(); postNativeBridge({ type: "request-diagnostics" });
   });
 
   // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection.
