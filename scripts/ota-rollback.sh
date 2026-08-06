@@ -31,7 +31,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BOOK=assets/signo_vivo_372.pdf
+BOOK=assets/songbook.pdf
 INDEX=src/alverniaManual2SongIndex.js
 TARGET=""
 LIST=0
@@ -47,12 +47,18 @@ done
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 # Every commit that changed the BOOK, newest first. That is the list of books that ever shipped.
+#
+# --follow is load-bearing: the book was renamed from signo_vivo_<pageCount>.pdf to a stable name,
+# and without it `git log` stops dead at the rename and reports "fewer than two book versions",
+# hiding every book that shipped before it. Every rollback target older than the rename would have
+# been invisible.
+#
 # Built with a read loop rather than `mapfile`: macOS ships bash 3.2, which does not have it, and
 # this script has to run on the machine that actually cuts releases.
 HIST=()
 while IFS= read -r line; do
   [ -n "$line" ] && HIST+=("$line")
-done < <(git log --format='%h|%ad|%s' --date=short -20 -- "$BOOK" 2>/dev/null)
+done < <(git log --follow --format='%h|%ad|%s' --date=short -20 -- "$BOOK" 2>/dev/null)
 
 if [ "${#HIST[@]}" -lt 2 ]; then
   echo "✖ fewer than two book versions in history — nothing to roll back to." >&2

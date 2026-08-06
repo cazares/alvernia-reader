@@ -30,7 +30,12 @@ const WEBP_QUALITY = parseJpegQuality(process.env.ALVERNIA_PDF_WEBP_QUALITY, 60)
 // forever, across every future book size. web/src/app.js declares the same constant. Changing it
 // is a full-book rename that invalidates every offline copy in the field simultaneously.
 const PAGE_PAD_WIDTH = 3;
-const BOOK_PDF_PATH = path.join(rootDir, "assets", "signo_vivo_372.pdf");
+// STABLE NAME ON PURPOSE. This used to be signo_vivo_<pageCount>.pdf, which meant every book
+// update should have renamed the file and chased five references — so nobody did, and the file sat
+// named "_372" while containing 373 pages for a day, misleading everyone who read it. The page
+// count already lives in three authoritative places (pdfinfo, the bundle manifest, the title
+// stamp); a fourth copy encoded in a filename is just one that goes stale.
+const BOOK_PDF_PATH = path.join(rootDir, "assets", "songbook.pdf");
 
 // Content-address of the BOOK: the source PDF's bytes plus the two render knobs that
 // determine the output pixels. This is what keys the page-image cache (PAGE_CACHE in

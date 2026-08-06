@@ -13,7 +13,7 @@
  * page tells you at a glance which book a device actually holds.
  *
  * Usage:
- *   node scripts/append-number-page.mjs --pdf assets/signo_vivo_372.pdf --number 373
+ *   node scripts/append-number-page.mjs --pdf assets/songbook.pdf --number 373
  *   node scripts/append-number-page.mjs --pdf <in> --out <out> --number 373
  *
  * Requires: ghostscript (gs) + qpdf + poppler (pdfinfo) — same set as stamp-book-date.mjs.

@@ -56,7 +56,7 @@ test("Release assets required by app config exist in-repo", () => {
     "assets/adaptive-icon.png",
     "assets/splash.png",
     "assets/favicon.png",
-    "assets/signo_vivo_372.pdf"
+    "assets/songbook.pdf"
   ];
 
   for (const relativePath of requiredPaths) {

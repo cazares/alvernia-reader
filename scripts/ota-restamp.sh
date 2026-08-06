@@ -26,7 +26,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export LANG=en_US.UTF-8
 
-BOOK=assets/signo_vivo_372.pdf
+BOOK=assets/songbook.pdf
 PASSTHRU=()
 while [ $# -gt 0 ]; do
   case "$1" in
