@@ -46,6 +46,26 @@ done
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
+# WHERE THE BOOK LIVED AT A GIVEN COMMIT. It was renamed from signo_vivo_<pageCount>.pdf to a
+# stable name, so "$sha:$BOOK" does not resolve for anything older than the rename — and every
+# rollback target older than that is exactly what you reach for in an emergency. Resolve the real
+# path per commit instead of assuming today's.
+#
+# The `|| true` matters as much as the lookup: under `set -e`, a command substitution that fails
+# aborts the script, so the first pre-rename commit silently truncated the whole listing to one row
+# rather than reporting anything.
+book_path_at() {
+  local sha="$1"
+  if git cat-file -e "${sha}:${BOOK}" 2>/dev/null; then printf '%s' "$BOOK"; return; fi
+  git ls-tree --name-only "$sha" assets/ 2>/dev/null | grep -iE '\.pdf$' | head -1 || true
+}
+pages_at() {
+  local sha="$1" p
+  p=$(book_path_at "$sha")
+  [ -n "$p" ] || return 0
+  git show "${sha}:${p}" 2>/dev/null | pdfinfo - 2>/dev/null | awk '/^Pages/{print $2}' || true
+}
+
 # Every commit that changed the BOOK, newest first. That is the list of books that ever shipped.
 #
 # --follow is load-bearing: the book was renamed from signo_vivo_<pageCount>.pdf to a stable name,
@@ -70,7 +90,7 @@ if [ "$LIST" = "1" ]; then
   i=0
   for h in "${HIST[@]}"; do
     sha=${h%%|*}; rest=${h#*|}; date=${rest%%|*}; subj=${rest#*|}
-    pages=$(git show "$sha:$BOOK" 2>/dev/null | pdfinfo - 2>/dev/null | awk '/^Pages/{print $2}')
+    pages=$(pages_at "$sha")
     mark="  "; [ "$i" = "0" ] && mark="→ "; [ "$i" = "1" ] && mark="⏪"
     printf "%s %s  %s  %4s pages  %s\n" "$mark" "$sha" "$date" "${pages:-?}" "$(echo "$subj" | cut -c1-52)"
     i=$((i+1))
@@ -86,7 +106,8 @@ if [ -z "$TARGET" ]; then
   TARGET=$(echo "${HIST[1]}" | cut -d'|' -f1)
 fi
 TARGET_SUBJ=$(git log -1 --format='%s' "$TARGET" 2>/dev/null | cut -c1-60)
-TARGET_PAGES=$(git show "$TARGET:$BOOK" 2>/dev/null | pdfinfo - 2>/dev/null | awk '/^Pages/{print $2}')
+TARGET_PAGES=$(pages_at "$TARGET")
+TARGET_PATH=$(book_path_at "$TARGET")
 NOW_PAGES=$(pdfinfo "$BOOK" 2>/dev/null | awk '/^Pages/{print $2}')
 
 say "Rolling back"
@@ -101,8 +122,11 @@ if [ -n "$(git status --porcelain "$BOOK" "$INDEX")" ]; then
 fi
 
 # ── Restore the old book + its song index ────────────────────────────────────────────────────────
-git checkout "$TARGET" -- "$BOOK" "$INDEX"
-echo "     restored $BOOK and $INDEX from $TARGET"
+# Restore from the path the book HAD at that commit — pre-rename targets are not at $BOOK — and
+# write it to today's name. git checkout cannot rename, so the PDF goes through git show.
+git show "${TARGET}:${TARGET_PATH}" > "$BOOK"
+git checkout "$TARGET" -- "$INDEX"
+echo "     restored $BOOK (from ${TARGET_PATH}) and $INDEX @ $TARGET"
 
 # ── Re-stamp page 1 ──────────────────────────────────────────────────────────────────────────────
 # The restored page 1 carries the stamp it had when it shipped — an OLD date. Leaving it would put
