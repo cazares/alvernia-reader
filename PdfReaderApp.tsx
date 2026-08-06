@@ -129,6 +129,25 @@ const SV_BOOK_DL_KILL = false;
 // only if we've heard from them within this window — otherwise the destructive "take control" confirm
 // false-fires forever after any director ever broadcast (the ref used to be set-once-never-cleared).
 const LIVE_DIRECTOR_WINDOW_MS = 8000;
+// ── Resuming the director role after a crash / memory-kill ──────────────────────────────────────
+// A director whose app restarts mid-Mass used to be demoted to follower behind a BLOCKING modal
+// telling them to re-enter their code. Until someone noticed and typed it, NOBODY was directing and
+// the choir sat frozen on whatever page they were on — the 2026-07-01 outage class, reached by a
+// different road. The justification in the code was "the code is deliberately never stored, so we
+// cannot auto-resume"; that stopped being true on 2026-08-05 when DIRECTOR_CODE became a constant
+// compiled into the app.
+//
+// Resuming does NOT violate "always ask, always" (Miguel, 2026-07-02). That rule is about never
+// PROMOTING someone who did not ask. A device that was directing twenty seconds ago and crashed is
+// not being promoted — it is continuing something already confirmed, on the same device, by the
+// same person, who is still holding it.
+const DIRECTOR_RESUME_WINDOW_MS = 5 * 60 * 1000;
+// Wait for the mesh to discover peers before deciding. At cold boot no peer is known yet, so an
+// immediate resume could produce TWO directors fighting over the page if someone took the role
+// during the reboot — worse than the problem being fixed. Follow first, listen, then decide.
+const DIRECTOR_RESUME_SETTLE_MS = 3500;
+// The heartbeat ticks every second; this is how often it may touch AsyncStorage.
+const DIRECTOR_STAMP_THROTTLE_MS = 20000;
 // The app is single-book: the only book is the standard (Alvernia) manual. Its id is pinned
 // everywhere so the mesh/relay Snapshot's bookId stays a stable "standard" for backward compat.
 const DEFAULT_BOOK: BookId = "standard";
@@ -216,6 +235,10 @@ export default function App() {
   // page). Drives resync after a WebView reload / foreground for followers. Null until a
   // director snapshot has actually been received (a fresh-boot follower must keep its own page).
   const lastDirectorSnapshotRef = useRef<{ page: number; book: BookId; at: number } | null>(null);
+  // Throttles the lastDirectorAt write from the 1s heartbeat. 0 = never written this session.
+  const lastDirectorAtWrittenRef = useRef<number>(0);
+  // Cancels a pending resume if anything changes the role while the mesh is settling.
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Director re-broadcast heartbeats. Two cadences: a FAST mesh re-send (local, free) so a
   // dropped page-turn recovers in ~2s, and a SLOW relay keepalive that only refreshes the
   // Cloudflare snapshot's freshness (page CHANGES publish to the relay immediately anyway).
@@ -594,6 +617,15 @@ export default function App() {
     meshHeartbeatRef.current = setInterval(() => {
       if (roleRef.current !== "director") return;
       const book = currentBookRef.current;
+      // Keep "when was this device last directing" fresh, throttled hard because this ticks every
+      // second and AsyncStorage is a real write. The boot path resumes only inside a short window
+      // after the LAST heartbeat, not after the moment the role was taken — a director who started
+      // at the beginning of Mass and crashed forty minutes in must still be inside the window.
+      const nowMs = Date.now();
+      if (nowMs - lastDirectorAtWrittenRef.current >= DIRECTOR_STAMP_THROTTLE_MS) {
+        lastDirectorAtWrittenRef.current = nowMs;
+        AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(nowMs)).catch(() => {});
+      }
       sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, {
         mode: modeForBook(book),
         bookId: book,
@@ -669,8 +701,10 @@ export default function App() {
         // would read no "director" role, come back as a silent follower, and the relay heartbeat
         // would never restart → every signovivo.com follower frozen for the rest of Mass with no
         // 401 signal. Persisting "director" makes the boot resume prompt fire so the operator
-        // re-enters their code (the code itself is never stored — no auto-resume of a credential).
+        // resumes. This device has no mesh, so it can only ever be a relay transmitter.
         AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director").catch(() => {});
+        lastDirectorAtWrittenRef.current = Date.now();
+        AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(Date.now())).catch(() => {});
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
         startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
@@ -702,9 +736,12 @@ export default function App() {
         }
         if (myGen !== roleGenerationRef.current) return; // superseded while the mesh was starting
         roleRef.current = "director";
-        // Record the role (breadcrumb only). We deliberately do NOT persist the director code or a
-        // timestamp — there is no auto-restore, so a credential must never sit in storage.
+        // Record the role AND when. lastDirectorAt is what the boot path reads to tell a crash
+        // twenty seconds ago from a cold start next Sunday; the heartbeat keeps it fresh from here.
+        // No credential is stored — DIRECTOR_CODE is a constant in this file, not a secret.
         await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director");
+        lastDirectorAtWrittenRef.current = Date.now();
+        AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(Date.now())).catch(() => {});
         if (myGen !== roleGenerationRef.current) return; // superseded while persisting
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
@@ -742,6 +779,13 @@ export default function App() {
   const performSoftReset = useCallback(async () => {
     breadcrumb("soft-reset");
     roleGenerationRef.current++; // supersede any in-flight become* from the prior role
+    // A boot-time director resume may be sitting in its mesh-settle window. A soft reset is the
+    // operator explicitly saying "put this device back to nothing" — letting a timer promote it to
+    // director three seconds later would silently undo exactly what they asked for.
+    if (resumeTimerRef.current) {
+      clearTimeout(resumeTimerRef.current);
+      resumeTimerRef.current = null;
+    }
     stopDirectorHeartbeat();
     try {
       await resetNearbyDirectorSync();
@@ -1706,26 +1750,66 @@ export default function App() {
     // The listener below still re-registers on every run; only this restore is one-shot.
     if (!didBootstrapRef.current) {
       didBootstrapRef.current = true;
-      // NO auto-director: a device ALWAYS boots as a follower. Becoming director requires explicitly
-      // entering a director code, which then ASKS for confirmation (onDirectorCode). We never
-      // silently restore a stale director role — that would step on whoever is actually directing
-      // right now. (Miguel, 2026-07-02: "don't just auto-make anyone director — always ask, always.")
+      // A device always boots as a FOLLOWER, and a stale director role is never silently restored —
+      // that would step on whoever is actually directing right now. (Miguel, 2026-07-02: "don't just
+      // auto-make anyone director — always ask, always.")
       //
-      // NEW-DIR-1: but a SILENT demotion is its own hazard — if a DIRECTOR's app restarts mid-Mass it
-      // drops to follower with no signal and nobody is directing (the 2026-07-01 outage class). Read the
-      // prior role BEFORE becomeFollower() overwrites it; if this device was directing, surface a visible
-      // prompt so the operator knows to RE-ENTER their code (the code is deliberately never stored, so we
-      // cannot auto-resume). Intentional exit clears lastSyncRole, so this only fires after a crash/kill.
-      AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole)
-        .then((prev) => {
+      // The ONE exception, added 2026-08-05: a device that was directing MOMENTS ago and crashed.
+      // A silent demotion is its own hazard — the app restarts mid-Mass, drops to follower with no
+      // signal, and NOBODY is directing until a human notices (the 2026-07-01 outage class, reached
+      // by a different road). That is not a promotion to ask about; it is the same person, on the
+      // same device, continuing something they already confirmed.
+      //
+      // Guarded three ways, and it stays a follower unless all three pass:
+      //   1. lastDirectorAt within DIRECTOR_RESUME_WINDOW_MS — recently, not "at some point"
+      //   2. the mesh has had DIRECTOR_RESUME_SETTLE_MS to find peers — at cold boot no peer is
+      //      known yet, and resuming blind is how you get two directors
+      //   3. no other device is directing inside the live-heartbeat window when the timer fires
+      //
+      // (The old code could not do this because the director code was PII kept out of the binary.
+      // Since 2026-08-05 DIRECTOR_CODE is a constant in this file, so there is no credential to
+      // store and nothing to withhold.) Intentional exit clears lastSyncRole, so this whole path
+      // only runs after a crash or a kill.
+      Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole),
+        AsyncStorage.getItem(STORAGE_KEYS.lastDirectorAt),
+      ])
+        .then(([prev, atRaw]) => {
           lastKnownRoleRef.current = prev ? String(prev) : null;
-          if (prev === "director") {
-            Alert.alert(
-              "Estabas dirigiendo",
-              "La app se reinició y ahora sigues al director como los demás. Para volver a dirigir, reingresa tu código en el teclado (♪).",
-              [{ text: "Entendido" }],
-            );
+          if (prev !== "director") return;
+          const at = Number(atRaw || 0);
+          const freshEnough = at > 0 && Date.now() - at <= DIRECTOR_RESUME_WINDOW_MS;
+          if (!freshEnough) {
+            // Directed at some point, but not recently — this is a normal cold start, not a crash
+            // mid-Mass. Say so without blocking the screen the choir is reading from.
+            injectEvent({
+              type: "toast",
+              text: "Estabas dirigiendo antes. Toca ♪ e ingresa el código para volver a dirigir.",
+            });
+            return;
           }
+          // Fresh. Follow first (below), let the mesh discover peers, THEN decide — resuming before
+          // the radio has found anyone is how you end up with two directors.
+          resumeTimerRef.current = setTimeout(() => {
+            resumeTimerRef.current = null;
+            // Someone re-entered the code, or took the role by hand, while we waited.
+            if (roleRef.current === "director" || explicitTransmitterRef.current) return;
+            const snap = lastDirectorSnapshotRef.current;
+            const someoneElseIsDirecting =
+              Boolean(snap) && Date.now() - (snap?.at ?? 0) < LIVE_DIRECTOR_WINDOW_MS;
+            if (someoneElseIsDirecting) {
+              // Another device picked it up during the reboot. Taking it back would leave two
+              // directors publishing conflicting pages; stay a follower and say why.
+              injectEvent({
+                type: "toast",
+                text: "Otro dispositivo está dirigiendo ahora. Sigues al director.",
+              });
+              return;
+            }
+            void becomeDirector(DIRECTOR_CODE).then(() => {
+              injectEvent({ type: "toast", text: "Recuperaste la dirección del coro." });
+            });
+          }, DIRECTOR_RESUME_SETTLE_MS);
         })
         .catch(() => {})
         .finally(() => {

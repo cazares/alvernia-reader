@@ -1230,6 +1230,55 @@ const showRelayAuthWarning = (status) => {
   relayAuthWarningEl.classList.add("is-on");
 };
 
+// ── Neutral sync notice ───────────────────────────────────────────────────────
+// Same shape as the relay-auth banner above, in slate instead of red, for things the operator must
+// SEE but that are not failures: "you got the direction back", "someone else is directing now".
+//
+// It exists because the alternative was a native Alert. A modal during Mass blocks the page the
+// choir is reading from and requires someone to notice and tap it — at the exact moment they are
+// singing. Informational text should never take the screen hostage. Auto-dismisses; the message is
+// a courtesy, not a decision.
+let syncNoticeEl = null;
+let syncNoticeTimer = null;
+const showSyncNotice = (text) => {
+  if (!text) return;
+  if (!syncNoticeEl) {
+    const style = document.createElement("style");
+    style.textContent =
+      "#sv-sync-note{position:fixed;top:max(0.7rem,env(safe-area-inset-top,0px));left:50%;" +
+      "transform:translateX(-50%);z-index:69;display:none;max-width:min(92vw,34rem);" +
+      "align-items:flex-start;gap:0.55rem;padding:0.8rem 0.9rem;border-radius:0.85rem;" +
+      "background:#1e293b;color:#fff;font:600 0.92rem/1.35 system-ui,-apple-system,sans-serif;" +
+      "box-shadow:0 6px 22px rgba(0,0,0,.45);-webkit-tap-highlight-color:transparent}" +
+      "#sv-sync-note.is-on{display:flex}" +
+      "#sv-sync-note .sv-sn-x{flex:0 0 auto;margin-left:0.25rem;width:1.6rem;height:1.6rem;border:0;" +
+      "border-radius:50%;background:rgba(255,255,255,0.22);color:#fff;font-size:1.05rem;line-height:1;" +
+      "cursor:pointer;-webkit-tap-highlight-color:transparent}";
+    document.head.appendChild(style);
+    syncNoticeEl = document.createElement("div");
+    syncNoticeEl.id = "sv-sync-note";
+    syncNoticeEl.setAttribute("role", "status");
+    syncNoticeEl.setAttribute("aria-live", "polite");
+    const msg = document.createElement("span");
+    msg.className = "sv-sn-msg";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "sv-sn-x";
+    closeBtn.setAttribute("aria-label", "Cerrar aviso");
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => syncNoticeEl.classList.remove("is-on"));
+    syncNoticeEl.appendChild(msg);
+    syncNoticeEl.appendChild(closeBtn);
+    document.body.appendChild(syncNoticeEl);
+  }
+  syncNoticeEl.querySelector(".sv-sn-msg").textContent = String(text);
+  // Synchronously, not via rAF — a backgrounded WebView throttles rAF and the notice would never
+  // appear (same reason the relay banner does it this way).
+  syncNoticeEl.classList.add("is-on");
+  if (syncNoticeTimer) clearTimeout(syncNoticeTimer);
+  syncNoticeTimer = setTimeout(() => syncNoticeEl && syncNoticeEl.classList.remove("is-on"), 12000);
+};
+
 const applyNativeSyncEvent = async (payload) => {
   // Whole-body guard (M2 Slice C): the native shell calls this via evaluateJavaScript on
   // EVERY mesh sync event. A throw from any branch (a malformed payload, or a downstream
@@ -1267,6 +1316,13 @@ const applyNativeSyncEvent = async (payload) => {
     // this never fires on every page turn.)
     if (payload.type === "relay-auth-error") {
       showRelayAuthWarning(payload.status);
+      return;
+    }
+
+    // Neutral operator notices from the native shell — director role resumed after a crash, or
+    // refused because another device picked it up during the reboot.
+    if (payload.type === "toast") {
+      showSyncNotice(payload.text);
       return;
     }
 
