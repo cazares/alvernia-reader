@@ -1044,6 +1044,17 @@ export default function App() {
         case "director-code":
           onDirectorCode(msg.code);
           break;
+        // The web UI asking for the role directly, with no code typed. Routed through the SAME
+        // handler as a typed code — so it gets the same confirmation, the same live-director
+        // takeover warning, and the same becomeDirector path. The web bundle never learns
+        // DIRECTOR_CODE; it asks, and the shell decides.
+        //
+        // This handler ships in the BINARY even though the button that sends it ships over the air,
+        // because a web bundle that sends a message no shell understands is a button that does
+        // nothing. Native first, web whenever.
+        case "request-director":
+          onDirectorCode(DIRECTOR_CODE);
+          break;
         case "resync": {
           // A follower tapped the ⟳ button in the web UI. The web relay is off in the shell,
           // so do the NATIVE resync: re-request the director's current snapshot over the mesh

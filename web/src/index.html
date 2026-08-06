@@ -142,6 +142,15 @@
             <button class="song-jump-go" id="go-button" type="button" aria-label="Abrir canto">♪ Abrir Canto ♪</button>
             <button class="song-jump-cancel" id="song-cancel" type="button">Cancelar</button>
           </div>
+
+          <!-- Taking the choir. Hidden by default and revealed only inside the native shell, for a
+               device that is not already directing — app.js decides. It lives here, behind opening
+               the ♪ modal, rather than on the reading surface: two deliberate taps, nowhere near a
+               thumb resting on the page edge. The confirmation still happens natively.
+               Replaces a memorised code, so a spare iPad can take over when the director's dies. -->
+          <button class="song-jump-direct is-hidden" id="direct-button" type="button">
+            Dirigir el coro
+          </button>
         </div>
       </div>
 

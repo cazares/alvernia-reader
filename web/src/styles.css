@@ -2321,6 +2321,24 @@ body.sv-drawer-open .search-fab { display: none !important; }
   touch-action: manipulation;
 }
 .song-jump-cancel:active { background: #e2e2e2; }
+/* Taking the choir. Deliberately the quietest control in the modal — smaller, outlined, no fill —
+   because it is rare and consequential, and the loud button here must stay "open the song". */
+.song-jump-direct {
+  margin-top: 14px;
+  width: 100%;
+  padding: 16px;
+  border: 2px solid #d4d4d4;
+  border-radius: 12px;
+  background: transparent;
+  color: #666;
+  font-size: 19px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.song-jump-direct:active { background: #ececec; }
+.song-jump-direct.is-hidden { display: none; }
 
 /* Retire the drawer's Teclado/Explorar mode switch — jump-to-song is the modal now */
 .drawer-mode-switch { display: none; }
