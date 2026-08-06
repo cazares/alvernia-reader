@@ -143,6 +143,34 @@ gitignored, and contains real phone numbers — Miguel's to delete or keep, nobo
 
 ---
 
+## 4b. When something goes wrong on a device
+
+**♪ modal → "¿Algo anda mal?"** — collapsed by default, native-shell only, each action confirming
+natively before it does anything:
+
+| | |
+|---|---|
+| Usar el cancionero original | forces the baked book (was `907315268`) |
+| Reparar la sincronización | soft reset (was `744668486`) |
+| Ver diagnóstico | the crumb log |
+
+Both codes still work. They became buttons because they exist for the five minutes before Mass when
+something has already broken — the exact moment nobody can look up a nine-digit number.
+
+**Diagnóstico** shows the build, the page count, **which songbook this device holds**, and the last
+200 breadcrumbs across restarts (`── app start ──` marks each boot; the line before it is usually
+the last thing that worked). Selectable, so it can be read aloud or pasted into a message.
+
+That book line matters: with the title-page stamp deleted (§4), this is now the only way to answer
+"¿qué cancionero tiene?" with no internet — and unlike ink on page 1, it comes from the device's own
+resolved state and cannot disagree with the book.
+
+⚠️ `breadcrumb()` persistence has an ordering rule: crumbs buffer in memory until the previous
+session is read back, because the first crumb after a crash lands milliseconds into boot and would
+otherwise overwrite the history with a one-element array. `e2e/rescueAndDiagnostics.test.mjs` pins it.
+
+---
+
 ## 5. Delivery has TWO conditions left, and they are physics
 
 ```
@@ -213,8 +241,8 @@ bundle from `file://`.
 
 1. **Get the choir onto build 404+** (§2). Nothing else matters until this happens. The next IPA
    already carries the download cache-buster, so it should hold for months.
-2. **No visible failure state on-device.** If an update does not land, nothing on screen says why.
-   A status line + Retry — turning each refusal into text instead of silence — is the single
-   highest-value remaining change. It lives in `web/src`, so it ships over the air; no binary needed.
+2. **No visible failure state for the OTA specifically.** If an update does not land, nothing says
+   why. The crumb log (§4b) now records it, but only if someone goes looking. A status line + Retry
+   would surface it. Lives in `web/src`, so it ships over the air; no binary needed.
 3. **`--base` rollback + `decideBundle` rule 7** (§3) — a decision, not a bug fix.
 4. **Nothing.** Director codes were the last open decision and are gone (§4).
