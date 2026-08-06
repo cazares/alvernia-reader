@@ -162,9 +162,12 @@ button:disabled {
 @keyframes sv-pill-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .director-mode-badge.is-nobody .director-mode-badge-title { color: #fff; }
 .director-mode-badge.is-nobody .director-mode-badge-exit { color: rgba(255, 255, 255, 0.92); }
-/* No action line while following: the state is the information, and a permanently visible
-   "take control" invites the mis-tap the confirm dialog then has to catch. */
-.director-mode-badge.is-following .director-mode-badge-exit { display: none; }
+/* The following state DOES carry its action ("Tomar") — dimmed, not hidden. Hiding it made the pill
+   look inert, so nobody would learn the seat can be taken without being told out loud, and the
+   moment that matters is exactly the one where the person who knows is not in the room. Dimming
+   keeps it from competing with the music; the confirm dialog, not the label's shyness, is what
+   stops a mis-tap. */
+.director-mode-badge.is-following .director-mode-badge-exit { opacity: 0.62; }
 
 .director-mode-badge {
   position: absolute;

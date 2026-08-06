@@ -77,6 +77,7 @@ jobs:
           e2e/directorSeat.test.mjs
           e2e/fabLayout.test.mjs
           e2e/buildBadgePage1.test.mjs
+          e2e/pillWording.test.mjs
           e2e/rescueAndDiagnostics.test.mjs
           e2e/bookOtaSeam.test.mjs
           e2e/sw-page-cache.test.mjs
