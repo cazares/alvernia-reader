@@ -113,3 +113,21 @@ test("diagnostics answer which songbook the device holds, with no internet", () 
   assert.match(APP, /payload\.pages/, "the viewer drops the page count");
   assert.match(APP, /payload\.book/, "the viewer drops the book identity");
 });
+
+test("operator overlays render ABOVE the modal that opens them", () => {
+  // The diagnostics request is fired from inside .song-jump-modal (z-index 200). At the z-index the
+  // overlay originally had (80) it rendered BEHIND that modal — present in the DOM, invisible on
+  // screen, with no clue why. The sync notice had the same defect at 69. Both are things the
+  // operator must SEE; being silently covered is the failure class this whole session kept finding.
+  const css = fs.readFileSync("web/src/styles.css", "utf8");
+  const modalZ = Number(css.slice(css.indexOf(".song-jump-modal {")).match(/z-index:\s*(\d+)/)[1]);
+  const diagZ = Number(css.slice(css.indexOf("#sv-diag {")).match(/z-index:\s*(\d+)/)[1]);
+  assert.ok(diagZ > modalZ, `diagnostics z-index ${diagZ} is not above the modal's ${modalZ}`);
+  // The notice's CSS is built by concatenating string literals, so the selector and its z-index sit
+  // in different quoted chunks. Join them before matching or the pattern can never span the seam.
+  const joined = APP.replace(/"\s*\+\s*"/g, "");
+  const noticeMatch = joined.match(/#sv-sync-note\{[^"]*z-index:(\d+)/);
+  assert.ok(noticeMatch, "could not find the sync notice z-index");
+  const noticeZ = Number(noticeMatch[1]);
+  assert.ok(noticeZ > modalZ, `sync notice z-index ${noticeZ} is not above the modal's ${modalZ}`);
+});

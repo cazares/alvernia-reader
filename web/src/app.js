@@ -1253,7 +1253,7 @@ const showSyncNotice = (text) => {
     const style = document.createElement("style");
     style.textContent =
       "#sv-sync-note{position:fixed;top:max(0.7rem,env(safe-area-inset-top,0px));left:50%;" +
-      "transform:translateX(-50%);z-index:69;display:none;max-width:min(92vw,34rem);" +
+      "transform:translateX(-50%);z-index:250;display:none;max-width:min(92vw,34rem);" +
       "align-items:flex-start;gap:0.55rem;padding:0.8rem 0.9rem;border-radius:0.85rem;" +
       "background:#1e293b;color:#fff;font:600 0.92rem/1.35 system-ui,-apple-system,sans-serif;" +
       "box-shadow:0 6px 22px rgba(0,0,0,.45);-webkit-tap-highlight-color:transparent}" +
