@@ -100,6 +100,41 @@ not done: republish-forward works and was used repeatedly on 2026-08-05.
 DIRECTOR_CODE = "333444555"          PdfReaderApp.tsx:110
 ```
 
+### The pill — what the room is doing, and the control for it
+
+Top-left in the native shell, always visible, three states. Tapping acts on whatever it shows.
+
+| Pill | Meaning | Tap |
+|---|---|---|
+| `DIRECTOR ✕ Salir` | you are directing | confirm → step down |
+| `SIGUIENDO` (quiet) | someone else is | confirm → take control (destructive) |
+| `NADIE DIRIGE ▶ Dirigir` (amber) | **the seat is empty** | confirm → direct |
+
+`NADIE DIRIGE` fires ONLY on the mesh's own `self-directed` verdict, never inferred from silence —
+guessing would light it during the ~10s of boot discovery on every device every Sunday.
+
+Before this, the badge appeared only for the director, so an empty seat looked exactly like
+everything working: follower controls, no badge, and the ⟳ spinner going quiet. Eight iPads could
+sit through a whole Mass each turning its own pages with nothing on any screen saying so.
+
+### The usual iPad claims an empty seat
+
+A device that has directed **before** takes an empty seat on boot. No enrolment, no configuration,
+no code. It can NEVER take an occupied seat.
+
+Precedence is experience: `STORAGE_KEYS.directorSessions` counts how many times this device has
+directed, and more sessions means a shorter wait before claiming. The regular director fires first;
+a substitute who directed once yields, sees a live director and stands down.
+
+Deliberately rejected — do not "fix" these back:
+- **a code** — a phone number half the parish knows; it proved nothing
+- **enrolling a device** — forces a physical visit to Braulio's iPad on every reinstall, forever
+- **an N-day window** — silently expires over a summer, so the iPad that ran every Sunday for a year
+  stops claiming the seat exactly when everyone has forgotten there was a manual path
+
+⚠️ The commit that shipped this is mislabelled on `main` as `feat(badge): v1.0.4 …` (#333) — a
+`git commit -C` picked up the wrong message. The PR body on #333 is the accurate record.
+
 **Two ways in, one path through.** Tap **"Dirigir el coro"** in the ♪ modal (the normal way — the
 web posts `request-director`, the shell supplies the code), or type `DIRECTOR_CODE` on the numpad.
 Both land in `onDirectorCode` → **always** a confirm dialog, never a silent promotion →
