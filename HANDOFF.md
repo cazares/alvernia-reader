@@ -1,8 +1,8 @@
 # HANDOFF — SignoVivo / alvernia-reader
 
-*Rewritten 2026-08-05 (~6:00 PM CT). Supersedes the 2026-08-03 handoff, which predates the OTA
-being proven and still describes `assets/signo_vivo_372.pdf`, a numpad apply code, and a rollback
-mechanism that does not work.*
+*Rewritten 2026-08-05 (~11:30 PM CT). Supersedes the earlier 2026-08-05 handoff, which described a
+stamping stage, three publish gates and a hand-maintained song index — all deleted that night, and
+all of which were actively breaking the thing they were meant to protect.*
 
 ---
 
@@ -10,139 +10,160 @@ mechanism that does not work.*
 
 | | State |
 |---|---|
-| **Repo HEAD** | `main` @ `dfb5f2b` — everything merged, no open PRs |
-| **Web prod** | signovivo.com **v406** · `bv_29146774dc1035b9` · **373 pages** · minShellBuild 400 |
-| **OTA** | **ARMED** fleet-wide at `bv_29146774dc1035b9` |
-| **Native** | **404** — on the owner's iPhone only. **The choir is on ≤398 and cannot receive OTAs.** |
-| **THE OTA WORKS** | Proven BOTH directions on a real device, 2026-08-05 |
+| **Repo HEAD** | `main` @ `201c753` — everything merged, no open PRs |
+| **Web prod** | signovivo.com **v411** · `bv_29032a4e612d83f6` · **373 pages** · minShellBuild 400 |
+| **Native** | **404** — owner's iPhone only. **The choir is on ≤398 and cannot receive OTAs.** |
+| **The OTA works** | Proven both directions on a real device, and proven with an arbitrary PDF |
 
-**The one command you need:** `scripts/ota-publish.sh <new.pdf>`
-
----
-
-## 1. THE OTA IS PROVEN — both directions
-
-On the owner's iPhone, 2026-08-05, with the binary never moving:
-
-| | Badge | Book |
-|---|---|---|
-| installed 404 | `404b · 404w · 373p` | baked |
-| **forward** | `404b · 405w · 374p` | 373 → 374 songs, over the air |
-| **rollback** | `404b · 406w · 373p` | 374 → 373 songs, over the air |
-
-`b` = native binary · `w` = web bundle build · `p` = pages. **`b` never changing is the proof.**
+**The one command:** `scripts/ota-publish.sh <any.pdf>`
 
 ---
 
-## 2. How to ship a new songbook
+## 1. How to ship a songbook
 
 ```bash
-scripts/ota-publish.sh ~/Downloads/braulio-nuevo.pdf
+scripts/ota-publish.sh ~/Downloads/nuevo.pdf
 ```
 
-That is the entire procedure. It installs the PDF, extends the song index, re-stamps the title
-page, renders, runs every gate, deploys to signovivo.com, commits the release record AND the
-additive baseline, and arms the fleet. Then a person opens the app on a device.
+Two stages: install the PDF, publish it. It renders, deploys to signovivo.com, commits the release
+record **and** the additive baseline, and arms the fleet. Then a person opens the app on a device.
 
 ```bash
-scripts/ota-publish.sh <pdf> --devices k3m9x2   # prove on ONE iPad first
-scripts/ota-publish.sh <pdf> --dry-run          # build + gates, nothing leaves the Mac
+scripts/ota-publish.sh <pdf> --devices k3m9x2   # one device instead of the fleet
+scripts/ota-publish.sh <pdf> --dry-run          # render only; nothing leaves the Mac
+scripts/ota-publish.sh                          # no pdf = republish the book already in the repo
 scripts/ota-rollback.sh --list                  # what can I go back to?
 scripts/ota-rollback.sh                         # go back one book
 scripts/ota-arm.sh --disarm                     # stop NEW devices (already-updated keep it)
 ```
 
-**On a device:** it updates when you open the app, and the **⟳** button forces it. No code to type,
-no dialog. (The numpad code `265134902` still exists as a manual force but nothing routine needs it.)
+**On a device:** it updates when you open the app; **⟳** forces it. No code to type.
+
+### ANY PDF WORKS, AND NOTHING CHECKS IT
+
+This is a deliberate 2026-08-05 decision, not an oversight. Do not "restore" any of it as a bug fix.
+
+- **Song number IS page number**, derived from the PDF at build time (`web/build.mjs`). There is no
+  index to maintain. The old `src/alverniaManual2SongIndex.js` was a hand-edited `[song, page]` list
+  that had to be updated for every new book — and it was already an identity map, 316 of 317 entries.
+  The file still exists because `src/offlineBooks.ts` and three e2e tests import it; **nothing in the
+  publish path reads it.**
+- **No gates.** Boot smoke, book consistency and the additive gate no longer run on the OTA path.
+  `release.sh` honours `SKIP_GATES=1`, which `ota-deploy.sh` sets. The **native** path still gates by
+  default — an IPA cannot be undone by republishing forward.
+- **No stamping.** Nothing grafts, deletes or draws on a page.
+
+**Two consequences, owned:** a shrink can strand pages on a device that was offline when it landed,
+and a book that fails to render now reaches devices because nothing opens the bundle first. Both are
+recoverable by republishing forward.
 
 ---
 
-## 3. ⚠️ THE CHOIR CANNOT RECEIVE ANY OF THIS YET
+## 2. ⚠️ THE CHOIR STILL CANNOT RECEIVE ANY OF THIS
 
-`MIN_SHELL_BUILD = 400` (`web/build.mjs`) and the parish iPads are on **398 or older**. The gate is
-correct — pre-400 shells have three *measured* defects that turn an OTA into a ~26 MB retry loop:
+`MIN_SHELL_BUILD = 400` (`web/build.mjs:891`) and the parish iPads are on **398 or older**. The gate
+is correct — pre-400 shells have three *measured* defects that turn an OTA into a ~26 MB retry loop:
 
 - `≤394` no manifest in the staged bundle → evicted → permanent loop
 - `≤397` WebView denied `styles.css`/`app.js` → renders as raw HTML → quarantined
 - `≤399` `verifyStaged` refuses EVERY shrink → fails, re-stages → loop
 
 **Lowering it does not deliver to those devices; it burns their data forever.** The fix is
-distribution: get every iPad onto **404+** via TestFlight. `~/Desktop/SignoVivo-404.ipa` exists and
-is verified (codes 4/4, manifest embedded, 373 pages). Until then the OTA reaches one iPhone.
+distribution: get every iPad onto **404+** via TestFlight. After that, everything is OTA forever.
+
+**This is the only remaining work that matters.** It needs Miguel's hands: TestFlight and ~8
+physical iPads.
 
 ---
 
-## 4. ⚠️ ROLLBACK IS REPUBLISH-FORWARD. There is no other kind.
+## 3. ⚠️ ROLLBACK IS REPUBLISH-FORWARD. There is no other kind.
 
-**Never** roll back with `--base <immutable Pages deployment URL>`, despite `ota-arm.sh`'s own
-header historically claiming that is what makes rollback possible. The shipped client never
-implemented it:
+**Never** roll back with `--base <immutable Pages deployment URL>`:
 
 - `src/bookUpdate.js` `ALLOWED_HOSTS` matches by **exact string equality**, so
   `<hash>.alvernia-reader.pages.dev` and `staging.alvernia-reader.pages.dev` are refused
 - a refused pointer is **not ignored** — it is the **REVOKE** path, which **deletes the staged
   bundle**. You would destroy ~27 MB on every device while every gate on the Mac read green
 
-`ota-arm.sh` now blocks that base outright (exit 2), and `e2e/bookUpdate.test.mjs` pins the shell
-guard's host list to `ALLOWED_HOSTS` so they cannot drift.
+`ota-arm.sh` blocks that base outright (exit 2). **A `bookVersion → deployment URL` ledger is a
+WRITE-ONLY FILE. Do not build it.** Git is the ledger; `ota-rollback.sh --list` reads real history.
 
-**A `bookVersion → deployment URL` ledger is therefore a WRITE-ONLY FILE. Do not build it.** Git is
-already the ledger — `ota-rollback.sh --list` reads real history. Making `--base` real needs
-`ALLOWED_HOSTS` to accept subdomains (native constant → TestFlight) **and** a decision about
-`decideBundle` rule 7 refusing an older `builtFromShellBuild`.
+Making `--base` real needs `ALLOWED_HOSTS` to accept subdomains (a native constant → TestFlight)
+**and** a decision about `decideBundle` rule 7 refusing an older `builtFromShellBuild`. Deliberately
+not done: republish-forward works and was used repeatedly on 2026-08-05.
+
+---
+
+## 4. Becoming director
+
+Type a code on the numpad → `PdfReaderApp.tsx:820` checks `STANDARD_DIRECTOR_CODES` → **always** a
+confirm dialog, never a silent promotion → `becomeDirector()`.
+
+That set is baked at archive time: `release.sh` copies gitignored `director-codes.private.json` over
+the tracked, empty `director-codes.json`, then restores it (crash-safe via `trap`).
+
+**`release.sh` now ABORTS if that file is missing or unusable.** It used to print one warning inside
+a ten-minute log and archive anyway, producing an IPA that installs perfectly and rejects every code
+— discovered at Mass, 2026-07-01. `ALLOW_NO_DIRECTOR_CODES=1` for a deliberate director-less build.
+
+```bash
+node scripts/verify-director-codes.mjs     # ✅ before every archive. Never prints a code.
+```
+
+It also catches a *present* file that is still unusable: a misspelled key (`|| []` makes a typo an
+empty set), an empty list, a **super-admin code missing from the standard list** (`:820` rejects and
+returns before the super-admin branch at `:830` — it does not direct), a collision with a reserved
+numpad code, or two codes one digit apart. `e2e/director-codes.test.mjs` pins all of it.
+
+**Known debt, not a bug:** the codes are real 10-digit phone numbers compared by exact match. Anyone
+who knows a director's number can take the role from a parish iPad. Changing it means re-teaching
+four people.
 
 ---
 
 ## 5. Delivery has TWO conditions left, and they are physics
-
-`canApplyNow` went from 7 conditions to 2 on 2026-08-05:
 
 ```
 not-ready         nothing finished downloading
 bridge-not-ready  no WebView to swap under (else: permanent blank screen)
 ```
 
-Removed: `stale-ready` (12 h), `no-live-internet` (5 min check-in proof), `mesh-peer`,
-`recent-page-turn`, `director-active`, cold-boot cooldown, the role veto, the client stagger.
-`shell-too-old` **moved** to `shouldStage` — refuse the *download*, not the apply.
+Removed 2026-08-05: `stale-ready`, `no-live-internet`, `mesh-peer`, `recent-page-turn`,
+`director-active`, cold-boot cooldown, the role veto, the client stagger. `shell-too-old` **moved**
+to `shouldStage` — refuse the *download*, not the apply.
 
-**Every one of them refused SILENTLY.** That is why a working rollout and a dead one were
-indistinguishable for an afternoon. Six tests now assert each gate is *gone*; they go red if one
-creeps back. **Reverting any of it needs a new owner decision, not a "regression fix."**
+**Every one of them refused SILENTLY**, which is why a working rollout and a dead one were
+indistinguishable for an afternoon. Six tests assert each gate is *gone*. **Reverting any of it needs
+a new owner decision, not a "regression fix."**
 
-Accepted consequences, owned: an update can land mid-Mass (the WebView remounts, so screens blink),
-and a copy staged days ago applies whenever next foregrounded.
+Accepted: an update can land mid-Mass (screens blink as the WebView remounts), and a copy staged
+days ago applies whenever next foregrounded.
 
 ---
 
-## 6. Traps that cost real time today
+## 6. Traps that cost real time
 
-**The title-page stamp must not lie.** It is the only way to tell which book a device holds with no
-internet ("¿la suya dice agosto?"). It read `· 372 páginas` on a 371-page book for a full day.
-`ota-publish.sh` refuses to publish if the count disagrees; `ota-restamp.sh` fixes it.
-`stamp-book-date.mjs` **overlays** — running it on a stamped book smudges page 1 and every gate
-still passes, so it refuses and page 1 must be rebuilt from an unstamped source first.
+**The pre-arm gate must retry on the VERSION, not the bytes.** `verify-ota-fetchability` fetches the
+manifest *from the base* and checks files against **that** manifest — so while Cloudflare's alias
+still serves the previous deployment, it verifies the old book against itself and reports a clean
+pass. On 2026-08-05 that printed `✅ all 389 checked files are byte-exact … Safe to arm
+bv_29146774dc1035b9` then `✖ ABORT`, with every retry unused. Fixed: the version check is now inside
+the loop, 20 attempts over ~5 min. **If an arm aborts, wait and re-run the arm — do not redeploy.**
 
-**The pre-arm gate reds on the FIRST try after every deploy.** Always `index.html`, same size,
-different md5 — it carries `bookVersion` inline and the Cloudflare alias lags the deployment.
-`ota-arm.sh` now retries 6×/15s. Do not "just re-run" a red without reading it.
+**A failed publish leaves the wrong book committed.** `ota-publish.sh` copies the PDF over
+`assets/songbook.pdf` in stage 1, and `ota-deploy.sh` commits it in the release record. So after a
+bad publish, `git checkout assets/songbook.pdf` restores **the bad book** — it is what HEAD now holds.
+Use `git checkout origin/main -- assets/songbook.pdf`.
 
-**Commit `version.json` AND `web/manifest-baseline.json` WITH each release.** `release.sh` prints
-"COMMIT THIS" and moves on. Forgetting either makes the next build red against a stale reference and
-drifts the repo behind prod. `ota-publish.sh` does it for you.
-
-**The badge briefly shows the BAKED build during an apply** (WebView remount). It looks exactly like
-a revert. It is not.
-
-**`page-001 CHANGED IN PLACE` fires on EVERY book update** — the stamp carries the page count.
-`ota-publish.sh` overrides that one and *only* that one; a shrink, disappeared page or moved song
-aborts.
+**Merging ≠ deployed.** Prod moves only when `release.sh` / `ota-publish.sh` runs.
 
 **Never run two `release.sh` at once** — they share `web/dist`, `/tmp/release-native.log` and
-`~/Desktop/SignoVivo-<N>.ipa`. Doing so cost a build number today (`cwebp failed for render-281.png`).
+`~/Desktop/SignoVivo-<N>.ipa`.
 
 **Never run `npm run test:e2e`** — `e2e/relay-sync.test.mjs` publishes to the PRODUCTION relay room.
-Run the 13 named files in `.github/workflows/ci.yml` (216 tests with a built `web/dist`).
+Run the named files in `.github/workflows/ci.yml`.
+
+**A fresh worktree needs `npm ci`** before anything renders.
 
 ---
 
@@ -156,26 +177,22 @@ One web bundle (`web/src/`) deploys to signovivo.com (Cloudflare Pages, prod bra
 copied into `ios/WebBundle` inside the IPA. Native is a thin RN shell whose WKWebView loads that
 bundle from `file://`.
 
-- The book is `assets/songbook.pdf` — **stable name**, renamed 2026-08-05 from
-  `signo_vivo_<pageCount>.pdf` because that name encoded a mutable fact and was reliably stale.
-- `src/alverniaManual2SongIndex.js` is the hand-maintained `[song, page]` list. A page is not a song.
-- `director-codes.private.json` lives ONLY in the main checkout, is gitignored, and is needed for
-  any **native archive** — `release.sh` warns but proceeds without it, producing a build where
-  nobody can become director (the build-371 outage). Not needed for web-only OTA work.
-- Merging ≠ deployed. Prod moves only when `release.sh` (or `ota-publish.sh`) runs.
+- The book is `assets/songbook.pdf` — stable name; it deliberately does not encode a page count.
+- `director-codes.private.json` lives ONLY in the main checkout and is gitignored (see §4).
+- The shared checkout at `/Users/cazares/src/alvernia-reader` is usually on `main` and other tabs
+  read from it. Work in a fresh worktree; a guard hard-denies writes outside it.
 
-**Scripts:** `ota-publish.sh` (the one command) · `ota-rollback.sh` · `ota-restamp.sh` ·
-`ota-arm.sh` · `release.sh` · `verify-ota-fetchability.mjs`
+**Scripts:** `ota-publish.sh` (the one command) · `ota-rollback.sh` · `ota-arm.sh` · `ota-deploy.sh`
+· `release.sh` · `verify-director-codes.mjs` · `verify-ota-fetchability.mjs`
 
 ---
 
 ## 8. What is NOT done
 
-1. **Get the choir onto build 404+** — nothing else matters until this happens (§3).
+1. **Get the choir onto build 404+** (§2). Nothing else matters until this happens. The next IPA
+   already carries the download cache-buster, so it should hold for months.
 2. **No visible failure state on-device.** If an update does not land, nothing on screen says why.
-   The proposal is a status line + Retry: turn each refusal reason into text instead of silence.
-   This is the single highest-value remaining change.
-3. **`src/bookUpdate.js` downloads files with no cache-buster** while the manifest fetch uses
-   `?v=`. Cloudflare holds assets at `s-maxage=604800`. Not observed biting, but it is the same
-   class as the alias lag. Needs a native build; fold into the next one.
-4. **`--base` rollback + `decideBundle` rule 7** (§4) — a real decision, not a bug fix.
+   A status line + Retry — turning each refusal into text instead of silence — is the single
+   highest-value remaining change. It lives in `web/src`, so it ships over the air; no binary needed.
+3. **`--base` rollback + `decideBundle` rule 7** (§3) — a decision, not a bug fix.
+4. **Director codes are phone numbers** (§4) — a decision, not a bug fix.
