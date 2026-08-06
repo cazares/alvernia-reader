@@ -164,6 +164,11 @@ const DIRECTOR_RESUME_WINDOW_MS = 5 * 60 * 1000;
 const DIRECTOR_RESUME_SETTLE_MS = 12000;
 // The heartbeat ticks every second; this is how often it may touch AsyncStorage.
 const DIRECTOR_STAMP_THROTTLE_MS = 20000;
+// Experience-ranked claim on an EMPTY seat. A device with no history waits the full extra window;
+// every session shaves it, to a floor of zero. Bounded on purpose — the worst case is a few seconds
+// of nobody directing, against a choir that is already sitting on the last page either way.
+const HABIT_MAX_EXTRA_MS = 4000;
+const HABIT_STEP_MS = 250;
 // How many breadcrumbs to keep. Sized to cover a whole Mass plus the boot before it, while staying
 // small enough that serialising the array on every crumb is free.
 const BREADCRUMB_LIMIT = 200;
@@ -265,6 +270,13 @@ export default function App() {
   const becomeDirectorInFlightRef = useRef(false);
   // One-shot: the transmitter notice must not re-fire when syncAvailable flips identity.
   const didTransmitterNoticeRef = useRef(false);
+  // Read-modify-write, best effort. Losing a tick to a race costs nothing — the tally only has to
+  // rank devices against each other, never be exact.
+  const bumpDirectorSessions = useCallback(() => {
+    AsyncStorage.getItem(STORAGE_KEYS.directorSessions)
+      .then((raw) => AsyncStorage.setItem(STORAGE_KEYS.directorSessions, String((Number(raw || 0) || 0) + 1)))
+      .catch(() => {});
+  }, []);
   // Director re-broadcast heartbeats. Two cadences: a FAST mesh re-send (local, free) so a
   // dropped page-turn recovers in ~2s, and a SLOW relay keepalive that only refreshes the
   // Cloudflare snapshot's freshness (page CHANGES publish to the relay immediately anyway).
@@ -798,6 +810,7 @@ export default function App() {
         AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director").catch(() => {});
         lastDirectorAtWrittenRef.current = Date.now();
         AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(Date.now())).catch(() => {});
+        bumpDirectorSessions();
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
         startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
@@ -836,6 +849,7 @@ export default function App() {
         await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director");
         lastDirectorAtWrittenRef.current = Date.now();
         AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(Date.now())).catch(() => {});
+        bumpDirectorSessions();
         if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = false; return; } // superseded while persisting
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
@@ -1954,21 +1968,35 @@ export default function App() {
       Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole),
         AsyncStorage.getItem(STORAGE_KEYS.lastDirectorAt),
+        AsyncStorage.getItem(STORAGE_KEYS.directorSessions),
       ])
-        .then(([prev, atRaw]) => {
+        .then(([prev, atRaw, sessRaw]) => {
           lastKnownRoleRef.current = prev ? String(prev) : null;
-          if (prev !== "director") return;
           const at = Number(atRaw || 0);
-          const freshEnough = at > 0 && Date.now() - at <= DIRECTOR_RESUME_WINDOW_MS;
-          if (!freshEnough) {
-            // Directed at some point, but not recently — this is a normal cold start, not a crash
-            // mid-Mass. Say so without blocking the screen the choir is reading from.
-            injectEvent({
-              type: "toast",
-              text: "Estabas dirigiendo antes. Toca ♪ y luego «Dirigir el coro» para volver.",
-            });
-            return;
-          }
+          const sessions = Number(sessRaw || 0);
+          // TWO reasons to take an empty seat, sharing one set of guards.
+          //
+          //   crashFresh — this device was directing MOMENTS ago and the app restarted.
+          //   habitual   — this device has directed BEFORE, at any point. No recency window: a
+          //                window silently expires over a summer with no Mass, so the iPad that
+          //                has run every Sunday for a year would quietly stop taking the seat
+          //                exactly when everyone has forgotten there was a manual way.
+          //
+          // Nothing is enrolled, declared or configured. The device that keeps directing is simply
+          // the device that keeps directing — and that cannot be faked, because you would have to
+          // actually have done it.
+          const crashFresh = prev === "director" && at > 0 && Date.now() - at <= DIRECTOR_RESUME_WINDOW_MS;
+          const habitual = sessions > 0;
+          if (!crashFresh && !habitual) return;
+          // EXPERIENCE DECIDES WHO CLAIMS IT, without any device talking to another. Everyone waits
+          // for the mesh to settle; then the more this iPad has directed, the sooner it claims an
+          // empty seat. The regular director (hundreds of sessions) fires first and the others, now
+          // seeing a live director, stand down. A substitute who directed once a year ago is still
+          // eligible — it just yields. Turns a race into a precedence order with no coordination,
+          // no server and nothing to configure.
+          const extraWait = crashFresh
+            ? 0 // a crash is not a claim on the seat; it is a continuation, so no penalty
+            : Math.max(0, HABIT_MAX_EXTRA_MS - sessions * HABIT_STEP_MS);
           // becomeFollower() runs in the .finally() below and persists lastSyncRole="follower"
           // within milliseconds. If this device crashes AGAIN inside the settle window — and a
           // device that just crashed while directing is exactly the one that might — the next boot
@@ -2017,12 +2045,17 @@ export default function App() {
             // sat there as a follower with nobody directing. Ask the role what actually happened.
             void becomeDirector(DIRECTOR_CODE).then(() => {
               if (roleRef.current === "director" || explicitTransmitterRef.current) {
-                injectEvent({ type: "toast", text: "Recuperaste la dirección del coro." });
+                injectEvent({
+                  type: "toast",
+                  text: crashFresh
+                    ? "Recuperaste la dirección del coro."
+                    : "Nadie estaba dirigiendo — ahora diriges tú.",
+                });
               } else {
                 standDown("No se pudo recuperar la dirección. Toca ♪ y luego «Dirigir el coro».");
               }
             });
-          }, DIRECTOR_RESUME_SETTLE_MS);
+          }, DIRECTOR_RESUME_SETTLE_MS + extraWait);
         })
         .catch(() => {})
         .finally(() => {
