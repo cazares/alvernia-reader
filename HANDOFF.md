@@ -94,30 +94,35 @@ not done: republish-forward works and was used repeatedly on 2026-08-05.
 
 ---
 
-## 4. Becoming director
+## 4. Becoming director — ONE code, in plain source
 
-Type a code on the numpad → `PdfReaderApp.tsx:820` checks `STANDARD_DIRECTOR_CODES` → **always** a
-confirm dialog, never a silent promotion → `becomeDirector()`.
-
-That set is baked at archive time: `release.sh` copies gitignored `director-codes.private.json` over
-the tracked, empty `director-codes.json`, then restores it (crash-safe via `trap`).
-
-**`release.sh` now ABORTS if that file is missing or unusable.** It used to print one warning inside
-a ten-minute log and archive anyway, producing an IPA that installs perfectly and rejects every code
-— discovered at Mass, 2026-07-01. `ALLOW_NO_DIRECTOR_CODES=1` for a deliberate director-less build.
-
-```bash
-node scripts/verify-director-codes.mjs     # ✅ before every archive. Never prints a code.
+```
+DIRECTOR_CODE = "333444555"          PdfReaderApp.tsx:110
 ```
 
-It also catches a *present* file that is still unusable: a misspelled key (`|| []` makes a typo an
-empty set), an empty list, a **super-admin code missing from the standard list** (`:820` rejects and
-returns before the super-admin branch at `:830` — it does not direct), a collision with a reserved
-numpad code, or two codes one digit apart. `e2e/director-codes.test.mjs` pins all of it.
+Type it on the numpad → `PdfReaderApp.tsx:819` → **always** a confirm dialog, never a silent
+promotion → `becomeDirector()`. Nothing else grants the role. To change it, edit that one line.
 
-**Known debt, not a bug:** the codes are real 10-digit phone numbers compared by exact match. Anyone
-who knows a director's number can take the role from a parish iPad. Changing it means re-teaching
-four people.
+**There is no codes file, no baking step, and nothing to forget.** Until 2026-08-05 this was a set
+of real director phone numbers that `release.sh` swapped out of a gitignored
+`director-codes.private.json` at archive time. That machinery bought nothing — taking the role
+already requires physically holding a parish iPad, and the confirm dialog, not the secrecy of the
+number, is what prevents an accidental takeover. What it cost was real:
+
+- an archive made without that file produced an IPA that installed perfectly and **rejected every
+  code** — the 2026-07-01 Mass outage
+- it kept four people's phone numbers one `git add` away from a public repo
+- only the main checkout had the file, so no worktree could archive
+
+Removed at the owner's call: *"super overkill for what this app is and is meant to become (stay the
+same)."* Nine iPads, one permanent director, no MDM. **Any checkout can now archive.**
+
+`333444555` sits at Hamming distance 8+ from every other numpad code (soft reset `744668486`, book
+apply `265134902`, force baked `907315268`) — read off a card in poor light, a single misread must
+not wipe the device's role instead of granting it. Keep that property if you ever change it.
+
+⚠️ `director-codes.private.json` may still exist in the main checkout. It is unused, still
+gitignored, and contains real phone numbers — Miguel's to delete or keep, nobody else's.
 
 ---
 
@@ -183,7 +188,7 @@ bundle from `file://`.
   read from it. Work in a fresh worktree; a guard hard-denies writes outside it.
 
 **Scripts:** `ota-publish.sh` (the one command) · `ota-rollback.sh` · `ota-arm.sh` · `ota-deploy.sh`
-· `release.sh` · `verify-director-codes.mjs` · `verify-ota-fetchability.mjs`
+· `release.sh` · `verify-ota-fetchability.mjs`
 
 ---
 
@@ -195,4 +200,4 @@ bundle from `file://`.
    A status line + Retry — turning each refusal into text instead of silence — is the single
    highest-value remaining change. It lives in `web/src`, so it ships over the air; no binary needed.
 3. **`--base` rollback + `decideBundle` rule 7** (§3) — a decision, not a bug fix.
-4. **Director codes are phone numbers** (§4) — a decision, not a bug fix.
+4. **Nothing.** Director codes were the last open decision and are gone (§4).

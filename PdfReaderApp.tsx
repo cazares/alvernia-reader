@@ -35,7 +35,6 @@ import {
   startNearbyFollower,
 } from "./src/nearbyDirectorSync";
 import { publishPageToRelay, setRelayPublishCode, setRelayAuthErrorHandler } from "./src/directorRelaySync";
-import directorCodes from "./director-codes.json";
 import { STORAGE_KEYS, type BookId } from "./src/offlineBooks";
 import {
   decideBundle,
@@ -93,22 +92,22 @@ const FORCE_BUNDLED_TTL_MS = 24 * 60 * 60 * 1000;
 // Fixed Multipeer session for the parish mesh (unchanged from the native reader).
 const DIRECTOR_SESSION = "1234";
 
-// Director entry. A real director number, baked at build from the gitignored
-// director-codes.private.json — the committed director-codes.json is EMPTY, so no phone numbers
-// live in this public repo. Any code in this set may take the director role (after confirming).
-const STANDARD_DIRECTOR_CODES = new Set<string>(
-  ((directorCodes as { standardDirectorCodes?: string[] }).standardDirectorCodes || []).map((c) =>
-    String(c).replace(/[^0-9]/g, ""),
-  ),
-);
-// Super-admin codes (Miguel) — a SUBSET of the standard codes, baked from the gitignored
-// director-codes.private.json. Same power as any director code; the confirm dialog just labels it
-// "super admin" so it's clear this number is taking the director role (never promoted silently).
-const SUPER_ADMIN_CODES = new Set<string>(
-  ((directorCodes as { superAdminCodes?: string[] }).superAdminCodes || []).map((c) =>
-    String(c).replace(/[^0-9]/g, ""),
-  ),
-);
+// Director entry. ONE code, in plain source, on purpose.
+//
+// This used to be a set of REAL DIRECTOR PHONE NUMBERS, baked at archive time out of a gitignored
+// director-codes.private.json that release.sh swapped over a tracked empty file and restored under
+// a trap. That machinery bought nothing: taking the role already requires physically holding a
+// parish iPad, and the confirm dialog below — not the secrecy of the number — is what stops an
+// accidental takeover. What it cost was real: an archive made without that file produced an IPA
+// that installed perfectly and rejected every code, which is how the 2026-07-01 Mass outage
+// happened, and it put four people's phone numbers one `git add` away from a public repo.
+//
+// Removed 2026-08-05 at the owner's call: "super overkill for what this app is and is meant to
+// become (stay the same)." Nine iPads, one permanent director, no MDM, no threat model.
+//
+// Distance 8+ from every other numpad code (soft reset, book apply, force baked) so a single
+// misread in poor light cannot wipe a device's role instead of granting it.
+const DIRECTOR_CODE = "333444555";
 // Secret numpad code carried over from the native reader.
 const SOFT_RESET_CODE = "744668486";
 
@@ -817,7 +816,7 @@ export default function App() {
       // Any valid director code may take the role. A valid code does NOT promote SILENTLY — confirm
       // first, so entering your code at Mass/practice never yanks the role from a director who is
       // already live (Miguel, 2026-07-02).
-      const isDirectorCode = STANDARD_DIRECTOR_CODES.has(code);
+      const isDirectorCode = code === DIRECTOR_CODE;
       if (!isDirectorCode) {
         // Unrecognized → tell the web so it surfaces "código incorrecto".
         injectEvent({ type: "role", role: "none" });
@@ -827,7 +826,6 @@ export default function App() {
       // Super-admin codes (Miguel) get a labeled prompt; everyone else is a plain director.
       // Best-effort heads-up: lastDirectorSnapshotRef is set whenever a director's page has arrived
       // over the mesh, so if it's set another device is (or was just) directing — warn before takeover.
-      const isSuperAdmin = SUPER_ADMIN_CODES.has(code);
       // NEW-DIR-3: only warn about taking over a director who is live RIGHT NOW (a fresh mesh
       // snapshot within the heartbeat window) — not one who directed earlier this session and left.
       // Previously this was `Boolean(lastDirectorSnapshotRef.current)`, a set-once-never-cleared flag,
@@ -837,16 +835,10 @@ export default function App() {
         roleRef.current !== "director" &&
         Boolean(snap) &&
         Date.now() - (snap?.at ?? 0) < LIVE_DIRECTOR_WINDOW_MS;
-      const title = liveDirector
-        ? "⚠️ Ya hay un director activo"
-        : isSuperAdmin
-          ? "Super admin — ¿dirigir?"
-          : "¿Dirigir el coro?";
+      const title = liveDirector ? "⚠️ Ya hay un director activo" : "¿Dirigir el coro?";
       const body = liveDirector
-        ? `Otro dispositivo está dirigiendo AHORA. Si continúas${isSuperAdmin ? " (super admin)" : ""}, tú tomas el control y todos te seguirán a ti.`
-        : isSuperAdmin
-          ? "Entrarás como director (super admin). Los demás dispositivos seguirán tu página."
-          : "Los demás dispositivos seguirán tu página. Si otro director ya está activo, le quitarás el control.";
+        ? "Otro dispositivo está dirigiendo AHORA. Si continúas, tú tomas el control y todos te seguirán a ti."
+        : "Los demás dispositivos seguirán tu página. Si otro director ya está activo, le quitarás el control.";
       Alert.alert(title, body, [
         // Cancel: do nothing — stay exactly as you were (a follower keeps following the real director).
         { text: "Cancelar", style: "cancel" },
