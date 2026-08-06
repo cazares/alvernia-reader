@@ -41,6 +41,30 @@ fi
 # build-325/327 "song N unreachable" class, straight to prod with nothing firing.
 # It costs ~1s (pdfinfo + a regex) and it runs in EVERY mode, staging included:
 # STAGING still builds and deploys a real bundle that a canary iPad will read.
+# STRAY .xcarchive INSIDE ios/. React Native's post-install hook runs `find ios/ -name Info.plist`
+# and skips only /Pods, Tests, metainternal, .bundle, build/ and DerivedData/. An .xcarchive sitting
+# directly in ios/ matches none of them, so the hook walks into the packaged .app and hits BINARY
+# plists (bplist00) — and Ruby 4.0.1 raises "invalid byte sequence in UTF-8" from deep inside
+# xcodeproj, sixty lines of backtrace that name neither the archive nor ios/.
+#
+# Cost the owner two failed builds on 2026-08-06 chasing a locale that was never the problem. The
+# check is one `ls`; the failure it prevents is unreadable.
+#
+# It does NOT move or delete anything: an .xcarchive carries the dSYMs that symbolicate crash
+# reports from that build, and these are often the only copy.
+STRAY_ARCHIVES=$(ls -d ios/*.xcarchive 2>/dev/null || true)
+if [ -n "$STRAY_ARCHIVES" ]; then
+  echo "" >&2
+  echo "✖ There are .xcarchive bundles inside ios/. pod install WILL fail with a misleading" >&2
+  echo "  \"invalid byte sequence in UTF-8\" from xcodeproj — it is reading their binary plists." >&2
+  echo "" >&2
+  echo "$STRAY_ARCHIVES" | sed 's/^/    /' >&2
+  echo "" >&2
+  echo "  MOVE them (do not delete — they hold the dSYMs for those builds):" >&2
+  echo "    mkdir -p ~/SignoVivo-archives && mv ios/*.xcarchive ~/SignoVivo-archives/" >&2
+  exit 1
+fi
+
 echo "==> 0/6  Preflight: book consistency (song index vs shipped PDF)"
 if [ "${SKIP_GATES:-0}" = "1" ]; then
   echo "         skipped (SKIP_GATES=1)"

@@ -2167,6 +2167,16 @@ html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-ar
 .search-fab { display: none; }                              /* hidden for followers */
 html[data-role="director"] .search-fab { display: flex; }   /* shown for the director */
 html[data-role="director"] .resync-fab { display: none; }   /* hidden for the director */
+
+/* CLEAR THE ⟳ FAB. The pill and the resync fab both sit at top-left with the same offset, and until
+   the pill existed they could never be on screen together: the old badge showed only for the
+   DIRECTOR, and the ⟳ fab is hidden for exactly that role. Making the pill visible to followers put
+   its text underneath the fab.
+   Shift by the fab's own width (4rem) plus the same 0.55rem gutter, and only while the fab is
+   actually shown — the director keeps the flush-left position it always had. */
+html[data-role="follower"] .director-mode-badge {
+  left: calc(max(0.55rem, env(safe-area-inset-left, 0px)) + 4.55rem);
+}
 /* Hide the right-side fabs WHILE the drawer is open (director-only; the drawer has its own
    nav). !important so it still wins over the director rule above. */
 body.sv-drawer-open .song-jump-fab,
