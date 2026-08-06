@@ -1184,8 +1184,12 @@ const SYNC_PILL = {
   // nowhere in this system, and the person tapping would wait for a reply that never comes. The red
   // "⚠️ Ya hay un director activo / Tomar el control" confirm is what makes it safe, not the label
   // being coy about what it does.
-  following: { cls: "is-following", title: "SIGUIENDO", action: "Dirigir el coro" },
-  nobody:    { cls: "is-nobody", title: "NADIE DIRIGE", action: "▶ Dirigir el coro" },
+  // "Convertirme en director" names the ROLE, reflexively — who is becoming what. Earlier attempts
+  // failed in both directions: "Tomar" was a bare verb (take WHAT?), and "Tomar el control" promised
+  // the takeover dialog, which only appears inside an 8s window the pill cannot see. Naming the role
+  // is true in every case and needs no context to read.
+  following: { cls: "is-following", title: "SIGUIENDO", action: "Convertirme en director" },
+  nobody:    { cls: "is-nobody", title: "NADIE DIRIGE", action: "▶ Convertirme en director" },
 };
 
 // A director's mesh heartbeat is ~1s. Well past that but well under a page's worth of silence, so a
