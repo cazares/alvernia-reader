@@ -1054,13 +1054,18 @@ This extends [`pre-mass-checklist.md`](pre-mass-checklist.md). It does not repla
 rule stands: new builds go out Wed/Sat practice only, never on a Mass day (Sun/Thu), and never deploy a
 fix during Mass** (`pre-mass-checklist.md:7-9`, `:65`).
 
-### Prerequisite — `director-codes.private.json`
+### Prerequisite — `director-codes.private.json` — ❌ OBSOLETE as of 2026-08-05 (PR #320)
 
-**Run `release.sh` from the MAIN checkout `/Users/cazares/src/alvernia-reader/`, or copy the file
-there first.** It is gitignored and exists only in the main checkout. `release.sh` **warns and
-proceeds** without it, producing a build where **nobody can become director** — this caused a real Mass
-outage (build 371). Before the archive, verify the file is present and non-empty. Treat its absence as
-a hard stop, not a warning.
+> **Ignore this section. There is no codes file any more.** It told you to archive only from the
+> main checkout, because that gitignored file lived there, and to treat its absence as a hard stop.
+> Both are now wrong — and following them sends you chasing a non-issue in the minutes before Mass,
+> which is the opposite of what a pre-Mass document is for.
+>
+> The director code is a plain constant in `PdfReaderApp.tsx` (`DIRECTOR_CODE`), so **any checkout
+> can archive**. The usual way in is the ♪ modal → **"Dirigir el coro"**, with no number to
+> remember. `release.sh` no longer bakes, swaps or restores anything.
+>
+> Current instructions: `HANDOFF.md` §4 and §4b.
 
 ### Correction to the existing canary step (RELVER-01 / RELVER-12)
 
@@ -1074,10 +1079,12 @@ Wed/Sat practice, on the live room, on the new TestFlight build, with exactly on
 
 ### A. Publishing a new songbook PDF (Wed/Sat, at home, with wifi)
 
-1. Drop the new PDF at `assets/signo_vivo_<N>.pdf`; confirm it is **additive** (old pages unchanged,
-   new songs appended).
-2. `bash scripts/release.sh` — this now runs the additive gate and the consistency check **before**
-   deploying, and hard-fails on a non-additive book unless `ADDITIVE_OVERRIDE` is typed.
+1. ❌ **OBSOLETE.** The book is `assets/songbook.pdf` (stable name since 2026-08-05) and you do not
+   place it by hand — `scripts/ota-publish.sh <pdf>` installs it. It need not be additive: the
+   publish path deliberately runs **no gates** (owner decision, `HANDOFF.md` §1). A shrink is
+   allowed, and its cost — pages stranded on a device that was offline — is stated there.
+2. ❌ **OBSOLETE.** `scripts/ota-publish.sh <pdf>` is the whole procedure and never asks for
+   `ADDITIVE_OVERRIDE`. `release.sh` is now only the **native/IPA** path, which does still gate.
 3. Verify `https://signovivo.com/bundle-manifest.json` serves the new `bookVersion` and the expected
    `totalPages`.
 4. Commit the new `web/manifest-baseline.json` **as its own commit**.

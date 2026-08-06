@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
     --devices) DEVICES="$2"; [ "$2" = "*" ] || ALLOW_FLEET=""; shift 2;;
     --no-arm)  ARM=0; shift;;
     --dry-run) DRY=1; ARM=0; shift;;
-    -h|--help) sed -n '2,28p' "$0"; exit 0;;
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
