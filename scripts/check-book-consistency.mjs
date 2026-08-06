@@ -8,9 +8,21 @@
  * The remaining risk is the SONG INDEX pointing a song at a page the PDF does not
  * have — then jump-by-number strands a user on a blank/clamped page during Mass.
  *
- * This validates the canonical song index (src/alverniaManual2SongIndex.js) — the
- * single source web/build.mjs reads — against the shipped PDF, and FAILS the build
- * if any song points beyond the last page.
+ * It USED to validate src/alverniaManual2SongIndex.js, a hand-maintained [song, page] list, against
+ * the PDF. That file stopped being read by anything on 2026-08-05: web/build.mjs now DERIVES the
+ * index from the rendered page count (song n = page n), so the file is frozen at 317 pairs / max
+ * page 373 forever while the shipped book moves freely.
+ *
+ * Leaving the check pointed at it was worse than deleting it. Publish a 350-page PDF over the OTA
+ * (which sets SKIP_GATES=1 and never runs this) and the next NATIVE release — or plain `npm run
+ * preios` — hard-failed with "correct the page in src/alverniaManual2SongIndex.js": a file the
+ * build ignores, so following the advice fixes nothing and editing it changes nothing. The native
+ * release and the simulator were both blocked by a fossil.
+ *
+ * It now validates what actually ships: the DERIVED index (song n = page n for n in 1..pages) is
+ * true by construction, so the only real question left is whether the PDF, the rendered pages and
+ * the manifest agree — which is the cross-check below, and which used to sit unreachable behind an
+ * early exit on that dead file.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -18,17 +30,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const songIndexPath = path.join(root, "src/alverniaManual2SongIndex.js");
 const pdfPath = path.join(root, "assets/songbook.pdf");
 
-const src = fs.readFileSync(songIndexPath, "utf8");
-const pairs = [...src.matchAll(/\[(\d+),\s*(\d+)\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
-if (!pairs.length) {
-  console.error(`❌ check-book-consistency: no [song, page] pairs found in ${path.basename(songIndexPath)}.`);
-  process.exit(1);
-}
-const songCount = pairs.length;
-const maxIndexedPage = pairs.reduce((m, [, p]) => Math.max(m, Number(p) || 0), 0);
 
 const info = spawnSync("pdfinfo", [pdfPath], { encoding: "utf8" });
 if (info.status !== 0) {
@@ -43,14 +46,11 @@ if (!Number.isFinite(actual)) {
 }
 
 let ok = true;
-if (maxIndexedPage > actual) {
-  console.error(`❌ song index references page ${maxIndexedPage} but ${path.basename(pdfPath)} has only ${actual} pages.`);
-  console.error("   That song is not rendered and not jump-reachable by number.");
-  console.error("   Fix: correct the page in src/alverniaManual2SongIndex.js, or update the PDF.");
+// song n = page n, derived from the render, so "a song points past the last page" is no longer
+// expressible. What IS still worth failing on is a book with no pages at all.
+if (!(actual > 0)) {
+  console.error(`❌ ${path.basename(pdfPath)} reports ${actual} pages.`);
   ok = false;
-}
-if (maxIndexedPage && maxIndexedPage < actual) {
-  console.warn(`⚠️  Last indexed song is on page ${maxIndexedPage} but the PDF has ${actual} pages — the final page(s) may not be jump-reachable by song number.`);
 }
 
 // ── Three-way cross-check: PDF ↔ render ↔ manifest ───────────────────────────
@@ -93,4 +93,4 @@ if (fs.existsSync(distPagesDir) && fs.existsSync(manifestPath)) {
 }
 
 if (!ok) process.exit(1);
-console.log(`✅ book consistency OK — ${songCount} songs, max indexed page ${maxIndexedPage} ≤ PDF pages ${actual}.`);
+console.log(`✅ book consistency OK — ${actual} pages, song n = page n, PDF/render/manifest agree.`);

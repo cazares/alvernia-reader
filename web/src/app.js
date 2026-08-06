@@ -1206,7 +1206,7 @@ const showRelayAuthWarning = (status) => {
   const style = document.createElement("style");
   style.textContent =
     "#sv-relay-warn{position:fixed;top:max(0.7rem,env(safe-area-inset-top,0px));left:50%;" +
-    "transform:translateX(-50%);z-index:70;display:none;max-width:min(92vw,34rem);" +
+    "transform:translateX(-50%);z-index:255;display:none;max-width:min(92vw,34rem);" +
     "align-items:flex-start;gap:0.55rem;padding:0.8rem 0.9rem;border-radius:0.85rem;" +
     "background:#b91c1c;color:#fff;font:600 0.92rem/1.35 system-ui,-apple-system,sans-serif;" +
     "box-shadow:0 6px 22px rgba(0,0,0,.45);-webkit-tap-highlight-color:transparent}" +
@@ -1290,18 +1290,24 @@ const showSyncNotice = (text) => {
 // Renders the native crumb ring buffer full-screen, selectable, newest LAST so it reads as a
 // timeline. Deliberately ugly and text-only: its job is to be read over the phone by someone
 // standing in a church, or copied into a message afterwards.
+// The dump gets read aloud over the phone by a chorister. "follower"/"off" in an otherwise
+// all-Spanish UI is a word they have to spell out.
+const ROLE_ES = { director: "director", follower: "siguiendo", off: "sin conexión" };
 let diagEl = null;
 const showDiagnostics = (payload) => {
   if (!diagEl) {
     diagEl = document.createElement("div");
     diagEl.id = "sv-diag";
+    diagEl.setAttribute("role", "dialog");
+    diagEl.setAttribute("aria-modal", "true");
+    diagEl.setAttribute("aria-label", "Diagnóstico del dispositivo");
     const header = document.createElement("header");
     const label = document.createElement("span");
     label.className = "sv-diag-label";
     const close = document.createElement("button");
     close.type = "button";
     close.textContent = "Cerrar";
-    close.addEventListener("click", () => diagEl.classList.remove("is-on"));
+    close.addEventListener("click", hideDiagnostics);
     header.appendChild(label);
     header.appendChild(close);
     const pre = document.createElement("pre");
@@ -1312,11 +1318,23 @@ const showDiagnostics = (payload) => {
   }
   const lines = Array.isArray(payload.lines) ? payload.lines : [];
   diagEl.querySelector(".sv-diag-label").textContent =
-    `build ${payload.build || "?"} · ${payload.pages || "?"} pág · ${payload.role || "?"} · ${lines.length} eventos\n${payload.book || "?"}`;
+    [
+      `build ${payload.build || "?"}`,
+      // A genuine 0 must not render as "?" — native sends `totalPagesRef.current || 0`, so
+      // "this device resolved zero pages" is exactly the state diagnostics exist to surface.
+      `${Number.isFinite(payload.pages) ? payload.pages : "?"} págs.`,
+      ROLE_ES[payload.role] || payload.role || "?",
+      `${lines.length} eventos`,
+    ].join(" · ") + `\n${payload.book || "?"}`;
   diagEl.querySelector(".sv-diag-body").textContent =
     lines.length ? lines.join("\n") : "Sin eventos registrados todavía.";
   diagEl.classList.add("is-on");
 };
+// True while the dump covers the screen. The rescue handlers closeSongJump() before posting, so
+// state.songJumpOpen is false and the global keydown handler would otherwise fall through to
+// turnSong(±1) — silently moving the whole congregation under an opaque overlay.
+const diagnosticsOpen = () => Boolean(diagEl && diagEl.classList.contains("is-on"));
+const hideDiagnostics = () => { if (diagEl) diagEl.classList.remove("is-on"); };
 
 const applyNativeSyncEvent = async (payload) => {
   // Whole-body guard (M2 Slice C): the native shell calls this via evaluateJavaScript on
@@ -2850,8 +2868,14 @@ const bindReaderEvents = () => {
   if (rescueToggle) rescueToggle.addEventListener("click", () => {
     haptic();
     // classList.toggle returns whether the class is now PRESENT — i.e. now hidden, not now open.
+    if (!rescueActions) return;
     const nowHidden = rescueActions.classList.toggle("is-hidden");
     rescueToggle.setAttribute("aria-expanded", String(!nowHidden));
+    // The card scrolls (max-height + overflow-y) and iOS draws no scrollbar, so on a 10.2" iPad
+    // portrait the last rescue button sat past the visible edge with nothing to signal it. Panic
+    // switches nobody can find in the five minutes before Mass are the failure this was built to
+    // prevent, so bring them into view rather than trusting the operator to discover the scroll.
+    if (!nowHidden) rescueActions.scrollIntoView({ block: "nearest" });
   });
   if (rescueBaked) rescueBaked.addEventListener("click", () => {
     haptic(); closeSongJump(); postNativeBridge({ type: "request-force-baked" });
@@ -3264,6 +3288,14 @@ const bindReaderEvents = () => {
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   window.addEventListener("keydown", (event) => {
+    // The diagnostics dump covers the screen but is opened AFTER closeSongJump(), so songJumpOpen is
+    // false and arrow keys would fall straight through to turnSong — moving the whole congregation
+    // under an opaque overlay, on the director's iPad, with nothing on screen to explain it.
+    if (diagnosticsOpen()) {
+      if (event.key === "Escape") hideDiagnostics();
+      event.preventDefault();
+      return;
+    }
     // Number entry only applies while the jump-to-song modal is open (matches native).
     if (state.songJumpOpen) {
       if (/^[0-9]$/.test(event.key)) { appendDigit(event.key); return; }

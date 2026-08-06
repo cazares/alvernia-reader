@@ -68,8 +68,30 @@ fi
 
 # ── 2. Deploy ────────────────────────────────────────────────────────────────────────────────────
 say "2/5  Deploying to signovivo.com (web only — no IPA, no TestFlight)"
+# `... | grep … || true` swallowed release.sh's exit code entirely — `set -o pipefail` reports the
+# pipeline's failure and `|| true` immediately discards it. A failed `wrangler pages deploy` (auth,
+# network, quota) therefore printed its ✖, and this script sailed on to commit a release record for
+# a build that never left the Mac and then ARM it. That was survivable while this script ran its own
+# gates first; with the gates gone it is the only thing between a broken publish and the fleet.
+#
+# PIPESTATUS[0] is the deploy's real status, and it must be read on the VERY NEXT line: `|| true`
+# would execute `true` and reset PIPESTATUS to (0), silently restoring the bug this replaces — which
+# is exactly what the first version of this fix did, caught by testing the failure path rather than
+# the happy one. `set +e` already stops a non-zero pipeline from aborting, so no `|| true` is needed
+# and grep finding no lines is harmless.
+set +e
 SKIP_GATES=1 ADDITIVE_OVERRIDE='yes I am changing published pages' SKIP_NATIVE=1 bash scripts/release.sh 2>&1 \
-  | grep -E 'build = |Deployment complete|additive baseline|DONE —|✖|FAILED' || true
+  | grep -E 'build = |Deployment complete|additive baseline|DONE —|✖|FAILED'
+RELEASE_RC=${PIPESTATUS[0]}
+set -e
+if [ "$RELEASE_RC" != "0" ]; then
+  echo "" >&2
+  echo "✖ release.sh exited $RELEASE_RC — NOTHING was published." >&2
+  echo "  Not committing a release record and not arming: the fleet must never be pointed at a" >&2
+  echo "  bookVersion that no origin serves. version.json may already be bumped; the next run" >&2
+  echo "  reuses it harmlessly. Re-run once the cause above is fixed." >&2
+  exit 1
+fi
 
 # release.sh rebuilds at the bumped number, so the SHIPPED bookVersion is not the one from step 1.
 BV=$(node -e "process.stdout.write(require('./web/dist/bundle-manifest.json').bookVersion)")
@@ -81,6 +103,18 @@ echo "     shipped: $BV  (web build $BUILD)"
 # baseline, then prints "COMMIT THIS" and moves on. Leaving them uncommitted means the next build
 # compares against a stale baseline and reds for no reason, and the repo drifts behind production.
 say "3/5  Committing the release record"
+# THE BOOK ITSELF. ota-publish.sh copies the new PDF over assets/songbook.pdf and nothing here ever
+# committed it, which quietly broke the one thing the removal of every gate was justified BY:
+#
+#   - ota-rollback.sh refuses to run while assets/songbook.pdf is dirty ("commit or discard them
+#     first"), so the advertised undo failed after EVERY publish — exactly when it is needed.
+#   - ota-rollback.sh --list builds its history from `git log --follow -- assets/songbook.pdf`, so
+#     the book just published was absent: --list labelled the PREVIOUS book "→ current", and the
+#     default rollback target was two books back rather than one.
+#
+# Committing it here makes git the ledger it was always claimed to be. Deliberately in the SAME
+# commit as version.json: the book and the build number that shipped it must never be separable.
+git add assets/songbook.pdf 2>/dev/null || true
 git add version.json app.json ios/SignoVivo/Info.plist ios/SignoVivo.xcodeproj/project.pbxproj 2>/dev/null || true
 git commit -q -m "chore(release): v${BUILD} — web-only; ${BOOK_PAGES}-page book ${BV}" 2>/dev/null \
   && echo "     ✅ release record" || echo "     (nothing to commit)"

@@ -2,11 +2,18 @@
 /**
  * PRE-ARM GATE — prove the deployed book is actually downloadable before arming any iPad.
  *
- * WHY THIS EXISTS. `src/bookUpdate.js` fetches every manifest entry as `${base}/${f.p}` with NO
- * cache-buster (the manifest fetch itself uses `?v=${bookVersion}`, but the file fetches do not),
- * then `verifyStaged` demands an exact size AND md5 match for each. Cloudflare's edge holds assets
- * with `s-maxage=604800` — SEVEN DAYS. So any path whose CONTENT changed while its PATH stayed the
- * same can serve stale bytes to a device long after a successful deploy.
+ * WHY THIS EXISTS. `src/bookUpdate.js` fetches every manifest entry and `verifyStaged` demands an
+ * exact size AND md5 match for each. Cloudflare's edge holds assets with `s-maxage=604800` — SEVEN
+ * DAYS — so any path whose CONTENT changed while its PATH stayed the same can serve stale bytes to a
+ * device long after a successful deploy.
+ *
+ * THE URL SHAPE MUST MATCH THE CLIENT'S, EXACTLY. Since 2026-08-05 the client appends
+ * `?v=${bookVersion}` to every file (it previously fetched bare paths, and this file's whole premise
+ * was that bare shape). This gate was not updated with it for several hours, which is the more
+ * dangerous of the two possible errors: a gate checking a URL nobody fetches reads as coverage while
+ * verifying nothing, and a device that fails verifyStaged is rendered on the fleet dashboard
+ * IDENTICALLY to one that was never armed. If the client's URL construction changes again, change it
+ * here in the same commit — `e2e/otaFetchability.test.mjs` fails if the two drift.
  *
  * A release that rewrites in place — every version-stamped release does, and the v390 web-only
  * bump changed exactly 4 files at unchanged paths — is therefore the highest-risk shape there is.
@@ -27,6 +34,10 @@
  * Exit 0 = every checked file is byte-exact. Non-zero = DO NOT ARM.
  */
 import { createHash } from "node:crypto";
+// Imported, never re-implemented: this gate exists to probe EXACTLY what the iPads request, so the
+// URL must come from the client itself. See bookFileUrl's own comment for what happened when the
+// two were separate strings.
+import { bookFileUrl } from "../src/bookUpdate.js";
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "https://signovivo.com")
@@ -70,8 +81,9 @@ const main = async () => {
     for (;;) {
       const f = queue.shift();
       if (!f) return;
-      // EXACTLY the client's URL shape — no cache-buster. That is the whole point.
-      const url = `${BASE}/${f.p}`;
+      // EXACTLY the client's URL shape, cache-buster included. That is the whole point: this gate
+      // is worthless the moment it probes a URL the iPads never request.
+      const url = bookFileUrl(BASE, f.p, manifest.bookVersion);
       try {
         const r = await fetch(url);
         const buf = Buffer.from(await r.arrayBuffer());
