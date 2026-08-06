@@ -128,7 +128,6 @@ const songJumpModal    = document.getElementById("song-jump-modal");
 const songJumpBackdrop = document.getElementById("song-jump-backdrop");
 const songJumpTrigger  = document.getElementById("song-jump-trigger");
 const songCancelButton = document.getElementById("song-cancel");
-const directButton = document.getElementById("direct-button");
 const rescueWrap = document.getElementById("rescue-wrap");
 const rescueToggle = document.getElementById("rescue-toggle");
 const rescueActions = document.getElementById("rescue-actions");
@@ -1167,14 +1166,26 @@ const flashSongDisplay = (msg, kind) => {
 // saying the seat was empty. Every signal needed to know already crossed the native bridge; the web
 // simply threw it away.
 const SYNC_PILL = {
+  // EACH LABEL NAMES THE OUTCOME, not the dialog. "Tomar" alone was vague — take WHAT? — but
+  // "Tomar el control" would have been worse: a promise the app cannot keep.
+  //
+  // Which confirm appears is decided NATIVELY at tap time by `liveDirector`, an 8s window on
+  // lastDirectorSnapshotRef (PdfReaderApp.tsx). The pill's SIGUIENDO uses a 15s window on mesh page
+  // events, deliberately longer so a brief radio hiccup does not flash NADIE DIRIGE at the choir
+  // mid-hymn. Between 8s and 15s the two disagree and the dialog reads "¿Dirigir el coro?", NOT
+  // "Tomar el control" — so a label promising the latter is wrong roughly half the time it matters.
+  //
+  // What never varies is where you end up: directing the choir. The pill says that. The TITLE
+  // (SIGUIENDO vs NADIE DIRIGE) and the tint carry the difference between the two situations, and
+  // the red takeover warning still appears when it applies.
   directing: { cls: "", title: "DIRECTOR", action: "✕ Salir" },
   // "Tomar", not "Pedir". Nothing approves this: tap, confirm, and you are the director — whoever
   // currently holds it is never asked. A word like "request" would promise a handshake that exists
   // nowhere in this system, and the person tapping would wait for a reply that never comes. The red
   // "⚠️ Ya hay un director activo / Tomar el control" confirm is what makes it safe, not the label
   // being coy about what it does.
-  following: { cls: "is-following", title: "SIGUIENDO", action: "Tomar" },
-  nobody:    { cls: "is-nobody", title: "NADIE DIRIGE", action: "▶ Dirigir" },
+  following: { cls: "is-following", title: "SIGUIENDO", action: "Dirigir el coro" },
+  nobody:    { cls: "is-nobody", title: "NADIE DIRIGE", action: "▶ Dirigir el coro" },
 };
 
 // A director's mesh heartbeat is ~1s. Well past that but well under a page's worth of silence, so a
@@ -1672,9 +1683,6 @@ const openSongJump = () => {
   // that is not already directing. Re-evaluated on every open rather than once at boot, because the
   // role changes mid-session — a director who steps down must be able to take it back.
   const inShell = NATIVE_FILE_MODE || hasNativeBridge();
-  if (directButton) {
-    directButton.classList.toggle("is-hidden", !(inShell && state.nativeSyncRole !== "director"));
-  }
   // Rescue is shell-only too — nothing here means anything to a browser on signovivo.com, which has
   // no mesh, no staged bundle and no crumb log. Always re-collapsed, so it cannot be left open.
   if (rescueWrap) rescueWrap.classList.toggle("is-hidden", !inShell);
@@ -2938,14 +2946,6 @@ const bindReaderEvents = () => {
 
   // "Dirigir el coro" — ask the native shell for the role. The web bundle never holds DIRECTOR_CODE;
   // it sends a request and the shell runs the same confirmation, live-director takeover warning and
-  // becomeDirector path a typed code would. Closing the modal first means the confirm lands on the
-  // page, not on top of a numpad nobody is using any more.
-  if (directButton) directButton.addEventListener("click", () => {
-    haptic();
-    closeSongJump();
-    postNativeBridge({ type: "request-director" });
-  });
-
   // Rescue block. The toggle only expands; each action confirms NATIVELY before doing anything, so
   // a stray tap in here still cannot change the device.
   if (rescueToggle) rescueToggle.addEventListener("click", () => {

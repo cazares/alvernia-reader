@@ -22,32 +22,33 @@ const revealDecision = () => {
     const calls = {};
     const el = (name) => ({ classList: { toggle: (_c, v) => { calls[name] = v; }, add: () => { calls[name + ":collapsed"] = true; } } });
     const fn = new Function(
-      "NATIVE_FILE_MODE", "hasNativeBridge", "state", "directButton", "rescueWrap", "rescueActions",
+      "NATIVE_FILE_MODE", "hasNativeBridge", "state", "rescueWrap", "rescueActions",
       "rescueToggle", "songJumpModal", "clearDraft",
       body.replace(/songJumpModal\.classList\.remove\("is-hidden"\);/, "").replace(/state\.songJumpOpen = true;/, ""),
     );
     fn(NATIVE_FILE_MODE, () => hasBridge, { nativeSyncRole: role, songJumpOpen: false },
-       el("direct"), el("rescue"), el("rescueActions"), { setAttribute() {} }, { classList: { remove() {} } }, () => {});
+       el("rescue"), el("rescueActions"), { setAttribute() {} }, { classList: { remove() {} } }, () => {});
     return calls;
   };
 };
 
-test("the button never appears on the public web", () => {
-  // signovivo.com serves this same bundle to anyone. No mesh, no role to take — an offer to
-  // 'direct the choir' there is dead at best. `true` passed to toggle() means HIDDEN.
-  const decide = revealDecision();
-  assert.equal(decide(false, false, "follower").direct, true, "direct button REVEALED on the public web");
-  assert.equal(decide(false, false, "follower").rescue, true, "rescue block REVEALED on the public web");
-  // ...and it must still work in the shell, or the gate is just "always hidden".
-  assert.equal(decide(true, false, "follower").direct, false, "button hidden inside the native shell");
-  assert.equal(decide(false, true, "follower").direct, false, "button hidden when the bridge exists");
-  assert.match(HTML, /class="song-jump-direct is-hidden"/, "must ship hidden and be revealed by JS");
+test("the way in is the pill, not a button buried in the song-jump modal", () => {
+  // "Dirigir el coro" used to sit inside a dialog titled IR A CANTO — wrong twice over: nobody
+  // looking to direct opens the go-to-song keypad, and on a 10.2" portrait iPad it fell below the
+  // card's fold. The pill shows the room's state AND is the control for it.
+  assert.ok(!/id="direct-button"/.test(HTML), "the modal director button is back");
+  assert.ok(!/directButton/.test(APP), "dead references to the removed button remain");
+  assert.match(APP, /postNativeBridge\(\{ type: "request-director" \}\)/,
+    "nothing asks native for the role any more");
 });
 
-test("the button is not offered to a device already directing", () => {
-  const decide = revealDecision();
-  assert.equal(decide(true, true, "director").direct, true, "a director is still offered the role");
-  assert.equal(decide(true, true, "follower").direct, false, "a follower is denied the role");
+test("the pill is the only thing that asks for the role, and it is shell-only", () => {
+  // One request site. Two would drift, and the second is always the one nobody re-checks.
+  assert.equal((APP.match(/type: "request-director"/g) || []).length, 1,
+    "more than one place asks for the director role");
+  const render = APP.slice(APP.indexOf("const renderDirectorModeBadge"), APP.indexOf("// ── Sync \"working\""));
+  assert.match(render, /NATIVE_FILE_MODE \|\| hasNativeBridge\(\)/,
+    "the pill is not gated to the native shell — signovivo.com has no room to describe");
 });
 
 test("the rescue block re-collapses on every open", () => {

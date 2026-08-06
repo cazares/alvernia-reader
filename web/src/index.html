@@ -147,14 +147,10 @@
             <button class="song-jump-cancel" id="song-cancel" type="button">Cancelar</button>
           </div>
 
-          <!-- Taking the choir. Hidden by default and revealed only inside the native shell, for a
-               device that is not already directing — app.js decides. It lives here, behind opening
-               the ♪ modal, rather than on the reading surface: two deliberate taps, nowhere near a
-               thumb resting on the page edge. The confirmation still happens natively.
-               Replaces a memorised code, so a spare iPad can take over when the director's dies. -->
-          <button class="song-jump-direct is-hidden" id="direct-button" type="button">
-            Dirigir el coro
-          </button>
+          <!-- "Dirigir el coro" used to live here. It moved to the sync pill (top-left), which shows
+               the room's state and IS the control for it. A director button inside a dialog titled
+               IR A CANTO was the wrong place twice over: nobody looking to direct opens the
+               go-to-song keypad, and on a 10.2" portrait iPad it sat below the card's fold. -->
 
           <!-- The two panic switches and the crumb log. Native-only, collapsed by default: these
                fire roughly once a year, under pressure, and must not compete for attention with

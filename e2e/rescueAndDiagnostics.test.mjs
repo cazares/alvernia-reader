@@ -15,9 +15,9 @@ const reveal = (nativeFileMode, hasBridge, role = "follower") => {
     .replace(/songJumpModal\.classList\.remove\("is-hidden"\);/, "").replace(/state\.songJumpOpen = true;/, "");
   const calls = {};
   const el = (n) => ({ classList: { toggle: (_c, v) => { calls[n] = v; }, add: () => { calls[n + ":collapsed"] = true; } } });
-  new Function("NATIVE_FILE_MODE", "hasNativeBridge", "state", "directButton", "rescueWrap",
+  new Function("NATIVE_FILE_MODE", "hasNativeBridge", "state", "rescueWrap",
     "rescueActions", "rescueToggle", "songJumpModal", "clearDraft", body)(
-    nativeFileMode, () => hasBridge, { nativeSyncRole: role }, el("direct"), el("rescue"),
+    nativeFileMode, () => hasBridge, { nativeSyncRole: role }, el("rescue"),
     el("rescueActions"), { setAttribute() {} }, { classList: { remove() {} } }, () => {});
   return calls;
 };
