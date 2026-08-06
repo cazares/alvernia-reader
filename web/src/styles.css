@@ -2374,7 +2374,9 @@ body.sv-drawer-open .search-fab { display: none !important; }
 #sv-diag {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  /* Above .song-jump-modal (200). At 80 it rendered BEHIND an open modal — invisible, with no clue
+     why. The request is fired from inside that modal, so this is not a hypothetical ordering. */
+  z-index: 260;
   display: none;
   flex-direction: column;
   background: #111;
