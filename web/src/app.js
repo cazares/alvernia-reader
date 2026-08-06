@@ -3997,14 +3997,14 @@ const initReader = async () => {
 // months-old songbook (that is the entire reason bookVersion exists) — so "395" could sit above a
 // book from June and look perfectly current.
 //
-// Now every surface answers four questions at a glance:
-//   PAD   which DEVICE — "PAD"/"PHN", injected by native; absent on web
-//   395b  which BINARY  — absent on web, where it reads "web" instead, so the surface is explicit
-//   396w  which WEB bundle — the OTA-updatable half; this is what a songbook update actually moves
-//   374p  which BOOK — pages in the bundle that is CURRENTLY MOUNTED, not what the shell believes
+// Now every surface answers four questions at a glance — v1.0.4 (395-396-374) PAD:
+//   395  which BINARY — reads "web" on the web, so the surface is always explicit
+//   396  which WEB bundle — the OTA-updatable half; this is what a songbook update actually moves
+//   374  which BOOK — pages in the bundle CURRENTLY MOUNTED, not what the shell believes
+//   PAD  which DEVICE — injected by native, outside the parentheses; absent on web
 //
-// A mismatch is now readable rather than invisible: `395b · 396w` means the web half was updated
-// over the air past its binary, which is exactly what a working OTA looks like.
+// A mismatch is now readable rather than invisible: 395-396 means the web half was updated over the
+// air past its binary, which is exactly what a working OTA looks like.
 //
 // DEVICE KIND IS NEVER GUESSED HERE. iPadOS 13+ reports itself as Macintosh to a WebView — no
 // "iPad" in the UA, `navigator.platform` is "MacIntel" — so any browser-side check is a
@@ -4020,22 +4020,45 @@ const webBuild = strip(BUILD_NUMBER);
 const baseVersion = strip("__BASE_VERSION__");
 const bookPages = Number(STANDARD_TOTAL_PAGES) || 0;
 
-const buildParts = [];
-if (deviceKind) buildParts.push(deviceKind);
-buildParts.push(nativeBuild ? `${nativeBuild}b` : "web");
-if (webBuild) buildParts.push(`${webBuild}w`);
-if (bookPages) buildParts.push(`${bookPages}p`);
-const buildLabel = buildParts.join(" · ");
+// THE FORMAT IS FIXED AND POSITIONAL:  v1.0.4 (404-406-373)
+//                                              │   │   └─ pages in the MOUNTED book
+//                                              │   └───── web bundle build (the OTA-updatable half)
+//                                              └───────── binary build (the shell; never moves OTA)
+//
+// Owner's call, 2026-08-06. Positional rather than suffixed (`404b · 406w · 373p`) because these
+// three numbers get read aloud across a choir loft and compared between devices — "four-oh-four,
+// four-oh-six, three-seventy-three" is one utterance, and two devices differ at a glance by which
+// column disagrees. The slots are NEVER reordered and NEVER collapsed: the whole point is that the
+// binary can sit still while the web build and the page count move, which is what a working OTA
+// looks like from the outside.
+//
+// Missing values render as "—" rather than being dropped, so the reading stays positional. On the
+// web there is no binary, so slot 1 reads "web".
+const slot = (v) => (v ? String(v) : "—");
+const buildLabel = [
+  nativeBuild ? slot(nativeBuild) : "web",
+  slot(webBuild),
+  slot(bookPages),
+].join("-");
+// Device kind stays OUTSIDE the parentheses — it is not a build number, and putting it in a
+// positional triple would make the triple mean different things on different devices.
+const kindSuffix = deviceKind ? ` ${deviceKind}` : "";
 
 if (appVersionLabel) {
-  appVersionLabel.textContent = baseVersion ? `Versión ${baseVersion} (${buildLabel})` : `Versión ${buildLabel}`;
+  appVersionLabel.textContent = baseVersion
+    ? `Versión ${baseVersion} (${buildLabel})${kindSuffix}`
+    : `Versión ${buildLabel}${kindSuffix}`;
 }
 // Small always-visible badge — shown on BOTH web and native (rendered in the WebView, so it
 // respects env(safe-area-inset-bottom) via viewport-fit=cover and never tucks under the iPhone home
 // indicator).
 const buildBadge = document.getElementById("build-badge");
 if (buildBadge) {
-  buildBadge.textContent = baseVersion ? `${baseVersion} · ${buildLabel}` : buildLabel;
+  // Same shape as the settings line, with the leading "v" — this is the string someone reads out
+  // over the phone, so the two surfaces must never disagree about what they are showing.
+  buildBadge.textContent = baseVersion
+    ? `v${baseVersion} (${buildLabel})${kindSuffix}`
+    : `${buildLabel}${kindSuffix}`;
   buildBadge.classList.add("is-shown");
 }
 
