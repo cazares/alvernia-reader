@@ -24,6 +24,10 @@
 #   forever. A blanket ADDITIVE_OVERRIDE would hide them; this does not.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Same reason release.sh sets it: without a UTF-8 locale, matching the accented "páginas" in the
+# title stamp behaves differently than it does in an interactive shell — which made the preflight
+# below report "373 != 373" on its first real run.
+export LANG=en_US.UTF-8
 
 DEVICES="*"
 ALLOW_FLEET="--allow-fleet"
@@ -48,11 +52,18 @@ if pgrep -f 'bash scripts/release.sh' >/dev/null 2>&1; then
   exit 1
 fi
 BOOK_PAGES=$(pdfinfo assets/signo_vivo_372.pdf 2>/dev/null | awk '/^Pages/{print $2}')
+STAMP_LINE=$(pdftotext -f 1 -l 1 assets/signo_vivo_372.pdf - 2>/dev/null | sed '/^[[:space:]]*$/d' | sed -n 2p)
+# The page count is the LAST number on the stamp line ("… CT · 373 páginas"). Read it that way
+# rather than by matching "páginas": the accent is multibyte and made this compare 373 against an
+# empty string under a non-UTF-8 locale. The last-number rule needs no accented character at all.
+STAMP_PAGES=$(printf '%s' "$STAMP_LINE" | grep -oE '[0-9]+' | tail -1)
 echo "     book in this worktree : ${BOOK_PAGES:-?} pages"
-echo "     page 1 says           : $(pdftotext -f 1 -l 1 assets/signo_vivo_372.pdf - 2>/dev/null | sed '/^[[:space:]]*$/d' | sed -n 2p)"
-if [ "${BOOK_PAGES:-0}" != "$(pdftotext -f 1 -l 1 assets/signo_vivo_372.pdf - 2>/dev/null | grep -oE '[0-9]+ p[áa]ginas' | grep -oE '^[0-9]+')" ]; then
-  echo "     ⚠️  the title page's page COUNT does not match the PDF. Re-stamp before publishing:" >&2
-  echo "        scripts/ota-restamp.sh" >&2
+echo "     page 1 says           : ${STAMP_LINE:-(no stamp found)}"
+if [ -z "${STAMP_PAGES:-}" ] || [ "${BOOK_PAGES:-0}" != "$STAMP_PAGES" ]; then
+  echo "" >&2
+  echo "  ✖ the title page claims ${STAMP_PAGES:-?} pages but the PDF has ${BOOK_PAGES:-?}." >&2
+  echo "    That line is the director's only offline staleness check, so it must not lie." >&2
+  echo "    Fix it:  scripts/ota-restamp.sh" >&2
   exit 1
 fi
 
