@@ -128,23 +128,11 @@ git show "${TARGET}:${TARGET_PATH}" > "$BOOK"
 git checkout "$TARGET" -- "$INDEX"
 echo "     restored $BOOK (from ${TARGET_PATH}) and $INDEX @ $TARGET"
 
-# ── Re-stamp page 1 ──────────────────────────────────────────────────────────────────────────────
-# The restored page 1 carries the stamp it had when it shipped — an OLD date. Leaving it would put
-# a book on the iPads whose title page claims a date it was not published on, which defeats the one
-# offline staleness check the director has ("¿la suya dice agosto?"). stamp-book-date refuses to
-# double-stamp, so page 1 is rebuilt from the unstamped original first, per its own documented
-# recipe. UNSTAMPED_SRC is the pre-stamp book; it is only ever read.
-UNSTAMPED_SRC=$(git rev-list --all --max-count=1 -- assets/signo_vivo_371.pdf 2>/dev/null || true)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-if [ -n "$UNSTAMPED_SRC" ] && git show "${UNSTAMPED_SRC}^:assets/signo_vivo_371.pdf" > "$TMP/unstamped.pdf" 2>/dev/null; then
-  qpdf --empty --pages "$TMP/unstamped.pdf" 1 "$BOOK" 2-z -- "$TMP/clean.pdf"
-  cp "$TMP/clean.pdf" "$BOOK"
-  node scripts/stamp-book-date.mjs --pdf "$BOOK" | grep -E '✅|❌'
-else
-  echo "     ⚠️  could not find an unstamped page 1; leaving the restored stamp as-is." >&2
-  echo "        The title page will show the date this book ORIGINALLY shipped." >&2
-fi
+# The restored book goes back EXACTLY as it shipped, page 1 included. The version that lived here
+# rebuilt page 1 and re-stamped it with today's date, by grafting a title page out of an old commit
+# of assets/signo_vivo_371.pdf — a path the 2026-08-05 rename deleted, whose surviving revision was
+# itself already stamped. So it welded a "371 páginas" cover onto whatever book you rolled back to.
+# A rollback restores a book; it does not author a new one.
 
 say "Publishing it"
 exec bash scripts/ota-deploy.sh "$@"

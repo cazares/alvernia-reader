@@ -17,16 +17,17 @@
 # production — the exact drift a whole handoff was written to warn about. A script cannot forget.
 #
 # THE ONE OVERRIDE IT WILL APPLY BY ITSELF, and nothing else:
-#   "page-001 CHANGED IN PLACE" is STRUCTURAL. The title-page stamp carries the page count, so ANY
-#   change to the book re-stamps page 1. It fires on literally every book update and means nothing
-#   on its own. If the additive gate reports ANYTHING ELSE — a shrink, a disappeared page, a moved
-#   song — this script ABORTS and shows you, because those are the ones that strand offline copies
-#   forever. A blanket ADDITIVE_OVERRIDE would hide them; this does not.
+#   "page-001 CHANGED IN PLACE" alone is waved through. A new edition can legitimately carry a new
+#   title page, and that is the one published page whose content is not a song — nobody is stranded
+#   by a different cover. If the additive gate reports ANYTHING ELSE — a shrink, a disappeared page,
+#   a moved song — this script ABORTS and shows you, because those are the ones that strand offline
+#   copies forever. A blanket ADDITIVE_OVERRIDE would hide them; this does not.
+#
+#   (Until 2026-08-05 this fired on EVERY update, because the pipeline re-stamped page 1 with the
+#   date and page count on every publish. That stamping is gone, so page-001 now changes only when
+#   the PDF you handed over actually has a different first page.)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# Same reason release.sh sets it: without a UTF-8 locale, matching the accented "páginas" in the
-# title stamp behaves differently than it does in an interactive shell — which made the preflight
-# below report "373 != 373" on its first real run.
 export LANG=en_US.UTF-8
 
 DEVICES="*"
@@ -52,20 +53,8 @@ if pgrep -f 'bash scripts/release.sh' >/dev/null 2>&1; then
   exit 1
 fi
 BOOK_PAGES=$(pdfinfo assets/songbook.pdf 2>/dev/null | awk '/^Pages/{print $2}')
-STAMP_LINE=$(pdftotext -f 1 -l 1 assets/songbook.pdf - 2>/dev/null | sed '/^[[:space:]]*$/d' | sed -n 2p)
-# The page count is the LAST number on the stamp line ("… CT · 373 páginas"). Read it that way
-# rather than by matching "páginas": the accent is multibyte and made this compare 373 against an
-# empty string under a non-UTF-8 locale. The last-number rule needs no accented character at all.
-STAMP_PAGES=$(printf '%s' "$STAMP_LINE" | grep -oE '[0-9]+' | tail -1)
-echo "     book in this worktree : ${BOOK_PAGES:-?} pages"
-echo "     page 1 says           : ${STAMP_LINE:-(no stamp found)}"
-if [ -z "${STAMP_PAGES:-}" ] || [ "${BOOK_PAGES:-0}" != "$STAMP_PAGES" ]; then
-  echo "" >&2
-  echo "  ✖ the title page claims ${STAMP_PAGES:-?} pages but the PDF has ${BOOK_PAGES:-?}." >&2
-  echo "    That line is the director's only offline staleness check, so it must not lie." >&2
-  echo "    Fix it:  scripts/ota-restamp.sh" >&2
-  exit 1
-fi
+[ -n "${BOOK_PAGES:-}" ] || { echo "✖ assets/songbook.pdf is not a readable PDF." >&2; exit 1; }
+echo "     book in this worktree : ${BOOK_PAGES} pages"
 
 # ── 1. Build ─────────────────────────────────────────────────────────────────────────────────────
 say "1/6  Rendering the book (~4 min)"
