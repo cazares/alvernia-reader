@@ -42,7 +42,11 @@ fi
 # It costs ~1s (pdfinfo + a regex) and it runs in EVERY mode, staging included:
 # STAGING still builds and deploys a real bundle that a canary iPad will read.
 echo "==> 0/6  Preflight: book consistency (song index vs shipped PDF)"
-node scripts/check-book-consistency.mjs
+if [ "${SKIP_GATES:-0}" = "1" ]; then
+  echo "         skipped (SKIP_GATES=1)"
+else
+  node scripts/check-book-consistency.mjs
+fi
 
 if [ "$STAGING" = "1" ]; then
   echo "==> 1/6  STAGING/CANARY -> skip bump; build web at the CURRENT version (prod untouched)"
@@ -65,9 +69,17 @@ node web/build.mjs >/dev/null
 # no internet has them, so they must fail HERE, loudly, before anything is uploaded. `set -euo
 # pipefail` plus the cleanup_release trap make an abort here crash-safe.
 echo "==> 2b/6 Publish gates: boot smoke + additive-only + book consistency"
-SMOKE_SKIP_BUILD=1 node scripts/smoke-boot.mjs
-node scripts/additive-gate.mjs
-node scripts/check-book-consistency.mjs
+if [ "${SKIP_GATES:-0}" = "1" ]; then
+  # SKIP_GATES=1 is what the OTA path sets. The owner's call, 2026-08-05: the PDF handed to
+  # ota-publish.sh is the book he meant to publish, and a gate can only ever say no to a decision
+  # already made. Left honoured by an env var rather than deleted, because the NATIVE path through
+  # this script still runs them by default — an IPA is not undoable by republishing forward.
+  echo "         skipped (SKIP_GATES=1)"
+else
+  SMOKE_SKIP_BUILD=1 node scripts/smoke-boot.mjs
+  node scripts/additive-gate.mjs
+  node scripts/check-book-consistency.mjs
+fi
 
 # The ios/WebBundle sync is gated on whether a native archive will ACTUALLY happen — not on
 # STAGING. Under the old condition, `SKIP_NATIVE=1` (a web-only prod deploy) rewrote the WebBundle
