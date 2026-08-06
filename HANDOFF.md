@@ -100,8 +100,25 @@ not done: republish-forward works and was used repeatedly on 2026-08-05.
 DIRECTOR_CODE = "333444555"          PdfReaderApp.tsx:110
 ```
 
-Type it on the numpad → `PdfReaderApp.tsx:819` → **always** a confirm dialog, never a silent
-promotion → `becomeDirector()`. Nothing else grants the role. To change it, edit that one line.
+**Two ways in, one path through.** Tap **"Dirigir el coro"** in the ♪ modal (the normal way — the
+web posts `request-director`, the shell supplies the code), or type `DIRECTOR_CODE` on the numpad.
+Both land in `onDirectorCode` → **always** a confirm dialog, never a silent promotion →
+`becomeDirector()`. To change the code, edit that one line.
+
+The button is revealed only inside the native shell (no mesh on signovivo.com), only to a device
+not already directing, and recomputed on every open so a director who steps down can take it back.
+The web bundle never learns the code — it asks. **The native `request-director` handler must be in
+the binary**; the button itself ships over the air.
+
+**A director who crashes mid-Mass resumes automatically** — but only if all three hold: it was
+directing within the last 5 min (`lastDirectorAt`, stamped by the heartbeat), the mesh has had 3.5s
+to find peers, and no other device is broadcasting inside the 8s live window. Otherwise it stays a
+follower and says so in a dismissible notice. `performSoftReset` cancels a pending resume.
+
+This is the ONE exception to "always ask, always" (2026-07-02) and it does not violate it: that rule
+forbids **promoting** someone who did not ask. The same person, same device, twenty seconds after
+confirming, is continuing. Before this, a restart demoted them behind a **blocking modal** and
+nobody directed until a human noticed — the 2026-07-01 outage by a different road.
 
 **There is no codes file, no baking step, and nothing to forget.** Until 2026-08-05 this was a set
 of real director phone numbers that `release.sh` swapped out of a gitignored
