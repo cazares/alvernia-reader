@@ -1168,7 +1168,12 @@ const flashSongDisplay = (msg, kind) => {
 // simply threw it away.
 const SYNC_PILL = {
   directing: { cls: "", title: "DIRECTOR", action: "✕ Salir" },
-  following: { cls: "is-following", title: "SIGUIENDO", action: "" },
+  // "Tomar", not "Pedir". Nothing approves this: tap, confirm, and you are the director — whoever
+  // currently holds it is never asked. A word like "request" would promise a handshake that exists
+  // nowhere in this system, and the person tapping would wait for a reply that never comes. The red
+  // "⚠️ Ya hay un director activo / Tomar el control" confirm is what makes it safe, not the label
+  // being coy about what it does.
+  following: { cls: "is-following", title: "SIGUIENDO", action: "Tomar" },
   nobody:    { cls: "is-nobody", title: "NADIE DIRIGE", action: "▶ Dirigir" },
 };
 
