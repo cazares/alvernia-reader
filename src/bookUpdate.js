@@ -44,6 +44,22 @@ export const BOOK_VERSION_RE = /^bv_[0-9a-f]{16}$/;
  */
 export const BUNDLE_MANIFEST_NAME = "bundle-manifest.json";
 
+/**
+ * The URL a device actually requests for one bundle file.
+ *
+ * Exported, and used by BOTH the downloader below and scripts/verify-ota-fetchability.mjs, because
+ * for several hours on 2026-08-05 they disagreed: the client had gained `?v=` and the pre-arm gate
+ * was still probing bare paths. A gate that checks a URL nobody fetches reads as full coverage while
+ * verifying nothing — and a device that fails verifyStaged looks IDENTICAL on the fleet dashboard to
+ * one that was never armed, so the failure would have been invisible from every angle.
+ *
+ * The `?v=` itself is not cosmetic: Cloudflare holds these assets at s-maxage=604800 and a book
+ * update rewrites files at unchanged paths, so a bare URL can be served the previous edition's bytes
+ * and fail verifyStaged on md5 forever.
+ */
+export const bookFileUrl = (base, filePath, bookVersion) =>
+  `${base}/${filePath}?v=${encodeURIComponent(bookVersion)}`;
+
 /** A staged bundle that has sat unconfirmed this long must re-verify before it may be applied. */
 export const STAGED_READY_TTL_MS = 12 * 60 * 60 * 1000;
 /** How recently a check-in must have succeeded for an apply to count as "real internet". */
@@ -416,7 +432,7 @@ export const stageBook = async (opts) => {
           // fails verifyStaged on md5, evicts the bundle, and re-downloads ~27 MB — forever, because
           // the next attempt gets the same stale bytes. Keying on bookVersion makes every URL unique
           // per book, so a device can never be served a file from the book it is replacing.
-          await net.download(`${base}/${f.p}?v=${encodeURIComponent(bookVersion)}`, dest);
+          await net.download(bookFileUrl(base, f.p, bookVersion), dest);
         } catch {
           throw new Error(`download:${f.p}`);
         }

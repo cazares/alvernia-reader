@@ -7,6 +7,21 @@ const APP = fs.readFileSync("web/src/app.js", "utf8");
 const HTML = fs.readFileSync("web/src/index.html", "utf8");
 const KEYS = fs.readFileSync("src/offlineBooks.ts", "utf8");
 
+// Executes openSongJump's reveal decision with fakes, so a deleted gate changes the RESULT rather
+// than merely removing a line some other assertion still matches.
+const reveal = (nativeFileMode, hasBridge, role = "follower") => {
+  const open = APP.slice(APP.indexOf("const openSongJump"), APP.indexOf("const closeSongJump"));
+  const body = open.replace(/^[\s\S]*?=> \{/, "").replace(/\};?\s*$/, "")
+    .replace(/songJumpModal\.classList\.remove\("is-hidden"\);/, "").replace(/state\.songJumpOpen = true;/, "");
+  const calls = {};
+  const el = (n) => ({ classList: { toggle: (_c, v) => { calls[n] = v; }, add: () => { calls[n + ":collapsed"] = true; } } });
+  new Function("NATIVE_FILE_MODE", "hasNativeBridge", "state", "directButton", "rescueWrap",
+    "rescueActions", "rescueToggle", "songJumpModal", "clearDraft", body)(
+    nativeFileMode, () => hasBridge, { nativeSyncRole: role }, el("direct"), el("rescue"),
+    el("rescueActions"), { setAttribute() {} }, { classList: { remove() {} } }, () => {});
+  return calls;
+};
+
 // ── The panic switches ────────────────────────────────────────────────────────
 // SOFT_RESET_CODE and BOOK_FORCE_BAKED_CODE exist for the five minutes before Mass when something
 // has already gone wrong. Reaching them required a memorised 9-digit number — in exactly the moment
@@ -33,25 +48,32 @@ test("each panic button confirms before doing anything", () => {
   for (const kind of ["request-force-baked", "request-soft-reset"]) {
     const at = NATIVE.indexOf(`case "${kind}":`);
     assert.ok(at > 0, `${kind} missing`);
-    const block = NATIVE.slice(at, at + 700);
-    assert.match(block, /Alert\.alert\(/, `${kind} fires with no confirmation`);
-    assert.match(block, /style: "cancel"/, `${kind} has no way out`);
+    const body = NATIVE.slice(at, NATIVE.indexOf("break;", at));
+    assert.match(body, /Alert\.alert\(/, `${kind} fires with no confirmation`);
+    assert.match(body, /style: "cancel"/, `${kind} has no way out`);
+    // THE MUTATION THAT SLIPPED PAST BEFORE: `onDirectorCode(CODE); Alert.alert(…)` — the action
+    // fires and the dialog appears afterwards as decoration. Every invocation must be inside an
+    // onPress handler, so require it to appear ONLY there.
+    const invocations = [...body.matchAll(/onDirectorCode\(/g)].length;
+    const inOnPress = [...body.matchAll(/onPress: \(\) => onDirectorCode\(/g)].length;
+    assert.equal(invocations, inOnPress, `${kind} calls onDirectorCode outside the confirm's onPress`);
+    assert.equal(inOnPress, 1, `${kind} should confirm exactly one action`);
   }
 });
 
 test("rescue controls never appear on the public web", () => {
   // signovivo.com has no mesh, no staged bundle and no crumb log — every one of these is dead there.
-  const open = APP.slice(APP.indexOf("const openSongJump"), APP.indexOf("const closeSongJump"));
-  assert.match(open, /NATIVE_FILE_MODE \|\| hasNativeBridge\(\)/, "reveal not gated on the shell");
-  assert.match(open, /rescueWrap\.classList\.toggle\("is-hidden"/, "rescue block never gated");
+  // Executed, not grepped: `inShell` is computed once and consumed by BOTH features, so a presence
+  // check for it passed even with the rescue gate deleted.
+  assert.equal(reveal(false, false).rescue, true, "rescue block REVEALED on the public web");
+  assert.equal(reveal(true, false).rescue, false, "rescue block hidden inside the native shell");
   assert.match(HTML, /class="song-jump-rescue is-hidden"/, "must ship hidden and be revealed by JS");
 });
 
 test("the rescue block re-collapses every time the modal opens", () => {
   // Otherwise it is left expanded from a previous visit and the once-a-year controls sit permanently
   // next to the one people use constantly.
-  const open = APP.slice(APP.indexOf("const openSongJump"), APP.indexOf("const closeSongJump"));
-  assert.match(open, /rescueActions\.classList\.add\("is-hidden"\)/, "stays open between visits");
+  assert.equal(reveal(true, true)["rescueActions:collapsed"], true, "stays expanded between visits");
 });
 
 // ── Breadcrumbs ───────────────────────────────────────────────────────────────
@@ -62,10 +84,17 @@ test("breadcrumbs are a bounded ring buffer, not one overwritten value", () => {
   // It used to write a single key and overwrite it on every call: exactly one crumb survived, and
   // it was the last one, which is almost never the interesting one.
   assert.match(KEYS, /breadcrumbs: "sv\.diag\.breadcrumbs"/, "no storage key for the buffer");
-  assert.match(NATIVE, /const BREADCRUMB_LIMIT = \d+/, "buffer is unbounded");
-  const fn = NATIVE.slice(NATIVE.indexOf("const breadcrumb = useCallback"), NATIVE.indexOf("// Read back the previous session"));
-  assert.match(fn, /next\.splice\(0, next\.length - BREADCRUMB_LIMIT\)/, "buffer never trims");
-  assert.match(fn, /STORAGE_KEYS\.breadcrumbs/, "buffer never persisted");
+  const LIMIT = Number(NATIVE.match(/const BREADCRUMB_LIMIT = (\d+)/)[1]);
+  // BREADCRUMB_LIMIT = 1 restores the exact one-crumb bug the buffer replaced, and the old
+  // assertion (`/const BREADCRUMB_LIMIT = \d+/`) waved it straight through.
+  assert.ok(LIMIT >= 100, `BREADCRUMB_LIMIT ${LIMIT} cannot cover a Mass plus the boot before it`);
+  // Execute the trim so a neutered splice cannot pass.
+  const trim = NATIVE.match(/if \(next\.length > BREADCRUMB_LIMIT\) (next\.splice\([^;]+\));/)[1];
+  const next = Array.from({ length: LIMIT + 25 }, (_, i) => `c${i}`);
+  new Function("next", "BREADCRUMB_LIMIT", trim + ";")(next, LIMIT);
+  assert.equal(next.length, LIMIT, "the ring buffer does not actually trim");
+  assert.equal(next[next.length - 1], `c${LIMIT + 24}`, "trim dropped the NEWEST crumbs");
+  assert.equal(next[0], "c25", "trim kept the wrong end of the buffer");
 });
 
 test("a crumb logged before the restore cannot clobber the previous session", () => {
@@ -74,9 +103,16 @@ test("a crumb logged before the restore cannot clobber the previous session", ()
   // the history, destroying it at exactly the moment it matters.
   const fn = NATIVE.slice(NATIVE.indexOf("const breadcrumb = useCallback"), NATIVE.indexOf("// Read back the previous session"));
   assert.match(fn, /if \(breadcrumbsLoadedRef\.current\)/, "persists before the restore has run");
+  // Execute the merge: order matters and a swap (…current, marker, …prev) drops the NEW session's
+  // crumbs, which the old presence checks accepted because both spreads were still present.
+  const mergeExpr = NATIVE.match(/const merged = (\[[^;]+\]);/)[1];
+  const merged = new Function("prev", "breadcrumbsRef", `return ${mergeExpr};`)(
+    ["old1", "old2"], { current: ["new1"] },
+  );
+  assert.deepEqual(merged.filter((x) => !x.includes("app start")), ["old1", "old2", "new1"],
+    "restore merge is out of order — the previous or current session is being dropped");
+  assert.ok(merged.findIndex((x) => x.includes("app start")) === 2, "the boot marker is misplaced");
   const restore = NATIVE.slice(NATIVE.indexOf("// Read back the previous session"), NATIVE.indexOf("// ── Remote sync telemetry"));
-  assert.match(restore, /\.\.\.prev/, "restore drops the previous session");
-  assert.match(restore, /\.\.\.breadcrumbsRef\.current/, "restore drops crumbs logged during boot");
   assert.match(restore, /breadcrumbsLoadedRef\.current = true/, "persistence never re-enabled");
 });
 
@@ -99,7 +135,8 @@ test("the diagnostics dump is selectable so it can be copied", () => {
   // Its whole job is to be read aloud over the phone or pasted into a message afterwards.
   const css = fs.readFileSync("web/src/styles.css", "utf8");
   const block = css.slice(css.indexOf("#sv-diag pre"), css.indexOf("#sv-diag button"));
-  assert.match(block, /user-select: text/, "the dump cannot be selected");
+  assert.match(block, /-webkit-user-select: text/, "WKWebView honours the PREFIXED property; unprefixed alone does nothing on the iPads");
+  assert.match(block, /(?<!-)user-select: text/, "unprefixed user-select missing");
 });
 
 test("diagnostics answer which songbook the device holds, with no internet", () => {

@@ -680,12 +680,20 @@ const buildStandardManifests = ({ pageFiles, pdfPath, bookOutDir }) => {
   const searchIndexPages = pageFiles.map((file, idx) => {
     const pageNum = idx + 1;
     const songEntry = songIndex.find((s) => s.page === pageNum);
-    let text;
-    if (songEntry) {
-      // Song pages: index title + clean lyrics (no chord names) for accurate lyric search
-      const parts = [songEntry.title || "", songEntry.lyrics || ""].filter(Boolean);
-      text = parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 800);
-    } else {
+    // Song pages: title + clean lyrics (chord names stripped) makes lyric search accurate.
+    const parts = [songEntry?.title || "", songEntry?.lyrics || ""].filter(Boolean);
+    let text = parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 800);
+    // FALL BACK TO RAW OCR when that yields nothing usable. This used to be an `else` on
+    // `if (songEntry)`, which became unreachable the moment songIndex was derived as an identity
+    // map — every page has an entry now, so pages with no title and no lyrics (front matter,
+    // table of contents, section dividers, continuation pages) produced an EMPTY string and were
+    // dropped by the length filter below.
+    //
+    // Measured against the hand-maintained index it replaced: search-index.json went 373 entries →
+    // 356, losing 17 pages and 8,321 bytes. Searching ⌕ for text printed on those pages returned
+    // nothing on a live device, silently, with no error anywhere. Restoring the fallback keeps the
+    // clean-lyrics path for real songs and the raw text for everything else.
+    if (text.length <= 5) {
       text = (pageTextsRaw[idx] || "").replace(/\s+/g, " ").trim().slice(0, 600);
     }
     return { page: pageNum, text };
