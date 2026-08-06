@@ -117,21 +117,32 @@ echo
 # loudly and for good.
 if [ "$SKIP_VERIFY" = "0" ]; then
   echo "==> Pre-arm: verifying $BASE serves $VERSION byte-exact"
+  # CHECK THE VERSION FIRST, INSIDE THE LOOP. verify-ota-fetchability fetches the manifest FROM THE
+  # BASE and checks every file against THAT manifest — so while the alias still serves the previous
+  # deployment it verifies the OLD book against itself and reports a clean pass. On 2026-08-05 that
+  # printed "✅ all 389 checked files are byte-exact … Safe to arm bv_29146774dc1035b9" on attempt 1,
+  # broke out of this loop, and only then hit the version comparison below and aborted — with all
+  # twenty retry-minutes unused. The byte check is necessary but it cannot tell you WHICH book it
+  # just blessed. Ask for the version, then verify it.
   VERIFY_OK=0
-  for attempt in 1 2 3 4 5 6; do
-    if node scripts/verify-ota-fetchability.mjs --all --base "$BASE" >/tmp/sv-fetchability.log 2>&1; then
+  ATTEMPTS=20
+  for attempt in $(seq 1 $ATTEMPTS); do
+    SERVED_NOW=$(curl -sS "$BASE/bundle-manifest.json?cb=$$-$attempt" -H 'cache-control: no-cache' \
+      | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write(JSON.parse(d).bookVersion||"")}catch{}})' || true)
+    if [ "$SERVED_NOW" = "$VERSION" ] \
+      && node scripts/verify-ota-fetchability.mjs --all --base "$BASE" >/tmp/sv-fetchability.log 2>&1; then
       tail -3 /tmp/sv-fetchability.log
       [ "$attempt" -gt 1 ] && echo "   (clean on attempt $attempt — the alias had been mid-swap)"
       VERIFY_OK=1
       break
     fi
-    if [ "$attempt" -lt 6 ]; then
-      echo "   attempt $attempt: mismatch — likely the alias still swapping, retrying in 15s…"
+    if [ "$attempt" -lt "$ATTEMPTS" ]; then
+      echo "   attempt $attempt/$ATTEMPTS: serving '${SERVED_NOW:-?}', want '$VERSION' — alias still swapping, retrying in 15s…"
       sleep 15
     fi
   done
   if [ "$VERIFY_OK" != "1" ]; then
-    echo "✖ ABORT — $BASE still does not serve $VERSION byte-exact after 6 attempts (~75s)." >&2
+    echo "✖ ABORT — $BASE still does not serve $VERSION byte-exact after $ATTEMPTS attempts (~5 min)." >&2
     echo "  This is no longer propagation. Full report:" >&2
     tail -30 /tmp/sv-fetchability.log >&2
     echo "  If cf-cache-status is HIT with a large age, purge those paths at the CDN first." >&2
