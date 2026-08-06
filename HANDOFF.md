@@ -106,9 +106,16 @@ Top-left in the native shell, always visible, three states. Tapping acts on what
 
 | Pill | Meaning | Tap |
 |---|---|---|
-| `DIRECTOR ✕ Salir` | you are directing | confirm → step down |
-| `SIGUIENDO` (quiet) | someone else is | confirm → take control (destructive) |
-| `NADIE DIRIGE ▶ Dirigir` (amber) | **the seat is empty** | confirm → direct |
+| `DIRECTOR · ✕ Salir` | you are directing | confirm → step down |
+| `SIGUIENDO · Dirigir el coro` (quiet, dimmed) | someone else is | confirm → you direct (red takeover warning if they are live) |
+| `NADIE DIRIGE · ▶ Dirigir el coro` (amber) | **the seat is empty** | confirm → you direct |
+
+⚠️ **The label names the OUTCOME, never the dialog.** An earlier version read `Tomar el control`, to
+match the takeover button. That is wrong roughly half the time it is read: which confirm appears is
+decided natively by `liveDirector`, an **8s** window on `lastDirectorSnapshotRef`, while the pill's
+`SIGUIENDO` uses a **15s** window on mesh page events — deliberately longer so a radio hiccup does
+not flash `NADIE DIRIGE` at the choir mid-hymn. Between 8s and 15s the dialog says `¿Dirigir el
+coro?`. Both paths end in the same place, so the label says that and nothing more.
 
 `NADIE DIRIGE` fires ONLY on the mesh's own `self-directed` verdict, never inferred from silence —
 guessing would light it during the ~10s of boot discovery on every device every Sunday.
@@ -135,15 +142,18 @@ Deliberately rejected — do not "fix" these back:
 ⚠️ The commit that shipped this is mislabelled on `main` as `feat(badge): v1.0.4 …` (#333) — a
 `git commit -C` picked up the wrong message. The PR body on #333 is the accurate record.
 
-**Two ways in, one path through.** Tap **"Dirigir el coro"** in the ♪ modal (the normal way — the
-web posts `request-director`, the shell supplies the code), or type `DIRECTOR_CODE` on the numpad.
+**Two ways in, one path through.** Tap the **pill** (above), or type `DIRECTOR_CODE` on the numpad.
 Both land in `onDirectorCode` → **always** a confirm dialog, never a silent promotion →
 `becomeDirector()`. To change the code, edit that one line.
 
-The button is revealed only inside the native shell (no mesh on signovivo.com), only to a device
-not already directing, and recomputed on every open so a director who steps down can take it back.
-The web bundle never learns the code — it asks. **The native `request-director` handler must be in
-the binary**; the button itself ships over the air.
+There is exactly ONE place that asks native for the role, and a test asserts it stays that way. The
+old "Dirigir el coro" button inside the ♪ modal was **removed** 2026-08-06: a director control in a
+dialog titled *IR A CANTO* was wrong twice over — nobody looking to direct opens the go-to-song
+keypad, and on a 10.2" portrait iPad it sat below the card's fold.
+
+The pill renders only inside the native shell (no mesh on signovivo.com). The web bundle never
+learns the code — it asks. **The native `request-director` handler must be in the binary**; the pill
+itself ships over the air.
 
 **A director who crashes mid-Mass resumes automatically** — but only if all three hold: it was
 directing within the last 5 min (`lastDirectorAt`, stamped by the heartbeat), the mesh has had 3.5s
