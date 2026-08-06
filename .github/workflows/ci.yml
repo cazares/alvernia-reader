@@ -101,3 +101,12 @@ jobs:
       # only web/src, so it does not depend on the build above.
       - name: Page-cache guard mutation test (proves the poisoning guards have teeth)
         run: node scripts/verify-sw-page-cache-guards.mjs
+
+      # Same reasoning again, for the director + rescue guards. These tests assert on SOURCE TEXT
+      # because the logic lives inside a React effect that cannot be imported without a React Native
+      # runtime — the single easiest way to write a test that passes forever and proves nothing.
+      # Measured the first time this ran: 13 of 13 mutations slipped past, including "the director
+      # button appears on the public web" and "the panic switches fire before their confirmation".
+      # It also fails if the unmutated suite is red, because that alone makes every mutation "pass".
+      - name: Director/rescue guard mutation test (proves those guards have teeth)
+        run: node scripts/verify-director-rescue-guards.mjs

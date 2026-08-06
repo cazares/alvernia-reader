@@ -31,7 +31,7 @@ import os from "node:os";
 import path from "node:path";
 
 const REPO = path.resolve(process.argv[2] || process.cwd());
-const FILES = ["PdfReaderApp.tsx", "web/src/app.js", "web/src/index.html", "web/src/styles.css", "src/offlineBooks.ts"];
+const FILES = ["PdfReaderApp.tsx", "web/src/app.js", "web/src/index.html", "web/src/styles.css", "src/offlineBooks.ts", "ios/SignoVivo/DirectorSyncModule.swift"];
 const TESTS = ["e2e/directorButton.test.mjs", "e2e/directorResume.test.mjs", "e2e/rescueAndDiagnostics.test.mjs"];
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "sv-guardmut-"));
@@ -52,7 +52,14 @@ const MUTATIONS = [
   ["a rotated DIRECTOR_CODE leaks into the public web bundle", "web/src/app.js",
    sub("const openSongJump = () => {", 'const LEAKED = "918273645";\nconst openSongJump = () => {')],
   ["the explicitTransmitterRef resume guard deleted", "PdfReaderApp.tsx",
-   sub('if (roleRef.current === "director" || explicitTransmitterRef.current) return;', 'if (roleRef.current === "director") return;')],
+   sub("      explicitTransmitterRef.current ||\n", "")],
+  ["the becomeDirector-in-flight guard deleted", "PdfReaderApp.tsx",
+   sub("      becomeDirectorInFlightRef.current\n", "      false\n")],
+  ["the settle window dropped back under the live-director window", "PdfReaderApp.tsx",
+   sub("const DIRECTOR_RESUME_SETTLE_MS = 12000;", "const DIRECTOR_RESUME_SETTLE_MS = 3500;")],
+  ["the resume success toast fires without checking the role actually changed", "PdfReaderApp.tsx",
+   sub('if (roleRef.current === "director" || explicitTransmitterRef.current) {\n                injectEvent({ type: "toast", text: "Recuperaste la dirección del coro." });',
+       'if (true) {\n                injectEvent({ type: "toast", text: "Recuperaste la dirección del coro." });')],
   ["resume no longer follows first — becomeFollower() dropped", "PdfReaderApp.tsx",
    sub(".finally(() => {\n          becomeFollower();\n        });", ".finally(() => {});")],
   ["soft-reset fires BEFORE its confirmation dialog", "PdfReaderApp.tsx",
@@ -73,6 +80,18 @@ const MUTATIONS = [
   ["-webkit-user-select dropped (the property iOS WKWebView actually honours)", "web/src/styles.css",
    sub("  -webkit-user-select: text;\n", "")],
 ];
+
+// BASELINE FIRST. If the pristine suite is red, every mutation trivially "fails" and this script
+// reports 0 MISSED while proving nothing. Measured: that is exactly what happened on the first run
+// after the assertions were rewritten, and it looked like total success.
+try {
+  execSync(`node --test ${TESTS.join(" ")}`, { cwd: ROOT, stdio: "pipe" });
+  console.log("baseline: suite green — mutations below are meaningful\n");
+} catch {
+  console.error("✖ BASELINE IS RED. Fix the suite before trusting any result here:\n");
+  try { execSync(`node --test ${TESTS.join(" ")}`, { cwd: ROOT, stdio: "inherit" }); } catch {}
+  process.exit(1);
+}
 
 let missed = 0, skipped = 0;
 for (const [name, file, fn] of MUTATIONS) {
