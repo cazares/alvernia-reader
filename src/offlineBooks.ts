@@ -22,6 +22,10 @@ export const STORAGE_KEYS = {
   // bounded ring buffer of recent breadcrumbs — the ONLY record of what a device did at Mass,
   // where there is no internet for the /log telemetry to reach and no MDM to ask afterwards
   breadcrumbs: "sv.diag.breadcrumbs",
+  // How many times this device has directed. Not a preference and not an enrolment — a tally. It is
+  // what lets the iPad that actually runs every Sunday claim an empty seat before one that directed
+  // once, with no configuration and nothing any other device has to agree to.
+  directorSessions: "sv.sync.directorSessions",
   // per-book saved position
   lastPagePrefix: "sv.book.lastPage.",
 

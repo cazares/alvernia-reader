@@ -52,9 +52,13 @@
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" src="books/standard/pages/page-001.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
-        <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button" aria-label="Salir del modo director">
-          <strong class="director-mode-badge-title">DIRECTOR</strong>
-          <span class="director-mode-badge-exit" aria-hidden="true">✕ Salir</span>
+        <!-- The room's sync state, and the control for it, in one place. Three states: you are
+             directing / someone is / nobody is. It replaces a badge that only ever appeared for the
+             director — which meant the one state worth shouting about, an EMPTY DIRECTOR SEAT,
+             looked exactly like everything being fine. Text is filled in by renderSyncPill(). -->
+        <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button">
+          <strong class="director-mode-badge-title" id="sync-pill-title">DIRECTOR</strong>
+          <span class="director-mode-badge-exit" id="sync-pill-action" aria-hidden="true">✕ Salir</span>
         </button>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
