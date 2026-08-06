@@ -51,8 +51,8 @@ if pgrep -f 'bash scripts/release.sh' >/dev/null 2>&1; then
   echo "✖ another release is already running. Two at once share web/dist and clobber each other." >&2
   exit 1
 fi
-BOOK_PAGES=$(pdfinfo assets/signo_vivo_372.pdf 2>/dev/null | awk '/^Pages/{print $2}')
-STAMP_LINE=$(pdftotext -f 1 -l 1 assets/signo_vivo_372.pdf - 2>/dev/null | sed '/^[[:space:]]*$/d' | sed -n 2p)
+BOOK_PAGES=$(pdfinfo assets/songbook.pdf 2>/dev/null | awk '/^Pages/{print $2}')
+STAMP_LINE=$(pdftotext -f 1 -l 1 assets/songbook.pdf - 2>/dev/null | sed '/^[[:space:]]*$/d' | sed -n 2p)
 # The page count is the LAST number on the stamp line ("… CT · 373 páginas"). Read it that way
 # rather than by matching "páginas": the accent is multibyte and made this compare 373 against an
 # empty string under a non-UTF-8 locale. The last-number rule needs no accented character at all.

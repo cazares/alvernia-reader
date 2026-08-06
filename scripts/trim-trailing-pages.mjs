@@ -18,7 +18,7 @@
  *
  * Usage:
  *   node scripts/trim-trailing-pages.mjs --to 371
- *   node scripts/trim-trailing-pages.mjs --to 371 --pdf assets/signo_vivo_372.pdf
+ *   node scripts/trim-trailing-pages.mjs --to 371 --pdf assets/songbook.pdf
  *   node scripts/trim-trailing-pages.mjs --to 371 --dry-run
  *
  * Requires: qpdf + poppler (pdfinfo) — the same set as append-number-page.mjs.
@@ -35,7 +35,7 @@ const arg = (name, fallback = null) => {
 };
 const has = (name) => process.argv.includes(name);
 
-const pdfPath = path.resolve(rootDir, arg("--pdf", "assets/signo_vivo_372.pdf"));
+const pdfPath = path.resolve(rootDir, arg("--pdf", "assets/songbook.pdf"));
 const target = Number(arg("--to"));
 const dryRun = has("--dry-run");
 
