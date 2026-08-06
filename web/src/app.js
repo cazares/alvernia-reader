@@ -128,6 +128,7 @@ const songJumpModal    = document.getElementById("song-jump-modal");
 const songJumpBackdrop = document.getElementById("song-jump-backdrop");
 const songJumpTrigger  = document.getElementById("song-jump-trigger");
 const songCancelButton = document.getElementById("song-cancel");
+const directButton = document.getElementById("direct-button");
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const PREFS_KEY = "nc-sort-prefs";
@@ -1521,6 +1522,13 @@ const backspaceDraft = () => {
 // ── Jump-to-song modal (native-style) ──────────────────────────────────────────
 const openSongJump = () => {
   clearDraft();
+  // Offer to direct only where it can work (the native shell owns the mesh) and only to a device
+  // that is not already directing. Re-evaluated on every open rather than once at boot, because the
+  // role changes mid-session — a director who steps down must be able to take it back.
+  if (directButton) {
+    const canOffer = (NATIVE_FILE_MODE || hasNativeBridge()) && state.nativeSyncRole !== "director";
+    directButton.classList.toggle("is-hidden", !canOffer);
+  }
   songJumpModal.classList.remove("is-hidden");
   state.songJumpOpen = true;
 };
@@ -2776,6 +2784,16 @@ const bindReaderEvents = () => {
   songStatus.addEventListener("click", () => { haptic(); openSongJump(); });
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); navigationDrawer.classList.add("as-dropdown"); openDrawer(); activateTab("buscar"); });
+
+  // "Dirigir el coro" — ask the native shell for the role. The web bundle never holds DIRECTOR_CODE;
+  // it sends a request and the shell runs the same confirmation, live-director takeover warning and
+  // becomeDirector path a typed code would. Closing the modal first means the confirm lands on the
+  // page, not on top of a numpad nobody is using any more.
+  if (directButton) directButton.addEventListener("click", () => {
+    haptic();
+    closeSongJump();
+    postNativeBridge({ type: "request-director" });
+  });
 
   // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection.
   // Spin the icon for ~1.1s on tap so it's obvious it's reconnecting/refreshing.
