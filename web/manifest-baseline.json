@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "bookVersion": "bv_9b5dc9e58858fc6f",
-  "totalPages": 373,
-  "builtFromShellBuild": 414,
+  "bookVersion": "bv_93bca08c2cae7941",
+  "totalPages": 371,
+  "builtFromShellBuild": 417,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-06T23:09:34.524Z",
-  "sourcePdfSha256": "383fba080baed91e790432a79f2260b7c8db5a0d0140364cb38610dd27d175e1",
-  "sourcePdfPages": 373,
-  "songIndexDigest": "566f35e430e223de528f506e580fcfedfaec7faaa36e7c54421fe93ec348a382",
+  "generatedAt": "2026-08-07T03:18:10.704Z",
+  "sourcePdfSha256": "1581c9f06a4a46113d34b53152ab7ffe16dce2ae44d8ea5563cd58c074d9b6e9",
+  "sourcePdfPages": 371,
+  "songIndexDigest": "6bf07e036abb64e88d77f3bcb1bcc977d051503b7038cc5718e7a3b43b13ce85",
   "firstSong": 1,
-  "lastSong": 373,
+  "lastSong": 371,
   "songPages": [
     [
       1,
@@ -1494,14 +1494,6 @@
     [
       371,
       371
-    ],
-    [
-      372,
-      372
-    ],
-    [
-      373,
-      373
     ]
   ],
   "pagePadWidth": 3,
@@ -1514,21 +1506,21 @@
   "files": [
     {
       "p": "app.js",
-      "n": 200698,
-      "h": "bee16179fd92a260adcbac6d01bfa17af321a2d383b35cbf7a24eb78a42c2fd6",
-      "m": "1ed92fc055189b2b208c12218ca010ad"
+      "n": 201972,
+      "h": "d5e56650dfff3546871007bdc6fd2b87ff88dcfc9eb9a6a2460d0c8fe12d800e",
+      "m": "d44a4cf56a93fd7b7179bb710c48e819"
     },
     {
       "p": "books.json",
       "n": 88,
-      "h": "6c9caeb75764281ceadb6f15aa5d5899f4ac72c8eee4c9ed9c080464aa7a9866",
-      "m": "3c59a92104e4b9c382a616a53ca3ff99"
+      "h": "941a68a2fedb58b1090e59e9b4dfa47b3f44debf55f1ad3fb476ff1f3a30f7de",
+      "m": "392a7e62792a1e6d00635283c233818a"
     },
     {
       "p": "books/standard/pages.json",
-      "n": 213424,
-      "h": "7d7e3e87cdf5d676f0e701f595fd1bb69bfdf3cab14893dea7aed876006870e0",
-      "m": "d40b937e23ba983e06542f4b8493779a"
+      "n": 213086,
+      "h": "73ce78dfb96476c9f8109153426d2e132f5048405baa4011794196d294c2f952",
+      "m": "7ef4eb855fe008fcb4910d1416b40ed3"
     },
     {
       "p": "books/standard/pages/page-001.webp",
@@ -3757,34 +3749,22 @@
       "m": "b2ac842606b04937396fda2e1fd4a2af"
     },
     {
-      "p": "books/standard/pages/page-372.webp",
-      "n": 12172,
-      "h": "9d52a422b966c75e659613aaa840554410ce0b2777f7557d80ac774ed8881f1d",
-      "m": "b9132f1c74f39ce0c0ef87ffc2b74ad8"
-    },
-    {
-      "p": "books/standard/pages/page-373.webp",
-      "n": 12696,
-      "h": "80df8dbb1598847e13df9157f815d368763034d57be6e9f9090e139ab818eef8",
-      "m": "9bfcc29bce17f34dcfbe7e69c7c697b8"
-    },
-    {
       "p": "books/standard/search-index.json",
-      "n": 142762,
-      "h": "3f220e3582fe134c37c91ea81e724e81d284d9f7f1603f4399bd3463813d77f9",
-      "m": "d4bddb44c18513b32564e57a92a1ebb9"
+      "n": 142616,
+      "h": "5f7abea0c220c4941618940fd12ad500009707bc04235ecdc66119ae9f8980f2",
+      "m": "9712849ea1a4420690129cd0496509ce"
     },
     {
       "p": "books/standard/song-search-index.json",
-      "n": 545839,
-      "h": "1f7e13142fba384601a79a98ca0e2b159743b0b195c4bd0cd949dd6fb1b83de5",
-      "m": "827cf2823938a98cf4c27c4661111691"
+      "n": 545687,
+      "h": "191a5c6f15193cfb6e7c1f4bab3213c3ef8787b411b9e986845889410463826d",
+      "m": "20b010e4504d79d0468507335a46d7d4"
     },
     {
       "p": "books/standard/song-titles.json",
-      "n": 9354,
-      "h": "ce3f6ac4bb55a2987e9fc45a39c6508ae8552f39f6d01b46e7fa445a730f6520",
-      "m": "48cf784f8c70651432c7770ec239c6dc"
+      "n": 9312,
+      "h": "a11a6d4e7943931ea817d7cebc03caa31800ce096dfb4661ab1da011d02f7e95",
+      "m": "1cb4b8f9f511d61bd2dbe29f9c90701a"
     },
     {
       "p": "icon-192.png",
@@ -3806,9 +3786,9 @@
     },
     {
       "p": "index.html",
-      "n": 23920,
-      "h": "1f71b8215b269d2927afeed6176eb22a399c64cc603add72bb62e7993def265e",
-      "m": "fad2f071324382868e41cc972bf20394"
+      "n": 23683,
+      "h": "2062874392f7e059028aa9eff41295d623019fd26b842c2c91220cd79a5626b0",
+      "m": "8418fec5cca592fffd9cb7d7f620c917"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3836,15 +3816,15 @@
     },
     {
       "p": "styles.css",
-      "n": 67300,
-      "h": "8ad2095dedfeb735830c433dc002d1ddbe6a97713ae4a038fe636be5dca5497b",
-      "m": "8c2a4e9d7e24b79bc43015446478485c"
+      "n": 67012,
+      "h": "1e4bdb2337d2d49fb97e7a11cff90da7d28de42313297c8f38ced84f928fc8b8",
+      "m": "f769a4b03ed85b507585101f4dbb2529"
     },
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "35bed5d7494bc5bcc95adb229ca9699f9c70d736692a41466a8c1653c7b35222",
-      "m": "d6bb38f71605ba6a90f2fc7121742788"
+      "h": "1b5763aff7da04821346fe9d8ae96a66dd863020a953ef88b0a6a75a1cf2a915",
+      "m": "aeb99ba387f7b4aa3924cada0cf45b7f"
     }
   ]
 }
