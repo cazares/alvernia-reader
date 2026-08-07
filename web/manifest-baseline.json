@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "bookVersion": "bv_7a32e6eba2191427",
-  "totalPages": 372,
-  "builtFromShellBuild": 423,
+  "bookVersion": "bv_86c92eab731c60ff",
+  "totalPages": 371,
+  "builtFromShellBuild": 424,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-07T13:41:33.933Z",
-  "sourcePdfSha256": "6d954914c0850069309a241bdbbb70f91b3f1f185787d320ab73adbe7113d150",
-  "sourcePdfPages": 372,
-  "songIndexDigest": "25e3afaaa0ea9c42224405e447c002f05fd764223c02a957047bc73ff090b868",
+  "generatedAt": "2026-08-07T14:04:39.124Z",
+  "sourcePdfSha256": "1581c9f06a4a46113d34b53152ab7ffe16dce2ae44d8ea5563cd58c074d9b6e9",
+  "sourcePdfPages": 371,
+  "songIndexDigest": "6bf07e036abb64e88d77f3bcb1bcc977d051503b7038cc5718e7a3b43b13ce85",
   "firstSong": 1,
-  "lastSong": 372,
+  "lastSong": 371,
   "songPages": [
     [
       1,
@@ -1494,10 +1494,6 @@
     [
       371,
       371
-    ],
-    [
-      372,
-      372
     ]
   ],
   "pagePadWidth": 3,
@@ -1511,20 +1507,20 @@
     {
       "p": "app.js",
       "n": 201972,
-      "h": "c4277f11b5d0347429e0b8d82c3456769226c09e3863f368b6be87c2cef08ade",
-      "m": "abff99525231b5a27cb86310cd6bdc85"
+      "h": "7991d4373238137e1392afcaed8e9230d565b5bdcf8999a1b35911f3fb012658",
+      "m": "cf7f1466710e98f5cb509e74b73bf620"
     },
     {
       "p": "books.json",
       "n": 88,
-      "h": "1f2508be6467b502ebca85b2c6761e09cf8624933336fab5321a68f8643ae638",
-      "m": "6a32cbf701f69bf7fc68a82c62c9393d"
+      "h": "941a68a2fedb58b1090e59e9b4dfa47b3f44debf55f1ad3fb476ff1f3a30f7de",
+      "m": "392a7e62792a1e6d00635283c233818a"
     },
     {
       "p": "books/standard/pages.json",
-      "n": 213254,
-      "h": "69f9b67fa0a849ff35de5bba61ccb5767cdad2d411df85122a45a6da4e0a943d",
-      "m": "79dbf9faad1b31f48e195808e6cc747e"
+      "n": 213086,
+      "h": "73ce78dfb96476c9f8109153426d2e132f5048405baa4011794196d294c2f952",
+      "m": "7ef4eb855fe008fcb4910d1416b40ed3"
     },
     {
       "p": "books/standard/pages/page-001.webp",
@@ -3753,28 +3749,22 @@
       "m": "b2ac842606b04937396fda2e1fd4a2af"
     },
     {
-      "p": "books/standard/pages/page-372.webp",
-      "n": 12172,
-      "h": "9d52a422b966c75e659613aaa840554410ce0b2777f7557d80ac774ed8881f1d",
-      "m": "b9132f1c74f39ce0c0ef87ffc2b74ad8"
-    },
-    {
       "p": "books/standard/search-index.json",
-      "n": 142688,
-      "h": "11aea446e9180d47c9ab58b99588dab406ba52bd80aa5981e0ec9c9570bc261d",
-      "m": "d7674272aecf83391bbd7eb1ab884fec"
+      "n": 142616,
+      "h": "5f7abea0c220c4941618940fd12ad500009707bc04235ecdc66119ae9f8980f2",
+      "m": "9712849ea1a4420690129cd0496509ce"
     },
     {
       "p": "books/standard/song-search-index.json",
-      "n": 545763,
-      "h": "df999508bcbc00b993dc182408ec325397acb56129a8b6a40949ccb017ee8fde",
-      "m": "b35d044dd90027fb62ce41e22ef32334"
+      "n": 545687,
+      "h": "191a5c6f15193cfb6e7c1f4bab3213c3ef8787b411b9e986845889410463826d",
+      "m": "20b010e4504d79d0468507335a46d7d4"
     },
     {
       "p": "books/standard/song-titles.json",
-      "n": 9332,
-      "h": "9f3f98ebecc2715c791edd8b2d4c20a51cd49d64756eda5a4db6b37072f277b2",
-      "m": "0363fac5ac6d0525d0045aacf3adaf61"
+      "n": 9312,
+      "h": "a11a6d4e7943931ea817d7cebc03caa31800ce096dfb4661ab1da011d02f7e95",
+      "m": "1cb4b8f9f511d61bd2dbe29f9c90701a"
     },
     {
       "p": "icon-192.png",
@@ -3797,8 +3787,8 @@
     {
       "p": "index.html",
       "n": 23683,
-      "h": "1ab574623eece7f484b927ee1ea750a5e5fd25f07f72c5a6dd63972aa6b4534f",
-      "m": "d0073059b599fa2a185d642f37e6b2fc"
+      "h": "7a06cf80491ca10da2ae0ee4317f30916aedc215f5b6d90c431aef7664c643dd",
+      "m": "6388b1610c750dd141a1e5b173c0a8ed"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3833,8 +3823,8 @@
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "2ab8370d0a15e81212339ab32844738762bba8fc84bc536dc5e48ef8bfda8e82",
-      "m": "4d2f1bf8965caf14a99736d59b40aad0"
+      "h": "bc3a1cf4a4cd8b79142117ac124f8166c801d70cf4d487d4f50bc541cc15cbc1",
+      "m": "2e83404618961cbcb09d4800fca436c3"
     }
   ]
 }
