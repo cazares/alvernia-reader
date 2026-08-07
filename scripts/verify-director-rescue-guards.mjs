@@ -44,11 +44,13 @@ const restore = () => FILES.forEach((f) => fs.writeFileSync(path.join(ROOT, f), 
 
 const sub = (a, b) => (s) => s.replace(a, b);
 
+// Two mutations were DELETED on 2026-08-06 with the "¿Algo anda mal?" block they targeted — the
+// public-web gate and the re-collapse. A mutation whose pattern no longer exists is reported as a
+// SKIP, and a SKIP is a failure here for exactly the reason this file exists: it looks like
+// coverage while testing nothing. Retargeting them at absent markup would have been worse.
 const MUTATIONS = [
   ["the sync PILL no longer gated on the native shell (appears on public signovivo.com)", "web/src/app.js",
    sub("  if (!inShell) {\n    directorModeBadge.classList.add(\"is-hidden\");\n    return;\n  }", "")],
-  ["rescue block no longer gated on the shell (panic switches on the public web)", "web/src/app.js",
-   sub('rescueWrap.classList.toggle("is-hidden", !inShell)', 'rescueWrap.classList.toggle("is-hidden", false)')],
   ["a rotated DIRECTOR_CODE leaks into the public web bundle", "web/src/app.js",
    sub("const openSongJump = () => {", 'const LEAKED = "918273645";\nconst openSongJump = () => {')],
   ["the explicitTransmitterRef resume guard deleted", "PdfReaderApp.tsx",
@@ -68,8 +70,6 @@ const MUTATIONS = [
    sub('case "request-force-baked":\n          Alert.alert(', 'case "request-force-baked":\n          onDirectorCode(BOOK_FORCE_BAKED_CODE);\n          Alert.alert(')],
   ["request-director bypasses onDirectorCode's takeover confirmation", "PdfReaderApp.tsx",
    sub('case "request-director":\n          onDirectorCode(DIRECTOR_CODE);', 'case "request-director":\n          void becomeDirector(DIRECTOR_CODE); if (0) onDirectorCode(DIRECTOR_CODE);')],
-  ["rescue block left EXPANDED between visits", "web/src/app.js",
-   sub('if (rescueActions) rescueActions.classList.add("is-hidden");', 'if (rescueActions && false) rescueActions.classList.add("is-hidden");')],
   ["crumb merge order swapped — the NEW session's crumbs get dropped", "PdfReaderApp.tsx",
    sub("const merged = [...prev, `${new Date().toISOString()} ── app start ──`, ...breadcrumbsRef.current];",
        "const merged = [...breadcrumbsRef.current, `${new Date().toISOString()} ── app start ──`, ...prev];")],

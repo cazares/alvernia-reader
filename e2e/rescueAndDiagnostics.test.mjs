@@ -27,11 +27,18 @@ const reveal = (nativeFileMode, hasBridge, role = "follower") => {
 // has already gone wrong. Reaching them required a memorised 9-digit number — in exactly the moment
 // nobody can look anything up. These pin the button path without removing the codes.
 
-test("both panic switches are reachable without a code", () => {
-  assert.match(NATIVE, /case "request-force-baked":/, "no button path to the baked songbook");
-  assert.match(NATIVE, /case "request-soft-reset":/, "no button path to the soft reset");
-  assert.match(APP, /postNativeBridge\(\{ type: "request-force-baked" \}\)/);
-  assert.match(APP, /postNativeBridge\(\{ type: "request-soft-reset" \}\)/);
+test("the panic switches are reachable by CODE, and the bridge handlers survive", () => {
+  // The "¿Algo anda mal?" block was removed from the IR A CANTO modal on 2026-08-06 — that dialog is
+  // opened constantly during Mass and had grown a once-a-year maintenance drawer under it. The
+  // numpad codes remain the way in, and the native handlers stay so any future entry point can use
+  // them without a new binary.
+  assert.match(NATIVE, /case "request-force-baked":/, "the bridge handler was deleted with the button");
+  assert.match(NATIVE, /case "request-soft-reset":/, "the bridge handler was deleted with the button");
+  assert.match(NATIVE, /if \(code === SOFT_RESET_CODE\)/, "the typed soft-reset path is gone too");
+  assert.match(NATIVE, /if \(code === BOOK_FORCE_BAKED_CODE\)/, "the typed force-baked path is gone too");
+  // ...and nothing in the web still posts them, or it would be a button that no longer exists.
+  assert.ok(!/request-force-baked/.test(APP), "dead web caller for a removed button");
+  assert.ok(!/request-soft-reset/.test(APP), "dead web caller for a removed button");
 });
 
 test("the original numpad codes still work", () => {
@@ -61,20 +68,10 @@ test("each panic button confirms before doing anything", () => {
   }
 });
 
-test("rescue controls never appear on the public web", () => {
-  // signovivo.com has no mesh, no staged bundle and no crumb log — every one of these is dead there.
-  // Executed, not grepped: `inShell` is computed once and consumed by BOTH features, so a presence
-  // check for it passed even with the rescue gate deleted.
-  assert.equal(reveal(false, false).rescue, true, "rescue block REVEALED on the public web");
-  assert.equal(reveal(true, false).rescue, false, "rescue block hidden inside the native shell");
-  assert.match(HTML, /class="song-jump-rescue is-hidden"/, "must ship hidden and be revealed by JS");
-});
-
-test("the rescue block re-collapses every time the modal opens", () => {
-  // Otherwise it is left expanded from a previous visit and the once-a-year controls sit permanently
-  // next to the one people use constantly.
-  assert.equal(reveal(true, true)["rescueActions:collapsed"], true, "stays expanded between visits");
-});
+// The two "rescue controls never appear on the public web" / "re-collapses on every open" tests
+// were deleted with the block itself on 2026-08-06. Keeping them would have meant asserting the
+// behaviour of markup that no longer exists — the shape of test that passes forever and proves
+// nothing, which this file was rewritten once already to stop doing.
 
 // ── Breadcrumbs ───────────────────────────────────────────────────────────────
 // There is no internet inside the church and no MDM on these iPads, so the /log telemetry cannot
@@ -123,12 +120,16 @@ test("a corrupt or missing buffer does not break boot", () => {
   assert.match(restore, /Array\.isArray\(parsed\)/, "trusts whatever was stored");
 });
 
-test("diagnostics are served to the web, which renders them", () => {
-  // Native captures and serves; the viewer is web so it can improve over the air.
-  assert.match(NATIVE, /case "request-diagnostics":/, "no way to read the buffer back");
-  assert.match(APP, /postNativeBridge\(\{ type: "request-diagnostics" \}\)/, "nothing asks for it");
-  assert.match(APP, /payload\.type === "diagnostics"/, "web ignores the reply");
-  assert.match(APP, /const showDiagnostics/, "no renderer");
+test("the diagnostics plumbing survives, even though nothing invokes it yet", () => {
+  // ⚠️ REACHABILITY GAP, knowingly accepted. "Ver diagnóstico" lived in the removed block, so the
+  // crumb log currently has NO entry point in the UI. The capture, the bridge handler and the
+  // renderer are all intact, so restoring a way in is a web-only change — but as of 2026-08-06
+  // nobody can open it on a device.
+  assert.match(NATIVE, /case "request-diagnostics":/, "native can no longer serve the buffer");
+  assert.match(APP, /payload\.type === "diagnostics"/, "the web could not render a reply");
+  assert.match(APP, /const showDiagnostics/, "the renderer was deleted — restoring access needs a rewrite");
+  assert.ok(!/postNativeBridge\(\{ type: "request-diagnostics" \}\)/.test(APP),
+    "something DOES ask for diagnostics now — update this test, the gap is closed");
 });
 
 test("the diagnostics dump is selectable so it can be copied", () => {

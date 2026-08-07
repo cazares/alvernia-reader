@@ -78,6 +78,7 @@ jobs:
           e2e/directorSeat.test.mjs
           e2e/fabLayout.test.mjs
           e2e/buildBadgePage1.test.mjs
+          e2e/followerIdleRender.test.mjs
           e2e/pillWording.test.mjs
           e2e/buildNumberGuard.test.mjs
           e2e/pillWording.test.mjs
