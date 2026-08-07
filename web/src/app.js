@@ -128,12 +128,6 @@ const songJumpModal    = document.getElementById("song-jump-modal");
 const songJumpBackdrop = document.getElementById("song-jump-backdrop");
 const songJumpTrigger  = document.getElementById("song-jump-trigger");
 const songCancelButton = document.getElementById("song-cancel");
-const rescueWrap = document.getElementById("rescue-wrap");
-const rescueToggle = document.getElementById("rescue-toggle");
-const rescueActions = document.getElementById("rescue-actions");
-const rescueBaked = document.getElementById("rescue-baked");
-const rescueReset = document.getElementById("rescue-reset");
-const rescueDiag = document.getElementById("rescue-diag");
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const PREFS_KEY = "nc-sort-prefs";
@@ -1562,6 +1556,26 @@ const loadPageImage = async (pageNumber, retryToken = "") => {
 
 const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = {}) => {
   const nextPage = clampPage(pageNumber);
+
+  // ALREADY ON THIS PAGE — do nothing. A director's mesh heartbeat arrives once per SECOND, and
+  // every one of them called through here even when the page had not moved. Each pass bumped the
+  // load request, scheduled a loading indicator, reassigned pageImage.src, and posted a
+  // `page-changed` message to native — which writes AsyncStorage. Sixty times a minute, for the
+  // length of a Mass, on an eight-year-old iPad. That is the shape of the crash reported on
+  // 2026-08-06: a follower left on one screen for several minutes, doing nothing.
+  //
+  // Guarded narrowly on purpose: only when the page is unchanged AND the <img> is genuinely showing
+  // it. A pending or failed load still falls through and re-renders, so a follower can never get
+  // stuck on a blank while the mesh insists the page is current.
+  if (
+    nextPage === state.currentPage &&
+    pageImageMatches(nextPage) &&
+    pageImage.complete &&
+    pageImage.naturalWidth > 0
+  ) {
+    return;
+  }
+
   const requestId = state.pageLoadRequest + 1;
   state.pageLoadRequest = requestId;
   scheduleLoadingIndicator();
@@ -1698,11 +1712,7 @@ const openSongJump = () => {
   // that is not already directing. Re-evaluated on every open rather than once at boot, because the
   // role changes mid-session — a director who steps down must be able to take it back.
   const inShell = NATIVE_FILE_MODE || hasNativeBridge();
-  // Rescue is shell-only too — nothing here means anything to a browser on signovivo.com, which has
-  // no mesh, no staged bundle and no crumb log. Always re-collapsed, so it cannot be left open.
-  if (rescueWrap) rescueWrap.classList.toggle("is-hidden", !inShell);
-  if (rescueActions) rescueActions.classList.add("is-hidden");
-  if (rescueToggle) rescueToggle.setAttribute("aria-expanded", "false");
+
   songJumpModal.classList.remove("is-hidden");
   state.songJumpOpen = true;
 };
@@ -2961,30 +2971,6 @@ const bindReaderEvents = () => {
 
   // "Dirigir el coro" — ask the native shell for the role. The web bundle never holds DIRECTOR_CODE;
   // it sends a request and the shell runs the same confirmation, live-director takeover warning and
-  // Rescue block. The toggle only expands; each action confirms NATIVELY before doing anything, so
-  // a stray tap in here still cannot change the device.
-  if (rescueToggle) rescueToggle.addEventListener("click", () => {
-    haptic();
-    // classList.toggle returns whether the class is now PRESENT — i.e. now hidden, not now open.
-    if (!rescueActions) return;
-    const nowHidden = rescueActions.classList.toggle("is-hidden");
-    rescueToggle.setAttribute("aria-expanded", String(!nowHidden));
-    // The card scrolls (max-height + overflow-y) and iOS draws no scrollbar, so on a 10.2" iPad
-    // portrait the last rescue button sat past the visible edge with nothing to signal it. Panic
-    // switches nobody can find in the five minutes before Mass are the failure this was built to
-    // prevent, so bring them into view rather than trusting the operator to discover the scroll.
-    if (!nowHidden) rescueActions.scrollIntoView({ block: "nearest" });
-  });
-  if (rescueBaked) rescueBaked.addEventListener("click", () => {
-    haptic(); closeSongJump(); postNativeBridge({ type: "request-force-baked" });
-  });
-  if (rescueReset) rescueReset.addEventListener("click", () => {
-    haptic(); closeSongJump(); postNativeBridge({ type: "request-soft-reset" });
-  });
-  if (rescueDiag) rescueDiag.addEventListener("click", () => {
-    haptic(); closeSongJump(); postNativeBridge({ type: "request-diagnostics" });
-  });
-
   // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection.
   // Spin the icon for ~1.1s on tap so it's obvious it's reconnecting/refreshing.
   const resyncFab = document.getElementById("resync-fab");

@@ -152,18 +152,11 @@
                IR A CANTO was the wrong place twice over: nobody looking to direct opens the
                go-to-song keypad, and on a 10.2" portrait iPad it sat below the card's fold. -->
 
-          <!-- The two panic switches and the crumb log. Native-only, collapsed by default: these
-               fire roughly once a year, under pressure, and must not compete for attention with
-               "open the song" the other 364 days. Each confirms natively before doing anything. -->
-          <div class="song-jump-rescue is-hidden" id="rescue-wrap">
-            <button class="song-jump-rescue-toggle" id="rescue-toggle" type="button"
-                    aria-expanded="false" aria-controls="rescue-actions">¿Algo anda mal?</button>
-            <div class="song-jump-rescue-actions is-hidden" id="rescue-actions">
-              <button class="song-jump-rescue-btn" id="rescue-baked" type="button">Usar el cancionero original</button>
-              <button class="song-jump-rescue-btn" id="rescue-reset" type="button">Reparar la sincronización</button>
-              <button class="song-jump-rescue-btn" id="rescue-diag" type="button">Ver diagnóstico</button>
-            </div>
-          </div>
+          <!-- The rescue block ("¿Algo anda mal?" + the two panic switches + diagnostics) was removed
+               2026-08-06. IR A CANTO is the dialog people open constantly during Mass, and it had
+               grown a once-a-year maintenance drawer under it. The numpad codes still reach every
+               one of those actions, and the native handlers are untouched. -->
+
         </div>
       </div>
 
