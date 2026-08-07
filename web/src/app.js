@@ -1324,6 +1324,9 @@ const showRelayAuthWarning = (status) => {
   // WebView): guarantees the banner is displayed even if the slide-in keyframe is skipped.
   relayAuthWarningEl.classList.add("is-on");
 };
+const hideRelayAuthWarning = () => {
+  if (relayAuthWarningEl) relayAuthWarningEl.classList.remove("is-on");
+};
 
 // ── Neutral sync notice ───────────────────────────────────────────────────────
 // Same shape as the relay-auth banner above, in slate instead of red, for things the operator must
@@ -1461,6 +1464,14 @@ const applyNativeSyncEvent = async (payload) => {
     // this never fires on every page turn.)
     if (payload.type === "relay-auth-error") {
       showRelayAuthWarning(payload.status);
+      return;
+    }
+
+    // Publishing recovered. Take the banner down: it is shown on failure and, before this existed,
+    // could only be removed by tapping its × — so a fixed relay went on shouting, and a stale
+    // warning looks exactly like a live one.
+    if (payload.type === "relay-auth-ok") {
+      hideRelayAuthWarning();
       return;
     }
 

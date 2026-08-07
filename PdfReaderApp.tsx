@@ -34,7 +34,12 @@ import {
   startNearbyDirector,
   startNearbyFollower,
 } from "./src/nearbyDirectorSync";
-import { publishPageToRelay, setRelayPublishing, setRelayAuthErrorHandler } from "./src/directorRelaySync";
+import {
+  publishPageToRelay,
+  setRelayPublishing,
+  setRelayAuthErrorHandler,
+  setRelayAuthOkHandler,
+} from "./src/directorRelaySync";
 import { STORAGE_KEYS, type BookId } from "./src/offlineBooks";
 import {
   decideBundle,
@@ -670,7 +675,16 @@ export default function App() {
     setRelayAuthErrorHandler((status: number) => {
       injectEvent({ type: "relay-auth-error", status });
     });
-    return () => setRelayAuthErrorHandler(null);
+    // ...and the other half: tell the WebView when publishing starts working again, so the banner
+    // comes DOWN on its own. Without this it could only be dismissed by hand — a warning about a
+    // problem that no longer exists, indistinguishable on screen from a live one.
+    setRelayAuthOkHandler(() => {
+      injectEvent({ type: "relay-auth-ok" });
+    });
+    return () => {
+      setRelayAuthErrorHandler(null);
+      setRelayAuthOkHandler(null);
+    };
   }, [injectEvent]);
 
   // ── Page broadcast: mesh (director) + relay (director or explicit transmitter) ──

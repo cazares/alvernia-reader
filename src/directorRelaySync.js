@@ -30,6 +30,16 @@ let relayAuthErrorHandler = null;
 export const setRelayAuthErrorHandler = (fn) => {
   relayAuthErrorHandler = typeof fn === "function" ? fn : null;
 };
+// RECOVERY NEEDS ITS OWN SIGNAL. The warning banner is shown on failure and, until this existed,
+// could only be removed by tapping its ×. Re-arming the latch below let a FUTURE failure warn again,
+// but nothing ever told the WebView the problem had gone away — so a fixed relay kept shouting. On
+// 2026-08-06 that banner was still on screen long after the worker deploy that fixed it, and it is
+// indistinguishable on screen from a live failure. A warning that cannot retract itself teaches
+// people to ignore warnings.
+let relayAuthOkHandler = null;
+export const setRelayAuthOkHandler = (fn) => {
+  relayAuthOkHandler = typeof fn === "function" ? fn : null;
+};
 let authErrorNotified = false;
 
 // WHETHER THIS DEVICE MAY PUBLISH AT ALL — a local gate, not a credential.
@@ -93,7 +103,16 @@ const doPublish = async (payload) => {
     // non-ok statuses (5xx server blips, 429) are transient and already covered by the re-publish
     // loop, so we don't cry wolf on them.
     if (res && res.ok) {
-      authErrorNotified = false; // recovered — re-arm so a future failure can warn again
+      // Only speak on the TRANSITION. Firing on every successful publish would post an event on
+      // every page turn for a director who never had a problem — noise the bridge does not need.
+      if (authErrorNotified) {
+        authErrorNotified = false; // recovered — re-arm so a future failure can warn again
+        try {
+          if (relayAuthOkHandler) relayAuthOkHandler();
+        } catch {
+          /* a recovery notice must never break the publish that caused it */
+        }
+      }
     } else if (res && (res.status === 401 || res.status === 403) && !authErrorNotified) {
       authErrorNotified = true;
       try {
