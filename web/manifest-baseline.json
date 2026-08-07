@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "bookVersion": "bv_74d6f35e7ddc5a29",
-  "totalPages": 374,
-  "builtFromShellBuild": 419,
+  "bookVersion": "bv_756289bc81101643",
+  "totalPages": 373,
+  "builtFromShellBuild": 420,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-07T04:26:15.110Z",
-  "sourcePdfSha256": "e4465a3437b182cd5537a6fded67b4d17616dde5071dd2618c38df358d237c44",
-  "sourcePdfPages": 374,
-  "songIndexDigest": "448083e390fc46cf6e335196ba85b3ac1afd3ea520a2c9e130f97f293cd3efd9",
+  "generatedAt": "2026-08-07T04:33:33.194Z",
+  "sourcePdfSha256": "383fba080baed91e790432a79f2260b7c8db5a0d0140364cb38610dd27d175e1",
+  "sourcePdfPages": 373,
+  "songIndexDigest": "566f35e430e223de528f506e580fcfedfaec7faaa36e7c54421fe93ec348a382",
   "firstSong": 1,
-  "lastSong": 374,
+  "lastSong": 373,
   "songPages": [
     [
       1,
@@ -1502,10 +1502,6 @@
     [
       373,
       373
-    ],
-    [
-      374,
-      374
     ]
   ],
   "pagePadWidth": 3,
@@ -1519,20 +1515,20 @@
     {
       "p": "app.js",
       "n": 201972,
-      "h": "c7145dd2bebaf87d580167776d8c08082dd14b45695fa65f71b098cb8b45b20a",
-      "m": "b5860a01d2ba658e8914ba781af29f1b"
+      "h": "7ede72a0b97c5dddecd29d8d6fbf48683e6a32f816844116b6e07d6e27e7bb57",
+      "m": "bf3163dca20fc76cb9c1659973f5bfc4"
     },
     {
       "p": "books.json",
       "n": 88,
-      "h": "57c2479252a8f890c19f669630b843077b5c07656bd7f61060e59a55a01bb782",
-      "m": "82f2396f88248229d91f685afe63db0c"
+      "h": "6c9caeb75764281ceadb6f15aa5d5899f4ac72c8eee4c9ed9c080464aa7a9866",
+      "m": "3c59a92104e4b9c382a616a53ca3ff99"
     },
     {
       "p": "books/standard/pages.json",
-      "n": 213546,
-      "h": "5594981ab16ffbdb3586be5c5b62085d0cb4ab54814d0ccf8ffc9ef27e42386d",
-      "m": "5a29e84d95aef9974e84aff27adfac11"
+      "n": 213424,
+      "h": "7d7e3e87cdf5d676f0e701f595fd1bb69bfdf3cab14893dea7aed876006870e0",
+      "m": "d40b937e23ba983e06542f4b8493779a"
     },
     {
       "p": "books/standard/pages/page-001.webp",
@@ -3773,12 +3769,6 @@
       "m": "9bfcc29bce17f34dcfbe7e69c7c697b8"
     },
     {
-      "p": "books/standard/pages/page-374.webp",
-      "n": 10008,
-      "h": "9b17527d235be889a2c17c5e6d241cb4fe6b4b5a51503b6fd6e2964f569a812a",
-      "m": "8be12a4d18ee73b5b8621eb135039f59"
-    },
-    {
       "p": "books/standard/search-index.json",
       "n": 142762,
       "h": "3f220e3582fe134c37c91ea81e724e81d284d9f7f1603f4399bd3463813d77f9",
@@ -3786,9 +3776,9 @@
     },
     {
       "p": "books/standard/song-search-index.json",
-      "n": 545853,
-      "h": "ab22921a49f6f4cd8ededa0bc1e38819209d0ba980b6037c0438ec4507308cd2",
-      "m": "64b50c2363ec5d353a6ad685e01a2646"
+      "n": 545839,
+      "h": "1f7e13142fba384601a79a98ca0e2b159743b0b195c4bd0cd949dd6fb1b83de5",
+      "m": "827cf2823938a98cf4c27c4661111691"
     },
     {
       "p": "books/standard/song-titles.json",
@@ -3817,8 +3807,8 @@
     {
       "p": "index.html",
       "n": 23683,
-      "h": "f22d18b0bbf95d906c3d9c774813ce8e4ef2a75d8c587d0e69a66b9a48524ae7",
-      "m": "d65c21e10ec57b63bb100d66ee5774b8"
+      "h": "16b2f3bc06358166e756240d122aa252f4d60d7f7103983ae8cc3bcee8d7ce34",
+      "m": "021300c17e662962b002e258655fdf85"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3853,8 +3843,8 @@
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "7270d9a64c588e36f1015682f61acf6113ee1ed3fe1c47aaf21d8e99052fa199",
-      "m": "c03b73fc3de6ed1701ad3a65d70ef3e0"
+      "h": "aa491b53b9d37468e873ea6197e1fbba05fef36a50c5d64677845d2153d618d5",
+      "m": "7c94edb8980521184b9814bfd3722bb9"
     }
   ]
 }
