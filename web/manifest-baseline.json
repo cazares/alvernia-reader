@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "bookVersion": "bv_93bca08c2cae7941",
-  "totalPages": 371,
-  "builtFromShellBuild": 417,
+  "bookVersion": "bv_ff74ef9519e06554",
+  "totalPages": 373,
+  "builtFromShellBuild": 418,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-07T03:18:10.704Z",
-  "sourcePdfSha256": "1581c9f06a4a46113d34b53152ab7ffe16dce2ae44d8ea5563cd58c074d9b6e9",
-  "sourcePdfPages": 371,
-  "songIndexDigest": "6bf07e036abb64e88d77f3bcb1bcc977d051503b7038cc5718e7a3b43b13ce85",
+  "generatedAt": "2026-08-07T03:29:38.374Z",
+  "sourcePdfSha256": "383fba080baed91e790432a79f2260b7c8db5a0d0140364cb38610dd27d175e1",
+  "sourcePdfPages": 373,
+  "songIndexDigest": "566f35e430e223de528f506e580fcfedfaec7faaa36e7c54421fe93ec348a382",
   "firstSong": 1,
-  "lastSong": 371,
+  "lastSong": 373,
   "songPages": [
     [
       1,
@@ -1494,6 +1494,14 @@
     [
       371,
       371
+    ],
+    [
+      372,
+      372
+    ],
+    [
+      373,
+      373
     ]
   ],
   "pagePadWidth": 3,
@@ -1507,20 +1515,20 @@
     {
       "p": "app.js",
       "n": 201972,
-      "h": "d5e56650dfff3546871007bdc6fd2b87ff88dcfc9eb9a6a2460d0c8fe12d800e",
-      "m": "d44a4cf56a93fd7b7179bb710c48e819"
+      "h": "f3a8077e091a149098509379a48e01a7a00d1b50e5799138d3689cc43ca15313",
+      "m": "f4289d3f3790ea46e6a7cbb776b998da"
     },
     {
       "p": "books.json",
       "n": 88,
-      "h": "941a68a2fedb58b1090e59e9b4dfa47b3f44debf55f1ad3fb476ff1f3a30f7de",
-      "m": "392a7e62792a1e6d00635283c233818a"
+      "h": "6c9caeb75764281ceadb6f15aa5d5899f4ac72c8eee4c9ed9c080464aa7a9866",
+      "m": "3c59a92104e4b9c382a616a53ca3ff99"
     },
     {
       "p": "books/standard/pages.json",
-      "n": 213086,
-      "h": "73ce78dfb96476c9f8109153426d2e132f5048405baa4011794196d294c2f952",
-      "m": "7ef4eb855fe008fcb4910d1416b40ed3"
+      "n": 213424,
+      "h": "7d7e3e87cdf5d676f0e701f595fd1bb69bfdf3cab14893dea7aed876006870e0",
+      "m": "d40b937e23ba983e06542f4b8493779a"
     },
     {
       "p": "books/standard/pages/page-001.webp",
@@ -3749,22 +3757,34 @@
       "m": "b2ac842606b04937396fda2e1fd4a2af"
     },
     {
+      "p": "books/standard/pages/page-372.webp",
+      "n": 12172,
+      "h": "9d52a422b966c75e659613aaa840554410ce0b2777f7557d80ac774ed8881f1d",
+      "m": "b9132f1c74f39ce0c0ef87ffc2b74ad8"
+    },
+    {
+      "p": "books/standard/pages/page-373.webp",
+      "n": 12696,
+      "h": "80df8dbb1598847e13df9157f815d368763034d57be6e9f9090e139ab818eef8",
+      "m": "9bfcc29bce17f34dcfbe7e69c7c697b8"
+    },
+    {
       "p": "books/standard/search-index.json",
-      "n": 142616,
-      "h": "5f7abea0c220c4941618940fd12ad500009707bc04235ecdc66119ae9f8980f2",
-      "m": "9712849ea1a4420690129cd0496509ce"
+      "n": 142762,
+      "h": "3f220e3582fe134c37c91ea81e724e81d284d9f7f1603f4399bd3463813d77f9",
+      "m": "d4bddb44c18513b32564e57a92a1ebb9"
     },
     {
       "p": "books/standard/song-search-index.json",
-      "n": 545687,
-      "h": "191a5c6f15193cfb6e7c1f4bab3213c3ef8787b411b9e986845889410463826d",
-      "m": "20b010e4504d79d0468507335a46d7d4"
+      "n": 545839,
+      "h": "1f7e13142fba384601a79a98ca0e2b159743b0b195c4bd0cd949dd6fb1b83de5",
+      "m": "827cf2823938a98cf4c27c4661111691"
     },
     {
       "p": "books/standard/song-titles.json",
-      "n": 9312,
-      "h": "a11a6d4e7943931ea817d7cebc03caa31800ce096dfb4661ab1da011d02f7e95",
-      "m": "1cb4b8f9f511d61bd2dbe29f9c90701a"
+      "n": 9354,
+      "h": "ce3f6ac4bb55a2987e9fc45a39c6508ae8552f39f6d01b46e7fa445a730f6520",
+      "m": "48cf784f8c70651432c7770ec239c6dc"
     },
     {
       "p": "icon-192.png",
@@ -3787,8 +3807,8 @@
     {
       "p": "index.html",
       "n": 23683,
-      "h": "2062874392f7e059028aa9eff41295d623019fd26b842c2c91220cd79a5626b0",
-      "m": "8418fec5cca592fffd9cb7d7f620c917"
+      "h": "f777096037989742aa189456fe0dbb9bf29ea66855c40264afcf36be0bc5eb86",
+      "m": "9ba43be2f5273b263024d6739e74278d"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3823,8 +3843,8 @@
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "1b5763aff7da04821346fe9d8ae96a66dd863020a953ef88b0a6a75a1cf2a915",
-      "m": "aeb99ba387f7b4aa3924cada0cf45b7f"
+      "h": "f8e4e8c0b7716ef7fd29e0460ea452593ebb11e51ae865591a618a5244aa7ad0",
+      "m": "d0993bc2f4d89be70c337eea16ab5bd5"
     }
   ]
 }
