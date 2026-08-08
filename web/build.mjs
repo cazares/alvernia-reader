@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 
 const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
@@ -156,59 +157,143 @@ fs.writeFileSync(path.join(distDir, "sw.js"), serviceWorkerSource);
 // (PDF_RENDER_DPI / WEBP_QUALITY are defined at the top of the file — they feed bookVersion.)
 // Renders every PDF page to WebP under <bookOutDir>/pages/page-NNN.webp using the
 // same pdftoppm→cwebp path for every book. Returns the sorted list of webp files.
+const toolVersion = (bin, args) => {
+  // pdftoppm and cwebp both report version on stderr; merge both streams and take the first line.
+  const r = spawnSync(bin, args, { encoding: "utf8" });
+  const text = `${r.stdout || ""}${r.stderr || ""}`.trim().split("\n")[0] || "";
+  return text.trim().slice(0, 120) || "unknown";
+};
+
+// ─── Rendered-page cache ─────────────────────────────────────────────────────
+//
+// Rendering the book dominates every publish: measured on this Mac, 373 pages cost ~4.4 min in
+// pdftoppm plus ~1.6 min encoding, and a ROLLBACK paid all of it to reproduce pages that had
+// already been rendered byte-for-byte once. A same-book republish paid it to produce nothing new.
+//
+// So results are cached by CONTENT. The key covers everything that determines the output pixels —
+// the PDF bytes, the DPI, the WebP quality, the filename pad width, and the two renderer VERSIONS.
+// The versions matter: CI installs poppler and webp unpinned, so the runner and this Mac can
+// legitimately disagree, and a cache that ignored them would serve one machine's pixels as the
+// other's. A stale page is far worse than a slow build — it would ship the wrong music and look
+// perfectly healthy doing it.
+//
+// Kept OUTSIDE the repo, under ~/.cache, deliberately: every worktree shares it, so a rollback in a
+// fresh worktree still hits pages rendered elsewhere. Nothing here is authoritative — delete the
+// whole directory and the next build simply renders again.
+const RENDER_CACHE_DIR = path.join(os.homedir(), ".cache", "signovivo-render");
+
+const renderCacheKey = (pdfPath) => {
+  const h = crypto.createHash("sha256");
+  h.update(fs.readFileSync(pdfPath));
+  h.update(`dpi=${PDF_RENDER_DPI};q=${WEBP_QUALITY};pad=${PAGE_PAD_WIDTH}`);
+  h.update(`pdftoppm=${toolVersion("pdftoppm", ["-v"])};cwebp=${toolVersion("cwebp", ["-version"])}`);
+  return h.digest("hex").slice(0, 32);
+};
+
+// How many pages the PDF claims, so a cache hit can be checked against it rather than trusted.
+const pdfPageCount = (pdfPath) => {
+  const out = spawnSync("pdfinfo", [pdfPath], { encoding: "utf8" });
+  const m = out.status === 0 && /^Pages:\s+(\d+)/m.exec(out.stdout || "");
+  return m ? Number(m[1]) : 0;
+};
+
+const pageNoOf = (file) => Number(file.match(/-(\d+)\.(?:png|webp)$/)[1]);
+
+// Encode PNG→WebP across all cores. The old loop spawned cwebp once per page, sequentially: ~1.6 min
+// for 373 pages, on a machine with twelve idle cores. Measured 7.15x faster in parallel.
+// xargs is doing the pooling rather than a JS worker pool purely so this function can stay
+// synchronous — its caller and everything above it are sync, and making the whole chain async to
+// save a subprocess would be a much larger change than the problem deserves.
+const encodePngsToWebp = (pagesOutDir, pngFiles) => {
+  if (!pngFiles.length) return;
+  const pairs = [];
+  for (const png of pngFiles) {
+    const num = String(pageNoOf(png)).padStart(PAGE_PAD_WIDTH, "0");
+    pairs.push(path.join(pagesOutDir, png), path.join(pagesOutDir, `page-${num}.webp`));
+  }
+  const cores = Math.max(1, Number(spawnSync("sysctl", ["-n", "hw.ncpu"], { encoding: "utf8" }).stdout) || 4);
+  const res = spawnSync(
+    "/bin/sh",
+    ["-c",
+     `printf '%s\\0' "$@" | xargs -0 -P ${cores} -n 2 sh -c 'cwebp -quiet -q ${WEBP_QUALITY} "$0" -o "$1"'`,
+     "sh", ...pairs],
+    { stdio: "pipe" },
+  );
+  // xargs reports a non-zero exit if ANY child failed; the per-file check below is what actually
+  // proves every page landed, since a partial encode is the failure that would ship a gap.
+  for (let i = 1; i < pairs.length; i += 2) {
+    if (!fs.existsSync(pairs[i])) {
+      throw new Error(`cwebp failed for ${path.basename(pairs[i - 1])} (xargs status ${res.status ?? "?"})`);
+    }
+  }
+  for (let i = 0; i < pairs.length; i += 2) fs.unlinkSync(pairs[i]);
+};
+
+// Renders `pdfPath` into `pagesOutDir` as page-NNN.webp, reusing a cached render when the content
+// and every render setting are identical. Returns the sorted list of webp files.
 const renderPagesToWebp = (pdfPath, pagesOutDir) => {
   fs.mkdirSync(pagesOutDir, { recursive: true });
+
+  const expected = pdfPageCount(pdfPath);
+  const cacheDir = path.join(RENDER_CACHE_DIR, renderCacheKey(pdfPath));
+
+  // CACHE HIT — but only if it is complete. A half-populated directory (an interrupted build, a
+  // full disk) must fall through to a real render rather than ship a book with holes in it.
+  if (expected > 0 && fs.existsSync(cacheDir)) {
+    const cached = fs.readdirSync(cacheDir).filter((f) => /^page-\d+\.webp$/.test(f));
+    if (cached.length === expected) {
+      for (const f of cached) fs.copyFileSync(path.join(cacheDir, f), path.join(pagesOutDir, f));
+      console.log(`Rendered pages: CACHE HIT (${cached.length} pages, no pdftoppm/cwebp run).`);
+      return cached.sort((l, r) => pageNoOf(l) - pageNoOf(r));
+    }
+    console.log(`Render cache present but incomplete (${cached.length}/${expected}) — re-rendering.`);
+  }
+
   const pngPrefix = path.join(pagesOutDir, "render");
   const render = spawnSync(
     "pdftoppm",
     ["-png", "-r", String(PDF_RENDER_DPI), pdfPath, pngPrefix],
     { stdio: "inherit" },
   );
-
   if (render.status !== 0) {
     throw new Error(`pdftoppm failed with exit code ${render.status ?? 1} for ${pdfPath}`);
   }
 
   // Sort by page NUMBER, never lexically. pdftoppm's own pad width tracks the page count, so a
   // book that crosses 1000 emits render-0001..render-1000 and a string sort puts render-1000
-  // before render-0999 — which would silently mis-map the search index below (it pairs
-  // pageFiles[idx] with page idx+1). Numeric sort is correct at every book size.
-  const pageNo = (file) => Number(file.match(/-(\d+)\.(?:png|webp)$/)[1]);
+  // before render-0999 — which would silently mis-map the search index (it pairs pageFiles[idx]
+  // with page idx+1). Numeric sort is correct at every book size.
+  //
+  // FROZEN pad width on the OUTPUT — do NOT derive it from the page count. Every offline copy the
+  // additive-only invariant protects is keyed by filename, so a book crossing 1000 would rename
+  // page-001 to page-0001 and invalidate the entire installed base at once, silently.
+  // web/src/app.js's PAGE_PAD_WIDTH is the reader half of this contract; smoke-boot pins both.
   const pngFiles = fs
     .readdirSync(pagesOutDir)
     .filter((file) => /^render-\d+\.png$/.test(file))
-    .sort((left, right) => pageNo(left) - pageNo(right));
+    .sort((left, right) => pageNoOf(left) - pageNoOf(right));
 
-  // Encode each rendered page to WebP (page-NNN.webp), then drop the intermediate PNG.
   console.log(`Encoding ${pngFiles.length} pages to WebP q${WEBP_QUALITY} @ ${PDF_RENDER_DPI} DPI...`);
-  for (let i = 0; i < pngFiles.length; i++) {
-    // FROZEN pad width — do NOT derive this from the page count. pdftoppm pads to the width of the
-    // total, so at 1000 pages it would emit page-0001.webp and RENAME every existing page URL. Every
-    // offline copy the additive-only invariant protects — cached page images, previous SW caches, a
-    // staged download — is keyed by that filename, so a book crossing 1000 would invalidate the
-    // entire installed base at once, silently. Padding to a FIXED minimum of 3 keeps page-001..999
-    // permanent forever and lets page 1000+ simply be longer, which is genuinely additive.
-    // web/src/app.js's PAGE_PAD_WIDTH is the reader half of this contract; smoke-boot pins both.
-    const num = String(pageNo(pngFiles[i])).padStart(PAGE_PAD_WIDTH, "0");
-    const pngPath = path.join(pagesOutDir, pngFiles[i]);
-    const webpOut = path.join(pagesOutDir, `page-${num}.webp`);
-    const webp = spawnSync(
-      "cwebp",
-      ["-quiet", "-q", String(WEBP_QUALITY), pngPath, "-o", webpOut],
-      { stdio: "pipe" },
-    );
-    if (webp.status !== 0 || !fs.existsSync(webpOut)) {
-      throw new Error(`cwebp failed for ${pngFiles[i]} (status ${webp.status ?? "?"})`);
-    }
-    fs.unlinkSync(pngPath);
-    if ((i + 1) % 50 === 0) process.stdout.write(`  ${i + 1}/${pngFiles.length}\n`);
-  }
+  encodePngsToWebp(pagesOutDir, pngFiles);
   console.log("WebP generation done.");
 
-  return fs
+  const out = fs
     .readdirSync(pagesOutDir)
     .filter((file) => /^page-\d+\.webp$/.test(file))
-    .sort((left, right) => pageNo(left) - pageNo(right));
+    .sort((left, right) => pageNoOf(left) - pageNoOf(right));
+
+  // Populate the cache only on a COMPLETE render. Writing a partial result would poison every
+  // future build of this exact book, which is the one thing a cache must never do.
+  if (expected > 0 && out.length === expected) {
+    try {
+      fs.mkdirSync(cacheDir, { recursive: true });
+      for (const f of out) fs.copyFileSync(path.join(pagesOutDir, f), path.join(cacheDir, f));
+      console.log(`Render cache populated (${out.length} pages).`);
+    } catch (e) {
+      console.warn(`Could not populate the render cache (harmless): ${e.message}`);
+    }
+  }
+  return out;
 };
 
 // ─── Song Title Overrides ────────────────────────────────────────────────────
@@ -819,12 +904,6 @@ fs.writeFileSync(
 // (red team A6). `sourcePdfPages` comes from pdfinfo — the PDF, not the render — so a render that
 // silently drops pages is a mismatch rather than a consistent lie, and `sourcePdfSha256` pins which
 // PDF this actually came from.
-const toolVersion = (bin, args) => {
-  // pdftoppm and cwebp both report version on stderr; merge both streams and take the first line.
-  const r = spawnSync(bin, args, { encoding: "utf8" });
-  const text = `${r.stdout || ""}${r.stderr || ""}`.trim().split("\n")[0] || "";
-  return text.trim().slice(0, 120) || "unknown";
-};
 
 const walkFiles = (dir, base = dir) => {
   // WALK THE TREE. Never build this list in memory as files are written: a manifest that CAN omit a
