@@ -8,12 +8,21 @@ figure is a raster image (no text) and is left alone; anything OUTSIDE the box (
 TONO/CAPO/INTRO, lyrics) is untouched.
 
 Usage:
-  python3 scripts/clean-header-boxes.py [--in assets/alvernia_manual_2.pdf] [--out <path>]
+  python3 scripts/clean-header-boxes.py [--in assets/songbook.pdf] [--out <path>]
+  python3 scripts/clean-header-boxes.py --in one-song.pdf --pages 1        # a single new song
 
 Notes on this specific PDF (pypdf-assembled): pdftotext y-extents are unreliable (big-font
 parentheticals over-report), so font-SIZE classification uses bbox height while rectangle
 PLACEMENT is pixel-snapped from a render. Box borders are thin/faint on some pages, so they
 are detected by the longest continuous dark run per row, not a dark-pixel fraction.
+
+`--pages` exists so a NEW song can be cleaned by the SAME code that cleaned the other ~290,
+before it is spliced in (scripts/splice-song-pages.py calls it that way). Without it the page
+list comes from the song index, which only knows about songs already IN the book — so a fresh
+one-page export had no way through here, and the two pages added before this option existed
+went in raw: 369/370 kept the credit line inside the header box until they were re-cleaned.
+Note the size thresholds below are tuned for the book's 768x1024 page box, so normalize the
+geometry BEFORE cleaning (splice-song-pages.py does this in that order).
 
 Requires: poppler (pdftoppm, pdftotext), pikepdf, Pillow.
 """
@@ -23,9 +32,11 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ap = argparse.ArgumentParser()
-ap.add_argument("--in", dest="src", default=os.path.join(ROOT, "assets/alvernia_manual_2.pdf"))
+ap.add_argument("--in", dest="src", default=os.path.join(ROOT, "assets/songbook.pdf"))
 ap.add_argument("--out", dest="out", default=None)
 ap.add_argument("--index", default=os.path.join(ROOT, "src/alverniaManual2SongIndex.js"))
+ap.add_argument("--pages", default=None,
+                help="explicit 1-based page numbers (e.g. '1' or '371,372') instead of the song index")
 ap.add_argument("--dpi", type=int, default=110)
 args = ap.parse_args()
 SRC = args.src
@@ -53,8 +64,18 @@ def words_of(pageno):
 
 _cache = {}
 def render(pageno):
+    # pdftoppm's zero-padding tracks the PAGE COUNT of the input, so the 371-page book yields
+    # p-001.png while a single-page sheet yields p-1.png. Hardcoding :03d worked for exactly as
+    # long as this script only ever saw the whole book; --pages on a one-page export crashed with
+    # a FileNotFoundError. (web/build.mjs documents the same trap at its own rename site.)
     if pageno not in _cache:
-        _cache[pageno] = Image.open(os.path.join(tmp, f"p-{pageno:03d}.png")).convert("L")
+        for width in (3, 2, 1, 4, 5, 6):
+            candidate = os.path.join(tmp, f"p-{pageno:0{width}d}.png")
+            if os.path.exists(candidate):
+                break
+        else:
+            raise SystemExit(f"pdftoppm produced no render for page {pageno} in {tmp}")
+        _cache[pageno] = Image.open(candidate).convert("L")
     return _cache[pageno]
 
 def detect_box(im):
@@ -90,8 +111,15 @@ def ink_span(im, x0, x1, y0, y1):
     rows = [y for y in range(ya, yb) if any(px[x, y] < DARK for x in range(xa, xb, 2))]
     return (min(rows), max(rows)) if rows else None
 
-canon = [(int(a), int(b)) for a, b in re.findall(r'\[(\d+),\s*(\d+)\]', open(args.index).read())]
-pdf = pikepdf.open(SRC)
+if args.pages:
+    # Explicit page list. The "song number" half of the pair is only ever used for reporting here,
+    # so a page cleaned this way is identified by its own page number.
+    canon = [(int(p), int(p)) for p in re.split(r'[,\s]+', args.pages.strip()) if p]
+else:
+    canon = [(int(a), int(b)) for a, b in re.findall(r'\[(\d+),\s*(\d+)\]', open(args.index).read())]
+# allow_overwriting_input because OUT defaults to SRC (edit in place) — which is this script's
+# documented default call, and which pikepdf >= 6 refuses outright without this flag.
+pdf = pikepdf.open(SRC, allow_overwriting_input=True)
 n_pages = n_rects = 0
 
 for song, pageno in canon:
