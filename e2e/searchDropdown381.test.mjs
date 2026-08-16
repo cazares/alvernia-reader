@@ -18,11 +18,18 @@ import { spawnSync } from "node:child_process";
 // is exactly the kind of check that passes while the geometry it guards has been swapped out
 // around it. Comments are stripped first, so a note can be added without tripping it.
 //
+// THE REFERENCE IS A COMMITTED FIXTURE, e2e/fixtures/search-css-381.json, extracted from
+// d507509 by this file's own rulesOf(). CI checks out a SHALLOW clone, so `git show d507509:` is
+// not available there (the first CI run of this test failed on exactly that). Whenever history IS
+// available, the fixture is asserted equal to the live extraction — so it cannot be hand-edited
+// into agreeing with a drift without that assertion going red on every developer machine.
+//
 // If a search rule must change for a REAL reason, change it and update ALLOWED_DRIFT below with
 // the reason — a reviewer then sees the exception, instead of a comment claiming verbatim.
 
 const REF_381 = "d507509";
 const FILE = "web/src/styles.css";
+const FIXTURE = "e2e/fixtures/search-css-381.json";
 const SEARCH_RULE = /search|drawer|as-dropdown|sort/i;
 
 // Rules that legitimately differ from 381, by selector. Empty on purpose today.
@@ -45,17 +52,25 @@ const rulesOf = (css) => {
   return out;
 };
 
+const fixture = JSON.parse(fs.readFileSync(FIXTURE, "utf8"));
+const REF = new Map(Object.entries(fixture.rules));
+
 const git = spawnSync("git", ["show", `${REF_381}:${FILE}`], { encoding: "utf8" });
 const HAVE_381 = git.status === 0 && git.stdout.length > 1000;
 
-test("build 381 is reachable in this clone (the pin needs its reference)", () => {
-  assert.ok(HAVE_381, `git show ${REF_381}:${FILE} failed — shallow clone? fetch the history.`);
+test("the committed 381 fixture matches the real d507509 (when history is available)", { skip: !HAVE_381 && "shallow clone — fixture is the reference here" }, () => {
+  // Proves the fixture is what it claims to be. Skips (loudly) in a shallow CI clone; runs on
+  // every developer machine, so a hand-edited fixture cannot survive a local test run.
+  const live = rulesOf(git.stdout);
+  assert.equal(fixture.ref, REF_381);
+  assert.deepEqual([...REF.entries()].sort(), [...live.entries()].sort(),
+    `${FIXTURE} does not match git show ${REF_381}:${FILE} — regenerate it, do not hand-edit it`);
 });
 
-test("every search/drawer CSS rule is IDENTICAL to build 381, at rule granularity", { skip: !HAVE_381 }, () => {
-  const ref = rulesOf(git.stdout);
+test("every search/drawer CSS rule is IDENTICAL to build 381, at rule granularity", () => {
+  const ref = REF;
   const now = rulesOf(fs.readFileSync(FILE, "utf8"));
-  assert.ok(ref.size > 50, `only ${ref.size} search rules found in 381 — the selector filter is wrong`);
+  assert.ok(ref.size > 50, `only ${ref.size} search rules in the fixture — it is truncated or the filter is wrong`);
 
   const problems = [];
   for (const [sel, body] of ref) {
