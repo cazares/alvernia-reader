@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "bookVersion": "bv_9a1f68ef1153dbf6",
-  "totalPages": 371,
-  "builtFromShellBuild": 425,
+  "bookVersion": "bv_b3ca513b7ebc4b47",
+  "totalPages": 372,
+  "builtFromShellBuild": 426,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-07T18:12:38.809Z",
-  "sourcePdfSha256": "1581c9f06a4a46113d34b53152ab7ffe16dce2ae44d8ea5563cd58c074d9b6e9",
-  "sourcePdfPages": 371,
-  "songIndexDigest": "6bf07e036abb64e88d77f3bcb1bcc977d051503b7038cc5718e7a3b43b13ce85",
+  "generatedAt": "2026-08-16T00:14:35.902Z",
+  "sourcePdfSha256": "95c2c08a5d1dba4adb5cf291eec56ce140d3da1d47cbf8638f83cc95f5497220",
+  "sourcePdfPages": 372,
+  "songIndexDigest": "24ca86bdf9970c111d5930f71ebdba954d1ebaeff1294cb1028ef437f3dbb2cb",
   "firstSong": 1,
-  "lastSong": 371,
+  "lastSong": 372,
   "songPages": [
     [
       1,
@@ -1494,6 +1494,10 @@
     [
       371,
       371
+    ],
+    [
+      372,
+      372
     ]
   ],
   "pagePadWidth": 3,
@@ -1506,21 +1510,21 @@
   "files": [
     {
       "p": "app.js",
-      "n": 201972,
-      "h": "1a8385ff60386a02b78e3bcf28353143be8ac30877a8ae5644e9cff5f279182b",
-      "m": "67550627d5fa64ab2af71c3797ffd823"
+      "n": 200759,
+      "h": "51f1844d9b97a71b5b96eacffc010f27677d8eac933a9bd986e4de48cdf5a44e",
+      "m": "46a7ccefe65ea6b825b1f764c21666e0"
     },
     {
       "p": "books.json",
       "n": 88,
-      "h": "941a68a2fedb58b1090e59e9b4dfa47b3f44debf55f1ad3fb476ff1f3a30f7de",
-      "m": "392a7e62792a1e6d00635283c233818a"
+      "h": "1f2508be6467b502ebca85b2c6761e09cf8624933336fab5321a68f8643ae638",
+      "m": "6a32cbf701f69bf7fc68a82c62c9393d"
     },
     {
       "p": "books/standard/pages.json",
-      "n": 213086,
-      "h": "73ce78dfb96476c9f8109153426d2e132f5048405baa4011794196d294c2f952",
-      "m": "7ef4eb855fe008fcb4910d1416b40ed3"
+      "n": 213465,
+      "h": "75edd84d3417e794f7388015485e448092756a2106d911761376bda44b5f33c4",
+      "m": "d9c902a4dee9505f1a8501086ae54316"
     },
     {
       "p": "books/standard/pages/page-001.webp",
@@ -3744,27 +3748,33 @@
     },
     {
       "p": "books/standard/pages/page-371.webp",
-      "n": 40050,
-      "h": "63f1afdc835593641c268456c681df2cdf497cc3193945945266aaf932e9b474",
-      "m": "b2ac842606b04937396fda2e1fd4a2af"
+      "n": 59996,
+      "h": "970701cbe92d2b9e246b7d5e7f6468de85626ec7d6fbe6b58b663c6ce8fde1d5",
+      "m": "45ef3042e1b6eb80840d07eedabac108"
+    },
+    {
+      "p": "books/standard/pages/page-372.webp",
+      "n": 42308,
+      "h": "54b1fba1d63be8c140f78534d6b340984887ea50854af208c44f6f78ac38b016",
+      "m": "14588f10e7285b9aa32451587014a185"
     },
     {
       "p": "books/standard/search-index.json",
-      "n": 142616,
-      "h": "5f7abea0c220c4941618940fd12ad500009707bc04235ecdc66119ae9f8980f2",
-      "m": "9712849ea1a4420690129cd0496509ce"
+      "n": 142864,
+      "h": "3127d7d2f42dd430242f34054657e3f3819767d7f843caee01b922ab9e5a33b6",
+      "m": "f1bd3c7c5132d9ab1dea10f4f093efe6"
     },
     {
       "p": "books/standard/song-search-index.json",
-      "n": 545687,
-      "h": "191a5c6f15193cfb6e7c1f4bab3213c3ef8787b411b9e986845889410463826d",
-      "m": "20b010e4504d79d0468507335a46d7d4"
+      "n": 546457,
+      "h": "242aaf7cbe3a9cc332ce4ab9713e78eee38e116d595a6d407aab047dfca55d38",
+      "m": "80705e84f830bcf027ed10d1a517eeb4"
     },
     {
       "p": "books/standard/song-titles.json",
-      "n": 9312,
-      "h": "a11a6d4e7943931ea817d7cebc03caa31800ce096dfb4661ab1da011d02f7e95",
-      "m": "1cb4b8f9f511d61bd2dbe29f9c90701a"
+      "n": 9327,
+      "h": "babeb6123b174c9b3d27ac280f9e6e19e3af4cf6dd78ad17afa112beff6bd1fb",
+      "m": "7814ebde4a9a46138a7d24a7b5118d11"
     },
     {
       "p": "icon-192.png",
@@ -3786,9 +3796,9 @@
     },
     {
       "p": "index.html",
-      "n": 23683,
-      "h": "6d914c43908e240ebf530c72284800767937a1b0c86f092281dd92eaa9870c98",
-      "m": "e5a200296f4c599c2e326876e6b111d1"
+      "n": 23054,
+      "h": "9034c032f385055e4170f718110d478aa221b6d9e7c0c57982371e569f63abd7",
+      "m": "f659d406468a2c0a93c10840e2b29847"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3816,15 +3826,15 @@
     },
     {
       "p": "styles.css",
-      "n": 67012,
-      "h": "1e4bdb2337d2d49fb97e7a11cff90da7d28de42313297c8f38ced84f928fc8b8",
-      "m": "f769a4b03ed85b507585101f4dbb2529"
+      "n": 68619,
+      "h": "ee1db6821a82400418eabb258bc406448014dce48c12e522a74bc4f4a54189e9",
+      "m": "4f2d8eb66bb2dd2b1e32bf5a74ad060f"
     },
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "bf2adfe03d7375adc145efb776f46fa47787ee84a25fbc5a1f9fbf3bb3060d91",
-      "m": "188264a3b50e0d302cf6db81e64977ca"
+      "h": "c17577742dd982e7f6435e77711c82b47e8497adcbb977c98a33fad6a39e4b90",
+      "m": "58a22e791e0e967f97b9730d9a6a2817"
     }
   ]
 }
