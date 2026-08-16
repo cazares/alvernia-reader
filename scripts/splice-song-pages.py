@@ -21,7 +21,12 @@ It does three things to each incoming sheet, IN THIS ORDER, and the order is the
      "(Autor) Rev 00 05 08 2026" credit line inside the top bordered box; every page already in
      the book has had that removed. Splicing a raw sheet is a VISIBLE REGRESSION, and it has
      already happened twice — 369 and 370 went in raw.
-  3. SPLICE, replacing an existing page or appending a contiguous new one.
+  3. SPLICE, replacing an existing page or appending a contiguous new one — into a temp file.
+  4. VERIFY WITH POPPLER before the temp file becomes the book: every spliced page is rendered
+     from the final file with pdftoppm (what web/build.mjs uses) and must contain ink and match
+     the render of the sheet that was prepared for it. This exists because a valid-looking splice
+     CAN render blank under poppler and green under every other gate — see normalise() for the
+     empty-stream case the mutation harness found. Only a verified file is moved into place.
 
 Everything else in the book is left alone, and `--expect-pages` makes the final count an
 assertion rather than a hope. There is deliberately NO way to leave a gap: appending page 374
@@ -37,7 +42,7 @@ Options:
     --no-clean           skip the header-box cleanup (raw splice — you almost never want this)
     --dry-run            report what would happen; write nothing
 
-Requires: pikepdf, poppler (pdfinfo) — plus Pillow for the cleanup step.
+Requires: pikepdf, Pillow, poppler (pdftoppm, pdftotext).
 """
 import argparse
 import os
@@ -117,12 +122,57 @@ def normalise(src_pdf_path, src_page_no, target_w, target_h, out_path):
         if extra in page.obj:
             del page.obj[extra]
 
+    # ONE content stream, not an array. Found 2026-08-15 by the mutation harness, not by luck:
+    # when a page's /Contents array contains an EMPTY stream (pikepdf's add_blank_page makes
+    # one; other producers can too), the copy into the book can come out serialised as
+    # `<< /Length 0 /Filter /FlateDecode >>` — zero bytes declared as Flate data, which is not a
+    # zlib stream. Ghostscript shrugs; POPPLER fails the inflate and abandons the whole content
+    # array, and poppler is what web/build.mjs renders the book with. The page reaches every
+    # iPad BLANK, and every gate downstream (page count, manifest, consistency) reads green.
+    # The PowerPoint sheets never hit it only because their content is a single non-empty
+    # stream. Coalescing removes the empty member and the array boundaries in one move.
+    page.contents_coalesce()
+
     out = pikepdf.Pdf.new()
     out.pages.append(page)
     out.save(out_path)
     out.close()
     pdf.close()
     return scale
+
+
+def render_png(pdf_path, page_no, out_png, dpi=72):
+    """Render one page with pdftoppm — the SAME renderer web/build.mjs feeds the devices from."""
+    prefix = out_png[:-4] if out_png.endswith(".png") else out_png
+    res = subprocess.run(
+        ["pdftoppm", "-f", str(page_no), "-l", str(page_no), "-r", str(dpi), "-png",
+         "-singlefile", pdf_path, prefix],
+        capture_output=True, text=True,
+    )
+    if res.returncode != 0 or not os.path.exists(prefix + ".png"):
+        die(f"pdftoppm could not render page {page_no} of {show(pdf_path)}: {res.stderr.strip()}")
+    return prefix + ".png"
+
+
+def verify_rendered(book_path, prepared, tmp):
+    """The last word: render every spliced page from the FINAL file with poppler and require it to
+    (a) contain ink and (b) match the render of the sheet we prepared. Anything the splice lost or
+    mangled on the way in — an empty-stream quirk, a dropped resource, a wrong index — shows up
+    here as blank or different, and this is the only check that looks at what a device will see
+    rather than at what the file claims.
+    """
+    from PIL import Image, ImageChops
+    for n, staged in prepared:
+        got = render_png(book_path, n, os.path.join(tmp, f"final-{n}.png"))
+        want = render_png(staged, 1, os.path.join(tmp, f"staged-{n}.png"))
+        a = Image.open(got).convert("L")
+        b = Image.open(want).convert("L")
+        if Image.eval(a, lambda p: 255 - p).getbbox() is None:
+            die(f"page {n} renders BLANK under poppler after the splice — refusing to write it. "
+                f"(The prepared sheet {show(staged)} is what was spliced; inspect it with pdftoppm.)")
+        if a.size != b.size or ImageChops.difference(a, b).getbbox() is not None:
+            die(f"page {n} does not render the same as the sheet prepared for it — refusing to write. "
+                f"({show(book_path)} p{n} vs {show(staged)})")
 
 
 def clean_header_box(path):
@@ -229,10 +279,20 @@ def main():
         if len(book.pages) != final_pages:
             die(f"internal error: assembled {len(book.pages)} pages, expected {final_pages}")
 
-        book.save(out_path)
+        # Write to a sibling temp file, verify THAT with the real renderer, and only then move it
+        # over the target. Two things fall out of the ordering: the book on disk is never a
+        # half-written file, and a splice that poppler would render blank never becomes the book.
+        pending = out_path + ".splicing"
+        book.save(pending)
         for src in open_sources:
             src.close()
-        print(f"\n✅ wrote {show(out_path)} — {final_pages} pages")
+        try:
+            verify_rendered(pending, prepared, tmp)
+            os.replace(pending, out_path)
+        finally:
+            if os.path.exists(pending):
+                os.remove(pending)
+        print(f"\n✅ wrote {show(out_path)} — {final_pages} pages (spliced pages verified under poppler)")
     finally:
         book.close()
         shutil.rmtree(tmp, ignore_errors=True)
