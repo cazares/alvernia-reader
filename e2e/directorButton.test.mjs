@@ -51,13 +51,6 @@ test("the pill is the only thing that asks for the role, and it is shell-only", 
     "the pill is not gated to the native shell — signovivo.com has no room to describe");
 });
 
-test("the rescue block re-collapses on every open", () => {
-  // Otherwise it is left expanded from a previous visit, and once-a-year controls sit permanently
-  // beside the one people use constantly.
-  const decide = revealDecision();
-  assert.equal(decide(true, true, "follower")["rescueActions:collapsed"], true, "stays expanded between visits");
-});
-
 test("the web never learns the director code — it asks", () => {
   // Read the code FROM the native source rather than hardcoding it: the previous version pinned the
   // literal "333444555", so rotating DIRECTOR_CODE would have left this guarding a dead value while

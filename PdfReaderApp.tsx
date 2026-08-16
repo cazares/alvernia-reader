@@ -1942,7 +1942,7 @@ export default function App() {
         lastKnownRoleRef.current = "director";
         injectEvent({
           type: "toast",
-          text: "Estabas transmitiendo. Toca ♪ para volver a dirigir — nadie está transmitiendo ahora.",
+          text: "Estabas transmitiendo. Toca el estado arriba a la izquierda para volver a dirigir.",
         });
       })
       .catch(() => {});
@@ -2041,7 +2041,7 @@ export default function App() {
             // later, resuming a role that expired long ago.
             const atNow = Number(atRaw || 0);
             if (!(atNow > 0) || Date.now() - atNow > DIRECTOR_RESUME_WINDOW_MS) {
-              standDown("Estabas dirigiendo antes. Toca ♪ y luego «Dirigir el coro» para volver.");
+              standDown("Estabas dirigiendo antes. Toca el estado arriba a la izquierda para volver.");
               return;
             }
             const snap = lastDirectorSnapshotRef.current;
@@ -2066,7 +2066,7 @@ export default function App() {
                     : "Nadie estaba dirigiendo — ahora diriges tú.",
                 });
               } else {
-                standDown("No se pudo recuperar la dirección. Toca ♪ y luego «Dirigir el coro».");
+                standDown("No se pudo recuperar la dirección. Toca el estado arriba a la izquierda.");
               }
             });
           }, DIRECTOR_RESUME_SETTLE_MS + extraWait);
