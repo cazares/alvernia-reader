@@ -15,6 +15,10 @@ import { DurableObject } from "cloudflare:workers";
 // iPad at once, and the worker otherwise has no coverage at all.
 // @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
 import { decideBookUpdate } from "./bookArming.js";
+// Diagnostic ring-buffer sizing + run-length folding. Plain JS for the same reason as above:
+// this is the instrument every mesh diagnosis depends on, so it gets real tests.
+// @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
+import { foldLogEntries, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
 
 export interface Env {
   SYNC_ROOM: DurableObjectNamespace<SyncRoom>;
@@ -220,17 +224,17 @@ export class SyncRoom extends DurableObject<Env> {
     entries: unknown[],
     ip = "",
   ): Promise<{ ok: true; total: number; rateLimited?: boolean }> {
-    // A2: cap /log spam per IP (devices batch-append breadcrumbs). Generous (20 burst, 3/sec) so real
-    // devices never hit it; stops an unauthenticated /log flood from churning DO storage.
-    if (this.rateLimited(ip, 20, 3)) {
+    // SIZED FOR A ROOM, NOT A PAIR. The old limit bucketed by IP at 3/sec sustained, and a whole
+    // fleet leaves through ONE NAT — six iPads flushing once a second had over half their
+    // telemetry refused, with ok:true and no device-side retry, so the log looked calm precisely
+    // when it was losing the evidence. And 600 shared entries is ~100 seconds at fleet scale, most
+    // of it keepalive that evicts the one disconnect explaining why the choir stopped following.
+    // Both ceilings and the run-length fold live in logBuffer.js so node --test can cover them.
+    if (this.rateLimited(ip, LOG_RATE_BURST, LOG_RATE_PER_SEC)) {
       return { ok: true, total: 0, rateLimited: true };
     }
     const existing = (await this.ctx.storage.get<unknown[]>("dbglog")) ?? [];
-    const rx = Math.floor(Date.now() / 1000);
-    const stamped = entries
-      .slice(0, 200)
-      .map((e) => (e && typeof e === "object" ? { rx, ...(e as object) } : { rx, v: e }));
-    const next = [...existing, ...stamped].slice(-600); // ring buffer: keep the last 600 entries
+    const next = foldLogEntries(existing, entries, Math.floor(Date.now() / 1000));
     await this.ctx.storage.put("dbglog", next);
     return { ok: true, total: next.length };
   }
