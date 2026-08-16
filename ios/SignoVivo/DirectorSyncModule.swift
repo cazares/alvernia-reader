@@ -1708,6 +1708,30 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.discoveredFollowerInfo.removeValue(forKey: peerID)
       if self.currentRole == "follower" {
         if self.connectedDirectorPeer == peerID {
+          // THE BROWSER LOSING SIGHT OF A PEER IS NOT THE SESSION DROPPING, and treating it as one
+          // wedged the follower PERMANENTLY. Discovery and the MCSession are independent
+          // subsystems: a director's advertisement lapses routinely under radio congestion, or
+          // whenever that device restarts its own advertiser — which every peer does on its refresh
+          // cycle, so this fires more often the more iPads are in the room.
+          //
+          // Clearing connectedDirectorPeer while the data path is still up is unrecoverable. The
+          // reconsiderFollowerTarget() below returns immediately (its first guard bails when the
+          // session is non-empty, emitting "connected"), so nothing ever restores the reference.
+          // From then on every page arriving over that live session is dropped by the guard in
+          // didReceive, the half-open watchdog is disarmed because it requires the same reference,
+          // hellos stop, and the discovery-refresh timer was already paused at .connected. Even the
+          // eventual real .notConnected cannot recover it: that path is gated on
+          // connectedDirectorPeer == peerID, the very field this cleared. The device follows
+          // nothing, forever, while its pill still reads SIGUIENDO and ⟳ does nothing — the
+          // "half the devices synced" report, and a `lost` with no `session:notConnected` beside it
+          // in the relay log is its signature.
+          //
+          // .notConnected already guards this exact case a few lines below (allConnectedPeers).
+          // This is that guard's missing twin.
+          if self.allConnectedPeers.contains(peerID) {
+            self.dbgLog("lost:session-still-live", ["peer": peerID.displayName])
+            return
+          }
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.emitState(status: "searching", message: "Se perdió el director. Buscando otro cercano.")
         }
