@@ -49,6 +49,12 @@ jobs:
       - name: Install render tools (poppler + webp)
         run: brew install poppler webp
 
+      # For e2e/spliceSongPages.test.mjs — behavioural tests of the tool that rewrites the songbook,
+      # against real PDFs, rendered with poppler. Without these the tests skip LOUDLY (their choice), so
+      # a failed install here degrades to a visible skip rather than a red run.
+      - name: Install PDF tools (pikepdf + Pillow for the splice tests)
+        run: pip3 install --break-system-packages pikepdf pillow || pip3 install pikepdf pillow || echo "::warning::pikepdf/Pillow did not install — spliceSongPages tests will skip"
+
       - name: Install dependencies
         run: npm ci
 
@@ -86,6 +92,8 @@ jobs:
           e2e/rescueAndDiagnostics.test.mjs
           e2e/bookOtaSeam.test.mjs
           e2e/sw-page-cache.test.mjs
+          e2e/searchDropdown381.test.mjs
+          e2e/spliceSongPages.test.mjs
           sync-worker/test/bookArming.test.mjs
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
