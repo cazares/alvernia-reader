@@ -4179,6 +4179,39 @@ if (buildBadge) {
     ? `v${baseVersion} (${buildLabel})${kindSuffix}`
     : `${buildLabel}${kindSuffix}`;
   syncBuildBadgeVisibility();
+
+  // TAP THE BADGE TO READ THIS DEVICE'S CRUMB LOG. Native has captured up to 200 breadcrumbs across
+  // restarts this whole time, and the viewer below has shipped in every build — but the ONE control
+  // that connects them went away with the "¿Algo anda mal?" drawer in #342, which the commit itself
+  // flagged as knowingly accepted. The consequence only became clear after a Mass went wrong: six
+  // devices were each holding a written account of what they did, and there was no way to open it.
+  //
+  // The badge is the right home and costs nothing. It already answers "what is this device
+  // holding?", and it is drawn on PAGE 1 ONLY (syncBuildBadgeVisibility), so during Mass — when
+  // nobody is on page 1 — there is no new control anywhere near the music. No code to memorise, no
+  // menu, no clutter on the 371 pages that matter.
+  //
+  // NATIVE SHELL ONLY: signovivo.com has no bridge to ask, so on the public web the badge stays
+  // exactly what it was. Parity is preserved by doing nothing there rather than by showing an
+  // empty dialog.
+  if (hasNativeBridge() || NATIVE_FILE_MODE) {
+    buildBadge.removeAttribute("aria-hidden");
+    buildBadge.setAttribute("role", "button");
+    buildBadge.setAttribute("tabindex", "0");
+    buildBadge.setAttribute("aria-label", "Ver diagnóstico de este dispositivo");
+    buildBadge.style.cursor = "pointer";
+    const askForDiagnostics = () => {
+      haptic(12);
+      // Native answers with a `diagnostics` event, which applyNativeSyncEvent hands to
+      // showDiagnostics. If an older shell does not understand this message it is simply ignored —
+      // the badge stays a label, which is what it was before.
+      postNativeBridge({ type: "request-diagnostics" });
+    };
+    buildBadge.addEventListener("click", askForDiagnostics);
+    buildBadge.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); askForDiagnostics(); }
+    });
+  }
 }
 
 // Screen wake lock (P7): keep the screen awake while the reader is open, so a follower's
