@@ -1081,7 +1081,14 @@ button:disabled {
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-nav-row,
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-mode-switch { display: none; }
 .navigation-drawer.as-dropdown.search-fullscreen .drawer-pane-content {
-  max-height: min(60vh, 540px);
+  /* Fill the near-full panel; results scroll WITHIN it. This is the 381 rule, byte for byte.
+     The `min(60vh, 540px)` cap that sat here through v426 was the compact-dropdown era's, and
+     the "restored verbatim" pass above missed it — so the panel was 381's size while the list
+     inside it stopped at ~540px, leaving the bottom half of the panel empty on an iPad. Found by
+     diffing every search/drawer rule against d507509 (2026-08-15): this was the ONLY one. */
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── Back button: shown inside search fullscreen ────────────────────────────── */

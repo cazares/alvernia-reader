@@ -86,6 +86,8 @@ jobs:
           e2e/rescueAndDiagnostics.test.mjs
           e2e/bookOtaSeam.test.mjs
           e2e/sw-page-cache.test.mjs
+          e2e/searchDropdown381.test.mjs
+          e2e/spliceSongPages.test.mjs
           sync-worker/test/bookArming.test.mjs
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
