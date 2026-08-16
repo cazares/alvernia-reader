@@ -156,6 +156,9 @@ const state = {
   indexDrillDown: false,
   loadingTimer: 0,
   pageLoadRequest: 0,
+  // The page whose render most recently FAILED, and when. Paces retries of a page that cannot be
+  // rendered at all — see RENDER_RETRY_COOLDOWN_MS.
+  lastRenderFailure: null,
   prefetchedPages: new Set(),
   prefetchingPages: new Set(),
   touchStart: null,
@@ -218,6 +221,13 @@ const nativeFullscreenSupported = Boolean(
 const canOfferPseudoFullscreen = isIOS && isStandaloneApp;
 const supportsFullscreen = nativeFullscreenSupported || canOfferPseudoFullscreen;
 const DEFAULT_START_PAGE = 2;
+// Pacing for a page that keeps failing to render — the pure rule lives in lib/svRenderPace.js so a
+// test can EXECUTE it rather than quote it. See that file for the loop it breaks.
+const { shouldPaceRender: svShouldPaceRender } = (typeof self !== "undefined" && self.svRenderPace) || {
+  // Defensive fallback: if the lib script failed to load, never pace — an un-paced retry storm is
+  // bad, but a follower that silently refuses to render is worse.
+  shouldPaceRender: () => false,
+};
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
 const CACHE_VERSION = "__CACHE_VERSION__";
 // Content-address of the BOOK (source PDF + render knobs, hashed by build.mjs). Keys everything
@@ -1576,6 +1586,12 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     return;
   }
 
+  // STILL FAILING THIS PAGE — do not hammer it. The error overlay is already up and native is
+  // re-driving us once a second; without this the retry rate is the heartbeat rate. Cleared on any
+  // successful render and by an explicit human retry, so this only ever paces a page that is
+  // genuinely not renderable right now.
+  if (svShouldPaceRender(state.lastRenderFailure, nextPage, Date.now())) return;
+
   const requestId = state.pageLoadRequest + 1;
   state.pageLoadRequest = requestId;
   scheduleLoadingIndicator();
@@ -1602,6 +1618,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     }
 
     state.currentPage = nextPage;
+    state.lastRenderFailure = null; // this page renders again — stop pacing it
     syncBuildBadgeVisibility();
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
@@ -1639,6 +1656,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
     // right page. A render-failed signal lets native clear its optimistic ref so the next
     // heartbeat re-drives the render. (Native must handle this message for it to take effect —
     // paired fix; harmless/no-op if unhandled.)
+    state.lastRenderFailure = { page: nextPage, at: Date.now() };
     postNativeBridge({
       type: "render-failed",
       page: nextPage,
@@ -3687,6 +3705,11 @@ const goLive = () => {
 // init, so the forward reference resolves fine.
 const reconnectRelay = () => {
   haptic(12);
+  // A HUMAN ASKING TO RETRY OUTRANKS THE COOLDOWN. RENDER_RETRY_COOLDOWN_MS paces a page that keeps
+  // failing on its own; ⟳ is somebody standing there deciding to try again, usually right after
+  // doing something that changed the answer (moving nearer the router, rejoining Wi-Fi). Making
+  // them wait out a pacing window for a machine would make the one control they have feel broken.
+  state.lastRenderFailure = null;
   // NATIVE: the web relay is intentionally OFF in the iPad shell (it syncs over the Multipeer
   // mesh via the bridge). So a ⟳ tap must NOT open a web-relay socket — ask the shell to
   // re-request the director's snapshot over the mesh instead.
@@ -4156,6 +4179,39 @@ if (buildBadge) {
     ? `v${baseVersion} (${buildLabel})${kindSuffix}`
     : `${buildLabel}${kindSuffix}`;
   syncBuildBadgeVisibility();
+
+  // TAP THE BADGE TO READ THIS DEVICE'S CRUMB LOG. Native has captured up to 200 breadcrumbs across
+  // restarts this whole time, and the viewer below has shipped in every build — but the ONE control
+  // that connects them went away with the "¿Algo anda mal?" drawer in #342, which the commit itself
+  // flagged as knowingly accepted. The consequence only became clear after a Mass went wrong: six
+  // devices were each holding a written account of what they did, and there was no way to open it.
+  //
+  // The badge is the right home and costs nothing. It already answers "what is this device
+  // holding?", and it is drawn on PAGE 1 ONLY (syncBuildBadgeVisibility), so during Mass — when
+  // nobody is on page 1 — there is no new control anywhere near the music. No code to memorise, no
+  // menu, no clutter on the 371 pages that matter.
+  //
+  // NATIVE SHELL ONLY: signovivo.com has no bridge to ask, so on the public web the badge stays
+  // exactly what it was. Parity is preserved by doing nothing there rather than by showing an
+  // empty dialog.
+  if (hasNativeBridge() || NATIVE_FILE_MODE) {
+    buildBadge.removeAttribute("aria-hidden");
+    buildBadge.setAttribute("role", "button");
+    buildBadge.setAttribute("tabindex", "0");
+    buildBadge.setAttribute("aria-label", "Ver diagnóstico de este dispositivo");
+    buildBadge.style.cursor = "pointer";
+    const askForDiagnostics = () => {
+      haptic(12);
+      // Native answers with a `diagnostics` event, which applyNativeSyncEvent hands to
+      // showDiagnostics. If an older shell does not understand this message it is simply ignored —
+      // the badge stays a label, which is what it was before.
+      postNativeBridge({ type: "request-diagnostics" });
+    };
+    buildBadge.addEventListener("click", askForDiagnostics);
+    buildBadge.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); askForDiagnostics(); }
+    });
+  }
 }
 
 // Screen wake lock (P7): keep the screen awake while the reader is open, so a follower's

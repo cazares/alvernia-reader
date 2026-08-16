@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "bookVersion": "bv_300db1c637fafbfa",
+  "bookVersion": "bv_5cfff85d99e7655a",
   "totalPages": 372,
-  "builtFromShellBuild": 428,
+  "builtFromShellBuild": 429,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-16T02:15:46.671Z",
+  "generatedAt": "2026-08-16T23:06:30.126Z",
   "sourcePdfSha256": "95c2c08a5d1dba4adb5cf291eec56ce140d3da1d47cbf8638f83cc95f5497220",
   "sourcePdfPages": 372,
   "songIndexDigest": "24ca86bdf9970c111d5930f71ebdba954d1ebaeff1294cb1028ef437f3dbb2cb",
@@ -1510,9 +1510,9 @@
   "files": [
     {
       "p": "app.js",
-      "n": 200759,
-      "h": "c2b174cb86e6548892b43c5c14270d81a72309bc4dd59938efb5e94854e1d645",
-      "m": "3c488b3f7bebc30c4569a8befab3ed1e"
+      "n": 204413,
+      "h": "db407e2f2b3d00786f01c2b9c23201c9577f2dad9f44865c246a8c50b2f083c0",
+      "m": "f844f31902933dc6660a82dc64ac77fc"
     },
     {
       "p": "books.json",
@@ -3796,15 +3796,21 @@
     },
     {
       "p": "index.html",
-      "n": 23054,
-      "h": "c2034ce40b30101d33ba1164feb07030e148a070576ce9734a2250f9464a11d0",
-      "m": "effd0716e0799b85138d482b6ccc9a55"
+      "n": 23108,
+      "h": "5fb47b2be8338d1d1e5e3d76f58b372cdf779a756679efa5f1c15382b26cee77",
+      "m": "fd8846ae884003cb18569b01551d3eaf"
     },
     {
       "p": "lib/svRelayRoom.js",
       "n": 2037,
       "h": "e5d43669499170c24fbca01542307f72679c8412a23b283425d6ec99dc1ad64e",
       "m": "9976340ff57add80d88c920f9d369df8"
+    },
+    {
+      "p": "lib/svRenderPace.js",
+      "n": 3276,
+      "h": "0da3349e5a04ada4d63f11edaf7defacc7cf9361446f86cd178e767671cf51da",
+      "m": "1ab1d4fbd5cbae8ebac87688814004d8"
     },
     {
       "p": "lib/svSelftest.js",
@@ -3833,8 +3839,8 @@
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "da651f3d53930bc975df98dd31b712c81f581f0f586320fd768b2a306d3fe05a",
-      "m": "e21a63b14c59a486c41b194e3c96c28b"
+      "h": "c2629681906909b99161b22903f275f0c1dbe7d8aeab94cfc6c3a52f442f1bbb",
+      "m": "ce15540cc1130bb9b1dcf57dc7e256c8"
     }
   ]
 }

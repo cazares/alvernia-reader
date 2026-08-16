@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+// renderPage's preamble now also consults the render PACING rule (lib/svRenderPace.js), which
+// paces retries of a page that keeps failing to load. This file evaluates that preamble as real
+// code, so it has to supply the real dependency — a stub would let this file pass while the two
+// guards disagreed in the browser. With no recorded failure the pacing rule always returns false,
+// so every assertion below still isolates the SAME-PAGE guard, which is what it is here to test.
+const { shouldPaceRender } = require("../web/src/lib/svRenderPace.js");
 
 const APP = fs.readFileSync("web/src/app.js", "utf8");
 
@@ -15,9 +24,10 @@ const skips = ({ next, current, imgMatches, complete, naturalWidth }) => {
   const start = APP.indexOf("const renderPage = async");
   const guard = APP.slice(start, APP.indexOf("const requestId = state.pageLoadRequest + 1;", start));
   const body = guard.slice(guard.indexOf("if ("));
-  const fn = new Function("nextPage", "state", "pageImage", "pageImageMatches",
+  const fn = new Function("nextPage", "state", "pageImage", "pageImageMatches", "svShouldPaceRender",
     `${body.replace(/\n\s*return;\n\s*\}/, "\n    return true;\n  }")}\n  return false;`);
-  return fn(next, { currentPage: current }, { complete, naturalWidth }, () => imgMatches);
+  // lastRenderFailure: null — no page is currently failing, so the pacing rule is inert here.
+  return fn(next, { currentPage: current, lastRenderFailure: null }, { complete, naturalWidth }, () => imgMatches, shouldPaceRender);
 };
 const base = { next: 50, current: 50, imgMatches: true, complete: true, naturalWidth: 800 };
 

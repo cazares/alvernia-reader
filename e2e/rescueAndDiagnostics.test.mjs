@@ -120,16 +120,36 @@ test("a corrupt or missing buffer does not break boot", () => {
   assert.match(restore, /Array\.isArray\(parsed\)/, "trusts whatever was stored");
 });
 
-test("the diagnostics plumbing survives, even though nothing invokes it yet", () => {
-  // ⚠️ REACHABILITY GAP, knowingly accepted. "Ver diagnóstico" lived in the removed block, so the
-  // crumb log currently has NO entry point in the UI. The capture, the bridge handler and the
-  // renderer are all intact, so restoring a way in is a web-only change — but as of 2026-08-06
-  // nobody can open it on a device.
+test("the crumb log is REACHABLE on a device — the whole chain, end to end", () => {
+  // THE GAP IS CLOSED (2026-08-16). This test used to assert the opposite: "Ver diagnóstico" went
+  // away with the rescue drawer in #342, leaving capture, bridge handler and renderer all intact
+  // with no way in — knowingly accepted at the time, and its own comment asked whoever restored
+  // access to come update this. What made the cost concrete was a Mass going wrong: six devices
+  // were each holding a written account of what they had done, and none of it could be opened.
   assert.match(NATIVE, /case "request-diagnostics":/, "native can no longer serve the buffer");
   assert.match(APP, /payload\.type === "diagnostics"/, "the web could not render a reply");
-  assert.match(APP, /const showDiagnostics/, "the renderer was deleted — restoring access needs a rewrite");
-  assert.ok(!/postNativeBridge\(\{ type: "request-diagnostics" \}\)/.test(APP),
-    "something DOES ask for diagnostics now — update this test, the gap is closed");
+  assert.match(APP, /const showDiagnostics/, "the renderer is gone");
+  assert.match(APP, /postNativeBridge\(\{ type: "request-diagnostics" \}\)/,
+    "nothing asks for diagnostics — the crumb log is unreadable on a device again");
+});
+
+test("the way in is the PAGE-1 badge, so no new control sits near the music", () => {
+  // During Mass nobody is on page 1, so this adds nothing to the 371 pages that matter. The badge
+  // already answers "what is this device holding?", which is the same question one layer shallower.
+  const wiring = APP.slice(APP.indexOf("const buildBadge = document.getElementById"));
+  assert.match(wiring, /request-diagnostics/, "the badge is not the entry point");
+  assert.match(wiring, /BUILD_BADGE_PAGE|syncBuildBadgeVisibility/, "the badge is no longer page-1-only");
+  assert.match(wiring, /role", "button"|setAttribute\("role", "button"\)/, "not announced as tappable to VoiceOver");
+  assert.match(wiring, /keydown/, "keyboard users cannot open it");
+});
+
+test("PARITY: signovivo.com is untouched — the badge only becomes a button inside the shell", () => {
+  // The web and the native app load ONE bundle. A public visitor has no bridge to ask, so the
+  // badge must stay exactly the label it has always been rather than offer an empty dialog.
+  const wiring = APP.slice(APP.indexOf("const buildBadge = document.getElementById"));
+  const gate = wiring.indexOf("hasNativeBridge() || NATIVE_FILE_MODE");
+  assert.ok(gate > 0, "the diagnostics entry point is not gated to the native shell");
+  assert.ok(gate < wiring.indexOf("request-diagnostics"), "the gate comes after the wiring it is meant to guard");
 });
 
 test("the diagnostics dump is selectable so it can be copied", () => {
