@@ -134,46 +134,29 @@ const SV_BOOK_DL_KILL = false;
 // only if we've heard from them within this window — otherwise the destructive "take control" confirm
 // false-fires forever after any director ever broadcast (the ref used to be set-once-never-cleared).
 const LIVE_DIRECTOR_WINDOW_MS = 8000;
-// ── Resuming the director role after a crash / memory-kill ──────────────────────────────────────
-// A director whose app restarts mid-Mass used to be demoted to follower behind a BLOCKING modal
-// telling them to re-enter their code. Until someone noticed and typed it, NOBODY was directing and
-// the choir sat frozen on whatever page they were on — the 2026-07-01 outage class, reached by a
-// different road. The justification in the code was "the code is deliberately never stored, so we
-// cannot auto-resume"; that stopped being true on 2026-08-05 when DIRECTOR_CODE became a constant
-// compiled into the app.
+// ── ONE DIRECTOR. ONLY A HUMAN MAKES ONE. ──────────────────────────────────────────────────────
+// (Miguel, 2026-08-15, the night before Mass, after watching physical devices split: "only ever
+// allow one and only one director." And 2026-07-02: "don't just auto-make anyone director — always
+// ask, always.")
 //
-// Resuming does NOT violate "always ask, always" (Miguel, 2026-07-02). That rule is about never
-// PROMOTING someone who did not ask. A device that was directing twenty seconds ago and crashed is
-// not being promoted — it is continuing something already confirmed, on the same device, by the
-// same person, who is still holding it.
-const DIRECTOR_RESUME_WINDOW_MS = 5 * 60 * 1000;
-// Wait for the mesh to discover peers before deciding. At cold boot no peer is known yet, so an
-// immediate resume could produce TWO directors fighting over the page if someone took the role
-// during the reboot — worse than the problem being fixed. Follow first, listen, then decide.
+// Between 2026-08-05 and build 427 this file could mint a director BY ITSELF, twice over: a device
+// that had directed moments before its app restarted resumed the role, and a device that had EVER
+// directed claimed an "empty" seat on every boot after ~12-16s. Both decided the seat was empty from
+// "no director page heard within 8s" — but a director the radio has DISCOVERED and not yet
+// CONNECTED to sends no pages, and discovery alone can take 5-30s. So the automatic claim fired
+// while a human was already directing, and because the mesh resolves two directors by NEWEST TOKEN
+// WINS (DirectorSyncModule.swift, handleDirectorConflict), the automatic one demoted the human.
+// The choir followed the wrong iPad, or half of each, until the next collision.
 //
-// This was 3500 and that was WRONG, in a way its own test asserted around rather than caught. The
-// only thing that ever populates lastDirectorSnapshotRef is a mesh `page` event, which needs a
-// fully connected MCSession — and ios/SignoVivo/DirectorSyncModule.swift budgets far longer than
-// 3.5s for that: followerRetryDelay 2s, followerSnapshotProbeDelay 1.5s AFTER connecting, and
-// selfDirectedTimeoutSeconds 10s for a follower to conclude there is no director at all. The mesh
-// START is only requested by the becomeFollower() in the same tick, so the clock starts at zero.
+// So: no timer, no tally, no resume promotes this device. The role is taken ONLY by a hand on this
+// device — the pill, or the director code on the numpad — through onDirectorCode → becomeDirector.
+// A device that was directing when its app died comes back as a FOLLOWER and is TOLD to tap the
+// pill. Two humans who both take the role converge on the newer one within a discovery cycle, and
+// the one who lost is told so. That is the whole invariant, and e2e/singleDirector.test.mjs pins
+// every clause of it against this source.
 //
-// At 3.5s the "is someone else directing?" guard was therefore blind by construction: it would
-// read null on a healthy mesh where another iPad was actively directing, resume anyway, win the
-// conflict on a newer token, and silently demote the person who had deliberately taken over.
-//
-// Must exceed BOTH the live-director window (or the guard tests a snapshot that cannot exist yet)
-// and Swift's own self-directed timeout. The cost of waiting is that the choir stays on the last
-// page a few seconds longer — it is already frozen, since the director just crashed. The cost of
-// not waiting is two directors mid-Mass.
-const DIRECTOR_RESUME_SETTLE_MS = 12000;
 // The heartbeat ticks every second; this is how often it may touch AsyncStorage.
 const DIRECTOR_STAMP_THROTTLE_MS = 20000;
-// Experience-ranked claim on an EMPTY seat. A device with no history waits the full extra window;
-// every session shaves it, to a floor of zero. Bounded on purpose — the worst case is a few seconds
-// of nobody directing, against a choir that is already sitting on the last page either way.
-const HABIT_MAX_EXTRA_MS = 4000;
-const HABIT_STEP_MS = 250;
 // How many breadcrumbs to keep. Sized to cover a whole Mass plus the boot before it, while staying
 // small enough that serialising the array on every crumb is free.
 const BREADCRUMB_LIMIT = 200;
@@ -266,17 +249,15 @@ export default function App() {
   const lastDirectorSnapshotRef = useRef<{ page: number; book: BookId; at: number } | null>(null);
   // Throttles the lastDirectorAt write from the 1s heartbeat. 0 = never written this session.
   const lastDirectorAtWrittenRef = useRef<number>(0);
-  // Cancels a pending resume if anything changes the role while the mesh is settling.
-  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // True from the moment becomeDirector is entered until it settles. roleRef is only assigned after
-  // the mesh has started (which can sleep 2s and retry), so a user who confirms the takeover dialog
-  // one second into the settle window is still pre-roleRef when the resume timer fires — and the
-  // resume would supersede their in-flight call, then congratulate them for its own work.
+  // the mesh has started (which can sleep 2s and retry); anything that must not race a director
+  // start in flight reads this, not roleRef.
   const becomeDirectorInFlightRef = useRef(false);
   // One-shot: the transmitter notice must not re-fire when syncAvailable flips identity.
   const didTransmitterNoticeRef = useRef(false);
-  // Read-modify-write, best effort. Losing a tick to a race costs nothing — the tally only has to
-  // rank devices against each other, never be exact.
+  // A count of how often this device has directed. DIAGNOSTIC ONLY — it decides nothing. (It used
+  // to rank devices for an automatic seat claim; that path is gone, see the ONE DIRECTOR note above.)
+  // Read-modify-write, best effort.
   const bumpDirectorSessions = useCallback(() => {
     AsyncStorage.getItem(STORAGE_KEYS.directorSessions)
       .then((raw) => AsyncStorage.setItem(STORAGE_KEYS.directorSessions, String((Number(raw || 0) || 0) + 1)))
@@ -324,21 +305,6 @@ export default function App() {
       /* a diagnostic must never be able to break the thing it is diagnosing */
     }
   }, []);
-
-  // A pending resume must not outlive the component. Deliberately its own effect with an empty dep
-  // array so this runs on UNMOUNT ONLY — folding it into the bootstrap effect's cleanup would kill a
-  // legitimate in-flight resume every time that effect re-ran, and didBootstrapRef guarantees it
-  // could never be rescheduled. Firing post-teardown would start 1s/12s heartbeat intervals that
-  // nothing is left to clear, and publish pages from a torn-down tree.
-  useEffect(
-    () => () => {
-      if (resumeTimerRef.current) {
-        clearTimeout(resumeTimerRef.current);
-        resumeTimerRef.current = null;
-      }
-    },
-    [],
-  );
 
   // Read back the previous session's crumbs, keeping anything logged during this boot AFTER them.
   // A session boundary is marked so a reader can see where the restart happened — the line before
@@ -905,13 +871,6 @@ export default function App() {
   const performSoftReset = useCallback(async () => {
     breadcrumb("soft-reset");
     roleGenerationRef.current++; // supersede any in-flight become* from the prior role
-    // A boot-time director resume may be sitting in its mesh-settle window. A soft reset is the
-    // operator explicitly saying "put this device back to nothing" — letting a timer promote it to
-    // director three seconds later would silently undo exactly what they asked for.
-    if (resumeTimerRef.current) {
-      clearTimeout(resumeTimerRef.current);
-      resumeTimerRef.current = null;
-    }
     stopDirectorHeartbeat();
     try {
       await resetNearbyDirectorSync();
@@ -1953,123 +1912,30 @@ export default function App() {
     if (!syncAvailable) return;
     primeNearbyPermissions().catch(() => {});
 
-    // Role-restore bootstrap: ONCE per session only. If this effect re-runs (its become*/
-    // injectEvent useCallback deps changed identity mid-session), re-firing this would re-promote
-    // or re-mint a director under the live role — clobbering an intentional in-session role flip.
-    // The listener below still re-registers on every run; only this restore is one-shot.
+    // Role bootstrap: ONCE per session only. If this effect re-runs (its become*/injectEvent
+    // useCallback deps changed identity mid-session), re-firing this would clobber an intentional
+    // in-session role flip. The listener below still re-registers on every run; only this is one-shot.
     if (!didBootstrapRef.current) {
       didBootstrapRef.current = true;
-      // A device always boots as a FOLLOWER, and a stale director role is never silently restored —
-      // that would step on whoever is actually directing right now. (Miguel, 2026-07-02: "don't just
-      // auto-make anyone director — always ask, always.")
-      //
-      // The ONE exception, added 2026-08-05: a device that was directing MOMENTS ago and crashed.
-      // A silent demotion is its own hazard — the app restarts mid-Mass, drops to follower with no
-      // signal, and NOBODY is directing until a human notices (the 2026-07-01 outage class, reached
-      // by a different road). That is not a promotion to ask about; it is the same person, on the
-      // same device, continuing something they already confirmed.
-      //
-      // Guarded three ways, and it stays a follower unless all three pass:
-      //   1. lastDirectorAt within DIRECTOR_RESUME_WINDOW_MS — recently, not "at some point"
-      //   2. the mesh has had DIRECTOR_RESUME_SETTLE_MS to find peers — at cold boot no peer is
-      //      known yet, and resuming blind is how you get two directors
-      //   3. no other device is directing inside the live-heartbeat window when the timer fires
-      //
-      // (The old code could not do this because the director code was PII kept out of the binary.
-      // Since 2026-08-05 DIRECTOR_CODE is a constant in this file, so there is no credential to
-      // store and nothing to withhold.) Intentional exit clears lastSyncRole, so this whole path
-      // only runs after a crash or a kill.
-      Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole),
-        AsyncStorage.getItem(STORAGE_KEYS.lastDirectorAt),
-        AsyncStorage.getItem(STORAGE_KEYS.directorSessions),
-      ])
-        .then(([prev, atRaw, sessRaw]) => {
+      // A DEVICE ALWAYS BOOTS AS A FOLLOWER. Nothing here promotes it — see the ONE DIRECTOR note by
+      // DIRECTOR_STAMP_THROTTLE_MS. Not a stale role from last Sunday, not a crash a minute ago, not
+      // a tally of how often it has directed. Every one of those was tried between 2026-08-05 and
+      // build 427 and each could mint a second director beside a human's, and win. The only thing
+      // this block does with the persisted role is TELL the person: if this device was directing
+      // when the app died, they get one toast pointing at the pill, and the seat stays empty until a
+      // hand takes it. An empty seat for the seconds it takes to tap is the choir sitting on the
+      // last page — which it already is. Two directors is the choir split.
+      AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole)
+        .then((prev) => {
           lastKnownRoleRef.current = prev ? String(prev) : null;
-          const at = Number(atRaw || 0);
-          const sessions = Number(sessRaw || 0);
-          // TWO reasons to take an empty seat, sharing one set of guards.
-          //
-          //   crashFresh — this device was directing MOMENTS ago and the app restarted.
-          //   habitual   — this device has directed BEFORE, at any point. No recency window: a
-          //                window silently expires over a summer with no Mass, so the iPad that
-          //                has run every Sunday for a year would quietly stop taking the seat
-          //                exactly when everyone has forgotten there was a manual way.
-          //
-          // Nothing is enrolled, declared or configured. The device that keeps directing is simply
-          // the device that keeps directing — and that cannot be faked, because you would have to
-          // actually have done it.
-          const crashFresh = prev === "director" && at > 0 && Date.now() - at <= DIRECTOR_RESUME_WINDOW_MS;
-          const habitual = sessions > 0;
-          if (!crashFresh && !habitual) return;
-          // EXPERIENCE DECIDES WHO CLAIMS IT, without any device talking to another. Everyone waits
-          // for the mesh to settle; then the more this iPad has directed, the sooner it claims an
-          // empty seat. The regular director (hundreds of sessions) fires first and the others, now
-          // seeing a live director, stand down. A substitute who directed once a year ago is still
-          // eligible — it just yields. Turns a race into a precedence order with no coordination,
-          // no server and nothing to configure.
-          const extraWait = crashFresh
-            ? 0 // a crash is not a claim on the seat; it is a continuation, so no penalty
-            : Math.max(0, HABIT_MAX_EXTRA_MS - sessions * HABIT_STEP_MS);
-          // becomeFollower() runs in the .finally() below and persists lastSyncRole="follower"
-          // within milliseconds. If this device crashes AGAIN inside the settle window — and a
-          // device that just crashed while directing is exactly the one that might — the next boot
-          // would read "follower" and the resume would be gone for good. Re-assert the intent now;
-          // every path below that decides NOT to resume writes "follower" back.
-          AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director").catch(() => {});
-          const standDown = (text: string) => {
+          if (prev === "director") {
+            // Written back as follower so the toast fires once per crash, not on every boot forever.
             AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
-            injectEvent({ type: "toast", text });
-          };
-          // Fresh. Follow first (below), let the mesh discover peers, THEN decide — resuming before
-          // the radio has found anyone is how you end up with two directors.
-          resumeTimerRef.current = setTimeout(() => {
-            resumeTimerRef.current = null;
-            // Someone re-entered the code, or took the role by hand, while we waited. becomeDirector
-            // does not set roleRef until AFTER its mesh start (which can sleep 2s and retry), so
-            // roleRef alone would miss a takeover confirmed a second ago and still in flight.
-            if (
-              roleRef.current === "director" ||
-              explicitTransmitterRef.current ||
-              becomeDirectorInFlightRef.current
-            ) {
-              return;
-            }
-            // RE-CHECK freshness. iOS suspends the JS runtime when the app is not active and fires
-            // overdue timers on foreground, so this callback can run arbitrarily long after it was
-            // scheduled — lock the device inside the settle window and it might fire twenty minutes
-            // later, resuming a role that expired long ago.
-            const atNow = Number(atRaw || 0);
-            if (!(atNow > 0) || Date.now() - atNow > DIRECTOR_RESUME_WINDOW_MS) {
-              standDown("Estabas dirigiendo antes. Toca el estado arriba a la izquierda para volver.");
-              return;
-            }
-            const snap = lastDirectorSnapshotRef.current;
-            const someoneElseIsDirecting =
-              Boolean(snap) && Date.now() - (snap?.at ?? 0) < LIVE_DIRECTOR_WINDOW_MS;
-            if (someoneElseIsDirecting) {
-              // Another device picked it up during the reboot. Taking it back would leave two
-              // directors publishing conflicting pages; stay a follower and say why.
-              standDown("Otro dispositivo está dirigiendo ahora. Sigues al director.");
-              return;
-            }
-            // becomeDirector NEVER rejects — it catches its own failures and falls back to
-            // becomeFollower. So `.then()` fires just as happily when the mesh never started, and
-            // the naive version of this told the operator "you got the choir back" while the device
-            // sat there as a follower with nobody directing. Ask the role what actually happened.
-            void becomeDirector(DIRECTOR_CODE).then(() => {
-              if (roleRef.current === "director" || explicitTransmitterRef.current) {
-                injectEvent({
-                  type: "toast",
-                  text: crashFresh
-                    ? "Recuperaste la dirección del coro."
-                    : "Nadie estaba dirigiendo — ahora diriges tú.",
-                });
-              } else {
-                standDown("No se pudo recuperar la dirección. Toca el estado arriba a la izquierda.");
-              }
+            injectEvent({
+              type: "toast",
+              text: "Estabas dirigiendo. Toca el estado arriba a la izquierda para volver a dirigir.",
             });
-          }, DIRECTOR_RESUME_SETTLE_MS + extraWait);
+          }
         })
         .catch(() => {})
         .finally(() => {
@@ -2137,6 +2003,15 @@ export default function App() {
             // re-homes immediately. Best-effort.
             requestCurrentSnapshot().catch(() => {});
             refreshNearbyDiscovery().catch(() => {});
+            // SAY SO. Until now the person who lost the seat got no signal at all — the pill just
+            // read SIGUIENDO — so they kept turning pages that no longer went anywhere and, once
+            // they noticed, took the role back, and the choir flipped a second time. Under ONE
+            // DIRECTOR the only way this fires is another human deciding to direct; the loser must
+            // know that, and that the choir now follows the other device.
+            injectEvent({
+              type: "toast",
+              text: "Otro dispositivo tomó la dirección del coro. Este dispositivo ahora sigue.",
+            });
           }
           break;
         }

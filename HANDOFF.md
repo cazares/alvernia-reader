@@ -124,23 +124,27 @@ Before this, the badge appeared only for the director, so an empty seat looked e
 everything working: follower controls, no badge, and the ⟳ spinner going quiet. Eight iPads could
 sit through a whole Mass each turning its own pages with nothing on any screen saying so.
 
-### The usual iPad claims an empty seat
+### ONE director, only a human makes one (2026-08-15 — supersedes the two blocks it replaced)
 
-A device that has directed **before** takes an empty seat on boot. No enrolment, no configuration,
-no code. It can NEVER take an occupied seat.
+**No device ever becomes director on its own.** Not from a persisted role, not from a crash a
+minute ago, not from a tally of how often it has directed. Miguel, the night before Mass, after
+watching physical devices split between two directors: *"only ever allow one and only one director."*
 
-Precedence is experience: `STORAGE_KEYS.directorSessions` counts how many times this device has
-directed, and more sessions means a shorter wait before claiming. The regular director fires first;
-a substitute who directed once yields, sees a live director and stands down.
+Both automatic paths that lived here between 2026-08-05 and build 427 — the "habitual" empty-seat
+claim and the crash-resume — decided the seat was empty from "no director page heard in 8s". A
+director the radio has DISCOVERED but not yet CONNECTED to sends no pages, and discovery alone can
+take 5-30s, so the automatic claim fired beside a human's, carried the NEWER token, and the mesh
+(newest wins) demoted the human. Removed in build 428, PR #346. `e2e/singleDirector.test.mjs` pins
+that `becomeDirector` has exactly one call site (the confirm in `onDirectorCode`) and that the boot
+path only ever calls `becomeFollower`; `scripts/verify-director-rescue-guards.mjs` proves it (a
+mutation that puts an automatic claim back is caught).
 
-Deliberately rejected — do not "fix" these back:
-- **a code** — a phone number half the parish knows; it proved nothing
-- **enrolling a device** — forces a physical visit to Braulio's iPad on every reinstall, forever
-- **an N-day window** — silently expires over a summer, so the iPad that ran every Sunday for a year
-  stops claiming the seat exactly when everyone has forgotten there was a manual path
+What a person sees: a device that was directing when its app died comes back as a FOLLOWER with one
+toast — *"Estabas dirigiendo. Toca el estado arriba a la izquierda para volver a dirigir."* Two
+humans who both take the role converge on the NEWER one within a discovery cycle
+(`handleDirectorConflict`, unchanged), and the loser now gets a toast saying so.
 
-⚠️ The commit that shipped this is mislabelled on `main` as `feat(badge): v1.0.4 …` (#333) — a
-`git commit -C` picked up the wrong message. The PR body on #333 is the accurate record.
+`STORAGE_KEYS.directorSessions` is still counted (diagnostic) but decides nothing.
 
 **Two ways in, one path through.** Tap the **pill** (above), or type `DIRECTOR_CODE` on the numpad.
 Both land in `onDirectorCode` → **always** a confirm dialog, never a silent promotion →
@@ -155,15 +159,8 @@ The pill renders only inside the native shell (no mesh on signovivo.com). The we
 learns the code — it asks. **The native `request-director` handler must be in the binary**; the pill
 itself ships over the air.
 
-**A director who crashes mid-Mass resumes automatically** — but only if all three hold: it was
-directing within the last 5 min (`lastDirectorAt`, stamped by the heartbeat), the mesh has had 3.5s
-to find peers, and no other device is broadcasting inside the 8s live window. Otherwise it stays a
-follower and says so in a dismissible notice. `performSoftReset` cancels a pending resume.
-
-This is the ONE exception to "always ask, always" (2026-07-02) and it does not violate it: that rule
-forbids **promoting** someone who did not ask. The same person, same device, twenty seconds after
-confirming, is continuing. Before this, a restart demoted them behind a **blocking modal** and
-nobody directed until a human noticed — the 2026-07-01 outage by a different road.
+**A director who crashes mid-Mass does NOT resume automatically** (build 428) — it comes back as a
+follower and is told to tap the pill. See *ONE director* above.
 
 **There is no codes file, no baking step, and nothing to forget.** Until 2026-08-05 this was a set
 of real director phone numbers that `release.sh` swapped out of a gitignored

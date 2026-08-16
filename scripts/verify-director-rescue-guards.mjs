@@ -32,7 +32,7 @@ import path from "node:path";
 
 const REPO = path.resolve(process.argv[2] || process.cwd());
 const FILES = ["PdfReaderApp.tsx", "web/src/app.js", "web/src/index.html", "web/src/styles.css", "src/offlineBooks.ts", "ios/SignoVivo/DirectorSyncModule.swift"];
-const TESTS = ["e2e/directorButton.test.mjs", "e2e/directorResume.test.mjs", "e2e/rescueAndDiagnostics.test.mjs", "e2e/pillWording.test.mjs"];
+const TESTS = ["e2e/directorButton.test.mjs", "e2e/singleDirector.test.mjs", "e2e/rescueAndDiagnostics.test.mjs", "e2e/pillWording.test.mjs"];
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "sv-guardmut-"));
 for (const rel of [...FILES, ...TESTS]) {
@@ -53,17 +53,28 @@ const MUTATIONS = [
    sub("  if (!inShell) {\n    directorModeBadge.classList.add(\"is-hidden\");\n    return;\n  }", "")],
   ["a rotated DIRECTOR_CODE leaks into the public web bundle", "web/src/app.js",
    sub("const openSongJump = () => {", 'const LEAKED = "918273645";\nconst openSongJump = () => {')],
-  ["the explicitTransmitterRef resume guard deleted", "PdfReaderApp.tsx",
-   sub("      explicitTransmitterRef.current ||\n", "")],
-  ["the becomeDirector-in-flight guard deleted", "PdfReaderApp.tsx",
-   sub("      becomeDirectorInFlightRef.current\n", "      false\n")],
-  ["the settle window dropped back under the live-director window", "PdfReaderApp.tsx",
-   sub("const DIRECTOR_RESUME_SETTLE_MS = 12000;", "const DIRECTOR_RESUME_SETTLE_MS = 3500;")],
-  ["the resume success toast fires without checking the role actually changed", "PdfReaderApp.tsx",
-   sub('if (roleRef.current === "director" || explicitTransmitterRef.current) {\n                injectEvent({',
-       'if (true) {\n                injectEvent({')],
-  ["resume no longer follows first — becomeFollower() dropped", "PdfReaderApp.tsx",
+  // ── ONE DIRECTOR (2026-08-15). The four resume/habit mutations that lived here were DELETED with
+  //    the machinery they mutated (a mutation with no target reports SKIP, which reads as coverage).
+  //    These pin the invariant that replaced it: nothing but a human's confirm mints a director.
+  ["the boot path no longer follows — becomeFollower() dropped", "PdfReaderApp.tsx",
    sub(".finally(() => {\n          becomeFollower();\n        });", ".finally(() => {});")],
+  ["an AUTOMATIC director claim returns to the boot path", "PdfReaderApp.tsx",
+   sub(".finally(() => {\n          becomeFollower();\n        });",
+       ".finally(() => {\n          becomeFollower();\n          void becomeDirector(DIRECTOR_CODE);\n        });")],
+  ["a persisted director role is silently RESTORED at boot instead of just announced", "PdfReaderApp.tsx",
+   sub('if (prev === "director") {\n            // Written back as follower',
+       'if (prev === "director") {\n            void becomeDirector(DIRECTOR_CODE);\n            // Written back as follower')],
+  ["the ex-director toast fires on every boot forever (lastSyncRole never written back)", "PdfReaderApp.tsx",
+   sub('            AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});\n            injectEvent({\n              type: "toast",\n              text: "Estabas dirigiendo.',
+       '            injectEvent({\n              type: "toast",\n              text: "Estabas dirigiendo.')],
+  ["the demoted director is not told another device took the seat", "PdfReaderApp.tsx",
+   sub('              text: "Otro dispositivo tomó la dirección del coro. Este dispositivo ahora sigue.",',
+       '              text: "",')],
+  ["the rediscovery kick after becoming director dropped — two directors wait out a browse cycle", "PdfReaderApp.tsx",
+   sub('        if (syncAvailable) refreshNearbyDiscovery().catch(() => {});\n        breadcrumb("director");',
+       '        breadcrumb("director");')],
+  ["the Swift tiebreak inverted — the OLDER director demotes and the newest never wins", "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("    if otherToken > currentDirectorToken {", "    if otherToken < currentDirectorToken {")],
   ["soft-reset fires BEFORE its confirmation dialog", "PdfReaderApp.tsx",
    sub('case "request-soft-reset":\n          Alert.alert(', 'case "request-soft-reset":\n          onDirectorCode(SOFT_RESET_CODE);\n          Alert.alert(')],
   ["force-baked fires BEFORE its confirmation dialog", "PdfReaderApp.tsx",

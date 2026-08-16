@@ -76,12 +76,11 @@ jobs:
           e2e/additiveGate.test.mjs
           e2e/bookResolve.test.mjs
           e2e/bookUpdate.test.mjs
-          e2e/directorResume.test.mjs
           e2e/directorButton.test.mjs
+          e2e/singleDirector.test.mjs
           e2e/buildBadgeFormat.test.mjs
           e2e/relayPublishGate.test.mjs
           e2e/relayAuthRecovery.test.mjs
-          e2e/directorSeat.test.mjs
           e2e/fabLayout.test.mjs
           e2e/buildBadgePage1.test.mjs
           e2e/followerIdleRender.test.mjs
