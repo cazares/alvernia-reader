@@ -74,13 +74,38 @@ if (!file) {
   process.exit(2);
 }
 
-const read = (p) =>
-  fs
+// COLLAPSE REVISIONS OF THE SAME FOLDED ROW. stress-capture is append-only BY DESIGN: the worker
+// folds a run of identical events into one row and bumps `n`, and every time `n` grows the capture
+// appends a NEW line for the same logical row. So a 17-minute 1 Hz heartbeat appears as dozens of
+// lines reading n=990, n=994, n=1000, n=1004, n=1006 ... Summing them counted the same heartbeat
+// over and over: the build-430 Mass-conditions run reported 303,831 page receipts for what was
+// actually ~1,006 per device -- a 100x overcount that made every "delivery per device" figure
+// meaningless. Keep only the highest-count copy of each row identity.
+//
+// The identity must match stress-capture's own rowId(): device + event + subject + FIRST timestamp,
+// and must NOT include `n` or the mutable last-seen `t`.
+const SUBJECT_KEYS = ["page", "peer", "to", "from", "target", "status", "dup", "code"];
+const rowId = (r) => {
+  const subject = SUBJECT_KEYS.map((k) => (r[k] === undefined ? "" : String(r[k]))).join("|");
+  const first = r.t0 !== undefined ? r.t0 : r.t;
+  return [r.dev, r.event, subject, first].join("~");
+};
+
+const read = (p) => {
+  const all = fs
     .readFileSync(p, "utf8")
     .trim()
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l));
+  const best = new Map();
+  for (const r of all) {
+    const id = rowId(r);
+    const prev = best.get(id);
+    if (prev === undefined || (r.n || 1) > (prev.n || 1)) best.set(id, r);
+  }
+  return [...best.values()];
+};
 
 /** Count of an event, summing the worker's fold counter. */
 const countEvent = (rows, event) =>
