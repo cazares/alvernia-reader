@@ -105,6 +105,33 @@ function analyze(rows, label) {
     recv.set(r.dev, (recv.get(r.dev) || 0) + (r.n || 1));
   }
 
+  // PAGE-SYNC LATENCY — what the congregation actually experiences. The director stamps
+  // `page:send` with the page number; each follower stamps `mesh:page-recv` with the same one.
+  // Use `t0` on folded rows (the FIRST arrival, not the last of a collapsed run) and ignore
+  // arrivals from before the send, which are the follower already sitting on that page.
+  const sends = rows.filter((r) => r.event === "page:send" && r.page != null).sort((a, b) => a.t - b.t);
+  const pageRecvs = rows.filter((r) => r.event === "mesh:page-recv" && r.page != null);
+  const latency = [];
+  for (const s of sends) {
+    for (const dev of new Set(pageRecvs.map((r) => r.dev))) {
+      const arrivals = pageRecvs
+        .filter((r) => r.dev === dev && r.page === s.page)
+        .map((r) => r.t0 || r.t)
+        .filter((t) => t >= s.t - 500);
+      if (!arrivals.length) {
+        latency.push({ page: s.page, dev, ms: null }); // never arrived
+        continue;
+      }
+      latency.push({ page: s.page, dev, ms: Math.min(...arrivals) - s.t });
+    }
+  }
+  // The FIRST page a follower sees includes join/discovery/handshake, so it is not a page-turn
+  // measurement. Judge steady-state turns only; the join cost is reported separately.
+  const firstPage = sends.length ? sends[0].page : null;
+  const turns = latency.filter((l) => l.page !== firstPage);
+  const missed = turns.filter((l) => l.ms === null);
+  const worst = turns.filter((l) => l.ms !== null).sort((a, b) => b.ms - a.ms)[0] || null;
+
   const span = (() => {
     const ts = rows.map((r) => r.t0 || r.t).filter(Boolean);
     if (!ts.length) return "unknown";
@@ -127,6 +154,11 @@ function analyze(rows, label) {
     halfOpen,
     notDirector,
     recv: [...recv.entries()].sort((a, b) => b[1] - a[1]),
+    latency,
+    turns,
+    missed,
+    worst,
+    firstPage,
   };
 }
 
@@ -145,6 +177,27 @@ function report(a) {
   console.log(`  session:peer-not-director (guard)    : ${a.notDirector}   ${a.notDirector > 0 ? "✅ guard fired" : "— not seen"}`);
   console.log("\n  page/heartbeat delivery per device:");
   for (const [d, n] of a.recv) console.log(`      ${String(n).padStart(5)}  ${d}`);
+
+  if (a.latency.length) {
+    const devs = [...new Set(a.latency.map((l) => l.dev))].sort();
+    const pages = [...new Set(a.latency.map((l) => l.page))];
+    console.log("\n  page-sync latency (director -> follower):");
+    console.log("      page   " + devs.map((d) => d.padEnd(11)).join(""));
+    for (const p of pages) {
+      const cells = devs.map((d) => {
+        const l = a.latency.find((x) => x.page === p && x.dev === d);
+        if (!l) return "".padEnd(11);
+        if (l.ms === null) return "NEVER ❌".padEnd(11);
+        return ((l.ms / 1000).toFixed(2) + "s" + (l.ms > 1000 ? " ⚠️" : "")).padEnd(11);
+      });
+      const tag = p === a.firstPage ? "  (join)" : "";
+      console.log("      " + String(p).padEnd(7) + cells.join("") + tag);
+    }
+    if (a.worst)
+      console.log(
+        `      worst page-turn: ${(a.worst.ms / 1000).toFixed(2)}s (page ${a.worst.page} -> ${a.worst.dev})`
+      );
+  }
 }
 
 const allRows = read(file);
@@ -180,6 +233,15 @@ const fail = [];
 if (cur.unrefusedCount > 0)
   fail.push(`${cur.unrefusedCount} cross-connect(s) the guard did NOT refuse — each became a false director`);
 if (cur.halfOpen > 2) fail.push(`${cur.halfOpen} half-open reconnects (must be ~0)`);
+if (cur.missed.length)
+  fail.push(
+    `${cur.missed.length} page turn(s) NEVER reached a follower: ` +
+      cur.missed.map((m) => `page ${m.page} -> ${m.dev}`).join(", ")
+  );
+if (cur.worst && cur.worst.ms > 3000)
+  fail.push(
+    `slowest page turn ${(cur.worst.ms / 1000).toFixed(2)}s (page ${cur.worst.page} -> ${cur.worst.dev}) — target is ~1s`
+  );
 if (guardPresent && cur.f2fCount === 0) {
   fail.push(
     "no follower->follower cross-connect ever happened — this run did NOT exercise the bug, " +
