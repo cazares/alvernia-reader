@@ -2133,6 +2133,68 @@ button:disabled {
 }
 .build-badge.is-shown { display: block; }
 
+/* ── Role control inside IR A CANTO ──────────────────────────────────────────
+   Quieter than the primary action: this is a rare, deliberate act, not the thing people came for. */
+.song-jump-role {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  width: 100%; margin-bottom: 0.6rem; padding: 0.7rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 12px;
+  background: rgba(26, 26, 46, 0.55); color: rgba(255, 255, 255, 0.92);
+  font-size: 1.05rem; font-weight: 600; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.song-jump-role:active { background: rgba(26, 26, 46, 0.75); transform: scale(0.99); }
+.song-jump-role-star { font-size: 1.15rem; line-height: 1; }
+/* Directing = the destructive-to-others state is already entered; the exit is calm and amber. */
+.song-jump-role.is-directing { border-color: rgba(245, 158, 11, 0.5); color: #fbbf24; }
+
+/* ── Take-the-role gate ──────────────────────────────────────────────────────
+   Red, blunt, and gated on a typed word so it cannot be tapped through by reflex. */
+.role-gate { position: fixed; inset: 0; z-index: 260; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.role-gate.is-hidden { display: none; }
+.role-gate-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.72); }
+.role-gate-card {
+  position: relative; z-index: 1; width: min(30rem, 100%);
+  background: #1a1020; border: 2px solid #b91c1c; border-radius: 16px;
+  padding: 1.4rem 1.3rem; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.role-gate-title { margin: 0 0 0.7rem; color: #f87171; font-size: 1.15rem; line-height: 1.25; letter-spacing: 0.01em; text-align: center; }
+.role-gate-body { margin: 0 0 1rem; color: rgba(255, 255, 255, 0.9); font-size: 1rem; line-height: 1.45; text-align: center; }
+.role-gate-body strong { color: #fca5a5; }
+.role-gate-label { display: block; margin-bottom: 0.4rem; color: rgba(255, 255, 255, 0.75); font-size: 0.92rem; }
+.role-gate-label strong { color: #fff; }
+.role-gate-input {
+  width: 100%; box-sizing: border-box; padding: 0.65rem 0.8rem; margin-bottom: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35); color: #fff; font-size: 1.1rem;
+}
+.role-gate-actions { display: flex; flex-direction: column; gap: 0.5rem; }
+.role-gate-confirm {
+  padding: 0.75rem 1rem; border: 0; border-radius: 12px;
+  background: #b91c1c; color: #fff; font-size: 1.05rem; font-weight: 700; cursor: pointer;
+}
+.role-gate-confirm:disabled { background: rgba(185, 28, 28, 0.32); color: rgba(255, 255, 255, 0.45); cursor: not-allowed; }
+.role-gate-cancel {
+  padding: 0.7rem 1rem; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 12px;
+  background: transparent; color: rgba(255, 255, 255, 0.85); font-size: 1rem; cursor: pointer;
+}
+
+/* ── Follower pill collapses to a DOT ────────────────────────────────────────
+   The word SIGUIENDO was a CLAIM, and it lied: a device stranded on the wrong song still read
+   SIGUIENDO all morning on 2026-08-17. A dot is just a light. The one state that still earns words
+   is "nobody is driving" — that is the moment a singer must notice, and amber + text is louder than
+   a word they have learned to ignore. Directing shows no dot at all: a director is the SOURCE, not
+   a receiver, so there is nothing to indicate. */
+html[data-role="follower"] .director-mode-badge.is-following {
+  width: 0.75rem; height: 0.75rem; min-width: 0; padding: 0; gap: 0;
+  border-radius: 50%; background: #22c55e; overflow: hidden;
+  top: calc(max(0.55rem, env(safe-area-inset-top, 0px)) + 1.6rem);
+  animation: sv-follow-breathe 2.4s ease-in-out infinite;
+}
+html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-title,
+html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-exit { display: none; }
+@keyframes sv-follow-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
 /* ════════════════════════════════════════════════════════════════════════════
    Jump-to-song modal — mirrors the iOS "IR A CANTO" modal exactly (no more).
    Contains only: heading, display, numpad (1-9 / blank / 0 / ⌫),
@@ -2174,6 +2236,19 @@ button:disabled {
    gap without pushing ♪ into the title. */
 html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 5.1rem); }
 .resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 3.05rem; }
+/* ── 123→ song-index fab ─────────────────────────────────────────────────────
+   ♪ was ambiguous: it says "audio" in an app that plays none, while the button opens a NUMBERED
+   index. Digits say what kind of thing; the arrow makes it a verb, not a label. Straight arrow —
+   curved ones read as rotate/undo in most UI vocabularies.
+   MUST sit after the shared .song-jump-fab/.search-fab/... block: same specificity, so source order
+   decides, and the shared 2.85rem was winning and overflowing the 4rem box by 27 px. */
+.song-jump-fab {
+  /* Three glyphs fill the 4rem box edge to edge, so a size that LOOKS right for a single ♪ reads
+     as shouting here. ~0.8rem sits at the same visual weight as the old note. */
+  font-size: 0.82rem; font-weight: 700; letter-spacing: 0.01em;
+  gap: 0.08rem; padding: 0; line-height: 1;
+}
+.song-jump-fab-arrow { font-size: 0.78rem; font-weight: 400; opacity: 0.85; }
 .resync-fab.is-spinning { flex-direction: column; justify-content: center; padding-bottom: 4px; }  /* ⟳ ~35% bigger */
 /* Fullscreen fab — bottom-right (override the base top); SVG icon sized to match the glyphs. */
 .fullscreen-fab {

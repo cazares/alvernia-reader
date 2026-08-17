@@ -92,7 +92,7 @@
       </button>
 
       <!-- ♪ Jump-to-song (top-RIGHT, everyone) + ⌕ search (top-RIGHT, DIRECTOR only via data-role) -->
-      <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto">♪</button>
+      <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto">123<span class="song-jump-fab-arrow" aria-hidden="true">&#8594;</span></button>
       <button class="search-fab" id="search-fab" type="button" aria-label="Buscar">⌕</button>
 
       <!-- ⛶ Fullscreen — bottom-RIGHT, same fab styling. Hidden where fullscreen isn't supported
@@ -143,6 +143,18 @@
           </div>
 
           <div class="song-jump-actions">
+            <!-- ROLE CONTROL. Deliberately behind the modal rather than on the reader: a permanently
+                 visible "become director" button on six choir iPads is a split-brain generator, and
+                 the choir is non-technical. Opening this dialog is the deliberate act, so the star is
+                 FILLED here — inside something you opened on purpose it reads as an affordance, not
+                 a distraction over the music. Same slot flips to "Salir" while directing, so one
+                 place owns the whole concept.
+                 Placed ABOVE the primary action on purpose: an earlier attempt at a director control
+                 in this card sat below the fold on a 10.2" portrait iPad. -->
+            <button class="song-jump-role" id="role-toggle" type="button">
+              <span class="song-jump-role-star" aria-hidden="true">&#9733;</span>
+              <span id="role-toggle-label">Dirigir</span>
+            </button>
             <button class="song-jump-go" id="go-button" type="button" aria-label="Abrir canto">♪ Abrir Canto ♪</button>
             <button class="song-jump-cancel" id="song-cancel" type="button">Cancelar</button>
           </div>
@@ -157,6 +169,29 @@
                grown a once-a-year maintenance drawer under it. The numpad codes still reach every
                one of those actions, and the native handlers are untouched. -->
 
+        </div>
+      </div>
+
+      <!-- TAKE-THE-ROLE GATE. One dialog, deliberately hostile. Taking the role changes the page for
+           EVERY device in the loft, and the person doing it is usually mid-song — so the gate is a
+           typed word, not a tap. All-caps is right HERE (a one-time alarm) where it is wrong on a
+           label you live with. Stepping DOWN gets a plain confirm instead: that direction is
+           recoverable, this one is not. -->
+      <div class="role-gate is-hidden" id="role-gate" role="dialog" aria-modal="true" aria-label="Confirmar dirigir el coro">
+        <div class="role-gate-backdrop" id="role-gate-backdrop"></div>
+        <div class="role-gate-card" role="document">
+          <h2 class="role-gate-title">ESTO CAMBIA LA P&Aacute;GINA DE TODOS</h2>
+          <p class="role-gate-body">
+            Si <strong>NO eres Braulio</strong>, esto va a causar problemas para
+            <strong>TODO EL CORO</strong>.
+          </p>
+          <label class="role-gate-label" for="role-gate-input">Escribe <strong>braulio</strong> para confirmar</label>
+          <input class="role-gate-input" id="role-gate-input" type="text" autocomplete="off"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
+          <div class="role-gate-actions">
+            <button class="role-gate-confirm" id="role-gate-confirm" type="button" disabled>Confirmar</button>
+            <button class="role-gate-cancel" id="role-gate-cancel" type="button">Cancelar</button>
+          </div>
         </div>
       </div>
 

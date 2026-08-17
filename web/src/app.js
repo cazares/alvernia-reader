@@ -1182,7 +1182,7 @@ const SYNC_PILL = {
   // What never varies is where you end up: directing the choir. The pill says that. The TITLE
   // (SIGUIENDO vs NADIE DIRIGE) and the tint carry the difference between the two situations, and
   // the red takeover warning still appears when it applies.
-  directing: { cls: "", title: "DIRECTOR", action: "✕ Salir" },
+  directing: { cls: "", title: "Dirigir", action: "✕ Salir" },
   // "Tomar", not "Pedir". Nothing approves this: tap, confirm, and you are the director — whoever
   // currently holds it is never asked. A word like "request" would promise a handshake that exists
   // nowhere in this system, and the person tapping would wait for a reply that never comes. The red
@@ -1192,8 +1192,10 @@ const SYNC_PILL = {
   // failed in both directions: "Tomar" was a bare verb (take WHAT?), and "Tomar el control" promised
   // the takeover dialog, which only appears inside an 8s window the pill cannot see. Naming the role
   // is true in every case and needs no context to read.
-  following: { cls: "is-following", title: "SIGUIENDO", action: "Convertirme en director" },
-  nobody:    { cls: "is-nobody", title: "NADIE DIRIGE", action: "▶ Convertirme en director" },
+  // SIGUIENDO is gone: CSS collapses this state to a bare breathing dot. The strings stay for
+  // screen readers and for the non-native web, where there is no mesh and no dot styling.
+  following: { cls: "is-following", title: "Siguiendo", action: "" },
+  nobody:    { cls: "is-nobody", title: "Nadie dirige", action: "" },
 };
 
 // A director's mesh heartbeat is ~1s. Well past that but well under a page's worth of silence, so a
@@ -1232,6 +1234,12 @@ const renderDirectorModeBadge = () => {
   // Drive the control layout: followers (web + any non-director native) get ⟳ resync + ♪;
   // a director gets ♪ + ⌕ search. Default "follower" so signovivo.com is right from boot.
   document.documentElement.dataset.role = isDirector ? "director" : "follower";
+  const rl = document.getElementById("role-toggle-label");
+  const rt = document.getElementById("role-toggle");
+  if (rl && rt) {
+    rt.classList.toggle("is-directing", isDirector);
+    rl.textContent = isDirector ? "Salir de director" : "Dirigir";
+  }
   if (!directorModeBadge) return;
   // Native shell only. On signovivo.com there is no mesh and no role to take, so the pill would be
   // describing a room the viewer is not in.
@@ -2984,6 +2992,70 @@ const bindReaderEvents = () => {
   songJumpTrigger.addEventListener("click", () => { haptic(); openSongJump(); });
   // Tapping the song title is the discoverable, deliberate entry to jump-to-song / browse.
   songStatus.addEventListener("click", () => { haptic(); openSongJump(); });
+  // ── Role control (inside IR A CANTO) + the take-the-role gate ──────────────────
+  const roleToggle = document.getElementById("role-toggle");
+  const roleLabel = document.getElementById("role-toggle-label");
+  const roleGate = document.getElementById("role-gate");
+  const roleGateInput = document.getElementById("role-gate-input");
+  const roleGateConfirm = document.getElementById("role-gate-confirm");
+  const roleGateCancel = document.getElementById("role-gate-cancel");
+  const roleGateBackdrop = document.getElementById("role-gate-backdrop");
+  // A typed word, not a code. Everyone watches Braulio enter his real code anyway, so secrecy was
+  // never the threat model — carelessness is. A word also cannot be muscle-memoried in a dialog
+  // whose muscle memory is digits.
+  const ROLE_GATE_WORD = "braulio";
+
+  const syncRoleToggle = () => {
+    if (!roleToggle || !roleLabel) return;
+    const directing = state.nativeSyncRole === "director";
+    roleToggle.classList.toggle("is-directing", directing);
+    roleLabel.textContent = directing ? "Salir de director" : "Dirigir";
+    // Native shell only — signovivo.com has no mesh and no role to take.
+    roleToggle.style.display = (NATIVE_FILE_MODE || hasNativeBridge()) ? "flex" : "none";
+  };
+  syncRoleToggle();
+
+  const closeRoleGate = () => {
+    if (!roleGate) return;
+    roleGate.classList.add("is-hidden");
+    if (roleGateInput) roleGateInput.value = "";
+    if (roleGateConfirm) roleGateConfirm.disabled = true;
+  };
+  if (roleGateInput && roleGateConfirm) {
+    roleGateInput.addEventListener("input", () => {
+      roleGateConfirm.disabled = roleGateInput.value.trim().toLowerCase() !== ROLE_GATE_WORD;
+    });
+  }
+  if (roleGateCancel) roleGateCancel.addEventListener("click", () => { haptic(); closeRoleGate(); });
+  if (roleGateBackdrop) roleGateBackdrop.addEventListener("click", closeRoleGate);
+  if (roleGateConfirm) roleGateConfirm.addEventListener("click", () => {
+    if (roleGateConfirm.disabled) return;
+    haptic(18);
+    closeRoleGate();
+    closeSongJump();
+    // `request-director` is the shell's existing entry point (PdfReaderApp.tsx:1141 -> DIRECTOR_CODE).
+    // The web bundle never holds the code; it asks, and the shell decides.
+    postNativeBridge({ type: "request-director" });
+  });
+
+  if (roleToggle) roleToggle.addEventListener("click", () => {
+    haptic();
+    if (state.nativeSyncRole === "director") {
+      // Stepping DOWN is recoverable, so it gets a plain confirm. Asymmetric friction, matched to
+      // consequence: only the direction that changes everyone else's page earns the red gate.
+      if (window.confirm("¿Salir de director?")) {
+        closeSongJump();
+        postNativeBridge({ type: "exit-director" });
+      }
+      return;
+    }
+    if (roleGate) {
+      roleGate.classList.remove("is-hidden");
+      if (roleGateInput) { roleGateInput.value = ""; roleGateInput.focus(); }
+      if (roleGateConfirm) roleGateConfirm.disabled = true;
+    }
+  });
+
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); navigationDrawer.classList.add("as-dropdown"); openDrawer(); activateTab("buscar"); });
 
