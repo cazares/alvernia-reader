@@ -2188,7 +2188,10 @@ button:disabled {
 html[data-role="follower"] .director-mode-badge.is-following {
   width: 0.75rem; height: 0.75rem; min-width: 0; padding: 0; gap: 0;
   border-radius: 50%; background: #22c55e; overflow: hidden;
-  top: calc(max(0.55rem, env(safe-area-inset-top, 0px)) + 1.6rem);
+  /* margin-top, NOT a top: calc(). e2e/fabLayout.test.mjs derives the pill's horizontal offset by
+     finding the calc() in this selector's rule, so a vertical calc() here reads as a LEFT offset
+     and reports a phantom overlap with the ⟳ fab. Centres the 0.75rem dot against the 4rem fab. */
+  margin-top: 1.6rem;
   animation: sv-follow-breathe 2.4s ease-in-out infinite;
 }
 html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-title,

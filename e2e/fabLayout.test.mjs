@@ -31,13 +31,21 @@ const fabWidth = () => {
 // checked the selector's own line, so a multi-line rule read as "no offset" and the test claimed an
 // overlap that did not exist. A layout test that cannot parse the layout is worse than none.
 const offsetOf = (selector) => {
+  // Scans EVERY rule whose selector matches, not just the first. Build 435 added a second rule for
+  // the same selector (`...director-mode-badge.is-following`, which collapses a follower's pill to a
+  // dot) ABOVE the rule carrying the horizontal offset — so first-match returned the dot's block,
+  // found no `+ Xrem`, and reported a phantom overlap with ⟳. It also only reads left/right, since
+  // a VERTICAL calc() in a sibling rule is not a horizontal offset and must never be read as one.
   const lines = CSS.split("\n");
-  const i = lines.findIndex((l) => l.includes(selector));
-  if (i === -1) return 0;
-  const block = lines.slice(i, i + 6).join("\n");
-  const body = block.slice(0, block.indexOf("}") + 1 || undefined);
-  const m = body.match(/\+\s*([\d.]+)rem/);
-  return m ? rem(m[1]) : 0; // no calc() → flush against the gutter
+  let best = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes(selector)) continue;
+    const block = lines.slice(i, i + 8).join("\n");
+    const body = block.slice(0, block.indexOf("}") + 1 || undefined);
+    const m = body.match(/(?:left|right):\s*calc\([^;]*?\+\s*([\d.]+)rem/);
+    if (m) best = Math.max(best, rem(m[1]));
+  }
+  return best; // no calc() → flush against the gutter
 };
 
 const span = (extraOffset, w) => ({ near: GUTTER + extraOffset, far: GUTTER + extraOffset + w });
