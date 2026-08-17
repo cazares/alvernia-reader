@@ -175,3 +175,45 @@ test("the page loads the pacing lib, or the fallback silently disables it foreve
   const idx = html.indexOf("lib/svRenderPace.js");
   assert.ok(idx < html.indexOf('src="app.js"'), "svRenderPace must load BEFORE app.js reads it");
 });
+
+// ── C. the group-session director mix-up (the Mass bug, found 2026-08-16 on 4 devices) ────────
+
+test("a follower only accepts the DIRECTOR as its director — not a fellow follower", () => {
+  // An MCSession is a GROUP: the director admits every follower into one session, and Multipeer
+  // then connects each member to every other member. A follower's .connected therefore fires for
+  // its peers too, and assigning connectedDirectorPeer unconditionally made the LAST peer to
+  // connect "the director" — usually another follower. Every real page was then dropped by the
+  // peer-match guard in didReceive, the 3s watchdog tore the link down, and the race repeated: a
+  // ~4s reconnect loop that never converges. Measured: 22 follower-to-follower connections and
+  // heartbeat delivery of 519/29/4 across three followers.
+  const idx = SWIFT.indexOf("case .connected:");
+  assert.ok(idx > 0, "the .connected handler is gone");
+  const block = SWIFT.slice(idx, SWIFT.indexOf("case .connecting:", idx));
+  const guardIdx = block.indexOf("isDirector");
+  assert.ok(guardIdx > 0, "no director check before claiming connectedDirectorPeer — this is the Mass bug");
+  assert.ok(
+    guardIdx < block.indexOf("self.connectedDirectorPeer = peerID"),
+    "the check runs AFTER the assignment it is supposed to gate",
+  );
+  assert.match(block, /guard isDirector else \{/, "the check does not actually gate anything");
+});
+
+test("the director predicate accepts every legitimate way we know a director", () => {
+  // Must not reject the real director: we may know it as the peer we invited, by its token, or by
+  // its advertised role — and lostPeer can clear the token map moments before .connected lands.
+  const idx = SWIFT.indexOf("case .connected:");
+  const block = SWIFT.slice(idx, SWIFT.indexOf("case .connecting:", idx));
+  assert.match(block, /pendingInvitePeer == peerID/, "the peer we invited is not accepted");
+  assert.match(block, /discoveredDirectors\[peerID\] != nil/, "a known director token is not accepted");
+  assert.match(block, /discoveredDirectorInfo\[peerID\]\?\["role"\] == "director"/, "an advertised director role is not accepted");
+});
+
+test("a non-director peer is IGNORED, not treated as a disconnect", () => {
+  // It must return before touching the watchdog, hello timer or discovery state — a fellow
+  // follower joining our session is a non-event, not a change of director.
+  const idx = SWIFT.indexOf("case .connected:");
+  const block = SWIFT.slice(idx, SWIFT.indexOf("case .connecting:", idx));
+  const g = block.indexOf("guard isDirector else {");
+  assert.match(block.slice(g, g + 220), /return/, "it falls through instead of ignoring the peer");
+  assert.match(block.slice(g, g + 220), /dbgLog\("session:peer-not-director"/, "no breadcrumb — the fix could not be confirmed from the field");
+});

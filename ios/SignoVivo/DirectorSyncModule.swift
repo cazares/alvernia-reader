@@ -1770,6 +1770,42 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       switch state {
       case .connected:
         if self.currentRole == "follower" {
+          // AN MCSession IS A GROUP, NOT A WIRE — and this line used to forget that.
+          //
+          // The director admits up to maxFollowersPerSession peers into ONE session, and Multipeer
+          // then connects every member to every other member. So a follower's .connected fires for
+          // the director AND for each of its fellow followers, in whatever order the radio settles.
+          // Assigning connectedDirectorPeer unconditionally meant the LAST peer to connect became
+          // "the director" — usually another follower. Measured on four devices, 2026-08-16: one
+          // follower reassigned it twice in 524 ms, ending up pointed at an iPhone that was itself
+          // only a follower.
+          //
+          // Everything downstream is gated on that field, so the damage is total and silent. Real
+          // pages from the real director are dropped by the guard in didReceive (peer mismatch);
+          // three seconds of silence trips the half-open watchdog; it tears the session down and
+          // re-invites; the same race runs again. That is a ~4 s reconnect loop that never
+          // converges, with the pill still reading SIGUIENDO the entire time. In one 45-minute
+          // capture: 22 follower-to-follower connections, 45 forced reconnects, and heartbeat
+          // delivery of 519 / 29 / 4 across three followers — the "half the devices synced" report,
+          // reproduced exactly.
+          //
+          // It needs THREE devices to appear at all: with a single follower there is no second
+          // follower to cross-connect with, which is why every two-device test ever run passed, and
+          // why this survived from build 381 through 429 untouched.
+          //
+          // So: only the peer we deliberately invited, or one we have seen advertising role=director,
+          // may claim the slot. Anything else is a peer sharing our session and is ignored here.
+          // Same three-way predicate the advertiser already uses to recognise a director, so the two
+          // places cannot drift: the peer we invited, one carrying a director token, or one whose
+          // discoveryInfo says role=director. The token/info clauses matter because lostPeer can
+          // clear discoveredDirectors moments before .connected lands for that same peer.
+          let isDirector = self.pendingInvitePeer == peerID
+            || self.discoveredDirectors[peerID] != nil
+            || self.discoveredDirectorInfo[peerID]?["role"] == "director"
+          guard isDirector else {
+            self.dbgLog("session:peer-not-director", ["peer": peerID.displayName])
+            return
+          }
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
           self.cancelSelfDirectedTimer()
           self.pauseDiscoveryRefreshWhileConnected()
