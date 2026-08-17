@@ -9,14 +9,21 @@
  * time, so a before-run and an after-run are scored by identical arithmetic.
  *
  * THE VERDICT (build 430, commit 1be7719):
- *   1. follower<->follower `session:connected` pairs  ... must be ZERO
- *   2. `watchdog:half-open-reconnect`                 ... must be ~0 (each one is a torn-down session)
- *   3. `session:peer-not-director`                    ... POSITIVE proof the new guard fired
+ *   1. every follower<->follower cross-connect is MATCHED by a `session:peer-not-director` refusal
+ *   2. `watchdog:half-open-reconnect` ... must be ~0 (each one is a torn-down session)
+ *   3. the run actually exercised the bug (at least one cross-connect happened)
  *
- * (3) is the one that cannot be faked by a quiet room: a test where no follower ever tried to
- * cross-connect produces zero of everything and looks identical to a working fix. If (1) is zero
- * AND (3) is zero, the run proved nothing — it needs THREE+ devices to reproduce at all, because
- * with a single follower there is no second follower to cross-connect with.
+ * (1) IS NOT "ZERO CROSS-CONNECTS". That was this tool's first criterion and it was WRONG: it
+ * printed FAIL on the 2026-08-17 hardware run that actually PROVED the fix. An MCSession is a
+ * GROUP — Multipeer always connects every member to every other member, and
+ * `dbgLog("session:\(stateName)")` fires BEFORE the switch, unconditionally. Follower<->follower
+ * `session:connected` rows therefore exist on a perfectly healthy mesh and can never be zero.
+ * The fix prevents the MISATTRIBUTION, not the connection. What must be zero is a cross-connect
+ * the guard did NOT refuse — that is the one that becomes a false director.
+ *
+ * (3) is what a quiet room cannot fake: zero cross-connects means the bug was never exercised,
+ * which is indistinguishable from a working fix. It needs THREE+ devices to reproduce at all,
+ * because with a single follower there is no second follower to cross-connect with.
  *
  * FOLDED ROWS. The worker collapses a run of identical events into one row and bumps `n`. Every
  * count here sums `n`, never rows — counting rows undercounts by ~3x on a busy mesh.
@@ -34,6 +41,11 @@ const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith("--"));
 const baselineIdx = args.indexOf("--baseline");
 const baselineFile = baselineIdx >= 0 ? args[baselineIdx + 1] : null;
+// Score only rows from this build. A device WITHOUT the fix in the mesh reports
+// `session:connected` for its fellow followers exactly like a broken build does, so one stray
+// old device fails an otherwise-perfect run. Same false-signal class as leaving a simulator on.
+const buildIdx = args.indexOf("--build");
+const onlyBuild = buildIdx >= 0 ? String(Number(args[buildIdx + 1])) : null;
 
 if (!file) {
   console.error("usage: node scripts/stress-analyze.mjs <capture.jsonl> [--baseline <before.jsonl>]");
@@ -75,6 +87,13 @@ function analyze(rows, label) {
     (isDirector(r.peer) ? f2d : f2f).push(r);
   }
 
+  // A cross-connect is only a BUG if the guard failed to refuse it. Match on (reporter, peer):
+  // the guard logs `session:peer-not-director` with the same two names microseconds later.
+  const rejected = new Set(
+    rows.filter((r) => r.event === "session:peer-not-director").map((r) => `${r.dev}|${r.peer}`)
+  );
+  const unrefused = f2f.filter((r) => !rejected.has(`${r.dev}|${r.peer}`));
+
   const builds = [...new Set(rows.map((r) => r.build).filter(Boolean))].sort();
   const halfOpen = countEvent(rows, "watchdog:half-open-reconnect");
   const notDirector = countEvent(rows, "session:peer-not-director");
@@ -102,6 +121,8 @@ function analyze(rows, label) {
     followers: [...roles.entries()].filter(([, v]) => v !== "director").map(([k]) => k),
     f2fCount: f2f.reduce((a, r) => a + (r.n || 1), 0),
     f2fPairs: [...new Set(f2f.map((r) => `${r.dev} -> ${r.peer}`))],
+    unrefusedCount: unrefused.length,
+    unrefusedPairs: [...new Set(unrefused.map((r) => `${r.dev} -> ${r.peer}`))],
     f2dCount: f2d.reduce((a, r) => a + (r.n || 1), 0),
     halfOpen,
     notDirector,
@@ -115,8 +136,10 @@ function report(a) {
   console.log(`director(s): ${a.directors.join(", ") || "(none seen)"}`);
   console.log(`followers  : ${a.followers.join(", ") || "(none seen)"}`);
   console.log("");
-  console.log(`  follower->follower session:connected : ${a.f2fCount}   ${a.f2fCount === 0 ? "✅" : "❌"}`);
+  console.log(`  follower->follower cross-connects    : ${a.f2fCount}   (Multipeer always does this — not a defect)`);
   for (const p of a.f2fPairs) console.log(`      ${p}`);
+  console.log(`  ...of those, UNREFUSED by the guard  : ${a.unrefusedCount}   ${a.unrefusedCount === 0 ? "✅ none became a false director" : "❌ THESE BECAME FALSE DIRECTORS"}`);
+  for (const p of a.unrefusedPairs) console.log(`      ${p}`);
   console.log(`  follower->director session:connected : ${a.f2dCount}   (healthy, expected > 0)`);
   console.log(`  watchdog:half-open-reconnect         : ${a.halfOpen}   ${a.halfOpen === 0 ? "✅" : a.halfOpen <= 2 ? "⚠️" : "❌"}`);
   console.log(`  session:peer-not-director (guard)    : ${a.notDirector}   ${a.notDirector > 0 ? "✅ guard fired" : "— not seen"}`);
@@ -124,7 +147,29 @@ function report(a) {
   for (const [d, n] of a.recv) console.log(`      ${String(n).padStart(5)}  ${d}`);
 }
 
-const cur = analyze(read(file), `CAPTURE ${file}`);
+const allRows = read(file);
+
+// CONTAMINATION CHECK. Report which build each device is on BEFORE scoring anything. A device
+// running a pre-430 build has no `session:peer-not-director` guard, so it reports
+// `session:connected` for its fellow followers exactly like a broken build would -- one stray old
+// device fails an otherwise-perfect run, and the failure looks like the fix not working.
+const buildOf = new Map();
+for (const r of allRows) if (r.dev && r.build) buildOf.set(r.dev, String(r.build));
+const buildsSeen = [...new Set(buildOf.values())].sort();
+if (buildsSeen.length > 1) {
+  console.log("\n⚠️  MIXED BUILDS IN THIS CAPTURE — the mesh had devices on different builds:");
+  for (const b of buildsSeen) {
+    const devs = [...buildOf.entries()].filter(([, v]) => v === b).map(([k]) => k);
+    console.log(`     build ${b}: ${devs.join(", ")}`);
+  }
+  if (!onlyBuild)
+    console.log("     Re-run with --build 430 to score only the fixed devices, or close the app on the others.");
+}
+
+const rows = onlyBuild ? allRows.filter((r) => String(r.build) === onlyBuild) : allRows;
+if (onlyBuild) console.log(`\n(scoring only build ${onlyBuild}: ${rows.length} of ${allRows.length} rows)`);
+
+const cur = analyze(rows, `CAPTURE ${file}`);
 if (baselineFile) report(analyze(read(baselineFile), `BASELINE ${baselineFile}`));
 report(cur);
 
@@ -132,12 +177,14 @@ report(cur);
 const guardPresent = cur.builds.some((b) => Number(b) >= 430);
 console.log("\n=== VERDICT ===");
 const fail = [];
-if (cur.f2fCount > 0) fail.push(`${cur.f2fCount} follower->follower session:connected (must be 0)`);
+if (cur.unrefusedCount > 0)
+  fail.push(`${cur.unrefusedCount} cross-connect(s) the guard did NOT refuse — each became a false director`);
 if (cur.halfOpen > 2) fail.push(`${cur.halfOpen} half-open reconnects (must be ~0)`);
-if (guardPresent && cur.notDirector === 0 && cur.f2fCount === 0) {
+if (guardPresent && cur.f2fCount === 0) {
   fail.push(
-    "guard never fired AND no cross-connects seen — this run did not exercise the bug. " +
-      "Re-run with 3+ devices (1 director + 2+ followers); 2 devices always pass."
+    "no follower->follower cross-connect ever happened — this run did NOT exercise the bug, " +
+      "which is indistinguishable from a working fix. Re-run with 3+ devices " +
+      "(1 director + 2+ followers); 2 devices always pass."
   );
 }
 if (!guardPresent) {
@@ -148,4 +195,5 @@ if (fail.length) {
   for (const f of fail) console.log("   · " + f);
   process.exit(1);
 }
-console.log("✅ PASS — no follower mistook a fellow follower for the director.");
+console.log(`✅ PASS — ${cur.f2fCount} cross-connect(s) occurred and the guard refused every one.`);
+console.log("   No follower mistook a fellow follower for the director.");
