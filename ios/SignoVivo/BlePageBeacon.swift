@@ -55,6 +55,8 @@ final class BlePageBeacon: NSObject {
   private var central: CBCentralManager?
   private var pendingAdvert: String?
   private var lastSeenSeq = -1
+  private var lastPublishedPage = -1
+  private var lastAppliedPage = -1
   private var isScanning = false
 
   // MARK: - Director side
@@ -63,6 +65,14 @@ final class BlePageBeacon: NSObject {
   /// as soon as the radio is ready, so a director that taps the pill and turns a page immediately
   /// does not lose the first update.
   func publish(page: Int, seq: Int) {
+    // PUBLISH ONLY ON A REAL CHANGE. The director's mesh heartbeat calls sendPageUpdate once per
+    // SECOND, not once per page turn — so the first cut of this bumped seq, restarted the
+    // advertiser and emitted telemetry every second forever. Measured over a 33-minute run: 280
+    // real page turns produced 907 ble:page-send and 2436 ble:page-recv, about 1.7 relay POSTs per
+    // second of pure noise, and a Bonjour advertiser tearing itself down 1 Hz for no reason.
+    // An advertisement is STATE, not an event: if the page has not moved there is nothing to say.
+    guard page != lastPublishedPage else { return }
+    lastPublishedPage = page
     let name = "\(Self.namePrefix)\(seq).\(page)"
     pendingAdvert = name
     if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
@@ -157,7 +167,13 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     // Monotonic guard: a cached or out-of-order advertisement must never move a follower BACKWARD.
     guard parsed.seq > lastSeenSeq else { return }
     lastSeenSeq = parsed.seq
-    log?("ble:page-recv", ["page": parsed.page, "seq": parsed.seq, "rssi": RSSI.intValue])
+    // Log only when the PAGE moves. A scan with allowDuplicates reports every advertisement packet,
+    // and one relay POST per packet is how a diagnostic turns into a denial of service against your
+    // own worker.
+    if parsed.page != lastAppliedPage {
+      lastAppliedPage = parsed.page
+      log?("ble:page-recv", ["page": parsed.page, "seq": parsed.seq, "rssi": RSSI.intValue])
+    }
     onPage?(parsed.page, parsed.seq)
   }
 }
