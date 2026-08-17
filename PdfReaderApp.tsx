@@ -1251,8 +1251,13 @@ export default function App() {
         case "render-failed": {
           // A follower's renderPage threw (offline / un-cached page). The mesh 'page' path
           // optimistically set currentPageRef.current = page BEFORE the web confirmed the render,
-          // so currentPageRef now equals the FAILED page. The 2s mesh heartbeat would then de-dupe
-          // (page === currentPageRef.current) and never re-drive this follower → wedged forever.
+          // so currentPageRef now equals the FAILED page.
+          //
+          // NOTE: the native de-dupe this was written to escape is GONE (see the 'page' case) —
+          // every packet is now forwarded, so a failed page is re-driven by the next beat whatever
+          // this ref says, and the web paces the retry itself (svShouldPaceRender). The sentinel is
+          // kept as belt-and-braces because it costs nothing and it keeps this ref honest about
+          // what is actually on screen, which is the property whose absence caused that wedge.
           // Reset the ref to an impossible-page sentinel (pages floor at 1) so the next heartbeat's
           // page !== currentPageRef.current and re-fires. A sentinel keeps the ref a `number` so the
           // many broadcastPage / `Number(...) || currentPageRef.current` consumers stay sound.
@@ -1965,10 +1970,30 @@ export default function App() {
           // foregrounded follower resyncs, and so "is a director live RIGHT NOW?" can be judged by recency.
           lastDirectorSnapshotRef.current = { page, book, at: Date.now() };
           lastPageTurnAtRef.current = Date.now();
-          // De-dupe the 2s mesh heartbeat: if we're already on this page+book it's just a
-          // keepalive re-send — do nothing (no redundant renderPage). A genuinely new page, a
-          // book switch, or a recovered dropped packet (page differs from ours) still syncs.
-          if (page === currentPageRef.current && book === currentBookRef.current) break;
+          // DUMB FOLLOWER (owner's rule, 2026-08-17): "STATELESS. DUMB FOLLOWERS, SIMPLE DIRECTOR."
+          //
+          // There used to be a de-dupe here — if `page === currentPageRef.current` we dropped the
+          // packet without rendering, on the theory that a same-page re-send is just a keepalive.
+          // That made the FOLLOWER decide whether to obey the director, using a REMEMBERED number.
+          // A remembered number can drift from what is actually on the glass; when it does, the
+          // follower ignores every re-assertion of the page it is already "on" and is wedged until
+          // the director happens to turn to a DIFFERENT page.
+          //
+          // That is the bug reported 2026-08-17: director on song 16 backgrounds, followers are
+          // walked to 14 and 19 by hand, director foregrounds still on 16 — and nobody comes back.
+          // Turning to 15 fixed all of them instantly, which proves the mesh was healthy the whole
+          // time and only the same-page re-assertion was being dropped. The iPhone recovered on its
+          // own precisely because it DISCONNECTED and reconnected, and the connect path sends a
+          // snapshot down a route this guard did not sit on. The bug rewarded a broken link.
+          //
+          // The check still exists — it just moved to the only layer that can see the truth. The
+          // web's renderPage returns early when the page is unchanged AND the <img> is genuinely
+          // showing it (app.js, "ALREADY ON THIS PAGE"). That guard is authoritative because it
+          // inspects the rendered image rather than a number we hope still matches it, and it is
+          // what actually prevents the 1 Hz re-render storm behind the 2026-08-06 crash — it
+          // returns before the load request, the loading indicator, the src assignment and the
+          // AsyncStorage write. Forwarding costs one bridge message per second per follower and
+          // buys back the property that matters: the director's word always reaches the screen.
           currentPageRef.current = page;
           // Keep the ref in sync, but DON'T inject a separate set-book: the single page
           // sync-event below carries `book`, and the web handler switches the book + renders the
@@ -2099,6 +2124,22 @@ export default function App() {
           injectEvent({ type: "sync-event", event: { type: "page", page, book } });
         }
       } else if (roleRef.current === "director") {
+        // SIMPLE DIRECTOR: on every foreground, re-arm the beat and re-assert the page. The
+        // broadcast below was already here; the restart is new.
+        //
+        // The 1 Hz mesh heartbeat is a JS setInterval, and a JS interval is not a guarantee — it
+        // does not run while iOS has the process suspended, and nothing in this handler used to
+        // put it back. Every other recovery path in the app re-arms itself on foreground (the
+        // advertiser at DirectorSyncModule.swift handleAppDidBecomeActive, the follower watchdog,
+        // discovery refresh); the one timer the whole choir depends on did not. startDirectorHeartbeat
+        // calls stopDirectorHeartbeat first, so calling it again is idempotent and cannot leak an
+        // interval.
+        //
+        // Belt and braces on purpose: the broadcast makes recovery immediate rather than up to a
+        // second later, and the restarted beat is what keeps re-asserting if that one packet is
+        // dropped. Neither alone is sufficient — a single packet can be lost, and a beat that
+        // starts a second late still leaves a visible gap.
+        startDirectorHeartbeat();
         broadcastPage(currentPageRef.current, currentBookRef.current);
       } else if (explicitTransmitterRef.current) {
         // Transmitter-only (no mesh): re-publish on foreground so the relay snapshot doesn't
@@ -2107,7 +2148,7 @@ export default function App() {
       }
     });
     return () => sub.remove();
-  }, [syncAvailable, broadcastPage, injectEvent, fleetCheckin]);
+  }, [syncAvailable, broadcastPage, injectEvent, fleetCheckin, startDirectorHeartbeat]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {

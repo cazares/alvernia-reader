@@ -1,0 +1,108 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+
+// DUMB FOLLOWERS, SIMPLE DIRECTOR — pinned (owner's rule, 2026-08-17).
+//
+// THE BUG THIS GUARDS. Director sits on song 16 and backgrounds. Followers are walked to other
+// songs by hand — iPad 1 to 14, iPad 2 to 19. Director foregrounds, still on 16. Nobody comes
+// back. The iPads sit on 14 and 19 indefinitely, reading as followed when they are not.
+//
+// Two observations made it diagnosable, and both are worth keeping because they are what a future
+// regression will look like:
+//
+//   - the director then turned to 15 and every follower snapped to 15 INSTANTLY. So the mesh was
+//     healthy the whole time. Only the re-assertion of a page a follower thought it was already on
+//     was being dropped.
+//   - the iPhone recovered on its own, while the two healthy iPads did not. Backwards — unless
+//     recovery comes from RECONNECTING, because the connect path sends a snapshot down a route the
+//     dropped guard did not sit on. The bug rewarded a broken link, which is why the flakiest
+//     device looked fine and the good ones stayed wedged.
+//
+// THE RULE. A follower does not get a vote on whether to obey the director. The native layer must
+// forward every page packet to the web; only the web may decide that no work is needed, because
+// only the web can see the rendered <img>. A guard built on a REMEMBERED page number will silently
+// drift from what is on the glass, and every drift wedges that follower until the director happens
+// to move to a different page.
+//
+// WHY THIS FILE EXISTS RATHER THAN A COMMENT. The de-dupe being removed was added deliberately, to
+// fix a real crash (2026-08-06: a follower left on one screen, renderPage doing a load request +
+// loading indicator + src assignment + AsyncStorage write sixty times a minute on an eight-year-old
+// iPad). That makes it exactly the kind of thing someone re-adds for good reasons. The protection
+// against that crash is REAL but it belongs in the web guard, which returns before any of that work
+// — so this file pins both halves: no native de-dupe, and the web guard still present.
+
+const APP_ROOT = path.resolve(new URL("..", import.meta.url).pathname);
+const app = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
+const web = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
+
+// Comments describe intent; only code can wedge a follower. Strip them before the NEGATIVE
+// assertion, so the tombstone explaining the removed guard cannot itself satisfy the check.
+//
+// Stripping is only used where it is needed. Applied to web/src/app.js this same regex removed 80%
+// of the file — a runaway block-comment match — which would have made every assertion below pass
+// against nothing. Positive assertions therefore read RAW source, and the stripper is sanity-pinned
+// below. A test whose instrument silently mangles its input is worse than no test.
+const stripComments = (s) =>
+  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+const appCode = stripComments(app);
+
+test("the comment stripper does not mangle its input (guards every assertion below)", () => {
+  const kept = appCode.length / app.length;
+  assert.ok(kept > 0.3, `stripper kept only ${(kept * 100).toFixed(0)}% of PdfReaderApp.tsx`);
+  // Landmarks that must survive stripping, or the negative assertion proves nothing.
+  assert.match(appCode, /case "page":/);
+  assert.match(appCode, /currentPageRef\.current = page/);
+});
+
+test("native NEVER drops a mesh page because it matches the remembered page", () => {
+  // The exact shape of the removed guard, and any near-relative of it. A follower that returns
+  // early here is a follower deciding not to obey the director.
+  assert.doesNotMatch(
+    appCode,
+    /if\s*\(\s*page\s*===\s*currentPageRef\.current[\s\S]{0,80}?\)\s*break\s*;/,
+    "native de-dupe is back: a follower whose remembered page drifts from the screen will ignore " +
+      "every re-assertion of that page and stay wedged until the director turns elsewhere",
+  );
+});
+
+test("every mesh page reaches the web layer", () => {
+  // The forward itself must survive. Without it there is nothing to render.
+  assert.match(
+    appCode,
+    /injectEvent\(\{\s*type:\s*"sync-event",\s*event:\s*\{\s*type:\s*"page"/,
+    "the native 'page' case must forward to the web as a sync-event",
+  );
+});
+
+test("the web keeps the reality-based guard that makes forwarding cheap", () => {
+  // This is what stops the 1 Hz re-render storm behind the 2026-08-06 crash. It is safe to rely on
+  // precisely because every clause inspects the DOM rather than a remembered number: same page AND
+  // the <img> is showing it AND it finished loading AND it has real pixels.
+  assert.match(web, /nextPage === state\.currentPage/);
+  assert.match(web, /pageImageMatches\(nextPage\)/);
+  assert.match(web, /pageImage\.complete/);
+  assert.match(web, /pageImage\.naturalWidth > 0/);
+});
+
+test("a director re-arms its heartbeat AND re-asserts its page on foreground", () => {
+  // The 1 Hz beat is a JS setInterval, which does not run while iOS holds the process suspended.
+  // Every other recovery path re-arms on foreground; the one timer the whole choir depends on did
+  // not. Both calls are required: the broadcast makes recovery immediate, the restarted beat keeps
+  // re-asserting if that single packet is dropped.
+  const foreground = appCode.slice(appCode.indexOf('AppState.addEventListener'));
+  const directorBranch = foreground.slice(
+    foreground.indexOf('roleRef.current === "director"'),
+    foreground.indexOf("explicitTransmitterRef.current)"),
+  );
+  assert.match(directorBranch, /startDirectorHeartbeat\(\)/, "director must re-arm the heartbeat on foreground");
+  assert.match(directorBranch, /broadcastPage\(/, "director must re-assert its page on foreground");
+});
+
+test("startDirectorHeartbeat is idempotent, so re-arming cannot leak an interval", () => {
+  // Calling it on every foreground is only safe because it clears first.
+  const body = appCode.slice(appCode.indexOf("const startDirectorHeartbeat"));
+  const firstStatement = body.slice(0, body.indexOf("setInterval"));
+  assert.match(firstStatement, /stopDirectorHeartbeat\(\)/);
+});
