@@ -1,6 +1,7 @@
 import Foundation
 import MultipeerConnectivity
 import Network
+import os
 import React
 import UIKit
 
@@ -256,6 +257,31 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// are dropped first: the newest breadcrumbs are the ones that explain a failure.
   private static let logBufferCap = 300
 
+  /// EVERY BREADCRUMB ALSO GOES TO THE DEVICE'S OWN LOG.
+  ///
+  /// Until 2026-08-17 this module produced ZERO local output — no os_log, no NSLog, no print. Every
+  /// breadcrumb it has ever written went to Cloudflare and nowhere else. Two consequences, and the
+  /// second one is the expensive one:
+  ///
+  ///   1. When the relay is unreachable the fleet is MUTE. That is not hypothetical: the account
+  ///      tripped its Cloudflare daily cap that afternoon and every device went silent for hours,
+  ///      mid-investigation.
+  ///   2. AT MASS THE FOLLOWERS ARE ON NO NETWORK AT ALL. So in the one setting the whole app
+  ///      exists for, no follower has ever been able to say what it did. The handoff records the
+  ///      cost plainly — "the fix cannot be confirmed in the field" — and a day was spent inferring
+  ///      causes from an absence of evidence that was guaranteed by construction.
+  ///
+  /// os_log fixes both for free. It needs no network, no relay, no key and no UI: attach the device
+  /// and `log stream --predicate 'subsystem == "com.cazares.signovivo"'`, or pull a sysdiagnose
+  /// AFTER a Mass and read the whole account offline. It costs zero Cloudflare requests, so it is
+  /// unaffected by the telemetry batching, and it survives whatever the quota is doing.
+  ///
+  /// `.public` is deliberate. os_log redacts interpolated strings by default, which would render
+  /// every peer name and page number as <private> — a log that cannot be read is the problem this
+  /// is solving, not a solution to it. The values are opaque peer ids, roles and page numbers on
+  /// the owner's own devices; there is nothing here that is not already on the screen.
+  private static let deviceLog = Logger(subsystem: "com.cazares.signovivo", category: "mesh")
+
   private func dbgLog(_ event: String, _ data: [String: Any] = [:]) {
     // Build the payload on the CALLING thread, exactly as the unbatched version did, so the role /
     // peer name / build recorded are the ones true at the moment of the event rather than at flush.
@@ -268,6 +294,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       "event": event,
     ]
     payload.merge(data) { _, new in new }
+
+    // Local first, and UNCONDITIONALLY — before the batching queue, before the suspend check, and
+    // outside anything the relay or the kill switch can turn off. Silencing the fleet's network
+    // telemetry must never also blind the device in front of you.
+    let extras = data
+      .map { "\($0.key)=\($0.value)" }
+      .sorted()
+      .joined(separator: " ")
+    Self.deviceLog.info(
+      "\(self.currentRole, privacy: .public) \(self.localPeerID?.displayName ?? "?", privacy: .public) \(event, privacy: .public) \(extras, privacy: .public)"
+    )
 
     logQueue.async { [weak self] in
       guard let self, !self.logSuspended else { return }

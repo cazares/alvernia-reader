@@ -138,3 +138,38 @@ test("the build badge can actually be tapped in the native shell", () => {
     "the listener itself must survive",
   );
 });
+
+// ── The device must be able to speak without a network ─────────────────────────
+//
+// Until 2026-08-17 DirectorSyncModule.swift produced ZERO local output — no os_log, no NSLog, no
+// print. Every breadcrumb went to Cloudflare and nowhere else, which meant the fleet was mute
+// whenever the relay was unreachable, and PERMANENTLY mute at Mass, where the followers are on no
+// network at all. That is the single most expensive gap in this project's history: the setting the
+// app exists for is the one setting in which no follower could ever say what it did, and a full day
+// was spent inferring causes from an absence of evidence guaranteed by construction.
+//
+// This pins the local channel so it cannot quietly disappear again.
+test("every mesh breadcrumb is also written to the device's own log", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  assert.match(swift, /^import os$/m, "os must be imported for Logger");
+  assert.match(swift, /Logger\(subsystem:\s*"com\.cazares\.signovivo"/,
+    "a Logger with a stable subsystem is what makes `log stream --predicate` usable");
+  assert.match(swift, /deviceLog\.info\(/, "dbgLog must mirror to the device log");
+  // .public or the whole log reads <private> — an unreadable log is the problem, not the fix.
+  assert.match(swift, /privacy:\s*\.public/);
+});
+
+test("the local log is written BEFORE the batching queue, so nothing can silence it", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const body = swift.slice(swift.indexOf("private func dbgLog("));
+  const local = body.indexOf("deviceLog.info(");
+  const queued = body.indexOf("logQueue.async");
+  assert.ok(local > 0 && queued > 0, "both paths must exist");
+  assert.ok(
+    local < queued,
+    "the device log must be written before the relay queue — the LOG_INTERVAL_MS kill switch " +
+      "silences the network, and it must never also blind the device in front of you",
+  );
+});
