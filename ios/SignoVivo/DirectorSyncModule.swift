@@ -1074,6 +1074,29 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private func scheduleNextDiscoveryRefresh() {
+    // FIX 1 — THE TIMER LEAK THAT CAUSED THE DISCOVERY STORM (measured 2026-08-17).
+    //
+    // This assigned `discoveryRefreshTimer` WITHOUT invalidating the previous timer. A
+    // Timer.scheduledTimer retains itself in the run loop, so overwriting the property does not
+    // stop the old one — it only loses the handle. The orphan still fires, and its callback
+    // schedules another. Ten call sites reach this function and only startDiscoveryRefreshTimer
+    // invalidated first, so the live timer population DOUBLED on every overlapping schedule.
+    //
+    // The biggest doubler was foregrounding: refreshNearbyDiscovery schedules without
+    // invalidating, and PdfReaderApp.tsx called it TWICE per foreground. Pick a device up, put it
+    // down, repeat, and the rate compounds.
+    //
+    // Measured on the owner's iPhone from its own unified log: 66 advertiser start/stop events per
+    // SECOND, sustained — ~33 full teardown/rebuild cycles a second against an intended one every
+    // 5-12 s. An MCSession invite cannot complete when the advertiser it must answer on lives ~15
+    // ms, which is exactly the "handshake fails, delivery is fine" signature recorded in issue
+    // #352. That issue holds EIGHT disproved theories — discovery backoff, the M-F1 clock, a render
+    // -layer bug, radio duty-cycling, AWDL/iOS incompatibility — every one of them about the
+    // device. It was a missing invalidate(), and it explains why the iPhone was worst: it is the
+    // device that gets picked up and put down all day.
+    discoveryRefreshTimer?.invalidate()
+    discoveryRefreshTimer = nil
+
     let generation = resetGeneration
     let interval: TimeInterval
     if earlyRefreshCyclesRemaining > 0 {
@@ -1317,8 +1340,56 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  // ── Discovery churn: hard floor + loop alarm ─────────────────────────────────
+  //
+  // Fix 1 (the invalidate above) removes the KNOWN driver of the storm. These two are the safety
+  // net for the unknown ones, at the owner's instruction: throttle it anyway, and make it shout.
+  // Ten call sites can reach refreshDiscovery, several from JS, so "no caller misbehaves" is not a
+  // property this code can assume — Murphy's Law applies to our own call graph.
+
+  /// No caller may tear down the transports faster than this, ever. 2 s is far below the intended
+  /// 5-12 s cadence so it never interferes with correct behaviour, and far above the ~15 ms
+  /// observed during the storm, so it converts a pathological loop into a survivable one: a
+  /// handshake gets whole seconds to complete instead of milliseconds.
+  private static let minRefreshInterval: TimeInterval = 2.0
+  private var lastRefreshAt: TimeInterval = 0
+
+  /// Loop alarm. Refreshes are DESIGNED to happen every 5-12 s, so more than 8 attempts inside 10 s
+  /// cannot be legitimate — it means something is driving this in a loop.
+  private static let refreshStormWindow: TimeInterval = 10
+  private static let refreshStormThreshold = 8
+  private var refreshAttemptTimes: [TimeInterval] = []
+  /// Latched so the alarm reports ONCE per episode rather than 33 times a second — an alarm that
+  /// floods the log is indistinguishable from the fault it is reporting. Re-arms when things calm.
+  private var refreshStormReported = false
+
   private func refreshDiscovery() {
     guard currentRole != "off" else { return }
+    let now = Date().timeIntervalSince1970
+
+    // ALARM — count every ATTEMPT, including ones the throttle below will drop. Counting only the
+    // ones that got through would hide the loop behind the very guard that contains it, which is
+    // how a throttle turns a loud bug into a silent one.
+    refreshAttemptTimes.append(now)
+    refreshAttemptTimes.removeAll { now - $0 > Self.refreshStormWindow }
+    if refreshAttemptTimes.count > Self.refreshStormThreshold {
+      if !refreshStormReported {
+        refreshStormReported = true
+        dbgLog("refresh:STORM", [
+          "attempts": refreshAttemptTimes.count,
+          "windowSec": Int(Self.refreshStormWindow),
+          "role": currentRole,
+        ])
+      }
+    } else if refreshAttemptTimes.count <= 2 {
+      refreshStormReported = false
+    }
+
+    // THROTTLE — silent by design. The alarm above is the signal; logging every dropped call would
+    // reproduce the flood at the telemetry layer.
+    guard now - lastRefreshAt >= Self.minRefreshInterval else { return }
+    lastRefreshAt = now
+
     autoreleasepool {
       // Prune directors that haven't been seen by the browser in over 90 s (stale MPC state).
       let now = Date().timeIntervalSince1970

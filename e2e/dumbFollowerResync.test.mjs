@@ -173,3 +173,63 @@ test("the local log is written BEFORE the batching queue, so nothing can silence
       "silences the network, and it must never also blind the device in front of you",
   );
 });
+
+// ── Discovery storm: the timer leak behind issue #352 ──────────────────────────
+//
+// scheduleNextDiscoveryRefresh assigned discoveryRefreshTimer WITHOUT invalidating the previous
+// timer. A Timer.scheduledTimer retains itself in the run loop, so overwriting the property loses
+// the handle without stopping the timer; the orphan fires and schedules another. Ten call sites
+// reach that function, so the live timer population DOUBLED on every overlapping schedule — and the
+// biggest doubler was foregrounding, which PdfReaderApp.tsx made twice as bad by calling
+// refreshNearbyDiscovery TWICE per foreground.
+//
+// Measured from the iPhone's own unified log on 2026-08-17: 66 advertiser start/stop events per
+// SECOND, sustained, against an intended one every 5-12 s. An MCSession invite cannot complete when
+// the advertiser it must answer on lives ~15 ms. That is the "handshake fails, delivery is fine"
+// signature in #352 — an issue carrying EIGHT disproved theories, every one about the device rather
+// than the timer, and it explains why the iPhone was worst: it is the one picked up all day.
+test("scheduleNextDiscoveryRefresh invalidates before it schedules", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func scheduleNextDiscoveryRefresh"));
+  // Anchor on the ASSIGNMENT, not the words "Timer.scheduledTimer" — the explanatory
+  // comment above the fix contains that phrase, so searching for it cut the slice before the fix
+  // and the assertion failed against code that was correct.
+  const body = fn.slice(0, fn.indexOf("discoveryRefreshTimer = Timer.scheduledTimer"));
+  assert.match(
+    body, /discoveryRefreshTimer\?\.invalidate\(\)/,
+    "a new discovery timer must never be scheduled without stopping the old one — that leak is #352",
+  );
+});
+
+test("discovery churn has a hard floor no caller can bypass", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  assert.match(swift, /minRefreshInterval: TimeInterval = 2\.0/);
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  assert.match(
+    fn.slice(0, 2600), /now - lastRefreshAt >= Self\.minRefreshInterval/,
+    "refreshDiscovery must throttle regardless of caller",
+  );
+});
+
+test("a refresh loop raises an alarm, and counts attempts the throttle drops", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  const body = fn.slice(0, 2600);
+  assert.match(body, /refresh:STORM/, "a loop must announce itself");
+  // The alarm must sit BEFORE the throttle's early return, or the guard that contains the loop
+  // also hides it — turning a loud bug into a silent one.
+  const alarm = body.indexOf("refreshAttemptTimes.append");
+  const guardIdx = body.indexOf("now - lastRefreshAt >= Self.minRefreshInterval");
+  assert.ok(alarm > 0 && guardIdx > 0 && alarm < guardIdx,
+    "attempts must be counted before the throttle drops them");
+});
+
+test("foreground triggers exactly ONE discovery refresh", () => {
+  const fg = appCode.slice(appCode.indexOf("AppState.addEventListener"));
+  const window = fg.slice(0, fg.indexOf("return () => sub.remove()"));
+  const calls = (window.match(/refreshNearbyDiscovery\(\)/g) || []).length;
+  assert.equal(calls, 1, `foreground calls refreshNearbyDiscovery ${calls}x; each one schedules a timer`);
+});

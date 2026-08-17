@@ -2108,7 +2108,12 @@ export default function App() {
       // does nothing now really is a device that had nothing to do.
       fleetCheckin();
       void autoApplyIfSafeRef.current?.();
-      if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
+      // ONE refresh, not two. This was duplicated, and each call scheduled another discovery timer
+      // without invalidating the previous one (DirectorSyncModule.scheduleNextDiscoveryRefresh) —
+      // so every foreground DOUBLED the live timer population. Measured on the owner's iPhone:
+      // 66 advertiser start/stop events per second, which is why the device that gets picked up and
+      // put down all day was the one that could never complete a handshake. The Swift side now
+      // invalidates properly and floors the churn at 2 s, but the duplicate had no reason to exist.
       if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (roleRef.current === "follower") {
         requestCurrentSnapshot().catch(() => {});
