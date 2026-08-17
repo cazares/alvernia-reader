@@ -32,9 +32,17 @@ const FILE = "web/src/styles.css";
 const FIXTURE = "e2e/fixtures/search-css-381.json";
 const SEARCH_RULE = /search|drawer|as-dropdown|sort/i;
 
-// Rules that legitimately differ from 381, by selector. Empty on purpose today.
+// Rules that legitimately differ from 381, by selector.
 const ALLOWED_DRIFT = new Map([
   // ["selector", "why it differs from 381"],
+  [".song-jump-fab, .search-fab, .resync-fab, .fullscreen-fab",
+   "2026-08-17: fab backing 0.38 -> 0.72 alpha. Owner-reviewed on a real iPad in PORTRAIT, which " +
+   "is how the whole choir uses the app and which 381 was never checked in: landscape letterboxes " +
+   "the page so these sit on black margins, while portrait puts them on a WHITE song sheet where a " +
+   "38%-navy wash is nearly invisible. Geometry, size and z-index are UNCHANGED — only the alpha."],
+  [".song-jump-fab:active, .search-fab:active, .resync-fab:active, .fullscreen-fab:active",
+   "2026-08-17: matching :active alpha 0.55 -> 0.86, so the pressed state stays visibly darker " +
+   "than the new resting 0.72. Same reason as above."],
 ]);
 
 const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");

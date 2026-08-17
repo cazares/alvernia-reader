@@ -149,10 +149,14 @@ test("late joiner: follower schedules a one-shot snapshot-recovery probe on conn
   assert.ok(connectedBlock.length > 0, "probe must be scheduled on .connected after startFollowerHelloTimer");
 });
 
-test("discovery cadence keeps early burst then steady 25-second refreshes", () => {
-  assert.match(swiftSource, /private static let discoveryRefreshInterval: TimeInterval = 25/);
+test("discovery cadence keeps early burst then steady 12-second refreshes", () => {
+  // 25 -> 12 and burst 6 -> 12 cycles, build 433. A follower that lost the director waited a FULL
+  // refresh interval before looking again — that was the 14 s recovery measured when a
+  // backgrounded director returned. Not lower than ~5 s: each refresh tears down and rebuilds both
+  // transports, so past that you disrupt discovery more than you perform it.
+  assert.match(swiftSource, /private static let discoveryRefreshInterval: TimeInterval = 12/);
   assert.match(swiftSource, /private static let earlyRefreshInterval: TimeInterval = 5/);
-  assert.match(swiftSource, /private static let earlyRefreshCycleCount = 6/);
+  assert.match(swiftSource, /private static let earlyRefreshCycleCount = 12/);
   assert.match(swiftSource, /earlyRefreshCyclesRemaining = Self\.earlyRefreshCycleCount/);
   assert.match(swiftSource, /earlyRefreshCyclesRemaining > 0/);
 });
@@ -279,49 +283,42 @@ test("edge case: director sendCurrentPageSnapshot uses reliable delivery", () =>
 // and still sends, so guarding only the send side would leave the rail wide open.
 const appSource = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
 
-test("mesh bundle push is disabled by a build-baked constant, not a remote flag", () => {
-  assert.match(swiftSource, /private static let meshBundlePushEnabled = false/);
-});
+test("peer bundle push is GONE — not disabled, not reachable, no receiver", () => {
+  // Replaces five tests that pinned the guards on a DISABLED rail. Build 434 deleted the subsystem
+  // outright, and the guards went with it. This asserts the stronger property.
+  //
+  // WHY IT IS A SECURITY TEST, not tidiness. From the project's own audit
+  // (docs/audit-findings-raw.md:240): any device in range advertising role=director on the
+  // hard-coded public session code could push an arbitrary web bundle onto every follower iPad —
+  // no auth, no signature, no consent — into a WebView with originWhitelist ['*'] and
+  // allowFileAccess, surviving reboot. It shipped for many builds behind ONE boolean. It was also
+  // the only writer of Documents/WebBundle (the directory the boot resolver prefers forever) and
+  // could push a book BACKWARDS, since its check compared CFBundleVersion rather than the book.
+  //
+  // Comments are stripped first: the tombstone doc-block deliberately NAMES what was removed so a
+  // future reader understands why, and that explanation must not trip its own test.
+  const code = swiftSource
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("///")).join("\n");
 
-test("GUARD 1/4 — handleBundleOffer refuses before any version comparison", () => {
-  const fn = swiftSource.slice(swiftSource.indexOf("private func handleBundleOffer"));
-  const guardIdx = fn.indexOf("guard Self.meshBundlePushEnabled else { return }");
-  const roleIdx = fn.indexOf('guard currentRole == "follower"');
-  assert.ok(guardIdx > -1, "handleBundleOffer is unguarded");
-  assert.ok(guardIdx < roleIdx, "the kill switch must come FIRST, before any other predicate");
-});
+  // If any of these names come back, the mechanism came back with them.
+  for (const gone of [
+    "meshBundlePushEnabled", "bundleTransferInFlight", "bundleTransferGeneration",
+    "sendBundleOffer", "handleBundleOffer", "handleBundleRequest",
+    "packWebBundle", "installReceivedBundle", "beginBundleTransfer",
+    "bundle_offer", "bundle_request",
+  ]) {
+    assert.ok(!code.includes(gone), `peer bundle push is back: ${gone} reappeared in the mesh module`);
+  }
 
-test("GUARD 2/4 — handleBundleRequest refuses to serve a bundle", () => {
-  const fn = swiftSource.slice(swiftSource.indexOf("private func handleBundleRequest"));
-  assert.ok(fn.indexOf("guard Self.meshBundlePushEnabled else { return }") > -1);
-});
-
-test("GUARD 3/4 — didFinishReceivingResource drops the transfer AND deletes the temp file", () => {
-  // The site with no role guard at all, which never inspected resourceName: anything a peer chose
-  // to send landed here and went straight to installReceivedBundle.
-  const fn = swiftSource.slice(swiftSource.indexOf("didFinishReceivingResourceWithName"));
-  const guardIdx = fn.indexOf("guard Self.meshBundlePushEnabled else {");
-  assert.ok(guardIdx > -1, "the receive boundary is unguarded");
-  const body = fn.slice(guardIdx, guardIdx + 400);
-  assert.match(body, /bundleTransferInFlight = false/, "must clear the in-flight flag or transfers wedge forever");
-  assert.match(body, /removeItem\(at: localURL\)/, "must not leave ~27 MB of temp file behind");
-  // Match the CALL, not the identifier — the surrounding comment mentions the function by name.
-  const callIdx = fn.search(/\binstallReceivedBundle\(at:/);
-  assert.ok(callIdx > -1, "expected an installReceivedBundle call site in this delegate");
-  assert.ok(guardIdx < callIdx, "the guard must precede the install call");
-});
-
-test("GUARD 4/4 — installReceivedBundle itself refuses, as defence in depth", () => {
-  const fn = swiftSource.slice(swiftSource.indexOf("private func installReceivedBundle"));
-  const guardIdx = fn.indexOf("guard Self.meshBundlePushEnabled else {");
-  assert.ok(guardIdx > -1, "the last line before Documents/WebBundle is unguarded");
-  // Must precede every filesystem write in the function.
-  const firstWrite = Math.min(
-    ...["createDirectory", "moveItem", "copyItem", "FileHandle"]
-      .map((s) => fn.indexOf(s))
-      .filter((i) => i > -1),
-  );
-  assert.ok(guardIdx < firstWrite, "the guard must come before any filesystem mutation");
+  // The two MCSessionDelegate resource methods must REMAIN (protocol requirements) and must not
+  // keep what a peer sends. An empty didStart plus a delete in didFinish is the correct posture:
+  // before, a stranger's archive was written to the container before anything rejected it.
+  assert.match(swiftSource, /didStartReceivingResourceWithName[\s\S]{0,200}\{\}/,
+    "didStartReceivingResource must exist with an EMPTY body");
+  const fin = swiftSource.slice(swiftSource.indexOf("didFinishReceivingResourceWithName"));
+  assert.match(fin.slice(0, 400), /removeItem\(at: localURL\)/,
+    "didFinishReceivingResource must DELETE anything a peer sent");
 });
 
 test("the JS bundleUpdated handler no longer auto-remounts the WebView", () => {

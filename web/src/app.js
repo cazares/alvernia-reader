@@ -3079,18 +3079,19 @@ const bindReaderEvents = () => {
   // Taking the role goes through the native confirm (request-director → onDirectorCode), which is
   // where the "someone is already directing" warning lives. Stepping down keeps its own confirm so
   // a mid-Mass mistap cannot silently drop the director.
+  // THE PILL NO LONGER TAKES THE ROLE (build 435). It is a readout: a bare dot while following,
+  // amber "Nadie dirige" when nothing is driving, and nothing at all for a director (he is the
+  // SOURCE, not a receiver). The role is taken through ★ Dirigir inside the IR A CANTO modal,
+  // behind the typed-word gate.
+  //
+  // Leaving this handler in place would have been a hole straight THROUGH that gate: a second
+  // ungated path to request-director, on the control most likely to be tapped by accident. Caught
+  // by e2e/directorButton.test.mjs asserting exactly one request site — which is precisely the
+  // drift it exists to prevent.
   if (directorModeBadge) directorModeBadge.addEventListener("click", () => {
     haptic();
-    const st = syncPillState();
-    if (st === "directing") {
-      if (window.confirm("¿Salir del modo director?\n\nDejarás de dirigir y volverás a seguidor.")) {
-        postNativeBridge({ type: "exit-director" });
-      }
-      return;
-    }
-    // "following" and "nobody" both land here; native decides which dialog to show, because only it
-    // knows whether a director is live on the mesh RIGHT NOW.
-    postNativeBridge({ type: "request-director" });
+    if (syncPillState() === "directing") return;   // exiting lives in the modal too
+    openSongJump();   // point at the control instead of acting: discoverable, not destructive
   });
 
   songCancelButton.addEventListener("click", () => { haptic(); closeSongJump(); });

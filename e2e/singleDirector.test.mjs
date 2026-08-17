@@ -148,9 +148,18 @@ test("the pill never appears on the public web", () => {
   assert.match(fn, /NATIVE_FILE_MODE \|\| hasNativeBridge\(\)/, "not gated to the native shell");
 });
 
-test("tapping the pill acts on whatever it is showing", () => {
-  const h = APP.slice(APP.indexOf("if (directorModeBadge) directorModeBadge.addEventListener"));
-  assert.match(h, /syncPillState\(\)/, "the tap ignores the displayed state");
-  assert.match(h, /exit-director/, "a director cannot step down");
-  assert.match(h, /request-director/, "a follower cannot take the role");
+test("the pill REPORTS state; it no longer takes or drops the role", () => {
+  // WHAT CHANGED (build 435). The pill used to be the role control, so this asserted that a tap
+  // acted on the displayed state. Both directions moved into the IR A CANTO modal (★ Dirigir /
+  // ★ Salir de director), behind a typed-word gate — because a permanently visible
+  // become-director control on six choir iPads is a split-brain generator.
+  //
+  // The invariant that MATTERS is stronger now and is enforced in directorButton.test.mjs: exactly
+  // ONE place asks for the role. Leaving this handler acting would have been a second, UNGATED
+  // path on the control most likely to be tapped by accident — a hole straight through the gate.
+  // That is exactly what the one-request-site assertion caught.
+  const h = APP.slice(APP.indexOf("if (directorModeBadge) directorModeBadge.addEventListener"), APP.indexOf("songCancelButton.addEventListener"));
+  assert.ok(!/request-director/.test(h), "the pill can still TAKE the role — that path must live only behind the gate");
+  assert.ok(!/exit-director/.test(h), "the pill can still DROP the role — that path must live only in the modal");
+  assert.match(h, /openSongJump\(\)/, "the pill should point at the control instead of acting");
 });

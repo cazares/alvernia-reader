@@ -26,7 +26,12 @@ const renderPill = (nativeFileMode, hasBridge, role, meshStatus = "", lastPageAg
   )(nativeFileMode, () => hasBridge,
     { nativeSyncRole: role },
     badge,
-    { documentElement: { dataset: {} }, getElementById: (id) => (id === "sync-pill-title" ? titleEl : actionEl) },
+    { documentElement: { dataset: {} }, getElementById: (id) => {
+        if (id === "sync-pill-title") return titleEl;
+        if (id === "role-toggle") return { classList: { toggle() {} } };
+        if (id === "role-toggle-label") return { textContent: "" };
+        return actionEl;
+      } },
     { now: () => lastPageAgoMs });
   return { hidden, title: titleEl.textContent, action: actionEl.textContent };
 };
@@ -50,16 +55,22 @@ const states = () => {
   return out;
 };
 
-test("all three states are present and each carries an action", () => {
+test("all three states are present; the pill reports STATE, it no longer takes the role", () => {
+  // WHAT CHANGED (build 435). The pill used to BE the role control, so every state had to carry an
+  // action or it looked inert. The role now lives behind the IR A CANTO modal (★ Dirigir), because
+  // a permanently visible become-director button on six choir iPads is a split-brain generator and
+  // the choir is non-technical. So the pill is now a readout, and a follower is a bare dot.
+  //
+  // "SIGUIENDO" was removed on purpose: it was a CLAIM, and it lied — two iPads sat stranded on
+  // song 59 for minutes still reading SIGUIENDO. A dot is just a light.
   const s = states();
   assert.deepEqual(Object.keys(s).sort(), ["directing", "following", "nobody"]);
   for (const [name, v] of Object.entries(s)) {
     assert.ok(v.title.length > 0, `${name} has no title`);
-    // Following used to render a blank action, which made the pill look inert — so nobody would
-    // learn the seat can be taken without being told out loud, and the moment that matters is the
-    // one where the person who knows is not in the room.
-    assert.ok(v.action.length > 0, `${name} renders no action, so the pill looks unclickable`);
   }
+  // The one state that still earns WORDS is "nobody is driving" — the moment a singer must notice.
+  assert.match(s.nobody.title, /nadie/i, "the no-director state must still say so in words");
+  assert.equal(s.following.action, "", "following must be a bare dot — no action, no claim");
 });
 
 test("no state promises an approval that does not exist", () => {
@@ -91,7 +102,35 @@ test("no label promises a dialog the app may not show", () => {
   }
 });
 
-test("both ways of taking the role name the same outcome", () => {
+test("the role control names the role, and is not a bare verb", () => {
+  // These two concerns followed the control to its new home rather than being deleted: an earlier
+  // label "Tomar" failed because it was a bare verb ("take WHAT?"), and both paths to directing must
+  // describe the same destination. The control is now #role-toggle inside the IR A CANTO modal.
+  const HTML = fs.readFileSync("web/src/index.html", "utf8");
+  assert.match(HTML, /id="role-toggle"/, "the role control is gone");
+  // Sentence case, not caps: all-caps is fine for a one-time alarm, distracting on a label you live
+  // with. The two labels are set in app.js.
+  assert.match(APP, /"Salir de director"\s*:\s*"Dirigir"/,
+    "the role control must read Dirigir / Salir de director");
+  // Naming the ROLE is what "Tomar" lacked — both labels do.
+  for (const label of ["Dirigir", "Salir de director"]) {
+    assert.ok(/dirig|director/i.test(label), `${label} does not name the role`);
+  }
+});
+
+test("taking the role is gated on a typed word, stepping down is not", () => {
+  // Asymmetric friction, matched to consequence. Taking the role changes the page for EVERY device
+  // in the loft; stepping down is recoverable. The word is "braulio", not a real director code:
+  // everyone watches Braulio type his code, so secrecy was never the threat model — carelessness is.
+  const HTML = fs.readFileSync("web/src/index.html", "utf8");
+  assert.match(HTML, /id="role-gate"/, "the take-the-role gate is gone");
+  assert.match(HTML, /ESTO CAMBIA LA P/, "the gate no longer warns that it changes everyone's page");
+  assert.match(APP, /ROLE_GATE_WORD = "braulio"/, "the typed-word gate is gone");
+  assert.match(APP, /roleGateConfirm\.disabled =/, "Confirmar must stay disabled until the word matches");
+  assert.match(APP, /¿Salir de director\?/, "stepping down must still confirm, plainly");
+});
+
+test("LEGACY (pre-435): both ways of taking the role named the same outcome", { skip: "the pill no longer takes the role — see the two tests above" }, () => {
   // Following and nobody differ in SITUATION, not in result: either way you end up directing. The
   // title (SIGUIENDO vs NADIE DIRIGE) and the tint carry the difference; the action states the
   // destination, which never varies.
@@ -103,7 +142,7 @@ test("both ways of taking the role name the same outcome", () => {
   assert.match(plain(s.nobody.action), /director/i, "the action does not name the role being taken");
 });
 
-test("no label is a bare verb with no object", () => {
+test("LEGACY (pre-435): no pill label is a bare verb", { skip: "the pill no longer carries an action — see 'the role control names the role'" }, () => {
   // The specific failure being guarded: "Tomar" reads as "take" with nothing taken.
   for (const [name, v] of Object.entries(states())) {
     const plain = v.action.replace(/[✕▶]\s*/, "").trim();
