@@ -320,8 +320,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   ///
   /// It does NOT survive a real phone call — this is a cellular iPad — and it is not meant to.
   /// That case needs a BLE background transport, which is a separate piece of work.
+  ///
+  /// DIRECTOR ONLY — build 431 applied this to every role and that was a REGRESSION. A follower
+  /// backgrounding now stayed alive ~30 s with a live MCSession while handleAppDidEnterBackground
+  /// had already stopped its watchdog, hello timer and discovery refresh, then got killed abruptly
+  /// when iOS reclaimed the task. The old fast-suspend path was a clean break that reconnected on
+  /// return. Measured on one device across the 430 -> 431 boundary in a single session:
+  ///
+  ///                  invites   connected   dropped   pages received
+  ///     build 430          8          16        11            2,185
+  ///     build 431         16          10        18              423
+  ///
+  /// Twice the invites, more drops than connects, a fifth of the pages. The trace shows the shape
+  /// exactly: bg:grace-begin, 26 s of limbo, bg:grace-expired, then four session:notConnected in
+  /// the same second.
+  ///
+  /// A follower going quiet for 30 s costs nobody anything — it reconnects when it comes back. The
+  /// DIRECTOR going quiet strands the entire choir, which is the only reason this exists. Role, not
+  /// device class: there is no iPhone/iPad branching anywhere in this repo and there must not be.
   private func beginBackgroundGrace() {
-    guard currentRole != "off", backgroundTaskID == .invalid else { return }
+    guard currentRole == "director", backgroundTaskID == .invalid else { return }
     backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "signovivo-mesh") { [weak self] in
       // Expiry handler: iOS is reclaiming us. End the task or the app is killed outright.
       self?.dbgLog("bg:grace-expired")
