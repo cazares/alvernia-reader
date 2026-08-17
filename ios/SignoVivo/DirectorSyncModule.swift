@@ -108,6 +108,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var thermalState: ProcessInfo.ThermalState = .nominal
   /// When backgrounded, avoid churny discovery timers (which can exacerbate memory/CPU pressure).
   private var appIsActive: Bool = true
+  /// Keeps the process alive briefly after backgrounding so the advertiser survives a glance at a
+  /// notification. See beginBackgroundGrace.
+  private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
   // MARK: - Web-bundle distribution
 
@@ -301,8 +304,41 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     thermalState = ProcessInfo.processInfo.thermalState
   }
 
+  /// THE DIRECTOR GOING DARK IS THE WHOLE FAILURE. iOS suspends a backgrounded app and
+  /// MCNearbyServiceAdvertiser dies with it, so the director simply stops existing as far as every
+  /// follower is concerned — there is no client-side fix, because the peer they are hunting for is
+  /// genuinely not there. Measured on five devices 2026-08-17: the director was backgrounded for
+  /// ~2.5 minutes and a follower logged ~150 `found` events in that window, every one of them for a
+  /// FELLOW FOLLOWER and never once for the director. It reconnected 14 s after the director
+  /// returned. The followers were behaving perfectly the entire time.
+  ///
+  /// Apple provides no background mode for MultipeerConnectivity, so "advertise forever" is not
+  /// available. What IS available is ~30 seconds of continued execution via a background task,
+  /// which covers the cases that actually happen to a director mid-Mass: glancing at a
+  /// notification, a Control Center pull, a brief app switch. Inside that window the process keeps
+  /// running, so the advertiser keeps advertising and no follower ever notices.
+  ///
+  /// It does NOT survive a real phone call — this is a cellular iPad — and it is not meant to.
+  /// That case needs a BLE background transport, which is a separate piece of work.
+  private func beginBackgroundGrace() {
+    guard currentRole != "off", backgroundTaskID == .invalid else { return }
+    backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "signovivo-mesh") { [weak self] in
+      // Expiry handler: iOS is reclaiming us. End the task or the app is killed outright.
+      self?.dbgLog("bg:grace-expired")
+      self?.endBackgroundGrace()
+    }
+    dbgLog("bg:grace-begin", ["role": currentRole])
+  }
+
+  private func endBackgroundGrace() {
+    guard backgroundTaskID != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(backgroundTaskID)
+    backgroundTaskID = .invalid
+  }
+
   @objc private func handleAppDidEnterBackground() {
     appIsActive = false
+    beginBackgroundGrace()
     // Keep existing MCSession connections as-is, but stop any periodic churn.
     discoveryRefreshTimer?.invalidate()
     discoveryRefreshTimer = nil
@@ -313,6 +349,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   @objc private func handleAppDidBecomeActive() {
     appIsActive = true
+    endBackgroundGrace()
     guard currentRole != "off" else { return }
 
     // Fix: the advertiser/browser silently stop retrying after 5 consecutive launch failures
@@ -346,6 +383,22 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         startSelfDirectedTimer()
       }
     } else if currentRole == "director" {
+      // RE-ADVERTISE IMMEDIATELY WHEN WE CAME BACK TO AN EMPTY ROOM. If the suspend outlasted the
+      // background grace, iOS tore our advertiser down and followers have been searching for a peer
+      // that no longer exists. Waiting up to discoveryRefreshInterval (25 s) for the next refresh
+      // tick to rebuild it is the difference measured on 2026-08-17 between a 14 s recovery and a
+      // ~1 s one, with the whole choir stranded for the gap.
+      //
+      // ONLY when there is nobody left. Tearing down a LIVE advertiser drops it out from under
+      // already-connected followers and aborts any in-flight invite — that is the outage the
+      // STABILITY PROTECTION block in scheduleNextDiscoveryRefresh exists to prevent, and this must
+      // not reintroduce it. With peers still attached the advertiser is demonstrably working, so
+      // there is nothing to fix.
+      if allConnectedPeers.isEmpty {
+        dbgLog("advertiser:foreground-restart")
+        advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
+        startAdvertising()
+      }
       startDiscoveryRefreshTimer()
       // After an iOS suspend, MPC may have silently dropped reliable sends to existing followers,
       // leaving them stuck on a stale page (half-dead mesh). Proactively re-push the current
