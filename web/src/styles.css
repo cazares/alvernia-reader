@@ -2186,12 +2186,20 @@ button:disabled {
    a word they have learned to ignore. Directing shows no dot at all: a director is the SOURCE, not
    a receiver, so there is nothing to indicate. */
 html[data-role="follower"] .director-mode-badge.is-following {
-  width: 0.75rem; height: 0.75rem; min-width: 0; padding: 0; gap: 0;
+  /* 0.75rem -> 0.525rem (30% smaller). It is a status light, not a control. */
+  width: 0.525rem; height: 0.525rem; min-width: 0; padding: 0; gap: 0;
   border-radius: 50%; background: #22c55e; overflow: hidden;
-  /* margin-top, NOT a top: calc(). e2e/fabLayout.test.mjs derives the pill's horizontal offset by
-     finding the calc() in this selector's rule, so a vertical calc() here reads as a LEFT offset
-     and reports a phantom overlap with the ⟳ fab. Centres the 0.75rem dot against the 4rem fab. */
-  margin-top: 1.6rem;
+  /* ON the ⟳ fab, not beside it (owner, 2026-08-17). The dot belongs TO the resync button — it says
+     "this button's link is alive" — so it now sits in that button's upper-left corner like a badge
+     instead of floating in its own slot 5.15rem to the right.
+     The overlap is DELIBERATE, and e2e/fabLayout.test.mjs pins it as such. That test guards the
+     is-nobody PILL, which carries text and must still clear the fab; it reads the max offset across
+     matching rules, so the 5.15rem rule below keeps satisfying it. z-index 46 vs the fab's 45 keeps
+     the dot on top.
+     margin-top, NOT a top: calc() — that test derives horizontal offsets from calc() in this
+     selector's rules, so a vertical calc() here would read as a LEFT offset. */
+  left: calc(max(0.55rem, env(safe-area-inset-left, 0px)) + 0.42rem);
+  margin-top: 0.42rem;
   animation: sv-follow-breathe 2.4s ease-in-out infinite;
 }
 html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-title,
@@ -2214,13 +2222,23 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
   z-index: 45;
   width: 4rem;
   height: 4rem;
+  /* SQUARE, GUARANTEED (owner, 2026-08-17). width/height alone are not enough: any padding or
+     border added later inflates one axis under the default content-box, and a fab in a flex context
+     can be stretched. border-box + aspect-ratio + no flex growth pin it to a true square whatever
+     else changes. */
+  box-sizing: border-box;
+  padding: 0;
+  aspect-ratio: 1 / 1;
+  flex: 0 0 auto;
   border-radius: 14px;
   border: 0;
   background: rgba(26, 26, 46, 0.72);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   color: #fff;
-  font-size: 2.85rem;
+  /* 2.85 -> 3.2rem: the glyph was leaving too much dead space inside the 4rem box, so the control
+     read as smaller than it is. */
+  font-size: 3.2rem;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -2238,7 +2256,7 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
    their boxes, so they read as one smudged control on a Pro iPad in portrait. 5.1rem gives a clear
    gap without pushing ♪ into the title. */
 html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 5.1rem); }
-.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 3.05rem; }
+.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 3.45rem; }  /* 3.05 -> 3.45: fill the box */
 /* ── 123→ song-index fab ─────────────────────────────────────────────────────
    ♪ was ambiguous: it says "audio" in an app that plays none, while the button opens a NUMBERED
    index. Digits say what kind of thing; the arrow makes it a verb, not a label. Straight arrow —
@@ -2246,12 +2264,16 @@ html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-ar
    MUST sit after the shared .song-jump-fab/.search-fab/... block: same specificity, so source order
    decides, and the shared 2.85rem was winning and overflowing the 4rem box by 27 px. */
 .song-jump-fab {
-  /* Three glyphs fill the 4rem box edge to edge, so a size that LOOKS right for a single ♪ reads
-     as shouting here. ~0.8rem sits at the same visual weight as the old note. */
-  font-size: 0.82rem; font-weight: 700; letter-spacing: 0.01em;
-  gap: 0.08rem; padding: 0; line-height: 1;
+  /* 25% BIGGER, button and contents together (owner, 2026-08-17). "123→" is the control people
+     reach for constantly during Mass, and at parity with the other fabs it read as the smallest
+     thing on screen because three glyphs share the space one glyph gets elsewhere.
+     Box 4 -> 5rem, digits 0.82 -> 1.03rem, arrow 0.78 -> 0.98rem: everything scaled by the same
+     1.25 so the proportions are unchanged and only the whole control grows. */
+  width: 5rem; height: 5rem;
+  font-size: 1.03rem; font-weight: 700; letter-spacing: 0.01em;
+  gap: 0.1rem; padding: 0; line-height: 1;
 }
-.song-jump-fab-arrow { font-size: 0.78rem; font-weight: 400; opacity: 0.85; }
+.song-jump-fab-arrow { font-size: 0.98rem; font-weight: 400; opacity: 0.85; }
 .resync-fab.is-spinning { flex-direction: column; justify-content: center; padding-bottom: 4px; }  /* ⟳ ~35% bigger */
 /* Fullscreen fab — bottom-right (override the base top); SVG icon sized to match the glyphs. */
 .fullscreen-fab {
@@ -2425,7 +2447,12 @@ body.sv-drawer-open .search-fab { display: none !important; }
 .song-jump-card .numberpad-key-back {
   background: #E5E7EB;
   border: 1px solid rgba(0, 0, 0, 0.06);
-  font-size: 28px;
+  /* 28 -> 46px (owner, 2026-08-17): the ⌫ glyph is meant to FILL its 78px key the way the digits
+     do, minus a sensible margin. At 28px it sat as a small mark in a large empty button and read as
+     disabled next to the 33px digits — and it is the key people hit fastest, mid-Mass, without
+     looking. */
+  font-size: 46px;
+  line-height: 1;
 }
 .song-jump-card .numberpad-key-back:active { background: #D1D5DB; }
 /* Empty bottom-left cell */
@@ -2438,6 +2465,30 @@ body.sv-drawer-open .search-fab { display: none !important; }
   gap: 10px;
   margin-top: 8px;
 }
+/* Cancelar + Abrir Canto share ONE row (owner, 2026-08-17); Dirigir keeps its own full-width row
+   above, unchanged. Stacked, the three buttons pushed the primary action toward the fold on a 10.2"
+   portrait iPad — the same problem that moved the old director control out of this card.
+   align-items: stretch equalises their heights without touching either button's own padding or
+   font size, so each keeps the height it already had. Cancel sits left, primary right. */
+.song-jump-actions-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.song-jump-actions-row > .song-jump-cancel,
+.song-jump-actions-row > .song-jump-go {
+  flex: 1 1 0;
+  min-width: 0;
+  /* ONE LINE EACH. At full width "♪ Abrir Canto ♪" fitted on one line; at half width it wrapped to
+     two and drove the row to 119 px, when the owner asked for the height these buttons already had.
+     Sized down just enough to fit rather than padded down, so the buttons keep their generous tap
+     target — this is a control people hit mid-Mass without looking. Measured back to ~82 px, which
+     is where the taller of the two (Cancelar) already sat.
+     The primary still dominates by FILL, not by type size: solid blue against flat grey. */
+  white-space: nowrap;
+}
+.song-jump-actions-row > .song-jump-go { font-size: 21px; }
+.song-jump-actions-row > .song-jump-cancel { font-size: 23px; }
 .song-jump-go {
   padding: 24px 16px;
   border: 0;

@@ -155,8 +155,13 @@
               <span class="song-jump-role-star" aria-hidden="true">&#9733;</span>
               <span id="role-toggle-label">Dirigir</span>
             </button>
-            <button class="song-jump-go" id="go-button" type="button" aria-label="Abrir canto">♪ Abrir Canto ♪</button>
-            <button class="song-jump-cancel" id="song-cancel" type="button">Cancelar</button>
+            <!-- Cancelar + Abrir Canto share one row (owner, 2026-08-17). Cancel LEFT, primary
+                 RIGHT — the platform convention, and it puts the destructive-ish option away from
+                 the thumb that is reaching for the loud one. Dirigir keeps its own row above. -->
+            <div class="song-jump-actions-row">
+              <button class="song-jump-cancel" id="song-cancel" type="button">Cancelar</button>
+              <button class="song-jump-go" id="go-button" type="button" aria-label="Abrir canto">♪ Abrir Canto ♪</button>
+            </div>
           </div>
 
           <!-- "Dirigir el coro" used to live here. It moved to the sync pill (top-left), which shows
