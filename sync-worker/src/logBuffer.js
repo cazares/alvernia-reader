@@ -106,3 +106,43 @@ export const foldLogEntries = (existing, incoming, rx) => {
   }
   return capped;
 };
+
+// ── Fleet telemetry throttle ───────────────────────────────────────────────────
+//
+// THE KILL SWITCH THAT DID NOT EXIST. On 2026-08-17 this account tripped Cloudflare's free-plan
+// Workers cap (100,000 requests/day): it served 99,428 requests, of which signovivo-sync was
+// 87,258 (87.8%), and BOTH signovivo.com and this Worker returned 429/1027 for hours. Every other
+// site on the account combined for ~12,000. Devices POSTed one request per mesh event with no
+// ceiling, and there was no way to stop them short of shipping a build — so it ran until UTC
+// midnight.
+//
+// This value is echoed on every POST /log response and adopted by the client on its next flush,
+// which makes `LOG_INTERVAL_MS` + `wrangler deploy` a ~20 second fleet-wide throttle.
+//
+// It lives here in plain JS, beside the ring buffer, for the same reason the buffer does: it can
+// then be covered by node --test. A kill switch nobody tested is not a kill switch.
+
+/** Default flush cadence. 15 s measured (scripts/telemetry-budget-sim.mjs) as a 4.8x request cut
+ *  with 100% of rows still delivered — 87,258/day -> ~18,000/day. */
+export const DEFAULT_LOG_INTERVAL_MS = 15000;
+
+/**
+ * Resolve the flush interval (ms) to hand back to devices.
+ *
+ * "0" is the kill switch and MUST survive as 0, so this cannot use `||` or any other
+ * falsy-coalescing shortcut — that bug would make the switch silently unusable.
+ *
+ * Anything unparseable falls back to the default rather than to 0. The failure mode leans LOUD on
+ * purpose: a typo that silences the whole fleet reads exactly like "the mesh is healthy", and
+ * telemetry going quiet is how mesh bugs went unnoticed from build 381 through 429.
+ *
+ * @param {{LOG_INTERVAL_MS?: string}} env
+ * @returns {number} milliseconds; 0 means "stop sending"
+ */
+export const logIntervalMs = (env) => {
+  const raw = String(env?.LOG_INTERVAL_MS ?? "").trim();
+  if (raw === "") return DEFAULT_LOG_INTERVAL_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_LOG_INTERVAL_MS;
+  return Math.floor(n);
+};

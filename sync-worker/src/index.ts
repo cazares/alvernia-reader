@@ -18,7 +18,7 @@ import { decideBookUpdate } from "./bookArming.js";
 // Diagnostic ring-buffer sizing + run-length folding. Plain JS for the same reason as above:
 // this is the instrument every mesh diagnosis depends on, so it gets real tests.
 // @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
-import { foldLogEntries, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
+import { foldLogEntries, logIntervalMs, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
 
 export interface Env {
   SYNC_ROOM: DurableObjectNamespace<SyncRoom>;
@@ -30,6 +30,20 @@ export interface Env {
    *  via `wrangler secret put FLEET_DASHBOARD_KEY`. This one STAYS: it guards a page listing the
    *  parish's devices and phone numbers, which is a different thing from a page number. */
   FLEET_DASHBOARD_KEY?: string;
+
+  /** How often a device should FLUSH its batched telemetry, in ms. Echoed on every POST /log
+   *  response so the fleet can be throttled — or silenced with "0" — WITHOUT a TestFlight build.
+   *
+   *  THE KILL SWITCH THAT DID NOT EXIST. On 2026-08-17 this account tripped Cloudflare's
+   *  free-plan Workers cap (100,000 requests/day): it served 99,428 requests, of which
+   *  signovivo-sync was 87,258 (87.8%), and BOTH signovivo.com and this Worker returned
+   *  429/1027 for hours. Every other site on the account combined for ~12,000. There was no
+   *  way to stop the traffic short of shipping a build, so it simply ran until UTC midnight.
+   *
+   *  Default 15000. Sized by replaying that day's captures through
+   *  scripts/telemetry-budget-sim.mjs: 15 s batching is a 4.8x cut with 100% of rows still
+   *  delivered (87,258 -> ~18,000/day). Raising it cuts further; "0" stops the fleet dead. */
+  LOG_INTERVAL_MS?: string;
 
   // ── Songbook OTA arming (docs/choir-pdf-distribution-plan.md §5.3) ─────────
   // SHIPPED DORMANT: with BOOK_UPDATE_VERSION empty the `bookUpdate` field never appears in any
@@ -424,6 +438,7 @@ function json(data: unknown, status: number, cors: Record<string, string>): Resp
   });
 }
 
+
 // There is no transmitter/director code any more. TRANSMITTER_CODES and its lookup were deleted
 // on 2026-08-06 along with the /publish gate that used them — see the publish route below. The
 // secret can be removed with `npx wrangler secret delete TRANSMITTER_CODES`; leaving it set is
@@ -659,8 +674,18 @@ export default {
                 ? [body]
                 : [];
           const result = await dbg.appendLog(entries, request.headers.get("CF-Connecting-IP") || "");
-          if (result.rateLimited) return json({ ok: false, error: "rate_limited" }, 429, cors);
-          return json(result, 200, cors);
+          // Ride the throttle policy back on the very requests being throttled — no new endpoint,
+          // no client plumbing, and it reaches a device the moment it next speaks. It goes on the
+          // rate_limited path TOO: a device being refused is exactly the one that must slow down.
+          //
+          // NOTE the asymmetry that makes this necessary: refusing a request inside the Worker does
+          // NOT save Cloudflare quota, because the Worker already ran to refuse it. The rate limiter
+          // below protects the ring BUFFER; only the client backing off protects the ACCOUNT.
+          const policy = { logIntervalMs: logIntervalMs(env) };
+          if (result.rateLimited) {
+            return json({ ok: false, error: "rate_limited", ...policy }, 429, cors);
+          }
+          return json({ ...result, ...policy }, 200, cors);
         }
         // P6-LOG: GET (read the whole diagnostic buffer) and DELETE (wipe it) were UNGATED — the
         // buffer holds sync breadcrumbs (opaque device ids, roles, page numbers) and must not be

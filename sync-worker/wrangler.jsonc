@@ -19,6 +19,22 @@
     // "ALLOWED_ORIGINS": "https://signovivo.com"
     "ALLOWED_ORIGINS": "*",
 
+    // ── Telemetry throttle — THE KILL SWITCH (added after the 2026-08-17 outage) ──
+    //
+    // How often a device flushes its batched dbgLog breadcrumbs, in ms. Echoed on every
+    // POST /log response, so changing it here + `npx wrangler deploy` retunes the whole
+    // fleet in ~20 seconds with no TestFlight round-trip. "0" stops telemetry dead.
+    //
+    // That day the account served 99,428 requests against Cloudflare's free-plan cap of
+    // 100,000/day; signovivo-sync alone was 87,258 of them and production returned
+    // 429/1027 for hours. There was NO way to turn the traffic off. Now there is.
+    //
+    // 15000 measured (scripts/telemetry-budget-sim.mjs) as a 4.8x cut with 100% of rows
+    // still delivered. Sampling was rejected: it saves ~1% more and costs two thirds of
+    // the evidence, because the request count is set by how many WINDOWS contain an
+    // event, not how many events.
+    "LOG_INTERVAL_MS": "15000",
+
     // ── Songbook OTA arming — SHIPPED DORMANT, and it must stay that way until rehearsed ──
     //
     // With BOOK_UPDATE_VERSION empty, the `bookUpdate` field never appears in ANY /fleet/checkin
