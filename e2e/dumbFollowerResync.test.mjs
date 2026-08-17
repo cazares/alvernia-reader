@@ -106,3 +106,35 @@ test("startDirectorHeartbeat is idempotent, so re-arming cannot leak an interval
   const firstStatement = body.slice(0, body.indexOf("setInterval"));
   assert.match(firstStatement, /stopDirectorHeartbeat\(\)/);
 });
+
+// ── The diagnostics door ───────────────────────────────────────────────────────
+//
+// The build badge is the ONLY way to open this device's crumb log, and the tap never worked.
+// styles.css sets `pointer-events: none` on .build-badge so a label floating over the music can
+// never swallow a page turn — right for a label, fatal for the button app.js turns it into in the
+// native shell. cursor, role, tabindex and the click listener were all applied to an element that
+// could not receive a click, on every device, since it shipped.
+//
+// Reported 2026-08-17 while trying to read the role off an iPhone that would not sync: there was no
+// way to get the answer out of the device. Same class as #342 removing the "¿Algo anda mal?"
+// drawer — six devices each holding a written account of what they did, and no door to open it.
+test("the build badge can actually be tapped in the native shell", () => {
+  const css = fs.readFileSync(path.join(APP_ROOT, "web", "src", "styles.css"), "utf8");
+  // The stylesheet rule stays: on signovivo.com the badge must remain a pure, non-blocking label.
+  assert.match(css, /\.build-badge\s*\{[^}]*pointer-events:\s*none/s);
+  // ...so the shell branch MUST re-enable it, or the listener below it is decoration.
+  // Anchor on the badge block itself. "hasNativeBridge() || NATIVE_FILE_MODE" also occurs ~29k
+  // chars earlier for an unrelated reason, and anchoring there made this assertion read a window
+  // that never contained the badge code at all — it would have failed no matter what was written.
+  const shellBranch = web.slice(web.indexOf("const buildBadge = document.getElementById"));
+  assert.match(
+    shellBranch.slice(0, 6000),
+    /buildBadge\.style\.pointerEvents\s*=\s*"auto"/,
+    "badge has a click listener but pointer-events:none — the diagnostics viewer is unreachable",
+  );
+  assert.match(
+    shellBranch.slice(0, 6000),
+    /buildBadge\.addEventListener\("click"/,
+    "the listener itself must survive",
+  );
+});
