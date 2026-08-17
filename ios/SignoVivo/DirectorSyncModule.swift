@@ -36,12 +36,24 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let handshakeGeneration = "2"
   private static let maxSessionCodeLength = 12
   /// Normal (steady-state) discovery refresh interval.
-  private static let discoveryRefreshInterval: TimeInterval = 25
+  // 25 -> 12. A follower that lost the director waited up to a FULL refresh interval before it even
+  // looked again; that is the 14 s recovery measured on 2026-08-17 when a backgrounded director
+  // returned. Halving it halves the blind window. Not lower: each refresh tears down and rebuilds
+  // both transports, so past ~5 s you disrupt discovery more than you perform it.
+  private static let discoveryRefreshInterval: TimeInterval = 12
   /// Fast refresh interval used for the first N cycles after starting, so followers find
   /// a late-arriving director within a few seconds rather than up to 25 s.
   private static let earlyRefreshInterval: TimeInterval = 5
-  private static let earlyRefreshCycleCount = 6           // 6 × 5 s = 30 s burst window
-  private static let inviteTimeout: TimeInterval = 30
+  private static let earlyRefreshCycleCount = 12          // 12 × 5 s = 60 s burst window (was 6/30 s)
+  // 30 -> 8. THE SINGLE BIGGEST SOURCE OF MEASURED STALENESS. Every failed handshake sat in a
+  // penalty box for the full timeout before the follower could even retry:
+  //     11:07:53  invite:send
+  //     11:08:24  session:notConnected   <- 31 s gone
+  // Four consecutive failures cost ~120 s while the device sat on the wrong song. A HEALTHY
+  // handshake completes in ~1 s (measured on three iPads), so 8 s is 8x headroom and caps the same
+  // four failures at ~32 s. Not lower: a too-short timeout abandons handshakes that would have
+  // completed on a marginal link, which trades staleness for churn.
+  private static let inviteTimeout: TimeInterval = 8
   private static let followerRetryDelay: TimeInterval = 2
   private static let followerHelloInterval: TimeInterval = 8
   /// Fast half-open watchdog. The director re-sends the current page every ~1s (mesh heartbeat), so
@@ -51,6 +63,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// force an immediate reconnect. 3s = ~3 missed heartbeats: tight, but tolerant of 1-2 dropped
   /// packets so a momentary blip doesn't churn the connection.
   private static let followerStaleReconnectSeconds: TimeInterval = 3.0
+  /// On foreground a follower must PROVE its session is alive rather than assume it. See the note
+  /// in handleAppDidBecomeActive.
+  private static let foregroundVerifySeconds: TimeInterval = 2.0
   private static let followerWatchdogInterval: TimeInterval = 1.0
   /// One-shot snapshot-recovery probe delay. MPC can drop the first reliable send right at
   /// .connected, so if the director's proactive snapshot AND the follower's first hello both
@@ -111,6 +126,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// Keeps the process alive briefly after backgrounding so the advertiser survives a glance at a
   /// notification. See beginBackgroundGrace.
   private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+  /// MEASUREMENT PROBE (build 433). A connectionless BLE page channel running ALONGSIDE the mesh,
+  /// observing only — it renders nothing and changes no behaviour. It exists to answer the one
+  /// question every proposed rewrite depends on: how fast does a page reach a follower when there
+  /// is no handshake to fail? Pair `ble:page-send` with `ble:page-recv` in stress-analyze.
+  private let bleBeacon = BlePageBeacon()
+  private var bleSeq = 0
 
   // MARK: - Web-bundle distribution
 
@@ -370,6 +391,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     endBackgroundGrace()
     guard currentRole != "off" else { return }
 
+    // BLE recovers on foreground far more cleanly than the mesh does, because there is no session
+    // to rebuild — the director simply advertises again and the follower simply scans again, and
+    // the CURRENT page is in the packet. No invite, no handshake, nothing that can half-succeed.
+    bleBeacon.resumeOnForeground()
+
     // Fix: the advertiser/browser silently stop retrying after 5 consecutive launch failures
     // (e.g. Local Network permission was denied, then granted in Settings). Give them ONE more
     // shot on foreground — the user may have just fixed permissions. Reset the counter so the
@@ -389,11 +415,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       if connectedDirectorPeer != nil {
         pauseDiscoveryRefreshWhileConnected()
         startFollowerHelloTimer()
-        // Fresh grace window: no heartbeats arrive while backgrounded, so reset the staleness clock
-        // before re-arming the watchdog (else it would fire instantly on foreground). The hello just
-        // sent + the director's foreground re-push will keep it fresh if the link is still alive; if
-        // it's dead, the watchdog reconnects ~3s later.
+        // VERIFY, DO NOT ASSUME. A full grace reset trusts `connectedDirectorPeer` on a session
+        // that may have died while we slept — and a follower that wakes holding a DEAD session has
+        // also just cancelled its own discovery (pauseDiscoveryRefreshWhileConnected above), so
+        // nothing is looking for anyone. That is the shape of the two iPads found stuck on song 59
+        // on 2026-08-17, still reading SIGUIENDO.
+        //
+        // Instead of a full 3 s grace, leave only foregroundVerifySeconds of it. A live director's
+        // 1 Hz heartbeat refreshes this within one beat, so a healthy link is unaffected; a dead one
+        // trips the watchdog ~2 s after wake, which clears the stale peer and resumes discovery.
+        // Bounded staleness on wake instead of unbounded.
         lastFollowerPageReceivedAt = Date().timeIntervalSince1970
+          - max(0, Self.followerStaleReconnectSeconds - Self.foregroundVerifySeconds)
         startFollowerWatchdog()
         sendFollowerHelloIfNeeded()
       } else {
@@ -491,6 +524,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.resetTransport(emitState: false)
       self.currentRole = "follower"
       self.currentSessionCode = normalizedSessionCode
+      // BLE PROBE — scan while following. Observes and logs only; the page is NOT applied to the
+      // UI, so a bad reading cannot move anybody off the director's page.
+      self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
+      self.bleBeacon.startScanning()
       self.configureTransport()
       self.startAdvertising()
       self.startBrowsing()
@@ -694,6 +731,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  /// What ⟳ SHOULD do. `refreshNearbyDiscovery` restarts the transports but never clears
+  /// `connectedDirectorPeer`, so against a wedged session it is a no-op — which is exactly what
+  /// Miguel saw on 2026-08-17: the spinner animated and the iPad stayed on song 59, because
+  /// scheduleNextDiscoveryRefresh skips re-browsing entirely while that field is non-nil. A human
+  /// tapping ⟳ has already decided they are not synced; honour that and tear the session down.
+  @objc(forceFollowerReconnectNow:rejecter:)
+  func forceFollowerReconnectNow(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole == "follower" else { resolve(nil); return }
+      self.dbgLog("resync:force-reconnect", [:])
+      self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+      self.forceFollowerReconnect(staleFor: 0)
+      resolve(nil)
+    }
+  }
+
   @objc(requestCurrentSnapshot:rejecter:)
   func requestCurrentSnapshot(
     _ resolve: @escaping RCTPromiseResolveBlock,
@@ -754,6 +810,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.currentTotalPages = max(0, totalPages.intValue)
       self.currentMode = mode
       self.currentBookId = bookId
+      // BLE PROBE — published before the connected-peers guard on purpose. The mesh gives up here
+      // when nobody is attached; a beacon does not care whether anyone is listening, which is
+      // exactly the property being measured.
+      self.bleSeq += 1
+      self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
+      self.bleBeacon.publish(page: self.currentPageNumber ?? page.intValue, seq: self.bleSeq)
       let connected = self.allConnectedPeers
       guard !connected.isEmpty else {
         self.emitState(status: "waiting-followers")
