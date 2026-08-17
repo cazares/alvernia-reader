@@ -10,25 +10,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let eventName = "DirectorSyncEvent"
   private static let protocolVersion = 1
 
-  /// PEER BUNDLE PUSH IS RETIRED. Build-baked, deliberately not remotely toggleable.
+  /// PEER BUNDLE PUSH IS GONE — removed entirely in build 434, not merely disabled.
   ///
-  /// This rail let a director stream its own `WebBundle` to a follower over Multipeer. Three
-  /// reasons it is off:
+  /// This rail let a director stream its own `WebBundle` to a follower over Multipeer. It shipped
+  /// behind `meshBundlePushEnabled = false` for many builds, which meant a single boolean was the
+  /// only thing standing between a stranger in range and persistent code execution on the choir's
+  /// iPads. From the project's own audit:
   ///
-  ///  1. It is the ONLY writer of `Documents/WebBundle`, and therefore the sole source of the D1
-  ///     stale-bundle trap — a device that took one push rendered that songbook forever while
-  ///     reporting the current build number. The boot resolver now refuses those copies, but the
-  ///     honest fix is to stop creating them.
-  ///  2. It can push a book BACKWARDS. The offer compares CFBundleVersion — the shell's number —
-  ///     which says nothing about which book either device holds, so a director on an older
-  ///     songbook and a newer shell overwrites a follower's newer book.
-  ///  3. Its job is being taken over by an HTTPS downloader that verifies against a manifest and
-  ///     applies only on an explicit human action.
+  ///   "Any device in Bluetooth/Wi-Fi range that advertises role=director on the fixed public
+  ///    session code can push an arbitrary web bundle onto every follower iPad ... no auth, no
+  ///    signature, no user consent ... the injected HTML/JS runs in a WebView with
+  ///    originWhitelist ['*'] + allowUniversalAccessFromFileURLs + allowFileAccess, persisting
+  ///    across relaunches."
   ///
-  /// Guarded at the RECEIVE boundary rather than only at the send, because the guards must hold
-  /// against peers running OLDER builds that still offer and still send. `didFinishReceivingResource`
-  /// in particular had no role guard at all and never inspected the resource name.
-  private static let meshBundlePushEnabled = false
+  /// It was also the ONLY writer of `Documents/WebBundle` — the directory the boot resolver
+  /// prefers forever — and it could push a book BACKWARDS, because its version check compared
+  /// CFBundleVersion (the shell's number), which says nothing about which book either device
+  /// holds. Books ship over HTTPS with manifest verification instead.
+  ///
+  /// Deleting the mechanism rather than the switch is the actual fix. `didFinishReceivingResource`
+  /// now discards anything a peer sends.
   // Handshake generation — incremented whenever the who-invites-whom rule changes.
   // Advertised in discoveryInfo so peers can see it before connecting.
   // Build ≤226: no "hgen" key → legacy (director initiates).
@@ -36,12 +37,24 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private static let handshakeGeneration = "2"
   private static let maxSessionCodeLength = 12
   /// Normal (steady-state) discovery refresh interval.
-  private static let discoveryRefreshInterval: TimeInterval = 25
+  // 25 -> 12. A follower that lost the director waited up to a FULL refresh interval before it even
+  // looked again; that is the 14 s recovery measured on 2026-08-17 when a backgrounded director
+  // returned. Halving it halves the blind window. Not lower: each refresh tears down and rebuilds
+  // both transports, so past ~5 s you disrupt discovery more than you perform it.
+  private static let discoveryRefreshInterval: TimeInterval = 12
   /// Fast refresh interval used for the first N cycles after starting, so followers find
   /// a late-arriving director within a few seconds rather than up to 25 s.
   private static let earlyRefreshInterval: TimeInterval = 5
-  private static let earlyRefreshCycleCount = 6           // 6 × 5 s = 30 s burst window
-  private static let inviteTimeout: TimeInterval = 30
+  private static let earlyRefreshCycleCount = 12          // 12 × 5 s = 60 s burst window (was 6/30 s)
+  // 30 -> 8. THE SINGLE BIGGEST SOURCE OF MEASURED STALENESS. Every failed handshake sat in a
+  // penalty box for the full timeout before the follower could even retry:
+  //     11:07:53  invite:send
+  //     11:08:24  session:notConnected   <- 31 s gone
+  // Four consecutive failures cost ~120 s while the device sat on the wrong song. A HEALTHY
+  // handshake completes in ~1 s (measured on three iPads), so 8 s is 8x headroom and caps the same
+  // four failures at ~32 s. Not lower: a too-short timeout abandons handshakes that would have
+  // completed on a marginal link, which trades staleness for churn.
+  private static let inviteTimeout: TimeInterval = 8
   private static let followerRetryDelay: TimeInterval = 2
   private static let followerHelloInterval: TimeInterval = 8
   /// Fast half-open watchdog. The director re-sends the current page every ~1s (mesh heartbeat), so
@@ -51,6 +64,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// force an immediate reconnect. 3s = ~3 missed heartbeats: tight, but tolerant of 1-2 dropped
   /// packets so a momentary blip doesn't churn the connection.
   private static let followerStaleReconnectSeconds: TimeInterval = 3.0
+  /// On foreground a follower must PROVE its session is alive rather than assume it. See the note
+  /// in handleAppDidBecomeActive.
+  private static let foregroundVerifySeconds: TimeInterval = 2.0
   private static let followerWatchdogInterval: TimeInterval = 1.0
   /// One-shot snapshot-recovery probe delay. MPC can drop the first reliable send right at
   /// .connected, so if the director's proactive snapshot AND the follower's first hello both
@@ -108,27 +124,30 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var thermalState: ProcessInfo.ThermalState = .nominal
   /// When backgrounded, avoid churny discovery timers (which can exacerbate memory/CPU pressure).
   private var appIsActive: Bool = true
+  /// Keeps the process alive briefly after backgrounding so the advertiser survives a glance at a
+  /// notification. See beginBackgroundGrace.
+  private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+  /// MEASUREMENT PROBE (build 433). A connectionless BLE page channel running ALONGSIDE the mesh,
+  /// observing only — it renders nothing and changes no behaviour. It exists to answer the one
+  /// question every proposed rewrite depends on: how fast does a page reach a follower when there
+  /// is no handshake to fail? Pair `ble:page-send` with `ble:page-recv` in stress-analyze.
+  private let bleBeacon = BlePageBeacon()
+  private var bleSeq = 0
+  /// Book context last seen from a MESH page. BLE carries only a page number, so it renders only
+  /// once we know which book that number refers to.
+  private var lastKnownTotalPages = 0
+  private var lastKnownMode = ""
+  private var lastKnownBookId = ""
+  private var bleLastSeenSeq = -1
+  private var bleAppliedSeq = -1
 
-  // MARK: - Web-bundle distribution
-
-  /// The running app's build number — used as the web-bundle version. Followers learn the
-  /// director's version passively (it rides on every outbound page payload) and via the
-  /// proactive `bundle_offer` control message sent right after a peer connects.
+  /// The running app's build number. Rides on every outbound page payload so a follower can see
+  /// which shell its director is on; it no longer gates any transfer.
   private var currentBundleVersion: String {
     Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
   }
 
-  /// Guards a follower so it requests + receives at most one bundle transfer at a time.
-  /// Set true when a `bundle_request` is sent (and on `didStartReceivingResource`), cleared
   /// after install succeeds/fails. Prevents duplicate requests from repeated offers.
-  private var bundleTransferInFlight = false
-  /// Generation token for the bundle-transfer watchdog. Incremented every time a transfer is
-  /// marked in-flight; the watchdog captures the current value and only fires if it still
-  /// matches (i.e. no newer transfer started and nothing cleared the flag in between). Guards
-  /// against a director vanishing mid-transfer and leaving bundleTransferInFlight stuck forever.
-  private var bundleTransferGeneration: Int = 0
-  /// How long a single bundle transfer may stay in-flight before the watchdog force-clears it.
-  private static let bundleTransferWatchdogSeconds: TimeInterval = 90
 
   // MARK: - Convenience
 
@@ -301,8 +320,59 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     thermalState = ProcessInfo.processInfo.thermalState
   }
 
+  /// THE DIRECTOR GOING DARK IS THE WHOLE FAILURE. iOS suspends a backgrounded app and
+  /// MCNearbyServiceAdvertiser dies with it, so the director simply stops existing as far as every
+  /// follower is concerned — there is no client-side fix, because the peer they are hunting for is
+  /// genuinely not there. Measured on five devices 2026-08-17: the director was backgrounded for
+  /// ~2.5 minutes and a follower logged ~150 `found` events in that window, every one of them for a
+  /// FELLOW FOLLOWER and never once for the director. It reconnected 14 s after the director
+  /// returned. The followers were behaving perfectly the entire time.
+  ///
+  /// Apple provides no background mode for MultipeerConnectivity, so "advertise forever" is not
+  /// available. What IS available is ~30 seconds of continued execution via a background task,
+  /// which covers the cases that actually happen to a director mid-Mass: glancing at a
+  /// notification, a Control Center pull, a brief app switch. Inside that window the process keeps
+  /// running, so the advertiser keeps advertising and no follower ever notices.
+  ///
+  /// It does NOT survive a real phone call — this is a cellular iPad — and it is not meant to.
+  /// That case needs a BLE background transport, which is a separate piece of work.
+  ///
+  /// DIRECTOR ONLY — build 431 applied this to every role and that was a REGRESSION. A follower
+  /// backgrounding now stayed alive ~30 s with a live MCSession while handleAppDidEnterBackground
+  /// had already stopped its watchdog, hello timer and discovery refresh, then got killed abruptly
+  /// when iOS reclaimed the task. The old fast-suspend path was a clean break that reconnected on
+  /// return. Measured on one device across the 430 -> 431 boundary in a single session:
+  ///
+  ///                  invites   connected   dropped   pages received
+  ///     build 430          8          16        11            2,185
+  ///     build 431         16          10        18              423
+  ///
+  /// Twice the invites, more drops than connects, a fifth of the pages. The trace shows the shape
+  /// exactly: bg:grace-begin, 26 s of limbo, bg:grace-expired, then four session:notConnected in
+  /// the same second.
+  ///
+  /// A follower going quiet for 30 s costs nobody anything — it reconnects when it comes back. The
+  /// DIRECTOR going quiet strands the entire choir, which is the only reason this exists. Role, not
+  /// device class: there is no iPhone/iPad branching anywhere in this repo and there must not be.
+  private func beginBackgroundGrace() {
+    guard currentRole == "director", backgroundTaskID == .invalid else { return }
+    backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "signovivo-mesh") { [weak self] in
+      // Expiry handler: iOS is reclaiming us. End the task or the app is killed outright.
+      self?.dbgLog("bg:grace-expired")
+      self?.endBackgroundGrace()
+    }
+    dbgLog("bg:grace-begin", ["role": currentRole])
+  }
+
+  private func endBackgroundGrace() {
+    guard backgroundTaskID != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(backgroundTaskID)
+    backgroundTaskID = .invalid
+  }
+
   @objc private func handleAppDidEnterBackground() {
     appIsActive = false
+    beginBackgroundGrace()
     // Keep existing MCSession connections as-is, but stop any periodic churn.
     discoveryRefreshTimer?.invalidate()
     discoveryRefreshTimer = nil
@@ -313,7 +383,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   @objc private func handleAppDidBecomeActive() {
     appIsActive = true
+    endBackgroundGrace()
     guard currentRole != "off" else { return }
+
+    // BLE recovers on foreground far more cleanly than the mesh does, because there is no session
+    // to rebuild — the director simply advertises again and the follower simply scans again, and
+    // the CURRENT page is in the packet. No invite, no handshake, nothing that can half-succeed.
+    bleBeacon.resumeOnForeground()
 
     // Fix: the advertiser/browser silently stop retrying after 5 consecutive launch failures
     // (e.g. Local Network permission was denied, then granted in Settings). Give them ONE more
@@ -334,11 +410,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       if connectedDirectorPeer != nil {
         pauseDiscoveryRefreshWhileConnected()
         startFollowerHelloTimer()
-        // Fresh grace window: no heartbeats arrive while backgrounded, so reset the staleness clock
-        // before re-arming the watchdog (else it would fire instantly on foreground). The hello just
-        // sent + the director's foreground re-push will keep it fresh if the link is still alive; if
-        // it's dead, the watchdog reconnects ~3s later.
+        // VERIFY, DO NOT ASSUME. A full grace reset trusts `connectedDirectorPeer` on a session
+        // that may have died while we slept — and a follower that wakes holding a DEAD session has
+        // also just cancelled its own discovery (pauseDiscoveryRefreshWhileConnected above), so
+        // nothing is looking for anyone. That is the shape of the two iPads found stuck on song 59
+        // on 2026-08-17, still reading SIGUIENDO.
+        //
+        // Instead of a full 3 s grace, leave only foregroundVerifySeconds of it. A live director's
+        // 1 Hz heartbeat refreshes this within one beat, so a healthy link is unaffected; a dead one
+        // trips the watchdog ~2 s after wake, which clears the stale peer and resumes discovery.
+        // Bounded staleness on wake instead of unbounded.
         lastFollowerPageReceivedAt = Date().timeIntervalSince1970
+          - max(0, Self.followerStaleReconnectSeconds - Self.foregroundVerifySeconds)
         startFollowerWatchdog()
         sendFollowerHelloIfNeeded()
       } else {
@@ -346,6 +429,22 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         startSelfDirectedTimer()
       }
     } else if currentRole == "director" {
+      // RE-ADVERTISE IMMEDIATELY WHEN WE CAME BACK TO AN EMPTY ROOM. If the suspend outlasted the
+      // background grace, iOS tore our advertiser down and followers have been searching for a peer
+      // that no longer exists. Waiting up to discoveryRefreshInterval (25 s) for the next refresh
+      // tick to rebuild it is the difference measured on 2026-08-17 between a 14 s recovery and a
+      // ~1 s one, with the whole choir stranded for the gap.
+      //
+      // ONLY when there is nobody left. Tearing down a LIVE advertiser drops it out from under
+      // already-connected followers and aborts any in-flight invite — that is the outage the
+      // STABILITY PROTECTION block in scheduleNextDiscoveryRefresh exists to prevent, and this must
+      // not reintroduce it. With peers still attached the advertiser is demonstrably working, so
+      // there is nothing to fix.
+      if allConnectedPeers.isEmpty {
+        dbgLog("advertiser:foreground-restart")
+        advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
+        startAdvertising()
+      }
       startDiscoveryRefreshTimer()
       // After an iOS suspend, MPC may have silently dropped reliable sends to existing followers,
       // leaving them stuck on a stale page (half-dead mesh). Proactively re-push the current
@@ -420,6 +519,33 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.resetTransport(emitState: false)
       self.currentRole = "follower"
       self.currentSessionCode = normalizedSessionCode
+      // BLE PROBE — scan while following. Observes and logs only; the page is NOT applied to the
+      // UI, so a bad reading cannot move anybody off the director's page.
+      self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
+      // RENDER THE BLE PAGE. Measured on 2026-08-17 (build 433): BLE delivered a page 9 seconds
+      // before the mesh session existed, and kept delivering sub-second throughout — median
+      // 0.10-0.18 s, worst case 0.83 s across all five devices, versus a mesh worst case of 112 s.
+      // The mesh keeps the fast path (0.02 s median); BLE is the floor that makes staleness
+      // bounded, because there is no handshake to fail.
+      //
+      // TWO SAFETY RULES. (1) Never render without a known book — a page number in the wrong book
+      // is unrecoverable, so this no-ops until a mesh page has told us which book we are in.
+      // (2) Monotonic: never apply an older seq than one already applied, so a stale advertisement
+      // cannot drag a follower backwards.
+      self.bleBeacon.onPage = { [weak self] page, seq in
+        guard let self = self, self.currentRole == "follower" else { return }
+        self.bleLastSeenSeq = seq
+        guard !self.lastKnownBookId.isEmpty else {
+          self.dbgLog("ble:skip-no-book", ["page": page, "seq": seq])
+          return
+        }
+        guard seq > self.bleAppliedSeq else { return }
+        self.bleAppliedSeq = seq
+        self.dbgLog("ble:page-apply", ["page": page, "seq": seq])
+        self.emitPage(page: max(1, page), totalPages: self.lastKnownTotalPages,
+                      mode: self.lastKnownMode, bookId: self.lastKnownBookId)
+      }
+      self.bleBeacon.startScanning()
       self.configureTransport()
       self.startAdvertising()
       self.startBrowsing()
@@ -623,6 +749,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  /// What ⟳ SHOULD do. `refreshNearbyDiscovery` restarts the transports but never clears
+  /// `connectedDirectorPeer`, so against a wedged session it is a no-op — which is exactly what
+  /// Miguel saw on 2026-08-17: the spinner animated and the iPad stayed on song 59, because
+  /// scheduleNextDiscoveryRefresh skips re-browsing entirely while that field is non-nil. A human
+  /// tapping ⟳ has already decided they are not synced; honour that and tear the session down.
+  @objc(forceFollowerReconnectNow:rejecter:)
+  func forceFollowerReconnectNow(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole == "follower" else { resolve(nil); return }
+      self.dbgLog("resync:force-reconnect", [:])
+      self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+      self.forceFollowerReconnect(staleFor: 0)
+      resolve(nil)
+    }
+  }
+
   @objc(requestCurrentSnapshot:rejecter:)
   func requestCurrentSnapshot(
     _ resolve: @escaping RCTPromiseResolveBlock,
@@ -683,6 +828,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.currentTotalPages = max(0, totalPages.intValue)
       self.currentMode = mode
       self.currentBookId = bookId
+      // BLE PROBE — published before the connected-peers guard on purpose. The mesh gives up here
+      // when nobody is attached; a beacon does not care whether anyone is listening, which is
+      // exactly the property being measured.
+      self.bleSeq += 1
+      self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
+      self.bleBeacon.publish(page: self.currentPageNumber ?? page.intValue, seq: self.bleSeq)
       let connected = self.allConnectedPeers
       guard !connected.isEmpty else {
         self.emitState(status: "waiting-followers")
@@ -713,371 +864,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       }
       self.emitState(status: "connected")
       resolve(["deliveredPeers": delivered])
-    }
-  }
-
-  // MARK: - Web-bundle distribution (peer-to-peer)
-
-  /// DIRECTOR → peer, sent right after the peer connects (alongside the page snapshot).
-  /// Advertises the director's bundle version so an offline follower on an older build can
-  /// pull the updated web bundle over the mesh. Uses the same reliable control-send helper
-  /// as the takeover_* messages.
-  private func sendBundleOffer(to peerID: MCPeerID) {
-    // Stop the traffic at the source too. This is NOT one of the four load-bearing guards — a peer
-    // on an older build still offers, which is exactly why the receive side is guarded — but there
-    // is no reason for a current build to advertise a rail it will not serve.
-    guard Self.meshBundlePushEnabled else { return }
-    guard currentRole == "director" else { return }
-    let payload: [String: Any] = [
-      "v": Self.protocolVersion,
-      "type": "bundle_offer",
-      "version": currentBundleVersion,
-    ]
-    sendControlPayload(payload, to: peerID)
-  }
-
-  /// FOLLOWER side. On receiving a `bundle_offer`, compare versions numerically; if the
-  /// director's is newer and no transfer is already in flight, request the bundle once.
-  private func handleBundleOffer(version offeredVersion: String, from peerID: MCPeerID) {
-    guard Self.meshBundlePushEnabled else { return } // GUARD 1/4 — never request a peer bundle
-    guard currentRole == "follower" else { return }
-    guard !bundleTransferInFlight else { return }
-    let offered = Int(offeredVersion) ?? 0
-    let mine = Int(currentBundleVersion) ?? 0
-    guard offered > mine else { return }
-    beginBundleTransfer()
-    let payload: [String: Any] = [
-      "v": Self.protocolVersion,
-      "type": "bundle_request",
-      "version": String(mine),
-    ]
-    sendControlPayload(payload, to: peerID)
-  }
-
-  /// FOLLOWER side. Marks a bundle transfer in-flight and arms a watchdog so the flag can never
-  /// stick forever if the director vanishes mid-transfer and MPC never delivers a terminal
-  /// didFinishReceivingResource. Idempotent for repeated arming (e.g. request then
-  /// didStartReceivingResource) — each call bumps the generation so only the latest watchdog acts.
-  /// Must be called on the main queue.
-  private func beginBundleTransfer() {
-    bundleTransferInFlight = true
-    bundleTransferGeneration += 1
-    let generation = bundleTransferGeneration
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.bundleTransferWatchdogSeconds) { [weak self] in
-      guard let self = self else { return }
-      // Only act if this is still the same transfer AND it never completed/cleared.
-      guard self.bundleTransferGeneration == generation, self.bundleTransferInFlight else { return }
-      self.bundleTransferInFlight = false
-      self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "timeout"] as [String: Any])
-    }
-  }
-
-  /// DIRECTOR side. On receiving a `bundle_request`, pack the running app's WebBundle and
-  /// stream it to the requesting peer via MCSession.sendResource (NOT subject to the 8 KB
-  /// control-payload cap). Cleans up the temp file on completion.
-  private func handleBundleRequest(from peerID: MCPeerID) {
-    guard Self.meshBundlePushEnabled else { return } // GUARD 2/4 — never serve a peer bundle
-    guard currentRole == "director" else { return }
-    let version = currentBundleVersion
-    guard let session = mcSessions.first(where: { $0.connectedPeers.contains(peerID) }) else { return }
-    // Packing touches the filesystem (~30 MB of assets) — do it off the main thread, then
-    // hop back to the session for the actual sendResource call.
-    DispatchQueue.global(qos: .utility).async { [weak self] in
-      guard let self = self else { return }
-      guard let packedURL = self.packWebBundle(version: version) else {
-        DispatchQueue.main.async {
-          self.emitError(code: "BUNDLE_PACK_FAILED", message: "No se pudo empaquetar el contenido para enviar.")
-          self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "pack"] as [String: Any])
-        }
-        return
-      }
-      DispatchQueue.main.async {
-        guard self.currentRole == "director", session.connectedPeers.contains(peerID) else {
-          try? FileManager.default.removeItem(at: packedURL)
-          return
-        }
-        session.sendResource(
-          at: packedURL,
-          withName: "webbundle-\(version).pack",
-          toPeer: peerID,
-          withCompletionHandler: { [weak self] error in
-            // Always clean up the temp pack once the transfer settles.
-            try? FileManager.default.removeItem(at: packedURL)
-            if let error = error {
-              DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.emitError(code: "BUNDLE_SEND_FAILED", message: error.localizedDescription)
-                self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "send"] as [String: Any])
-              }
-            }
-          }
-        )
-      }
-    }
-  }
-
-  /// Packs the app's shipped `WebBundle` blue-folder resource into a single self-describing
-  /// archive with no external dependency:
-  ///   [4-byte big-endian UInt32 header length][header JSON UTF-8][file0 bytes][file1 bytes]...
-  /// header JSON = { "v":1, "version":"<ver>", "files":[ {"path":"index.html","len":1234}, ... ] }
-  /// `path` is the POSIX-relative path (forward slashes) within the WebBundle dir.
-  /// File bytes are streamed via FileHandle so we never hold the whole ~30 MB in memory.
-  /// Returns the temp-file URL, or nil on any failure.
-  private func packWebBundle(version: String) -> URL? {
-    let fm = FileManager.default
-    guard let resourceURL = Bundle.main.resourceURL else { return nil }
-    let sourceDir = resourceURL.appendingPathComponent("WebBundle", isDirectory: true)
-    var isDir: ObjCBool = false
-    guard fm.fileExists(atPath: sourceDir.path, isDirectory: &isDir), isDir.boolValue else { return nil }
-
-    // Enumerate regular files only, recording each file's POSIX-relative path + byte length.
-    guard let enumerator = fm.enumerator(at: sourceDir, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) else {
-      return nil
-    }
-    struct PackEntry { let url: URL; let path: String; let len: Int }
-    var entries: [PackEntry] = []
-    let basePath = sourceDir.standardizedFileURL.path
-    while let element = enumerator.nextObject() as? URL {
-      let resourceValues = try? element.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-      guard resourceValues?.isRegularFile == true else { continue }
-      let fullPath = element.standardizedFileURL.path
-      // Derive the relative path under WebBundle; skip anything outside the base (shouldn't happen).
-      guard fullPath.hasPrefix(basePath + "/") else { continue }
-      var relPath = String(fullPath.dropFirst(basePath.count + 1))
-      relPath = relPath.replacingOccurrences(of: "\\", with: "/")
-      guard !relPath.isEmpty else { continue }
-      let len = resourceValues?.fileSize ?? 0
-      entries.append(PackEntry(url: element, path: relPath, len: len))
-    }
-    guard !entries.isEmpty else { return nil }
-    // Deterministic order so the manifest matches the byte stream exactly.
-    entries.sort { $0.path < $1.path }
-
-    let manifest: [String: Any] = [
-      "v": Self.protocolVersion,
-      "version": version,
-      "files": entries.map { ["path": $0.path, "len": $0.len] },
-    ]
-    guard let headerData = try? JSONSerialization.data(withJSONObject: manifest) else { return nil }
-    guard headerData.count <= Int(UInt32.max) else { return nil }
-
-    let destURL = fm.temporaryDirectory.appendingPathComponent("webbundle-\(version).pack")
-    try? fm.removeItem(at: destURL)
-    guard fm.createFile(atPath: destURL.path, contents: nil) else { return nil }
-    guard let writer = try? FileHandle(forWritingTo: destURL) else { return nil }
-    defer { try? writer.close() }
-
-    // [4-byte big-endian header length]
-    var headerLen = UInt32(headerData.count).bigEndian
-    let lenBytes = withUnsafeBytes(of: &headerLen) { Data($0) }
-    // Use the THROWING FileHandle API: the non-throwing write(_:)/readData(ofLength:) raise an
-    // uncatchable Objective-C NSFileHandleOperationException on I/O failure (e.g. disk full),
-    // which Swift do/catch and try? cannot trap → process crash. Route every I/O failure through
-    // cleanup + nil instead.
-    do {
-      try writer.write(contentsOf: lenBytes)
-      // [header JSON]
-      try writer.write(contentsOf: headerData)
-      // [file bytes, in manifest order] — streamed in chunks so memory stays flat.
-      for entry in entries {
-        let reader = try FileHandle(forReadingFrom: entry.url)
-        defer { try? reader.close() }
-        while true {
-          // read(upToCount:) returns Data? — nil/empty both mean EOF.
-          guard let chunk = try reader.read(upToCount: 1024 * 1024), !chunk.isEmpty else { break }
-          try writer.write(contentsOf: chunk)
-        }
-      }
-    } catch {
-      try? writer.close()
-      try? fm.removeItem(at: destURL)
-      return nil
-    }
-    return destURL
-  }
-
-  /// FOLLOWER side. Unpacks a received `.pack` file into a unique `Documents/WebBundle_new-<uuid>`
-  /// temp dir, validates it contains `index.html`, then atomically-ish swaps it into
-  /// `Documents/WebBundle`. On
-  /// success emits `{type:"bundleUpdated", version:...}`; on any failure emits `{type:"bundle-error"}`.
-  /// Always clears `bundleTransferInFlight`. Reads are FileHandle-sliced so we don't load the
-  /// whole archive into memory.
-  private func installReceivedBundle(at localURL: URL) {
-    let fm = FileManager.default
-    // GUARD 4/4 — the last line before anything touches Documents/WebBundle. Defence in depth: if
-    // any future call path reaches here, it still cannot write the directory that caused D1.
-    guard Self.meshBundlePushEnabled else {
-      try? fm.removeItem(at: localURL)
-      DispatchQueue.main.async { self.bundleTransferInFlight = false }
-      return
-    }
-    // This runs on a background utility queue, but bundleTransferInFlight is otherwise only ever
-    // touched on the main queue (beginBundleTransfer, the offer guard, the watchdog, resetTransport,
-    // the resource delegates). Marshal the clear back to main to avoid an unsynchronized write.
-    defer { DispatchQueue.main.async { self.bundleTransferInFlight = false } }
-
-    func fail(_ stage: String, cleanup newDir: URL?) {
-      if let newDir = newDir { try? fm.removeItem(at: newDir) }
-      DispatchQueue.main.async {
-        self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": stage] as [String: Any])
-      }
-    }
-
-    guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
-      fail("docs", cleanup: nil); return
-    }
-    // Unique per-install temp dir so two installs completing close together (director resend /
-    // takeover window) can't collide on a single fixed extraction path. Every exit path below —
-    // success AND fail() — removes THIS dir.
-    let newDir = docs.appendingPathComponent("WebBundle_new-\(UUID().uuidString)", isDirectory: true)
-    try? fm.removeItem(at: newDir)
-    do {
-      try fm.createDirectory(at: newDir, withIntermediateDirectories: true)
-    } catch {
-      fail("mkdir", cleanup: newDir); return
-    }
-
-    guard let reader = try? FileHandle(forReadingFrom: localURL) else {
-      fail("open", cleanup: newDir); return
-    }
-
-    // [4-byte big-endian header length]
-    // Use the THROWING read(upToCount:) — the non-throwing readData(ofLength:) raises an
-    // uncatchable Objective-C NSFileHandleOperationException on I/O failure (e.g. disk full),
-    // crashing the process. Route any read failure through fail() instead.
-    guard let lenData = try? reader.read(upToCount: 4), lenData.count == 4 else {
-      try? reader.close(); fail("header-len", cleanup: newDir); return
-    }
-    let headerLen = lenData.withUnsafeBytes { rawBuffer -> UInt32 in
-      var value: UInt32 = 0
-      withUnsafeMutableBytes(of: &value) { $0.copyBytes(from: rawBuffer) }
-      return UInt32(bigEndian: value)
-    }
-    // Bound the declared header length BEFORE allocating. A corrupt/malicious pack could claim a
-    // ~4 GB header → a multi-GB contiguous alloc → memory warning → jetsam kill (blank app). 4 MB
-    // is generous for a file manifest of a ~30 MB bundle.
-    guard headerLen > 0, headerLen <= 4 * 1024 * 1024 else {
-      try? reader.close(); fail("header-len-bounds", cleanup: newDir); return
-    }
-
-    // [header JSON]
-    guard let headerData = try? reader.read(upToCount: Int(headerLen)),
-          headerData.count == Int(headerLen),
-          let headerObj = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
-          let files = headerObj["files"] as? [[String: Any]] else {
-      try? reader.close(); fail("header-parse", cleanup: newDir); return
-    }
-    let headerVersion = headerObj["version"] as? String ?? ""
-
-    // Cheap up-front sanity check: the received file size must equal the 4-byte length prefix +
-    // the header JSON + the sum of every declared file length. A grossly truncated or oversized
-    // archive is rejected here before we extract a single byte. (Per-file size is re-verified
-    // exactly below; this catches whole-archive corruption early.)
-    var declaredFileBytes = 0
-    var declaredOverflow = false
-    for fileEntry in files {
-      let len = (fileEntry["len"] as? Int) ?? 0
-      guard len >= 0 else { declaredOverflow = true; break }
-      let (sum, overflow) = declaredFileBytes.addingReportingOverflow(len)
-      if overflow { declaredOverflow = true; break }
-      declaredFileBytes = sum
-    }
-    let receivedSize = (try? fm.attributesOfItem(atPath: localURL.path)[.size] as? Int) ?? nil
-    if !declaredOverflow, let receivedSize = receivedSize {
-      let expectedSize = 4 + Int(headerLen) + declaredFileBytes
-      guard receivedSize == expectedSize else {
-        try? reader.close(); fail("archive-size-mismatch", cleanup: newDir); return
-      }
-    }
-
-    // [file bytes] — slice sequentially; the reader's offset advances as we go.
-    for fileEntry in files {
-      guard let relPath = fileEntry["path"] as? String, !relPath.isEmpty,
-            let len = fileEntry["len"] as? Int, len >= 0 else {
-        try? reader.close(); fail("file-entry", cleanup: newDir); return
-      }
-      // Reject path traversal / absolute paths defensively (we control the sender, but Murphy).
-      let components = relPath.split(separator: "/").map(String.init)
-      guard !components.isEmpty, !components.contains(".."), !relPath.hasPrefix("/") else {
-        try? reader.close(); fail("file-path", cleanup: newDir); return
-      }
-      let destFileURL = newDir.appendingPathComponent(relPath)
-      let destFileDir = destFileURL.deletingLastPathComponent()
-      do {
-        try fm.createDirectory(at: destFileDir, withIntermediateDirectories: true)
-      } catch {
-        try? reader.close(); fail("file-mkdir", cleanup: newDir); return
-      }
-      guard fm.createFile(atPath: destFileURL.path, contents: nil),
-            let fileWriter = try? FileHandle(forWritingTo: destFileURL) else {
-        try? reader.close(); fail("file-create", cleanup: newDir); return
-      }
-      var remaining = len
-      var ioFailed = false
-      while remaining > 0 {
-        let toRead = min(remaining, 1024 * 1024)
-        // Throwing read/write so a disk-full / I/O error routes through fail() instead of
-        // crashing via an uncatchable NSFileHandleOperationException.
-        guard let chunk = try? reader.read(upToCount: toRead) else { ioFailed = true; break }
-        if chunk.isEmpty { break } // truncated archive
-        do {
-          try fileWriter.write(contentsOf: chunk)
-        } catch {
-          ioFailed = true; break
-        }
-        remaining -= chunk.count
-      }
-      try? fileWriter.close()
-      guard !ioFailed else {
-        try? reader.close(); fail("file-write", cleanup: newDir); return
-      }
-      guard remaining == 0 else {
-        try? reader.close(); fail("file-truncated", cleanup: newDir); return
-      }
-      // Verify the extracted file's on-disk size matches the manifest exactly. A short/garbage
-      // file would otherwise silently brick the follower's WebView once swapped in.
-      let onDiskSize = (try? fm.attributesOfItem(atPath: destFileURL.path)[.size] as? Int) ?? nil
-      guard onDiskSize == len else {
-        try? reader.close(); fail("file-size-mismatch", cleanup: newDir); return
-      }
-    }
-    try? reader.close()
-
-    // Validate: the unpacked dir must contain a non-trivial index.html. A zero/tiny index.html
-    // would brick the follower into a blank WebView, so require it to clear a small floor.
-    let indexURL = newDir.appendingPathComponent("index.html")
-    let indexSize = (try? fm.attributesOfItem(atPath: indexURL.path)[.size] as? Int) ?? nil
-    guard let indexBytes = indexSize, indexBytes > 200 else {
-      fail("index-too-small", cleanup: newDir); return
-    }
-
-    // Atomic-ish swap: move current WebBundle aside, move new into place, then drop the old.
-    let target = docs.appendingPathComponent("WebBundle", isDirectory: true)
-    let oldDir = docs.appendingPathComponent("WebBundle_old", isDirectory: true)
-    try? fm.removeItem(at: oldDir)
-    if fm.fileExists(atPath: target.path) {
-      do {
-        try fm.moveItem(at: target, to: oldDir)
-      } catch {
-        fail("swap-aside", cleanup: newDir); return
-      }
-    }
-    do {
-      try fm.moveItem(at: newDir, to: target)
-    } catch {
-      // Roll back: restore the old bundle if we moved it aside.
-      if fm.fileExists(atPath: oldDir.path) {
-        try? fm.moveItem(at: oldDir, to: target)
-      }
-      fail("swap-in", cleanup: newDir); return
-    }
-    try? fm.removeItem(at: oldDir)
-
-    DispatchQueue.main.async {
-      self.sendEvent(withName: Self.eventName, body: [
-        "type": "bundleUpdated",
-        "version": headerVersion,
-      ] as [String: Any])
     }
   }
 
@@ -1431,7 +1217,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     currentRole = "off"; currentSessionCode = ""; currentDirectorToken = ""
     lastFollowerHelloAt = 0
     lastFollowerPageReceivedAt = 0
-    bundleTransferInFlight = false
     currentPageNumber = nil; currentTotalPages = 0
     currentMode = ""; currentBookId = ""
     lastEmittedStatus = ""; lastEmittedPeerCount = -1
@@ -1833,7 +1618,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           }
           self.sendDirectorAnnounce(to: peerID)
           self.sendCurrentPageSnapshot(to: peerID, via: session)
-          self.sendBundleOffer(to: peerID)
         }
         self.emitState(status: "connected")
       case .connecting:
@@ -1933,17 +1717,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         return
       }
 
-      if type == "bundle_offer" {
-        guard let version = payload["version"] as? String else { return }
-        self.handleBundleOffer(version: version, from: peerID)
-        return
-      }
-
-      if type == "bundle_request" {
-        self.handleBundleRequest(from: peerID)
-        return
-      }
-
       guard type == "page" else { return }
       guard let page = payload["page"] as? Int else { return }
       let totalPages = payload["totalPages"] as? Int ?? 0
@@ -1955,6 +1728,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         // must not yank the follower onto a foreign page.
         guard let directorPeer = self.connectedDirectorPeer, directorPeer == peerID else { return }
         self.lastFollowerPageReceivedAt = Date().timeIntervalSince1970
+        // Remember the BOOK the director is in. The BLE beacon carries only a page number, and a
+        // page number applied to the wrong book is the one unrecoverable failure in this app — so
+        // BLE reuses this context and never invents one.
+        self.lastKnownTotalPages = max(0, totalPages)
+        self.lastKnownMode = mode
+        self.lastKnownBookId = bookId
+        self.bleAppliedSeq = self.bleLastSeenSeq   // mesh is authoritative; don't re-apply older BLE
         self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId)
       }
     }
@@ -1962,52 +1742,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
 
-  func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {
-    // A web-bundle transfer has begun. Mark in-flight (and re-arm the watchdog) so repeated
-    // bundle_offers don't double-request and a stalled transfer can't wedge the flag forever.
-    DispatchQueue.main.async {
-      // Ignore resources arriving on a stale/removed session, or when we're not a follower —
-      // otherwise a phantom transfer would re-arm the watchdog and bump the generation. didStart
-      // hasn't set the flag yet, so a plain early-return is correct here (unlike didFinish, which
-      // deliberately clears the flag on stale sessions).
-      guard self.mcSessions.contains(where: { $0 === session }), self.currentRole == "follower" else { return }
-      self.beginBundleTransfer()
-    }
-  }
+  // PEER BUNDLE TRANSFER IS REMOVED. These two stay because MCSessionDelegate requires them, and
+  // an EMPTY body is now the correct behaviour: ignore any file a peer tries to send us. Before,
+  // a stranger's archive was written to disk before anything rejected it.
+  func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
 
   func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
-    DispatchQueue.main.async {
-      // GUARD 3/4 — the actual receive boundary, and the one that matters most: this delegate had
-      // NO role guard and never inspected `resourceName`, so anything a peer chose to send landed
-      // here and went straight to installReceivedBundle. A peer running an older build will still
-      // offer and still send; the transfer is dropped on the floor here and the temp file removed.
-      guard Self.meshBundlePushEnabled else {
-        self.bundleTransferInFlight = false
-        if let localURL = localURL { try? FileManager.default.removeItem(at: localURL) }
-        return
-      }
-      guard self.mcSessions.contains(where: { $0 === session }) else {
-        self.bundleTransferInFlight = false
-        return
-      }
-      if let error = error {
-        self.emitError(code: "BUNDLE_RECEIVE_FAILED", message: error.localizedDescription)
-        self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "receive"] as [String: Any])
-        self.bundleTransferInFlight = false
-        return
-      }
-      guard let localURL = localURL else {
-        self.sendEvent(withName: Self.eventName, body: ["type": "bundle-error", "stage": "receive-nil"] as [String: Any])
-        self.bundleTransferInFlight = false
-        return
-      }
-      // Unpack + validate + swap off the main thread (filesystem-heavy); installReceivedBundle
-      // hops back to main for every sendEvent and clears bundleTransferInFlight when done.
-      let capturedURL = localURL
-      DispatchQueue.global(qos: .utility).async { [weak self] in
-        self?.installReceivedBundle(at: capturedURL)
-      }
-    }
+    // Delete anything a peer sent rather than leaving it in the container.
+    if let localURL = localURL { try? FileManager.default.removeItem(at: localURL) }
   }
   func session(_ session: MCSession, didReceiveCertificate certificate: [Any]?, fromPeer peerID: MCPeerID, certificateHandler: @escaping (Bool) -> Void) {
     certificateHandler(true)

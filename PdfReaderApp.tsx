@@ -28,6 +28,7 @@ import {
   isNearbyDirectorSyncAvailable,
   primeNearbyPermissions,
   refreshNearbyDiscovery,
+  forceFollowerReconnectNow,
   requestCurrentSnapshot,
   resetNearbyDirectorSync,
   sendNearbyDirectorPageUpdate,
@@ -1204,6 +1205,11 @@ export default function App() {
               // ⟳ must also kick a fast re-browse: if the director vanished or a NEW director
               // took over (handoff), requestCurrentSnapshot alone can't help until we re-find
               // it. refreshNearbyDiscovery accelerates re-discovery so ⟳ actually recovers.
+              // ⟳ MUST BREAK A WEDGED SESSION, not just re-browse. refreshNearbyDiscovery never
+              // clears connectedDirectorPeer, and scheduleNextDiscoveryRefresh skips re-browsing
+              // entirely while that field is set — so against the failure this button exists for it
+              // did nothing at all (observed 2026-08-17: spinner animated, iPad stayed on song 59).
+              forceFollowerReconnectNow().catch(() => {});
               refreshNearbyDiscovery().catch(() => {});
               requestCurrentSnapshot().catch(() => {});
             }

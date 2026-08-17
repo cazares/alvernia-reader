@@ -5,6 +5,7 @@ export function stopNearbyDirectorSync(): Promise<Record<string, unknown> | null
 export function resetNearbyDirectorSync(): Promise<Record<string, unknown> | null>;
 export function primeNearbyPermissions(): Promise<Record<string, unknown> | null>;
 export function refreshNearbyDiscovery(): Promise<Record<string, unknown> | null>;
+export function forceFollowerReconnectNow(): Promise<Record<string, unknown> | null>;
 export function requestCurrentSnapshot(): Promise<Record<string, unknown> | null>;
 export function requestDirectorTakeover(): Promise<{ requestId?: string } | null>;
 export function approveDirectorTakeover(requestId: string): Promise<Record<string, unknown> | null>;

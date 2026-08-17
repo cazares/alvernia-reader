@@ -64,6 +64,17 @@ export const refreshNearbyDiscovery = async () => {
   return null;
 };
 
+// A human tapping the reconnect button outranks every "don't disturb a live session" heuristic:
+// they can already see it is not working. This tears the session down so discovery can resume,
+// which refreshNearbyDiscovery alone cannot do.
+export const forceFollowerReconnectNow = async () => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.forceFollowerReconnectNow === "function") {
+    return nativeModule.forceFollowerReconnectNow();
+  }
+  return null;
+};
+
 export const requestCurrentSnapshot = async () => {
   if (!isNearbyDirectorSyncAvailable()) return null;
   if (typeof nativeModule.requestCurrentSnapshot === "function") {
