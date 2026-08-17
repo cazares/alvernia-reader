@@ -4273,6 +4273,23 @@ if (buildBadge) {
     buildBadge.setAttribute("tabindex", "0");
     buildBadge.setAttribute("aria-label", "Ver diagnóstico de este dispositivo");
     buildBadge.style.cursor = "pointer";
+    // THE TAP NEVER WORKED. styles.css sets `pointer-events: none` on .build-badge so a label
+    // floating over the music can never swallow a page-turn — correct for the label, fatal for the
+    // button this block turns it into. cursor/role/tabindex/listener were all applied and the
+    // element still could not receive a click, on ANY device. Reported 2026-08-17 as "the badge
+    // does nothing"; the diagnostics viewer has been unreachable by tap since it shipped, which is
+    // the same class of failure as #342 removing the drawer: the crumb log exists, the door doesn't.
+    //
+    // Re-enabled HERE rather than in the stylesheet so it is scoped to the native shell, where the
+    // badge is genuinely a control. On signovivo.com it stays a pure label and keeps
+    // pointer-events: none, so the web behaviour is unchanged.
+    buildBadge.style.pointerEvents = "auto";
+    // 8px text is a ~10px tall target. Pad the HIT AREA out to the 44px iOS minimum without
+    // changing a pixel of what is drawn: transparent padding, negative margin to keep the glyph
+    // exactly where it was. Someone hunting for a faint grey mark in the corner should not also
+    // have to hit it precisely.
+    buildBadge.style.padding = "17px";
+    buildBadge.style.margin = "-17px";
     const askForDiagnostics = () => {
       haptic(12);
       // Native answers with a `diagnostics` event, which applyNativeSyncEvent hands to

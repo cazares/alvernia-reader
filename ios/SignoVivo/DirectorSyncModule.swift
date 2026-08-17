@@ -1,6 +1,7 @@
 import Foundation
 import MultipeerConnectivity
 import Network
+import os
 import React
 import UIKit
 
@@ -141,6 +142,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var bleLastSeenSeq = -1
   private var bleAppliedSeq = -1
 
+  // ── Telemetry batching state (build 436) ─────────────────────────────────────
+  /// Serial queue guarding `logBuffer` + `logSuspended`. dbgLog is called from MCSession and
+  /// MCNearbyServiceBrowser delegate callbacks, which arrive on arbitrary threads.
+  private let logQueue = DispatchQueue(label: "com.cazares.signovivo.dbglog")
+  private var logBuffer: [[String: Any]] = []
+  private var logSuspended = false
+  /// Timer + interval are touched on MAIN ONLY (Timer needs a run loop, and keeping the interval
+  /// main-only avoids a second lock). The relay can retune both — see applyLogPolicy.
+  private var logFlushTimer: Timer?
+  private var logFlushInterval: TimeInterval = 15
+
   /// The running app's build number. Rides on every outbound page payload so a follower can see
   /// which shell its director is on; it no longer gates any transfer.
   private var currentBundleVersion: String {
@@ -207,10 +219,72 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   // MARK: - Remote sync telemetry (CF /log)
-  // Fire-and-forget POST of the Multipeer connection lifecycle so the peer-to-peer handshake can be
-  // inspected remotely (no Xcode needed). `dev` is the real peer displayName so the iPad/iPhone are
-  // identifiable. Best-effort; never blocks or affects sync.
+  //
+  // BATCHED since build 436. Breadcrumbs are buffered and flushed together on a timer instead of
+  // one HTTP POST per mesh event.
+  //
+  // WHY: on 2026-08-17 this took production down. The account tripped Cloudflare's free-plan
+  // Workers cap (100,000 requests/day) and BOTH signovivo.com and the relay returned 429/1027 for
+  // hours. Measured that day:
+  //
+  //     account-wide      99,428 / 100,000     <- the cap, hit at ~14:00 CT
+  //     signovivo-sync    87,258   (87.8%)
+  //     ~10 other sites   ~12,000  (23 workers, 39 zones, 9 Pages projects)
+  //
+  // One POST per event has no ceiling: it scales with how badly the mesh is behaving, so the
+  // instrument shouts loudest exactly when something is wrong. One follower hunting for a director
+  // logged ~150 `found` events in two minutes.
+  //
+  // WHY BATCHING AND NOT SAMPLING: replaying that day's real captures through
+  // scripts/telemetry-budget-sim.mjs —
+  //
+  //     batch 15s                          4.8x fewer requests   100% of rows kept
+  //     batch 15s + coalesce               4.8x                    51%
+  //     batch 30s + coalesce + sampling    8.6x                    34%
+  //
+  // Sampling saves ~1% more and costs two thirds of the evidence, because the request count is set
+  // by how many WINDOWS contain an event, not by how many events. Telemetry is how every mesh bug
+  // this week was found — including the follower-takes-a-follower-for-the-director bug that broke
+  // sync from build 381 through 429. It gets throttled here, never dropped.
+  //
+  // Best-effort throughout; never blocks or affects sync.
+
+  /// Flush early when a burst fills the buffer, so a storm still reports promptly instead of
+  /// waiting out the timer. Well under the relay's 200-entry LOG_MAX_BATCH.
+  private static let logFlushThreshold = 60
+  /// Hard ceiling on the buffer. AT MASS THE FOLLOWERS ARE ON NO NETWORK AT ALL — every flush
+  /// fails and nothing drains — so an unbounded buffer would grow for the whole hour. Oldest rows
+  /// are dropped first: the newest breadcrumbs are the ones that explain a failure.
+  private static let logBufferCap = 300
+
+  /// EVERY BREADCRUMB ALSO GOES TO THE DEVICE'S OWN LOG.
+  ///
+  /// Until 2026-08-17 this module produced ZERO local output — no os_log, no NSLog, no print. Every
+  /// breadcrumb it has ever written went to Cloudflare and nowhere else. Two consequences, and the
+  /// second one is the expensive one:
+  ///
+  ///   1. When the relay is unreachable the fleet is MUTE. That is not hypothetical: the account
+  ///      tripped its Cloudflare daily cap that afternoon and every device went silent for hours,
+  ///      mid-investigation.
+  ///   2. AT MASS THE FOLLOWERS ARE ON NO NETWORK AT ALL. So in the one setting the whole app
+  ///      exists for, no follower has ever been able to say what it did. The handoff records the
+  ///      cost plainly — "the fix cannot be confirmed in the field" — and a day was spent inferring
+  ///      causes from an absence of evidence that was guaranteed by construction.
+  ///
+  /// os_log fixes both for free. It needs no network, no relay, no key and no UI: attach the device
+  /// and `log stream --predicate 'subsystem == "com.cazares.signovivo"'`, or pull a sysdiagnose
+  /// AFTER a Mass and read the whole account offline. It costs zero Cloudflare requests, so it is
+  /// unaffected by the telemetry batching, and it survives whatever the quota is doing.
+  ///
+  /// `.public` is deliberate. os_log redacts interpolated strings by default, which would render
+  /// every peer name and page number as <private> — a log that cannot be read is the problem this
+  /// is solving, not a solution to it. The values are opaque peer ids, roles and page numbers on
+  /// the owner's own devices; there is nothing here that is not already on the screen.
+  private static let deviceLog = Logger(subsystem: "com.cazares.signovivo", category: "mesh")
+
   private func dbgLog(_ event: String, _ data: [String: Any] = [:]) {
+    // Build the payload on the CALLING thread, exactly as the unbatched version did, so the role /
+    // peer name / build recorded are the ones true at the moment of the event rather than at flush.
     var payload: [String: Any] = [
       "t": Int(Date().timeIntervalSince1970 * 1000),
       "dev": localPeerID?.displayName ?? "?",
@@ -220,13 +294,86 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       "event": event,
     ]
     payload.merge(data) { _, new in new }
+
+    // Local first, and UNCONDITIONALLY — before the batching queue, before the suspend check, and
+    // outside anything the relay or the kill switch can turn off. Silencing the fleet's network
+    // telemetry must never also blind the device in front of you.
+    let extras = data
+      .map { "\($0.key)=\($0.value)" }
+      .sorted()
+      .joined(separator: " ")
+    Self.deviceLog.info(
+      "\(self.currentRole, privacy: .public) \(self.localPeerID?.displayName ?? "?", privacy: .public) \(event, privacy: .public) \(extras, privacy: .public)"
+    )
+
+    logQueue.async { [weak self] in
+      guard let self, !self.logSuspended else { return }
+      self.logBuffer.append(payload)
+      if self.logBuffer.count > Self.logBufferCap {
+        self.logBuffer.removeFirst(self.logBuffer.count - Self.logBufferCap)
+      }
+      if self.logBuffer.count >= Self.logFlushThreshold { self.flushLogOnQueue() }
+    }
+    ensureLogFlushTimer()
+  }
+
+  /// Starts the repeating flush timer once. Main-only (Timer needs a run loop).
+  private func ensureLogFlushTimer() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.logFlushTimer == nil, self.logFlushInterval > 0 else { return }
+      self.logFlushTimer = Timer.scheduledTimer(
+        withTimeInterval: self.logFlushInterval, repeats: true
+      ) { [weak self] _ in
+        self?.logQueue.async { self?.flushLogOnQueue() }
+      }
+    }
+  }
+
+  /// MUST be called on `logQueue`. Drains the buffer into one POST.
+  private func flushLogOnQueue() {
+    guard !logSuspended, !logBuffer.isEmpty else { return }
+    let batch = logBuffer
+    logBuffer.removeAll(keepingCapacity: true)
     guard let url = URL(string: "https://signovivo-sync.4j4982y8jp.workers.dev/log"),
-          let body = try? JSONSerialization.data(withJSONObject: [payload]) else { return }
+          let body = try? JSONSerialization.data(withJSONObject: batch) else { return }
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = body
-    URLSession.shared.dataTask(with: req).resume()
+    // The batch is NOT re-queued on failure. At Mass every POST fails (no network) and retrying
+    // would rebuild the unbounded backlog this change exists to prevent.
+    URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+      guard let self, let data,
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+      else { return }
+      self.applyLogPolicy(obj)
+    }.resume()
+  }
+
+  /// Adopt the flush interval the relay asks for. THE KILL SWITCH THAT DID NOT EXIST on 2026-08-17:
+  /// with the fleet already fielded there was no way to stop the traffic that had taken production
+  /// down, so it simply ran until UTC midnight. Now `LOG_INTERVAL_MS` in the Worker retunes every
+  /// device on its next flush — and "0" silences them — with no TestFlight round-trip.
+  private func applyLogPolicy(_ response: [String: Any]) {
+    guard let ms = (response["logIntervalMs"] as? NSNumber)?.doubleValue else { return }
+    let next = max(0, ms / 1000)
+
+    logQueue.async { [weak self] in
+      guard let self else { return }
+      let suspend = (next == 0)
+      guard suspend != self.logSuspended else { return }
+      self.logSuspended = suspend
+      if suspend { self.logBuffer.removeAll(keepingCapacity: false) }
+    }
+
+    guard next > 0 else { return }
+    DispatchQueue.main.async { [weak self] in
+      guard let self, abs(next - self.logFlushInterval) > 0.001 else { return }
+      self.logFlushInterval = next
+      self.logFlushTimer?.invalidate()
+      self.logFlushTimer = nil
+      self.ensureLogFlushTimer()
+    }
   }
 
   /// DIRECTOR → every currently-connected peer. Announces this device's director token so any
@@ -373,6 +520,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   @objc private func handleAppDidEnterBackground() {
     appIsActive = false
     beginBackgroundGrace()
+    // Flush telemetry NOW. Timers do not fire once suspended, so whatever is still buffered would
+    // otherwise sit there until the app returns — and the breadcrumbs explaining a backgrounded
+    // director (bg:grace-begin/expired, the 431 regression trace) are precisely the ones written
+    // in this window. The background-task grace above is what keeps us alive long enough to send.
+    logQueue.async { [weak self] in self?.flushLogOnQueue() }
     // Keep existing MCSession connections as-is, but stop any periodic churn.
     discoveryRefreshTimer?.invalidate()
     discoveryRefreshTimer = nil

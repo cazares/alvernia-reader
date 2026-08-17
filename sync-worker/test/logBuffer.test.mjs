@@ -7,6 +7,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_LOG_INTERVAL_MS,
+  logIntervalMs,
   foldLogEntries,
   logSignature,
   LOG_MAX_BATCH,
@@ -181,4 +183,45 @@ test("a realistic 6-device stress run stays inside both ceilings and keeps its l
   assert.ok(JSON.stringify(buf).length <= LOG_MAX_BYTES, "10-minute 6-device run blew the byte ceiling");
   const kept = buf.filter((r) => r.event === "session:notConnected").length;
   assert.equal(kept, disconnects, `lost disconnect evidence: kept ${kept} of ${disconnects}`);
+});
+
+// ── logIntervalMs: the fleet kill switch ───────────────────────────────────────
+//
+// This is the control that did NOT exist on 2026-08-17, when 87,258 requests from this fleet took
+// the whole Cloudflare account past its 100,000/day cap and production served 429 for hours with no
+// way to turn the traffic off. Its two failure modes are both silent, so both are pinned here:
+//
+//   1. "0" mis-read as falsy -> the kill switch does nothing, and you find out during an outage.
+//   2. a typo mis-read as 0  -> the entire fleet goes quiet, which looks exactly like a healthy
+//      mesh. Telemetry going dark is how the follower-takes-a-follower bug survived 381 -> 429.
+
+test("logIntervalMs defaults when the var is absent, empty or blank", () => {
+  assert.equal(logIntervalMs({}), DEFAULT_LOG_INTERVAL_MS);
+  assert.equal(logIntervalMs({ LOG_INTERVAL_MS: "" }), DEFAULT_LOG_INTERVAL_MS);
+  assert.equal(logIntervalMs({ LOG_INTERVAL_MS: "   " }), DEFAULT_LOG_INTERVAL_MS);
+  assert.equal(logIntervalMs(undefined), DEFAULT_LOG_INTERVAL_MS);
+});
+
+test('"0" IS the kill switch and must survive as 0, not collapse to the default', () => {
+  // The `||` bug this pins would silently make the switch unusable — discovered mid-outage.
+  assert.equal(logIntervalMs({ LOG_INTERVAL_MS: "0" }), 0);
+  assert.equal(logIntervalMs({ LOG_INTERVAL_MS: " 0 " }), 0);
+});
+
+test("a real interval is honoured, and fractions floor to whole ms", () => {
+  assert.equal(logIntervalMs({ LOG_INTERVAL_MS: "30000" }), 30000);
+  assert.equal(logIntervalMs({ LOG_INTERVAL_MS: "1500.9" }), 1500);
+});
+
+test("garbage falls back to the default and NEVER to 0 — silence must not be the failure mode", () => {
+  for (const bad of ["abc", "15s", "NaN", "-1", "-5000", "Infinity", "{}"]) {
+    const got = logIntervalMs({ LOG_INTERVAL_MS: bad });
+    assert.equal(got, DEFAULT_LOG_INTERVAL_MS, `${bad} should fall back to the default`);
+    assert.notEqual(got, 0, `${bad} must not silence the fleet`);
+  }
+});
+
+test("the default is the measured 15 s, so a regression to the old per-event rate is visible", () => {
+  // 15 s = a 4.8x request cut with 100% of rows kept (scripts/telemetry-budget-sim.mjs).
+  assert.equal(DEFAULT_LOG_INTERVAL_MS, 15000);
 });
