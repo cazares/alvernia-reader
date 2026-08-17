@@ -187,8 +187,32 @@ else
         -archivePath build/SignoVivo.xcarchive -sdk iphoneos -allowProvisioningUpdates clean archive >"$LOG" 2>&1; then
     echo "ARCHIVE FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1   # trap restores codes + Podfile.lock
   fi
+  # EXPORT MUST AUTHENTICATE THE SAME WAY THE UPLOAD DOES. This team holds ZERO distribution
+  # certificates, so -allowProvisioningUpdates has to MINT one through cloud signing — and that
+  # needs a live App Store Connect session. Without the API key it falls back to Xcode's stored
+  # Apple ID, which breaks the moment the password changes: builds 430 and 431 BOTH archived
+  # successfully (~10 minutes each) and then died here on "Your session has expired", after the
+  # credentials were already configured, because the key was wired into the altool upload below and
+  # not into this line. Same key, same file, three extra flags.
+  #
+  # The key must carry the ADMIN role. A lesser role authenticates fine and then returns
+  # 403 FORBIDDEN "no access to cloud-managed distribution certificates" — a different error that
+  # looks like the same failure.
+  EXPORT_AUTH=()
+  [ -f scripts/asc-credentials.env ] && . scripts/asc-credentials.env
+  if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
+    EXPORT_P8="${ASC_P8_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}"
+    if [ -f "$EXPORT_P8" ]; then
+      EXPORT_AUTH=(-authenticationKeyPath "$EXPORT_P8"
+                   -authenticationKeyID "$ASC_KEY_ID"
+                   -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+    else
+      echo "         ⚠️  ASC key configured but $EXPORT_P8 is missing — falling back to the Xcode session" >&2
+    fi
+  fi
   if ! xcodebuild -exportArchive -archivePath build/SignoVivo.xcarchive -exportPath build/export \
-        -exportOptionsPlist ios/exportOptions.app-store.plist -allowProvisioningUpdates >>"$LOG" 2>&1; then
+        -exportOptionsPlist ios/exportOptions.app-store.plist -allowProvisioningUpdates \
+        "${EXPORT_AUTH[@]}" >>"$LOG" 2>&1; then
     echo "EXPORT FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1     # trap restores codes + Podfile.lock
   fi
   cleanup_release   # restore ASAP to minimize the PII window; the EXIT trap is the crash-safety net
