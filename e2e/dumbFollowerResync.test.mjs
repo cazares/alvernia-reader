@@ -357,3 +357,27 @@ test("BLE does not render before the mesh has established book context", () => {
   assert.match(fn.slice(0, 900), /guard !self\.lastKnownBookId\.isEmpty else/,
     "the mesh-first gate must remain until BLE carries a freshness signal");
 });
+
+// ── Never restart a browser that is demonstrably working ──────────────────────
+//
+// Build 445 measured on hardware: followers DID converge (the ghost-peer fix worked) but took
+// 10-20+ s, against the owner's standard that "staleness longer than a few seconds is a failure".
+//
+// Cause: refreshDiscovery now clears every discovered peer — correct, an MCPeerID dies with the
+// browser that found it — but it fires on a fixed 5-12 s tick regardless of whether the browser is
+// healthy. A follower that had found the director and was about to invite it got its discovery
+// wiped and started over, so convergence became "however many cycles until an invite happens to fit
+// inside one window". The director already had this protection; the follower's browser did not.
+test("a follower holds its browser steady while sightings are still arriving", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  assert.match(swift, /browserHealthySeconds: TimeInterval = \d+/, "the health window must exist");
+  const fn = swift.slice(swift.indexOf("private func scheduleNextDiscoveryRefresh"));
+  const body = fn.slice(0, fn.indexOf("\n  }\n"));
+  assert.match(body, /refresh:hold-browsing/, "the hold must be observable in telemetry");
+  assert.match(body, /discoveredDirectorSeenAt\.values\.max\(\)/,
+    "the hold must key on the most recent SIGHTING — that is the evidence the browser works");
+  // It must not hold once connected: a connected follower has no reason to suppress refreshes.
+  assert.match(body, /connectedDirectorPeer == nil/,
+    "the hold applies only while still hunting, never once attached");
+});

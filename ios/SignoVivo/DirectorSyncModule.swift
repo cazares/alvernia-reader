@@ -56,6 +56,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   // four failures at ~32 s. Not lower: a too-short timeout abandons handshakes that would have
   // completed on a marginal link, which trades staleness for churn.
   private static let inviteTimeout: TimeInterval = 8
+  /// How recently the browser must have seen a director for it to count as WORKING. Below this,
+  /// a scheduled refresh is skipped rather than destroying live discovery. Comfortably longer than
+  /// the 5 s early-refresh tick so a healthy hunt is never interrupted, and short enough that a
+  /// browser which has genuinely gone deaf is rebuilt within one extra cycle.
+  private static let browserHealthySeconds: TimeInterval = 20
   private static let followerRetryDelay: TimeInterval = 2
   private static let followerHelloInterval: TimeInterval = 8
   /// Fast half-open watchdog. The director re-sends the current page every ~1s (mesh heartbeat), so
@@ -1248,6 +1253,35 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
              Date().timeIntervalSince1970 - self.pendingInviteTimestamp < Self.inviteTimeout {
             self.dbgLog("refresh:hold-connecting", ["target": self.pendingInvitePeer?.displayName ?? ""])
             self.reconsiderFollowerTarget() // maintain/re-issue the invite on the LIVE browser
+            self.scheduleNextDiscoveryRefresh()
+            return
+          }
+
+          // STABILITY PROTECTION FOR THE FOLLOWER'S BROWSER — the mirror of the director's rule
+          // below, and the fix for slow convergence measured on the owner's fleet with build 445:
+          // followers DID converge (the ghost-peer fix worked) but took 10-20+ s, against a
+          // standard of "longer than a few seconds is a failure".
+          //
+          // refreshDiscovery() now clears every discovered peer, because an MCPeerID dies with the
+          // browser that found it. That is correct and it stopped the ghost invites. But it runs on
+          // a fixed 5-12 s tick REGARDLESS of whether the browser is working, so a follower that had
+          // found the director and was about to invite it got its discovery wiped and started over.
+          // Convergence became "however many cycles until an invite happens to fit inside one
+          // window" — 5 s, 10 s, 20 s. Exactly the numbers observed.
+          //
+          // The rule is the same one the director already follows: DO NOT RESTART A TRANSPORT THAT
+          // IS DEMONSTRABLY WORKING. A browser that produced a sighting seconds ago is not wedged,
+          // and restarting it destroys the only progress the follower has. The refresh exists to
+          // recover a browser that has gone deaf; it should fire when that is actually in evidence.
+          //
+          // Bounded on purpose: the hold lasts only while sightings keep arriving. If the director
+          // truly disappears, sightings stop, this guard lapses within browserHealthySeconds and the
+          // normal refresh resumes — so a genuinely dead browser still gets rebuilt.
+          if self.currentRole == "follower", self.connectedDirectorPeer == nil,
+             let newest = self.discoveredDirectorSeenAt.values.max(),
+             Date().timeIntervalSince1970 - newest < Self.browserHealthySeconds {
+            self.dbgLog("refresh:hold-browsing", ["seenAgo": Int(Date().timeIntervalSince1970 - newest)])
+            self.reconsiderFollowerTarget() // act on what the LIVE browser already found
             self.scheduleNextDiscoveryRefresh()
             return
           }
