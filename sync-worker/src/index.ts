@@ -68,6 +68,11 @@ export interface Env {
   BOOK_UPDATE_BASE?: string;
   /** Max devices mid-download at once under "*". Keeps 8 iPads off one parish access point. */
   BOOK_UPDATE_CONCURRENCY?: string;
+
+  /** Latest shipped native build number, echoed on /ota/checkin as `latestNativeBuild` so a
+   *  behind device can prompt its own "update the app" nudge. Purely informational — never gates
+   *  or blocks anything, unlike BOOK_UPDATE_*. Kept in lockstep by release.sh; see wrangler.jsonc. */
+  LATEST_NATIVE_BUILD?: string;
 }
 
 const PROTOCOL_VERSION = 1;
@@ -472,11 +477,12 @@ export default {
       //
       // The ONLY delivery path a device has for learning about a new songbook. Deliberately its
       // own route, its own DO instance ("__ota__"), its own narrow storage shape — see otaCheckin
-      // above for why. POST-only: a device reports {deviceId, bookVersion?, bookStage?} and gets
-      // back {bookUpdate} or nothing. Absent bookUpdate is not an error, it is the dormant default
-      // (see bookArming.js) — the client must not treat a network failure the same as an explicit
-      // "no update", so this fails soft: any error here still returns 200 with no bookUpdate field
-      // rather than surfacing a 500 the client would have no correct way to react to.
+      // above for why. POST-only: a device reports {deviceId, bookVersion?, bookStage?,
+      // nativeBuild?} and gets back {bookUpdate?, nativeBuildConfirmedLatest?}. Absent bookUpdate
+      // is not an error, it is the dormant default (see bookArming.js) — the client must not
+      // treat a network failure the same as an explicit "no update", so this fails soft: any
+      // error here still returns 200 with the informational fields omitted rather than
+      // surfacing a 500 the client would have no correct way to react to.
       if (url.pathname === "/ota/checkin") {
         if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
         if (Number(request.headers.get("content-length") || 0) > 4 * 1024) {
@@ -498,7 +504,27 @@ export default {
         } catch {
           bookUpdate = null; // never let an arming-decision failure surface as a broken check-in
         }
-        return json(bookUpdate ? { ok: true, bookUpdate } : { ok: true }, 200, cors);
+        // NATIVE BUILD FRESHNESS — see wrangler.jsonc's LATEST_NATIVE_BUILD comment. Fails toward
+        // "not confirmed" (the field is simply omitted, never sent as false): a device on a
+        // binary from before this field existed sends no nativeBuild at all and Number(undefined)
+        // is NaN, so it silently gets no flag either way — which is correct, since that binary
+        // has no code to interpret one. Any parse failure or mismatch also omits the flag rather
+        // than risk a false "you're current" from a malformed request.
+        let nativeBuildConfirmedLatest: true | undefined;
+        try {
+          const latest = Number(env.LATEST_NATIVE_BUILD || "");
+          const reported = Number((body as Record<string, unknown>)?.nativeBuild);
+          if (Number.isFinite(latest) && latest > 0 && Number.isFinite(reported) && reported >= latest) {
+            nativeBuildConfirmedLatest = true;
+          }
+        } catch {
+          nativeBuildConfirmedLatest = undefined;
+        }
+        return json(
+          { ok: true, ...(bookUpdate ? { bookUpdate } : {}), ...(nativeBuildConfirmedLatest ? { nativeBuildConfirmedLatest } : {}) },
+          200,
+          cors,
+        );
       }
 
       if (url.pathname === "/log") {

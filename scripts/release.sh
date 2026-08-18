@@ -312,18 +312,34 @@ if [ "$STAGING" != "1" ]; then
   # BOOK_UPDATE_VERSION; hand-editing it in wrangler.jsonc between releases is pointless, this
   # overwrites it on the very next run. Fails soft: a broken worker deploy here must not abort
   # a release that already reached TestFlight/prod — surface it loudly and keep going.
+  # LATEST_NATIVE_BUILD must NOT move on a SKIP_NATIVE=1 (web-only) run: $BUILD is still bumped
+  # by step 1 regardless, but no binary was actually archived or uploaded to TestFlight this run
+  # — writing $BUILD there anyway would nudge every device to "update" to a build that was never
+  # shipped. Only ever write it alongside a real native upload (TF_UPLOADED=1, set after step 4c).
+  export NATIVE_BUILD_JUST_SHIPPED=""
+  if [ "${SKIP_NATIVE:-0}" != "1" ] && [ "$TF_UPLOADED" = "1" ]; then
+    NATIVE_BUILD_JUST_SHIPPED="$BUILD"
+  else
+    echo "         (native build freshness NOT updated this run — no binary uploaded)"
+  fi
   echo "==> 5b/6 Arm OTA fleet-wide for $NEW_BOOK_VERSION (sync-worker)"
   if [ -d sync-worker ] && [ -f sync-worker/wrangler.jsonc ]; then
     node -e '
       const fs=require("fs");
       const p="sync-worker/wrangler.jsonc";
       const src=fs.readFileSync(p,"utf8");
-      const out=src.replace(/"BOOK_UPDATE_VERSION":\s*"[^"]*"/, `"BOOK_UPDATE_VERSION": "'"$NEW_BOOK_VERSION"'"`);
+      let out=src.replace(/"BOOK_UPDATE_VERSION":\s*"[^"]*"/, `"BOOK_UPDATE_VERSION": "'"$NEW_BOOK_VERSION"'"`);
       if (out === src) { console.error("  ✖ BOOK_UPDATE_VERSION pattern not found in " + p); process.exit(1); }
+      const shipped = process.env.NATIVE_BUILD_JUST_SHIPPED || "";
+      if (shipped) {
+        const before = out;
+        out = out.replace(/"LATEST_NATIVE_BUILD":\s*"[^"]*"/, `"LATEST_NATIVE_BUILD": "${shipped}"`);
+        if (out === before) { console.error("  ✖ LATEST_NATIVE_BUILD pattern not found in " + p); process.exit(1); }
+      }
       fs.writeFileSync(p, out);
     ' && (cd sync-worker && npx wrangler deploy 2>&1 | tail -5) \
-      && echo "         ✅ OTA armed: $NEW_BOOK_VERSION, fleet-wide" \
-      || echo "         ⚠ OTA arm/deploy failed — songbook update will NOT reach devices until this is fixed and re-run"
+      && echo "         ✅ OTA armed: $NEW_BOOK_VERSION, fleet-wide$([ -n "$NATIVE_BUILD_JUST_SHIPPED" ] && echo "; latest native build: $NATIVE_BUILD_JUST_SHIPPED")" \
+      || echo "         ⚠ OTA arm/deploy failed — songbook update AND the native-build nudge will NOT reach devices until this is fixed and re-run"
   else
     echo "         ⚠ sync-worker/ not found — skipping OTA arm"
   fi

@@ -71,6 +71,14 @@ const BUILD_VERSION = String((versionJson as { buildNumber?: number }).buildNumb
 // "take me to my update" without fabricating a link.
 const TESTFLIGHT_APP_URL = "itms-beta://";
 
+// Always-current fallback for a device that can't (or hasn't yet) updated the native binary —
+// same URL the relay/OTA base already points at (BOOK_UPDATE_BASE on the worker), so this is not
+// a new endpoint, just naming it here for the update prompts. Miguel, 2026-08-18: "don't just
+// lock them out... mention and link out to signovivo.com... link out to both actually — you don't
+// wanna just middle finger them." Every native-build-behind prompt offers this as well as
+// TestFlight, never just one or the other.
+const SIGNOVIVO_URL = "https://signovivo.com";
+
 /**
  * Which KIND of device this is — "PAD" | "PHN" | "" (unknown).
  *
@@ -268,6 +276,10 @@ export default function App() {
   // "shell-too-old") checks in every ~4 minutes forever — without this it would re-toast the
   // same "update the app" notice on every one of them.
   const didShellTooOldNoticeRef = useRef(false);
+  // Same one-shot shape, for the general "you're not on the latest binary" nudge (distinct from
+  // shell-too-old, which only fires when a book actually needs a newer shell — this fires
+  // whenever ANY newer binary has shipped, book-update or not).
+  const didNativeBuildNudgeRef = useRef(false);
   // A count of how often this device has directed. DIAGNOSTIC ONLY — it decides nothing. (It used
   // to rank devices for an automatic seat claim; that path is gone, see the ONE DIRECTOR note above.)
   // Read-modify-write, best effort.
@@ -521,6 +533,11 @@ export default function App() {
         deviceId,
         ...(activeBookVersionRef.current ? { bookVersion: activeBookVersionRef.current } : {}),
         ...(bookStageRef.current ? { bookStage: bookStageRef.current } : {}),
+        // Native build freshness nudge (Miguel, 2026-08-18) — see the server's LATEST_NATIVE_BUILD
+        // comment. Just a build number, nothing PII-adjacent; a device on a binary from before
+        // this field existed simply never sends it, which the server already treats correctly as
+        // "cannot confirm current" rather than an error.
+        ...(Number(BUILD_VERSION) > 0 ? { nativeBuild: Number(BUILD_VERSION) } : {}),
       }),
     })
       .then(async (r) => {
@@ -1833,6 +1850,42 @@ export default function App() {
     (body: unknown) => {
       const pointer = parseBookUpdate(body);
 
+      // NATIVE BUILD FRESHNESS NUDGE (Miguel, 2026-08-18) — "force everyone to get on this
+      // version... with in-app code... backend". Independent of bookUpdate: this fires whenever
+      // ANY newer binary has shipped, not just when a book needs one. Fails toward NOT nudging on
+      // ambiguous input (missing/malformed field, or the flag not present) — the server already
+      // omits nativeBuildConfirmedLatest rather than sending an explicit false, so there is
+      // nothing here to parse defensively against; a truthy check is the whole contract.
+      if (
+        !(body as Record<string, unknown>)?.nativeBuildConfirmedLatest &&
+        !didNativeBuildNudgeRef.current
+      ) {
+        const noticeText = "Hay una versión más reciente del app disponible. Puedes " +
+          "actualizar ahora, o mientras tanto usar signovivo.com desde cualquier navegador.";
+        injectEvent({ type: "toast", text: noticeText });
+        // Same mesh-idle gate as shell-too-old: never pop a blocking modal over an active
+        // Mass/rehearsal. If busy right now, the one-shot flag stays false so the NEXT check-in
+        // (~4 min later) tries the modal again once things are quiet.
+        if (meshPeerCountRef.current === 0) {
+          didNativeBuildNudgeRef.current = true;
+          Alert.alert(
+            "Actualización disponible",
+            noticeText,
+            [
+              { text: "Ahora no", style: "cancel" },
+              {
+                text: "signovivo.com",
+                onPress: () => { Linking.openURL(SIGNOVIVO_URL).catch(() => {}); },
+              },
+              {
+                text: "Actualizar",
+                onPress: () => { Linking.openURL(TESTFLIGHT_APP_URL).catch(() => {}); },
+              },
+            ],
+          );
+        }
+      }
+
       void (async () => {
         const staged = await readStored(STORAGE_KEYS.bookStaged, null);
 
@@ -1926,8 +1979,12 @@ export default function App() {
           // right now, the one-shot guard is deliberately NOT set, so the very next check-in
           // (~4 minutes later) tries the modal again once things are quiet.
           if (rec.error === "shell-too-old" && !didShellTooOldNoticeRef.current) {
+            // Never a dead end (Miguel, 2026-08-18: "don't just lock them out... link out to
+            // both" — TestFlight AND signovivo.com, which is always current regardless of this
+            // device's binary and works right now in any browser).
             const noticeText = "Hay un himnario nuevo, pero esta versión del app es muy antigua " +
-              "para instalarlo. Actualiza el app para recibirlo.";
+              "para instalarlo. Actualiza el app para recibirlo, o mientras tanto usa " +
+              "signovivo.com desde cualquier navegador.";
             injectEvent({ type: "toast", text: noticeText });
             if (meshPeerCountRef.current === 0) {
               didShellTooOldNoticeRef.current = true;
@@ -1936,6 +1993,10 @@ export default function App() {
                 noticeText,
                 [
                   { text: "Ahora no", style: "cancel" },
+                  {
+                    text: "signovivo.com",
+                    onPress: () => { Linking.openURL(SIGNOVIVO_URL).catch(() => {}); },
+                  },
                   {
                     text: "Actualizar",
                     onPress: () => { Linking.openURL(TESTFLIGHT_APP_URL).catch(() => {}); },
