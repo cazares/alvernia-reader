@@ -1266,47 +1266,22 @@ export default function App() {
             // Actively pull the director's CURRENT page (like the foreground path does) instead of
             // waiting for the next 1s heartbeat. Best-effort.
             if (syncAvailable) requestCurrentSnapshot().catch(() => {});
-          } else {
-            // SOLO READER, restored (Miguel, 2026-08-18: "after OTA update the app goes back to the
-            // page it was on before").
-            //
-            // Neither branch above applies here: not a director/transmitter (that path re-asserts
-            // its OWN currentPageRef, which survives a WebView-only remount in native memory and
-            // needs no restore), and not a follower with a live director snapshot to resync to
-            // (that path already lands on the director's real page). What's left is a device that
-            // is simply reading on its own — nobody to be authoritative FOR it — and for that case
-            // the web's post-reload boot-default page was the only place it could land.
-            //
-            // performApplySwap saves the page under this exact key moments before triggering the
-            // remount that fires this handler ("Save the reader's place so nobody loses it across
-            // the swap") — but nothing ever read it back. Read it now, once, and only for a fresh
-            // reload with nothing else to go on; a genuinely brand-new install has no key to find
-            // and correctly falls through to the web's own default.
-            void (async () => {
-              try {
-                const raw = await AsyncStorage.getItem(
-                  `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
-                );
-                const page = Number(raw);
-                if (Number.isFinite(page) && page >= 1) {
-                  currentPageRef.current = page;
-                  // src: "cache" — a REMEMBERED page, not a confirmed one. Tagged so the web's
-                  // firstNativePageSignal gate (2026-08-18) does not treat this as "the real
-                  // answer arrived": it renders immediately (better than a blank spinner) but
-                  // must not stop the wait for an actual mesh/BLE sync, or a follower whose real
-                  // director is a DIFFERENT song from what this device was on last time flashes
-                  // the stale cached song before correcting — the exact class of bug this gate
-                  // exists to prevent, just from a different source than the one originally fixed.
-                  injectEvent({
-                    type: "sync-event",
-                    event: { type: "page", page, book: currentBookRef.current, src: "cache" },
-                  });
-                }
-              } catch {
-                /* no saved page — the web's own default stands, same as a fresh install */
-              }
-            })();
           }
+          // SOLO-READER CACHE RESTORE — REMOVED (Miguel, 2026-08-18, after it regressed the
+          // headline director-page-race fix a SECOND time): it wrote a REMEMBERED (possibly
+          // stale) page into currentPageRef unconditionally. Tagging it src:"cache" (the previous
+          // attempt at fixing this) stopped it from falsely satisfying the web's
+          // firstNativePageSignal gate or the follower "director is alive" signal — but did NOT
+          // stop it from overwriting currentPageRef/state.currentPage with a stale value. If that
+          // device then tapped "Ser Director" before any real sync arrived, becomeDirector's
+          // fix (thread state.currentPage through the tap, aa68c9e) faithfully broadcast the
+          // STALE cached page to the whole choir — reproducing the exact original bug through a
+          // side door the first fix never anticipated.
+          //
+          // "why even cache at all????" — no good answer survived two regressions. A solo reader
+          // now simply falls through to the web's own default page after an OTA-triggered reload,
+          // same as a brand-new install. Smaller inconvenience (occasionally re-opens near the
+          // start) than a director broadcasting a wrong song to everyone.
           break;
         }
         case "page-changed": {
@@ -1327,11 +1302,6 @@ export default function App() {
             totalPagesRef.current = msg.totalPages;
           }
           if (isBookId(msg.book)) currentBookRef.current = msg.book;
-          // Persist per-book last page for restore.
-          AsyncStorage.setItem(
-            `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
-            String(page),
-          ).catch(() => {});
           broadcastPage(page, currentBookRef.current);
           break;
         }
@@ -2031,11 +2001,6 @@ export default function App() {
    */
   const performApplySwap = useCallback(
     async (staged: any) => {
-      // Save the reader's place so nobody loses it across the swap.
-      await AsyncStorage.setItem(
-        `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
-        String(currentPageRef.current),
-      ).catch(() => {});
       const res = await applyStagedBundle({ fs: bookFs });
       breadcrumb(`apply:${res.stage}`);
       if (!res.ok) return false;

@@ -26,8 +26,6 @@ export const STORAGE_KEYS = {
   // what lets the iPad that actually runs every Sunday claim an empty seat before one that directed
   // once, with no configuration and nothing any other device has to agree to.
   directorSessions: "sv.sync.directorSessions",
-  // per-book saved position
-  lastPagePrefix: "sv.book.lastPage.",
 
   // ── Book-bundle resolution (defect D1 / D2) ───────────────────────────────
   // The cached boot DECISION: { uri, bookVersion, builtFromShellBuild }. Parsing two manifests on
