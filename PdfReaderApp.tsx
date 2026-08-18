@@ -257,6 +257,10 @@ export default function App() {
   const becomeDirectorInFlightRef = useRef(false);
   // One-shot: the transmitter notice must not re-fire when syncAvailable flips identity.
   const didTransmitterNoticeRef = useRef(false);
+  // One-shot per session: a device refused for being on too old a binary (shouldStage's
+  // "shell-too-old") checks in every ~4 minutes forever — without this it would re-toast the
+  // same "update the app" notice on every one of them.
+  const didShellTooOldNoticeRef = useRef(false);
   // A count of how often this device has directed. DIAGNOSTIC ONLY — it decides nothing. (It used
   // to rank devices for an automatic seat claim; that path is gone, see the ONE DIRECTOR note above.)
   // Read-modify-write, best effort.
@@ -1886,6 +1890,18 @@ export default function App() {
           await AsyncStorage.setItem(STORAGE_KEYS.bookStaged, JSON.stringify(rec)).catch(() => {});
           setBookStage(rec.ready ? "ready" : `error:${rec.error}`);
           breadcrumb(rec.ready ? `staged-ready:${rec.bookVersion}` : `stage-failed:${rec.error}`);
+          // A binary too old to run this book was, until now, refused SILENTLY — MIN_SHELL_BUILD
+          // (web/build.mjs) already protects against ever applying something that would break, but
+          // nothing told the person holding the device why nothing is happening. One-shot per
+          // session: a refused device re-checks in every ~4 minutes forever.
+          if (rec.error === "shell-too-old" && !didShellTooOldNoticeRef.current) {
+            didShellTooOldNoticeRef.current = true;
+            injectEvent({
+              type: "toast",
+              text: "Hay un himnario nuevo, pero esta versión del app es muy antigua para " +
+                "instalarlo. Actualiza el app (TestFlight) para recibirlo.",
+            });
+          }
           // Install it. Don't wait to be asked — canApplyNow decides WHEN, and if right now is a
           // Mass or a rehearsal it defers and the next foreground/check-in retries.
           if (rec.ready) await autoApplyIfSafeRef.current?.();

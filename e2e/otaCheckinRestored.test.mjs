@@ -99,3 +99,21 @@ test("performApplySwap still saves the page this restore depends on", () => {
   assert.match(body, /lastPagePrefix\}\$\{currentBookRef\.current\}`,\s*\n\s*String\(currentPageRef\.current\)/,
     "performApplySwap no longer saves the reader's place before swapping");
 });
+
+test("shell-too-old is already a wired refusal (MIN_SHELL_BUILD), and it's no longer silent", () => {
+  // Miguel, 2026-08-18: "can you easily bake in forced binary updates for incompat. between new
+  // OTA and old binary... where things bust unless binary is updated by user". This mechanism
+  // already existed end-to-end (web/build.mjs's MIN_SHELL_BUILD, src/bookUpdate.js's stageBook +
+  // canApplyNow gates) — a binary too old to run a book can never stage or apply it. What was
+  // missing: nothing told the PERSON. This pins the fix — a one-shot toast on the "shell-too-old"
+  // refusal — without re-testing the refusal itself (already covered by e2e/bookUpdate.test.mjs).
+  const start = NATIVE.indexOf("const onCheckinResponse = useCallback");
+  const end = NATIVE.indexOf("onCheckinResponseRef.current = onCheckinResponse;");
+  const body = NATIVE.slice(start, end);
+  assert.match(body, /rec\.error === "shell-too-old"/,
+    "onCheckinResponse no longer distinguishes the shell-too-old failure from any other stage failure");
+  assert.match(body, /didShellTooOldNoticeRef\.current = true/,
+    "no one-shot guard — a refused device checks in every ~4 minutes and would re-toast forever");
+  assert.match(body, /type: "toast"/,
+    "the shell-too-old branch no longer surfaces a toast — back to silent refusal");
+});
