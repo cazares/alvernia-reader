@@ -345,10 +345,29 @@ export default function App() {
   const dbgDeviceRef = useRef<string>("?");
   const dbgBufferRef = useRef<Array<Record<string, unknown>>>([]);
   const dbgFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // TELEMETRY IS OPT-IN AND OFF BY DEFAULT (Miguel, 2026-08-18: "we only want to turn on the faucet
+  // when we need water not suck up a whole lake").
+  //
+  // It has zero user value — it exists to debug the mesh — and it is what exhausted the account's
+  // 100,000-request daily Worker quota twice, on 2026-08-17 and again on 2026-08-18, taking
+  // signovivo.com down WITH the relay both times because they share one quota. It is also useless
+  // at Mass, where followers have no internet and these POSTs are dropped on the floor.
+  //
+  // Turn it on deliberately for a debugging session via the ⌕ diagnostics dump or by setting
+  // sv.telemetry, and it stays on only for that install.
+  const telemetryEnabledRef = useRef(false);
+  useEffect(() => {
+    AsyncStorage.getItem("sv.telemetry")
+      .then((v) => { telemetryEnabledRef.current = v === "1"; })
+      .catch(() => {});
+  }, []);
   const dbgFlush = useCallback(() => {
     const batch = dbgBufferRef.current;
     if (batch.length === 0) return;
     dbgBufferRef.current = [];
+    // Drop the batch rather than queueing it: a queue that survives a Mass is a burst waiting to
+    // fire the moment a device finds wifi, which is the same outage with a delay on it.
+    if (!telemetryEnabledRef.current) return;
     fetch(`${RELAY_BASE}/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

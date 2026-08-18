@@ -31,6 +31,10 @@ export interface Env {
    *  parish's devices and phone numbers, which is a different thing from a page number. */
   FLEET_DASHBOARD_KEY?: string;
 
+  /** Daily budget for NON-ESSENTIAL requests (telemetry, fleet dashboard). Default 10000.
+   *  See nonEssentialBudget() — this is a reservation for signovivo.com, not a rate limit. */
+  NONESSENTIAL_DAILY_MAX?: string;
+
   /** How often a device should FLUSH its batched telemetry, in ms. Echoed on every POST /log
    *  response so the fleet can be throttled — or silenced with "0" — WITHOUT a TestFlight build.
    *
@@ -259,6 +263,24 @@ export class SyncRoom extends DurableObject<Env> {
   }
 
   /** RPC: clear the diagnostic ring buffer. */
+  /** Count one non-essential request against today's budget and return the new total.
+   *
+   *  Deliberately counts BEFORE the caller decides, so the answer is "you are the Nth request today"
+   *  and a burst cannot slip through on a stale read. Keyed by UTC date because that is the boundary
+   *  Cloudflare resets the account quota on, so the two windows line up exactly.
+   *
+   *  One key, overwritten daily. Old days are dropped rather than accumulated: this is a meter, not
+   *  an audit log, and a growing history in a DO is another thing to pay for. */
+  async spendNonEssential(day: string, cap: number): Promise<number> {
+    const rec = (await this.ctx.storage.get<{ day: string; n: number }>("budget")) ?? { day, n: 0 };
+    if (rec.day !== day) { rec.day = day; rec.n = 0; }
+    rec.n += 1;
+    // Stop writing once well past the cap: the answer does not change, and a refused request should
+    // not keep paying for storage to say so.
+    if (rec.n <= cap + 100) await this.ctx.storage.put("budget", rec);
+    return rec.n;
+  }
+
   async clearLog(): Promise<{ ok: true }> {
     await this.ctx.storage.put("dbglog", []);
     return { ok: true };
@@ -651,6 +673,48 @@ export default {
       // found, invite, connect/disconnect, page sent/received) here; GET reads the ring buffer back
       // so the whole director↔follower handshake can be inspected remotely. DELETE clears it.
       // A single fixed debug DO holds the buffer (separate from any sync room).
+      // ── QUOTA RESERVATION FOR signovivo.com ──────────────────────────────────────────────
+      //
+      // Cloudflare's free plan allows 100,000 Worker/Pages-Function requests a DAY, ACCOUNT-WIDE.
+      // signovivo.com and this relay share that one number, so diagnostics can and did starve the
+      // product: on 2026-08-17 and again on 2026-08-18 telemetry exhausted the quota and took the
+      // site down with it. Cloudflare offers no way to partition a quota, so it is partitioned here.
+      //
+      // Non-essential traffic (telemetry, fleet dashboard) gets NONESSENTIAL_DAILY_MAX — 10,000 by
+      // default, 10% — and is refused beyond it. Essential traffic (the site, /state, /subscribe,
+      // director publishes) is NEVER counted and NEVER refused, so the remaining ~90,000 is reserved
+      // for the thing people actually use.
+      //
+      // 10,000 is sized from both sides: a heavy Mass day of web followers is 10-20k requests
+      // (an offline download alone is ~389), so 90k is deep headroom; and 10k buys ~10 hours of
+      // 4-device telemetry at the 15s flush interval, which is longer than any debugging session.
+      //
+      // The counter lives in a DO and is touched ONLY by non-essential paths, so metering the
+      // faucet costs the product nothing.
+      const NON_ESSENTIAL = url.pathname === "/log"
+        || url.pathname === "/fleet"
+        || url.pathname === "/fleet.json"
+        || url.pathname === "/fleet-dashboard"
+        || url.pathname.startsWith("/fleet/");
+      if (NON_ESSENTIAL) {
+        const cap = Math.max(0, Number(env.NONESSENTIAL_DAILY_MAX ?? "10000") || 0);
+        const day = new Date().toISOString().slice(0, 10);   // UTC, same boundary Cloudflare resets on
+        const spent = await env.SYNC_ROOM.getByName("__budget__").spendNonEssential(day, cap);
+        if (spent > cap) {
+          return json(
+            {
+              error: "non-essential daily budget exhausted",
+              spent,
+              cap,
+              day,
+              note: "Reserved so signovivo.com always has quota. Raise NONESSENTIAL_DAILY_MAX to lift it.",
+            },
+            503,
+            { "Retry-After": "3600" },
+          );
+        }
+      }
+
       if (url.pathname === "/log") {
         const dbg = env.SYNC_ROOM.getByName("__debug_log__");
         if (request.method === "POST") {

@@ -35,6 +35,17 @@
     // event, not how many events.
     "LOG_INTERVAL_MS": "15000",
 
+    // ── QUOTA RESERVATION FOR signovivo.com ──────────────────────────────────
+    //
+    // Cloudflare's free plan gives the ACCOUNT 100,000 Worker/Pages-Function requests a day, and
+    // signovivo.com shares that number with this relay. Twice — 2026-08-17 and 2026-08-18 —
+    // telemetry ate the whole thing and took the site down with it.
+    //
+    // Non-essential traffic (telemetry, fleet dashboard) is capped here; everything the site and
+    // sync need is uncounted and unrefusable, so ~90,000 stays reserved for the product.
+    // 10,000 buys ~10 hours of 4-device telemetry at the 15s flush interval.
+    "NONESSENTIAL_DAILY_MAX": "10000",
+
     // ── Songbook OTA arming — SHIPPED DORMANT, and it must stay that way until rehearsed ──
     //
     // With BOOK_UPDATE_VERSION empty, the `bookUpdate` field never appears in ANY /fleet/checkin

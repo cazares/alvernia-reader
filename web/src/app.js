@@ -3836,6 +3836,7 @@ const relay = {
   hasDirector: false,
   clockOffsetMs: 0,  // (serverClock - deviceClock), calibrated from /state Date header (P2-CLOCKSKEW)
   healthTimer: 0,    // F3: independent time-driven relay-health watchdog (started once)
+  cooldownUntil: 0,  // circuit breaker: no relay traffic at all until this timestamp (see tripRelayCooldown)
 };
 
 let relayPill = null;
@@ -4004,9 +4005,39 @@ const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) 
 const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
 
 const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
+
+// ── CIRCUIT BREAKER ──────────────────────────────────────────────────────────────────────────
+//
+// THE OUTAGE THIS EXISTS FOR (2026-08-18, and 2026-08-17 before it). Cloudflare's free plan allows
+// 100,000 Worker requests a day. When the account crossed it, every request returned 429 — and this
+// client answered by trying HARDER: the socket died, backoff climbed to its 8s cap and ALSO started
+// a 4s /state poll, and then the 10s health timer reset backoff to 500ms and restarted both. About
+// 20-25 requests a minute per device, ~30k/day each, four devices — over the daily cap on their own,
+// forever. The outage fed itself and could not recover even after the traffic that started it
+// stopped.
+//
+// A 429 is the server saying stop. Retrying through it is not resilience, it is a denial of service
+// against your own account, and it takes signovivo.com down with the relay because both ride the
+// same quota. So: when the relay says stop, STOP — for minutes, not milliseconds.
+//
+// Deliberately blunt. The relay is a convenience path; the mesh and BLE carry Mass, where there is
+// no internet at all. Losing relay sync for ten minutes costs a web viewer some latency. Not losing
+// it costs everyone the whole day.
+const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+const relayCooling = () => Date.now() < (relay.cooldownUntil || 0);
+const tripRelayCooldown = (reason) => {
+  if (relayCooling()) return;
+  relay.cooldownUntil = Date.now() + RELAY_COOLDOWN_MS;
+  stopRelayPolling();
+  if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
+  try { relay.ws && relay.ws.close(); } catch {}
+  relay.ws = null;
+  try { console.warn("[sv] relay cooldown", reason, Math.round(RELAY_COOLDOWN_MS / 1000) + "s"); } catch {}
+};
 // Poll the relay for the director's current snapshot and apply it. Single-book + fully public:
 // there is no geo header to read and no book to resolve — just fetch /state and apply the page.
 const relayPollOnce = async (force = false) => {
+  if (relayCooling()) return;
   try {
     // Time-box the /state fetch with an AbortController so a HUNG connection fails FAST.
     // navigator.onLine is TRUE on wifi-without-internet, so the fetch can hang indefinitely.
@@ -4018,6 +4049,10 @@ const relayPollOnce = async (force = false) => {
     } finally {
       if (abortTimer) clearTimeout(abortTimer);
     }
+    // 429 / 1027 is the account over its daily quota. Nothing this client does can fix that, and
+    // every further request digs the hole deeper — including the ones that would tell us it is
+    // fixed. Back all the way off and let the reset happen.
+    if (r.status === 429) { tripRelayCooldown("429 daily limit"); return; }
     if (r.ok) {
       const recvMs = Date.now();
       const dateHeader = r.headers.get("date");
@@ -4045,7 +4080,16 @@ const relayPollOnce = async (force = false) => {
 };
 // Fallback polling (when the WS won't hold): force every tick so a stationary director
 // still keeps the follower in sync.
-const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
+// 4s -> 15s. A fallback that may run all day cannot poll at debug speed: 4s is 21,600 requests per
+// device per day, and four devices exceed the entire account quota by themselves. 15s keeps a
+// stationary director's followers in sync within one page turn's patience and costs a quarter as much.
+const RELAY_POLL_MS = 15000;
+const startRelayPolling = () => {
+  if (relayCooling()) return;
+  stopRelayPolling();
+  relay.pollTimer = setInterval(() => relayPollOnce(true), RELAY_POLL_MS);
+  relayPollOnce(true);
+};
 
 const connectRelay = () => {
   // F5: cancel any pending backoff reconnect on EVERY entry — BEFORE the dupe-guard return —
@@ -4054,6 +4098,9 @@ const connectRelay = () => {
   // guard, so the early-return path leaked the timer.) Keeps the "only ONE reconnect scheduled"
   // invariant on all paths.
   if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
+  // The account is over its daily quota; reconnecting is what put it there. Every path in — online,
+  // foreground, manual, backoff — funnels through here, so one guard covers them all.
+  if (relayCooling()) return;
   // Idempotent: if a socket is already CONNECTING (0) or OPEN (1), don't open a duplicate.
   // iOS fires `online` on network changes even while a socket is healthy, and the close-
   // handler's backoff reconnect can race with it — without this guard each call would stack
@@ -4160,7 +4207,33 @@ const connectRelay = () => {
   });
 };
 
+// OPT-IN, AND ONLY IN THE NATIVE SHELL. signovivo.com is UNTOUCHED by this gate: the relay is the
+// only sync a web follower has, so switching it off there would delete the product. The check is
+// deliberately written as "native AND not opted in" so the web path cannot be caught by it even by
+// accident, and a test asserts that.
+//
+// What this DOES turn off is a native follower SUBSCRIBING to the relay, which is pure redundancy:
+// that device already has the mesh and BLE, both of which work at Mass where there is no internet at
+// all. It is not free redundancy either — it is what made every device jump to a stale song 2 on
+// 2026-08-18 before the mesh corrected them, and its 4s /state poll is what exhausted the account's
+// 100k daily Worker quota and took signovivo.com down WITH the relay.
+//
+// The director's relay PUBLISH is not gated. That is what feeds signovivo.com, it fires once per
+// page turn, and it is the whole reason web followers exist.
+const relaySubscribeEnabled = () => {
+  const native = NATIVE_FILE_MODE || hasNativeBridge();
+  if (!native) return true;   // signovivo.com — always on, never gated
+  try {
+    if (/[?&]relay=1/.test(location.search)) return true;
+    return localStorage.getItem("sv.relaySubscribe") === "1";
+  } catch { return false; }
+};
+
 const startRelayFollow = () => {
+  if (!relaySubscribeEnabled()) {
+    try { console.info("[sv] relay subscribe off (native default) — mesh + BLE carry sync"); } catch {}
+    return;
+  }
   if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
@@ -4197,13 +4270,16 @@ const startRelayFollow = () => {
   // (no-op when healthy); leaves a CONNECTING socket alone (the 6s connectTimer owns that case).
   if (!relay.healthTimer) {
     relay.healthTimer = setInterval(() => {
-      if (relay.manualClose) return;
+      if (relay.manualClose || relayCooling()) return;
       const s = relay.ws;
       const dead = !s || s.readyState >= 2 || (s.readyState === WebSocket.OPEN && Date.now() - relay.lastMsgAt > 15000);
       if (!dead) return;
       try { s && s.close(); } catch {}
       relay.ws = null;
-      relay.backoff = 500;
+      // DO NOT RESET THE BACKOFF HERE. This ran every 10s and slammed backoff back to 500ms, so the
+      // exponential climb never survived one cycle — a socket that had earned an 8s wait was handed
+      // a half-second one instead, forever, on exactly the paths where the far end was already
+      // overloaded. Backoff resets on a SUCCESSFUL open, the only event that proves it is healthy.
       startRelayPolling();   // sync stays alive while a fresh socket re-establishes
       connectRelay();
     }, 10000);
