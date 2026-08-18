@@ -1021,10 +1021,77 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   // MARK: - Transport setup
 
+  /// This device's peer name, STABLE for the life of the install.
+  ///
+  /// It used to be minted fresh on every call to configureTransport — `UIDevice.name` plus a random
+  /// UUID prefix — and configureTransport runs on EVERY role transition (startDirector,
+  /// startFollower, approveDirectorTakeover). So a device became a stranger to the whole mesh every
+  /// time it changed role.
+  ///
+  /// MEASURED on the owner's fleet, build 440, from mPad's own unified log:
+  ///
+  ///     21:06:26  advertising as iPad-92A6C5
+  ///     21:08:07  advertising as iPad-CF034B     <- same iPad, two minutes later
+  ///     21:08:34  advertising as iPad-AE6CD6     <- and again
+  ///
+  ///     11 distinct peer identities for a 4-device fleet
+  ///
+  /// That is fatal for sync, because a follower tracks its director by MCPeerID
+  /// (connectedDirectorPeer, discoveredDirectors). WHEN THE DIRECTOR RENAMES ITSELF IT SILENTLY
+  /// ABANDONS EVERY FOLLOWER: they go on hunting a peer that no longer exists while a "new" director
+  /// they have never seen appears beside it. It is also what produced the apparent split-brain in
+  /// that capture — iPad-92A6C5 and iPad-AE6CD6 are the SAME iPad, not two directors.
+  ///
+  /// The random suffix itself is NOT the mistake and must stay: since iOS 16, UIDevice.name returns
+  /// a generic "iPad"/"iPhone" to apps without a special entitlement, so every device in the loft
+  /// would advertise the same displayName and collide. It only has to be stable, so it is generated
+  /// once and persisted.
+  private var stablePeerName: String {
+    let key = "sv.peerNameSuffix"
+    let defaults = UserDefaults.standard
+    let suffix: String
+    if let saved = defaults.string(forKey: key), !saved.isEmpty {
+      suffix = saved
+    } else {
+      suffix = String(UUID().uuidString.prefix(6))
+      defaults.set(suffix, forKey: key)
+    }
+    let rawName = UIDevice.current.name.isEmpty ? "SignoVivo" : UIDevice.current.name
+    // 63 is MCPeerID's hard limit; leave room for the "-XXXXXX" suffix.
+    let peerName = String(rawName.prefix(50))
+    return "\(peerName)-\(suffix)"
+  }
+
+  /// The archived MCPeerID for this install.
+  ///
+  /// A stable NAME is not sufficient. Apple's documentation is explicit that an MCPeerID's identity
+  /// is the object, not its displayName — two MCPeerIDs created independently with the same name are
+  /// not the same peer to Multipeer's bookkeeping — and that a peer ID must be ARCHIVED to be stable
+  /// across launches. resetTransport() sets localPeerID = nil and runs at the top of startDirector
+  /// and approveDirectorTakeover, so an in-memory cache alone would still mint a new peer on exactly
+  /// the transitions this is meant to survive.
+  ///
+  /// Falls back to a fresh peer on any archive failure rather than refusing to start: a device that
+  /// cannot read its own UserDefaults must still be able to join the mesh, and a fresh identity is
+  /// the pre-existing behaviour, not a regression.
+  private func loadOrCreatePeerID() -> MCPeerID {
+    let key = "sv.peerID.v1"
+    let defaults = UserDefaults.standard
+    if let data = defaults.data(forKey: key),
+       let restored = try? NSKeyedUnarchiver.unarchivedObject(ofClass: MCPeerID.self, from: data) {
+      return restored
+    }
+    let created = MCPeerID(displayName: stablePeerName)
+    if let data = try? NSKeyedArchiver.archivedData(withRootObject: created, requiringSecureCoding: true) {
+      defaults.set(data, forKey: key)
+    }
+    return created
+  }
+
   private func configureTransport() {
-    let rawName = UIDevice.current.name.isEmpty ? UUID().uuidString : UIDevice.current.name
-    let peerName = String(rawName.prefix(50)) // MCPeerID displayName hard limit is 63 chars
-    let peerID = MCPeerID(displayName: "\(peerName)-\(UUID().uuidString.prefix(6))")
+    // The SAME peer, every time. Reconfiguring the transport must not change who this device IS —
+    // only how it is talking.
+    let peerID = localPeerID ?? loadOrCreatePeerID()
     localPeerID = peerID
 
     // Create first session (director will lazily create second when first fills up)

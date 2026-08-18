@@ -233,3 +233,59 @@ test("foreground triggers exactly ONE discovery refresh", () => {
   const calls = (window.match(/refreshNearbyDiscovery\(\)/g) || []).length;
   assert.equal(calls, 1, `foreground calls refreshNearbyDiscovery ${calls}x; each one schedules a timer`);
 });
+
+// ── Peer identity must be STABLE across role changes ──────────────────────────
+//
+// configureTransport minted `UIDevice.name + UUID().prefix(6)` fresh on EVERY call, and it is
+// called on every role transition — startDirector, startFollower, approveDirectorTakeover. So a
+// device became a stranger to the whole mesh each time it changed role.
+//
+// MEASURED on the owner's fleet, build 440, from mPad's own unified log:
+//
+//     21:06:26  advertising as iPad-92A6C5
+//     21:08:07  advertising as iPad-CF034B     <- same iPad, two minutes later
+//     21:08:34  advertising as iPad-AE6CD6     <- and again
+//     11 distinct peer identities for a 4-device fleet
+//
+// Fatal for sync: a follower tracks its director by MCPeerID (connectedDirectorPeer,
+// discoveredDirectors), so a director that renames itself silently abandons every follower. It also
+// manufactured a phantom split-brain — iPad-92A6C5 and iPad-AE6CD6 were the same iPad.
+//
+// The random suffix must STAY: since iOS 16 UIDevice.name returns a generic "iPad" to apps without
+// a special entitlement, so without it every device in the loft advertises the same name.
+test("the peer identity is persisted, not minted per role change", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func configureTransport"));
+  const body = fn.slice(0, fn.indexOf("mcSessions"));
+  assert.doesNotMatch(
+    body, /MCPeerID\(displayName:\s*"\\\(peerName\)-\\\(UUID\(\)/,
+    "configureTransport is minting a random peer name again — every role change renames the device",
+  );
+  assert.match(body, /localPeerID \?\? loadOrCreatePeerID\(\)/,
+    "configureTransport must reuse the existing peer, then fall back to the persisted one");
+});
+
+test("the peer id survives resetTransport, which nils it", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  // resetTransport clearing localPeerID is WHY an in-memory cache is not enough — it runs at the
+  // top of startDirector and approveDirectorTakeover, the exact transitions this must survive.
+  const reset = swift.slice(swift.indexOf("private func resetTransport"));
+  assert.match(reset.slice(0, reset.indexOf("\n  }")), /localPeerID = nil/,
+    "if reset no longer nils the peer, this test's premise changed — re-read the fix");
+  // So the identity has to come off disk, archived. A stable NAME alone is not enough: Apple treats
+  // the MCPeerID OBJECT as the identity.
+  assert.match(swift, /NSKeyedArchiver\.archivedData\(withRootObject:/);
+  assert.match(swift, /NSKeyedUnarchiver\.unarchivedObject\(ofClass: MCPeerID\.self/);
+  assert.match(swift, /UserDefaults\.standard/);
+});
+
+test("the uniqueness suffix is kept — iOS 16+ gives every device the same UIDevice.name", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const prop = swift.slice(swift.indexOf("private var stablePeerName"));
+  const body = prop.slice(0, prop.indexOf("\n  }"));
+  assert.match(body, /UUID\(\)\.uuidString\.prefix\(6\)/, "the suffix must still exist");
+  assert.match(body, /defaults\.set\(suffix, forKey: key\)/, "and it must be persisted, not random");
+});
