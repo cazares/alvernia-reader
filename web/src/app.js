@@ -363,7 +363,7 @@ const postNativeBridge = (payload) => {
     }));
     return true;
   } catch (error) {
-    console.error("No se pudo hablar con la app nativa", error);
+    console.error("No se pudo hablar con el app nativa", error);
     return false;
   }
 };

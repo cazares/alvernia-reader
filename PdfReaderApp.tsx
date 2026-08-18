@@ -942,7 +942,7 @@ export default function App() {
           pendingInjectRef.current = [];
           if (next) setBundleUri(next);
           setMountKey((k) => k + 1);
-          Alert.alert("Cancionero original", "Se restauró el cancionero incluido en la app.");
+          Alert.alert("Cancionero original", "Se restauró el cancionero incluido en el app.");
         })();
         return;
       }
@@ -1161,7 +1161,7 @@ export default function App() {
         case "request-force-baked":
           Alert.alert(
             "¿Usar el cancionero original?",
-            "Se descartará el cancionero descargado y volverá el que viene con la app. Úsalo si el actual no abre bien.",
+            "Se descartará el cancionero descargado y volverá el que viene con el app. Úsalo si el actual no abre bien.",
             [
               { text: "Cancelar", style: "cancel" },
               // destructive, not the soft reset: THIS is the one that throws away the downloaded
@@ -1180,7 +1180,7 @@ export default function App() {
             type: "diagnostics",
             build: BUILD_VERSION,
             role: roleRef.current,
-            book: activeBookVersionRef.current || "(incluido en la app)",
+            book: activeBookVersionRef.current || "(incluido en el app)",
             pages: totalPagesRef.current || 0,
             lines: breadcrumbsRef.current.slice(-BREADCRUMB_LIMIT),
           });
@@ -1857,7 +1857,7 @@ export default function App() {
       return;
     }
 
-    Alert.alert("¿Actualizar el cancionero?", "La app se recargará con el libro nuevo.", [
+    Alert.alert("¿Actualizar el cancionero?", "El app se recargará con el libro nuevo.", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Actualizar",
@@ -1919,7 +1919,7 @@ export default function App() {
         lastKnownRoleRef.current = "director";
         injectEvent({
           type: "toast",
-          text: "Estabas transmitiendo cuando se cerró la app.",
+          text: "Estabas transmitiendo cuando se cerró el app.",
           action: "resume-director",
         });
       })
@@ -1959,7 +1959,7 @@ export default function App() {
             // that rots as soon as the UI moves; carrying the control cannot rot.
             injectEvent({
               type: "toast",
-              text: "Estabas dirigiendo cuando se cerró la app.",
+              text: "Estabas dirigiendo cuando se cerró el app.",
               action: "resume-director",
             });
           }
@@ -2309,7 +2309,7 @@ export default function App() {
       {webDead ? (
         <View style={styles.fallback}>
           <Text style={styles.fallbackTitle}>Signo Vivo se está recuperando</Text>
-          <Text style={styles.fallbackMsg}>La app no cargó bien. Toca para reintentar.</Text>
+          <Text style={styles.fallbackMsg}>El app no cargó bien. Toca para reintentar.</Text>
           <TouchableOpacity
             style={styles.fallbackBtn}
             accessibilityRole="button"

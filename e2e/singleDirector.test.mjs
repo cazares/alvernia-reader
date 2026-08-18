@@ -109,7 +109,7 @@ test("a device that was directing when it died comes back as a FOLLOWER and is h
   // top-left status stopped taking the role, and which this test happily pinned in place. A test
   // that freezes a sentence cannot notice the sentence has become a lie; e2e/noticesCarryControls
   // now bans directional wording outright, which is the property that actually matters.
-  assert.match(b, /text: "Estabas dirigiendo cuando se cerró la app\."/, "the ex-director is not told what happened");
+  assert.match(b, /text: "Estabas dirigiendo cuando se cerró el app\."/, "the ex-director is not told what happened");
   assert.match(b, /action: "resume-director"/, "the notice carries no way back — it is an announcement, not a control");
   // and the flag is written back so the notice fires once per crash, not forever
   assert.match(b, /setItem\(STORAGE_KEYS\.lastSyncRole, "follower"\)/, "lastSyncRole is not cleared after the notice");

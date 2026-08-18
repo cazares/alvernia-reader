@@ -30,9 +30,9 @@ test("no notice tells anyone where a control is", () => {
 
 test("the resume notice carries a button, and that button opens the GATE", () => {
   // Losing the role unexpectedly is the moment someone most needs one tap, not a scavenger hunt.
-  assert.match(NATIVE, /text: "Estabas dirigiendo cuando se cerró la app\.",\s*\n\s*action: "resume-director"/,
+  assert.match(NATIVE, /text: "Estabas dirigiendo cuando se cerró el app\.",\s*\n\s*action: "resume-director"/,
     "the crash-resume notice no longer carries its action");
-  assert.match(NATIVE, /text: "Estabas transmitiendo cuando se cerró la app\.",\s*\n\s*action: "resume-director"/,
+  assert.match(NATIVE, /text: "Estabas transmitiendo cuando se cerró el app\.",\s*\n\s*action: "resume-director"/,
     "the relay-transmitter notice no longer carries its action");
 
   // It must open the gate, NOT take the role: the typed word is the only thing standing between a
@@ -53,4 +53,15 @@ test("a device still boots as a FOLLOWER — the notice informs, it does not pro
     "the boot path no longer forces follower — a persisted role could promote this device");
   const boot = NATIVE.slice(NATIVE.indexOf("if (!didBootstrapRef.current)"), NATIVE.indexOf("const sub = addNearbyDirectorSyncListener"));
   assert.doesNotMatch(boot, /becomeDirector\(/, "the boot path can promote to director without a human");
+});
+
+test('Spanish copy uses "el app", never "la app"', () => {
+  // House style, Miguel 2026-08-18, global. Not a grammar debate — "la app" is common usage
+  // elsewhere and is still wrong in this product's voice. Cheap to enforce, easy to reintroduce
+  // by habit, so it is pinned rather than remembered.
+  const WEB = fs.readFileSync("web/src/app.js", "utf8");
+  const SELFTEST = fs.readFileSync("web/src/lib/svSelftest.js", "utf8");
+  for (const [name, src] of [["PdfReaderApp.tsx", NATIVE], ["web/src/app.js", WEB], ["svSelftest.js", SELFTEST]]) {
+    assert.doesNotMatch(src, /\bla app\b/i, `${name} says "la app" — this product writes "el app"`);
+  }
 });

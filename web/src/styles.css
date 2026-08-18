@@ -2499,8 +2499,17 @@ html[data-mesh="nobody"] .resync-fab::after {
 html[data-role="follower"] .director-mode-badge.is-nobody { display: none; }
 /* Hide the right-side fabs WHILE the drawer is open (director-only; the drawer has its own
    nav). !important so it still wins over the director rule above. */
+/* THE WHOLE CLUSTER HIDES TOGETHER, not most of it. This listed only ♪ and ⌕, so opening the search
+   dropdown left the role controls — Salir Director and ★ Ser Director — and the ⟳ floating over a
+   panel that covers the page. Enumerating a subset means every control added later is hidden by
+   default only if someone remembers this line; naming all of them makes the omission visible.
+   The sync status is included for the same reason: it is a control now (tapping it leaves the role),
+   so a stray tap while reading the search results would drop the choir's director. */
 body.sv-drawer-open .song-jump-fab,
-body.sv-drawer-open .search-fab { display: none !important; }
+body.sv-drawer-open .search-fab,
+body.sv-drawer-open .resync-fab,
+body.sv-drawer-open .become-director-pill,
+body.sv-drawer-open .director-mode-badge { display: none !important; }
 
 /* Modal shell + backdrop */
 .song-jump-modal {

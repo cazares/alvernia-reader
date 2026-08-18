@@ -49,6 +49,19 @@ const ALLOWED_DRIFT = new Map([
    "2026-08-17: matching :active alpha 0.55 -> 0.86, so the pressed state stays visibly darker " +
    "than the new resting 0.72. Same reason as above."],
 
+  // THE DRAWER HIDES THE WHOLE CLUSTER NOW, so this shared selector list grew.
+  // 381 hid only the two corner controls that existed then. By 2026-08-18 the cluster also holds
+  // the resync fab, the become-director pill and the sync status, and all three floated over a panel
+  // that covers the page. The status is the one that mattered: it is a CONTROL now (tapping it
+  // leaves the role), so a stray tap while reading search results would drop the choir's director.
+  ["body.sv-drawer-open .song-jump-fab, body.sv-drawer-open .search-fab",
+   "2026-08-18, SUPERSEDED: the 381 pair. Replaced by the full-cluster list below — enumerating a " +
+   "subset means each control added later is hidden only if someone remembers this rule exists."],
+  ["body.sv-drawer-open .song-jump-fab, body.sv-drawer-open .search-fab, body.sv-drawer-open .resync-fab, body.sv-drawer-open .become-director-pill, body.sv-drawer-open .director-mode-badge",
+   "2026-08-18: every corner control hides with the drawer, not just the two that existed in 381. " +
+   "The search panel's own geometry and behaviour are untouched; this is only about what stays on " +
+   "top of it. e2e/fabLayout.test.mjs asserts the SET, so an omission fails loudly."],
+
   // HISTORY, kept deliberately — these two keys match nothing today. A \u2715 exit fab and a
   // "Ser Director" entry fab each joined this shared selector list during 2026-08-17/18 and each
   // left again, once the DIRECTOR status itself became the exit (tapping it asks) and the keypad's

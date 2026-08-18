@@ -298,3 +298,20 @@ test("★ Ser Director keeps the star on line 1, which is what makes it narrow",
   assert.match(rule.slice(0, rule.indexOf("}")), /display:\s*flex/,
     "line 1 is not a flex row, so the star and Ser will not sit on one baseline");
 });
+
+test("the whole corner cluster hides together, not most of it", () => {
+  // This listed only ♪ and ⌕, so opening the search dropdown left the role controls and ⟳ floating
+  // over a panel that covers the page. Worse than untidy: the sync status is a CONTROL now — tapping
+  // it leaves the role — so a stray tap while reading search results drops the choir's director.
+  //
+  // Asserted as a SET rather than a line, because the failure mode is omission: every control added
+  // later is hidden only if someone remembers to come back here.
+  const rule = CSS.slice(CSS.indexOf("body.sv-drawer-open"));
+  const block = rule.slice(0, rule.indexOf("}") + 1);
+  for (const sel of [".song-jump-fab", ".search-fab", ".resync-fab",
+                     ".become-director-pill", ".director-mode-badge"]) {
+    assert.ok(block.includes(`body.sv-drawer-open ${sel}`),
+      `${sel} stays visible over the drawer — the cluster must hide as one`);
+  }
+  assert.match(block, /display: none !important/, "the drawer no longer hides the cluster at all");
+});
