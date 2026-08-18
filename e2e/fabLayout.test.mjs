@@ -28,6 +28,9 @@ const rootVar = (name) => {
 const GUTTER = rootVar("fab-gutter");
 const SIZE = rootVar("fab-size");
 const GAP = rootVar("fab-gap");
+// Vestigial since 2026-08-18: the DIRECTOR status content-hugs around a lone ☆, so no position is
+// derived from this width. Still read so the ladder fails loudly if someone re-introduces a fixed
+// status width without re-deriving the offsets beside it.
 const STATUS_W = rootVar("fab-status-w");
 
 const fabWidth = () => SIZE;
@@ -70,8 +73,6 @@ test("the corner cluster is uniformly spaced, by construction", () => {
   // Every neighbour pair must be exactly --fab-gap apart. This is the property the owner asked for
   // ("uniformly separated") and the one hand-computed offsets kept breaking.
   assert.equal(SLOT2 - SIZE, GAP, "slot 2 does not sit one gap after a control");
-  // The director's row is the OTHER width: its Ir a Canto must clear the status pill, not a square.
-  assert.ok(STATUS_W > SIZE, "the status is no wider than a square — it holds a word, it must be");
   assert.ok(GAP >= 0.25, `gap ${GAP}rem is too tight to read as separate controls`);
   assert.ok(GUTTER >= 0.75, `gutter ${GUTTER}rem crowds the screen edge`);
 });
@@ -217,11 +218,13 @@ test("ADDITIVE: Ir a Canto stays top-RIGHT, and the new controls take empty corn
   // where these buttons are. Ir a Canto spent 2026-08-17 in the top-LEFT cluster and moving it back
   // is the whole point — a rearrangement costs more than any layout gains.
   //
-  //   FOLLOWER : ⟳(L1) · ★ Ser Director(L2)              …            Ir a Canto (flush R)
-  //   DIRECTOR : DIRECTOR(L1)                     …      Ir a Canto(R2) · ⌕ (flush R)
+  //   FOLLOWER : ⟳(L1)          …    ★ Ser Director(R2) · Ir a Canto (flush R)
+  //   DIRECTOR : ☆(L1)          …        Ir a Canto(R2) · ⌕ (flush R)
   //
-  // ⟳/DIRECTOR share left slot 1 and Ir a Canto/⌕ share the right corner: in each pair the two are
-  // never on screen together, so nothing had to move to make room for what was added.
+  // Ir a Canto is flush right in BOTH roles and never moves. Everything added sits one slot to its
+  // left, in space that was empty, and the two occupants of that slot (★ Ser Director for a
+  // follower, ⌕ for a director) are never on screen together. Same for left slot 1: ⟳ for a
+  // follower, the ☆ status for a director.
   const rule = (sel) => {
     const i = CSS.indexOf(sel);
     assert.ok(i > 0, `${sel} is gone`);
@@ -232,11 +235,19 @@ test("ADDITIVE: Ir a Canto stays top-RIGHT, and the new controls take empty corn
   assert.match(rule('html[data-role="director"] .song-jump-fab'), /right:\s*calc\(/,
     "the director's Ir a Canto no longer steps left of ⌕ — they will overlap in that corner");
   assert.match(rule(".search-fab {"), /right:\s*max\(var\(--fab-gutter\)/, "⌕ is no longer flush right");
-  // The two ADDED controls both sit in the left cluster, which is where the empty space was.
-  assert.match(rule(".become-director-pill {"), /left:\s*calc\([^;]*--fab-slot2/,
-    "★ Ser Director is not in left slot 2 — it must sit one gap right of ⟳");
+  // ★ Ser Director sits one slot LEFT of Ir a Canto (owner moved it there 2026-08-18), sharing that
+  // slot with ⌕ — which only a director sees, so they never collide.
+  assert.match(rule(".become-director-pill {"), /right:\s*calc\([^;]*--fab-slot2/,
+    "★ Ser Director is not one slot left of Ir a Canto — it must not push Ir a Canto out of the corner");
   assert.match(rule('html[data-role="director"] .director-mode-badge'), /left:\s*max\(var\(--fab-gutter\)/,
-    "the DIRECTOR status left flush-left, where ⟳ is hidden and the corner is free");
+    "the ☆ status left flush-left, where ⟳ is hidden and the corner is free");
+
+  // BOTH added controls CONTENT-HUG. Neither carries text that changes, so neither can shove a
+  // neighbour by resizing — which is the only reason auto width is safe in a hand-built ladder.
+  for (const sel of [".become-director-pill {", 'html[data-role="director"] .director-mode-badge']) {
+    assert.match(rule(sel), /width:\s*max-content/, `${sel} is no longer content-fit`);
+    assert.match(rule(sel), /padding:/, `${sel} content-hugs with no padding — the label touches the edge`);
+  }
 });
 
 test("the two role controls never share the screen", () => {

@@ -3,17 +3,26 @@
      flush against the bezel, and against the page's own edge, which reads as crowded and puts a tap
      target where a palm rests. One variable so the four corners can never drift apart again; the
      max() keeps the notch/home-indicator insets winning wherever they are larger. */
-  --fab-gutter: 0.95rem;
+  /* 0.95 -> 1.89 -> 1.58rem. First +15px inward on every edge, then 5px back out (owner: "5px up,
+     5px left" for the top-left and "5px up, 5px right" for the top-right — which is one uniform
+     gutter change, since left-anchored controls move left, right-anchored move right, and every
+     control shares the top edge). One variable moves BOTH clusters in BOTH roles. */
+  --fab-gutter: 1.58rem;
   /* THE CLUSTER IS DERIVED, NOT HAND-COMPUTED. Every top control is --fab-size square (the DIRECTOR
      status is --fab-status-w wide), separated by exactly --fab-gap. The slot offsets below are
      calc()s off these three numbers, so the spacing is uniform BY CONSTRUCTION rather than by me
      getting the arithmetic right — which I did not, twice tonight: once leaving ⌕ and Ir a Canto
      0.1rem apart, once leaving the pill 0.15rem from ⟳. Change a size here and every position
      follows. */
-  --fab-size: 3.875rem;
+  --fab-size: 4.456rem;      /* 3.875 x 1.15 (owner: 15% wider AND taller; square, so one var does both) */
   --fab-gap: 0.5rem;
-  --fab-status-w: 6.2rem;
-  --fab-become-w: 7.6rem;   /* ★ Ser Director — longer word than DIRECTOR, own width so neither squeezes the other */
+  /* Vestigial: the DIRECTOR status content-hugs around a lone ☆ now, so nothing derives a position
+     from this width any more. Kept only as the base .director-mode-badge width, which every real
+     state overrides. Safe to auto-size because that pill no longer holds text that can change. */
+  --fab-status-w: 7.13rem;
+  /* ★ Ser Director has NO width var any more — it content-fits (owner: "as small as possible" +
+     "content-fit ... with reasonable margins/padding"). It is the one control whose text never
+     changes, so it cannot shove a neighbour by resizing, which is what fixed widths guard against. */
   /* slot 2 = one control + one gap from the edge; slot 3 = past the wider status pill. */
   --fab-slot2: calc(var(--fab-size) + var(--fab-gap));
   /* NO SLOT 3. The empty-seat state used to be a text pill sitting third in this row; it is now
@@ -227,7 +236,7 @@ button:disabled {
      the loft is actually used — the page fills the width and these land on a WHITE song sheet,
      where a 38%-navy wash is nearly invisible. 0.72 is legible over white without becoming a heavy
      black box over the music. */
-  background: rgba(26, 26, 46, 0.72);
+  background: rgba(26, 26, 46, 0.61);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
@@ -2288,14 +2297,14 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
   flex: 0 0 auto;
   border-radius: 14px;
   border: 0;
-  background: rgba(26, 26, 46, 0.72);
+  background: rgba(26, 26, 46, 0.61);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   color: #fff;
   /* 0.8625 of the 4.5rem box — the top-left ratio the owner liked, at the size he settled on
      (5rem, then 10% smaller). Keep these two numbers in step: changing the box without the glyph is
      what made these controls read as smaller than they are. */
-  font-size: 3.34rem;   /* 0.8625 of the 3.875rem box — the ratio stays fixed as the box moves */
+  font-size: 3.84rem;   /* 0.8625 of the 4.456rem box — the glyph:box ratio is held as the box grows */
   line-height: 1;
   display: flex;
   align-items: center;
@@ -2367,11 +2376,11 @@ html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), e
   bottom: max(var(--fab-gutter), env(safe-area-inset-bottom, 0px));
   right: max(var(--fab-gutter), env(safe-area-inset-right, 0px));
 }
-.fullscreen-fab svg { width: 2rem; height: 2rem; }
+.fullscreen-fab svg { width: 2.3rem; height: 2.3rem; }   /* 2 x 1.15, with the boxes */
 .song-jump-fab:active,
 .search-fab:active,
 .resync-fab:active,
-.fullscreen-fab:active { background: rgba(26, 26, 46, 0.86); transform: scale(0.96); }
+.fullscreen-fab:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
 /* ⟳ icon pulses opacity while reconnecting — soft breath, plus staggered dots below */
 .resync-icon { display: inline-block; line-height: 1; }
 .resync-fab.is-spinning .resync-icon { animation: sv-resync-pulse 1.5s ease-in-out infinite; }
@@ -2395,6 +2404,16 @@ html[data-role="director"] .search-fab { display: flex; }   /* shown for the dir
 html[data-role="director"] .director-mode-badge {
   left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
   cursor: pointer;
+  /* JUST THE STAR (owner, 2026-08-18). The word "DIRECTOR" is gone; the ☆ carries it, and it is the
+     same outline star that ★ Ser Director wears — so the symbol means "the director role" in both
+     corners, and the only question it answers is which side of it you are on. They are never on
+     screen together (one is director-only, the other follower-only), so the star cannot be
+     ambiguous in the moment.
+     Content-hug, not a fixed box: with no text there is nothing to reserve width for. Height stays
+     --fab-size so the top row still reads as one band. */
+  width: max-content;
+  padding: 0 0.72rem;
+  justify-content: center;
   /* A WHISPER OF THE SAME iOS BLUE as ★ Ser Director, so entering the role and holding it read as
      one idea. Layered as a 0.16 wash OVER the standard fab navy rather than a different colour, so
      the pill stays unmistakably part of the corner cluster — it is a status, and a status that
@@ -2402,7 +2421,7 @@ html[data-role="director"] .director-mode-badge {
      same blue for the same reason: recognisable, not loud. */
   background:
     linear-gradient(rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0.16)),
-    rgba(26, 26, 46, 0.72);
+    rgba(26, 26, 46, 0.61);
 }
 html[data-role="director"] .director-mode-badge .director-mode-badge-title { color: #E4EEFF; }
 /* OUTLINE star (☆ U+2606), not filled. Filled reads as "selected/favourite"; hollow reads as a
@@ -2410,10 +2429,14 @@ html[data-role="director"] .director-mode-badge .director-mode-badge-title { col
    its emphasis — that one is an action you take, this one is a state you are in. */
 html[data-role="director"] .director-mode-badge .director-mode-badge-star {
   display: block;
-  font-size: 0.9rem;
+  /* Scaled to fill the button now that it is the only content — same job the glyph does in ⟳/⌕. */
+  font-size: 2.9rem;
   line-height: 1;
-  color: rgba(228, 238, 255, 0.85);
+  color: rgba(228, 238, 255, 0.92);
 }
+/* The word is retired from the GLASS but stays in SYNC_PILL for screen readers, and the pill's
+   aria-label still says "Estás dirigiendo. Tocar para salir." */
+html[data-role="director"] .director-mode-badge .director-mode-badge-title { display: none; }
 .director-mode-badge-star { display: none; }
 html[data-role="director"] .director-mode-badge .director-mode-badge-exit { display: none; }
 html[data-role="director"] .resync-fab { display: none; }   /* hidden for the director */
@@ -2440,7 +2463,7 @@ html[data-role="director"] .resync-fab { display: none; }   /* hidden for the di
 html[data-mesh="nobody"] .resync-fab {
   /* A wash over the navy, not a repaint — same treatment as the DIRECTOR pill's blue, so the
      cluster still reads as one family rather than one alarming stranger. */
-  background: linear-gradient(rgba(239, 68, 68, 0.18), rgba(239, 68, 68, 0.18)), rgba(26, 26, 46, 0.72);
+  background: linear-gradient(rgba(239, 68, 68, 0.18), rgba(239, 68, 68, 0.18)), rgba(26, 26, 46, 0.61);
 }
 html[data-mesh="nobody"] .resync-icon { opacity: 0.45; }   /* the ⟳ recedes; the X is the message */
 html[data-mesh="nobody"] .resync-fab::after {
@@ -2859,40 +2882,45 @@ body.sv-drawer-open .search-fab { display: none !important; }
 .become-director-pill {
   position: fixed;
   top: max(var(--fab-gutter), env(safe-area-inset-top, 0px));
-  /* TOP-LEFT, ONE SLOT RIGHT OF ⟳ (owner: "top left: refresh then director to the right of it").
-     A follower's left cluster is ⟳(1) · Ser Director(2); a director's is the DIRECTOR status alone
-     in slot 1, because ⟳ is hidden for that role. Same corner, same ladder, either way — so the
-     role control is always in the same place and only its word changes. */
-  left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + var(--fab-slot2));
+  /* TOP-RIGHT, ONE SLOT LEFT OF IR A CANTO (owner, 2026-08-18). Ir a Canto stays flush in the corner
+     where the choir already looks for it; this is ADDED to its left, in space that was empty. For a
+     follower ⌕ is hidden, so the right cluster is ★ Ser Director · Ir a Canto. */
+  right: calc(max(var(--fab-gutter), env(safe-area-inset-right, 0px)) + var(--fab-slot2));
   z-index: 46;
   display: none;               /* shown only for a follower inside the native shell — see below */
   align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  width: var(--fab-become-w);
+  gap: 0.3rem;
+  /* CONTENT-FIT WIDTH, FIXED HEIGHT. Width is auto so the pill is only as wide as "Director" plus
+     its padding — it was 7.6rem of mostly air. Height stays --fab-size so the top row still reads as
+     one band; a control that is both narrower AND shorter than its neighbours reads as a different
+     class of thing. Safe to auto-size because this label never changes, so it can never shove a
+     neighbour the way a variable-width status would. */
+  width: max-content;
   height: var(--fab-size);
   box-sizing: border-box;
-  padding: 0.3rem 0.5rem;
+  padding: 0 0.62rem;
   border: 0;
   border-radius: 14px;
-  /* The same whisper of iOS blue the DIRECTOR pill wears, layered OVER the cluster navy rather than
-     replacing it — a control that stands out competes with the music it sits on top of. */
   background:
     linear-gradient(rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0.16)),
-    rgba(26, 26, 46, 0.72);
+    rgba(26, 26, 46, 0.61);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   color: #E4EEFF;
-  font: 700 0.82rem/1.1 system-ui, -apple-system, sans-serif;
   letter-spacing: 0.01em;
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.become-director-pill:active { background: rgba(26, 26, 46, 0.86); transform: scale(0.96); }
-.become-director-star { font-size: 0.9rem; line-height: 1; color: rgba(228, 238, 255, 0.85); }
-.become-director-label { white-space: nowrap; }
+.become-director-pill:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
+/* ☆ sits to the LEFT of both lines, vertically centred against the stack (owner). */
+.become-director-star { flex: 0 0 auto; font-size: 1.04rem; line-height: 1; color: rgba(228, 238, 255, 0.85); }
+/* TWO LINES — "Ser" over "Director" (owner). Stacking is what lets the pill be narrow: on one line
+   it is as wide as the whole phrase, and the phrase was most of that 7.6rem. */
+.become-director-label { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.06; }
+.become-director-l1 { font: 700 0.78rem/1.06 system-ui, -apple-system, sans-serif; opacity: 0.82; }
+.become-director-l2 { font: 700 0.95rem/1.06 system-ui, -apple-system, sans-serif; white-space: nowrap; }
 /* FOLLOWER + NATIVE SHELL ONLY. Driven by attributes on <html> that renderDirectorModeBadge sets on
    every render, rather than by a one-shot JS call: the function that used to hide the keypad's copy
    of this ran exactly once at init and never again on a role change, so it never actually hid.
