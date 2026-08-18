@@ -361,6 +361,32 @@ export default function App() {
       .then((v) => { telemetryEnabledRef.current = v === "1"; })
       .catch(() => {});
   }, []);
+
+  // ── TELEMETRY LEVELS ───────────────────────────────────────────────────────
+  //
+  // Off-by-default fixed the idle cost; this fixes the ON cost. Turning telemetry on used to mean
+  // turning on EVERYTHING — a 1 Hz mesh heartbeat, every BLE packet, every discovery tick — which is
+  // the firehose that exhausted a 100,000/day account quota twice in two days.
+  //
+  // Mirrors sync-worker/src/logBuffer.js exactly (LOG_LEVELS / levelForEvent); a test executes BOTH
+  // and asserts they classify identically, because two copies of a rule drift the moment one moves.
+  // The worker echoes logLevel on every POST /log, so `LOG_LEVEL` + `wrangler deploy` retunes the
+  // fleet in ~20s with no TestFlight round trip.
+  //
+  // INFERRED FROM THE EVENT NAME rather than passed at the call site: a level argument that must be
+  // remembered at ~100 call sites is one that will be forgotten, and forgetting would default to
+  // the loudest setting — which is exactly the failure being fixed.
+  const LOG_LEVELS = { off: 0, error: 1, warn: 2, info: 3, debug: 4 } as const;
+  const levelForEvent = useCallback((event: string): number => {
+    const e = String(event || "");
+    if (/error|STORM|conflict|denied|fail|wedged|revoke|abort/i.test(e)) return LOG_LEVELS.error;
+    if (/stale|retry|reconnect|rebuild|half-open|not-director|skip|cold/i.test(e)) return LOG_LEVELS.warn;
+    if (/^(become|role|boot|resync|director|follower)[:.]?|ready|start|stop/i.test(e)) return LOG_LEVELS.info;
+    return LOG_LEVELS.debug;
+  }, []);
+  // Starts OFF. Raised only by the policy the worker echoes back, so the resting state of a device
+  // that never talks to the relay is silence.
+  const logLevelRef = useRef<number>(LOG_LEVELS.off);
   const dbgFlush = useCallback(() => {
     const batch = dbgBufferRef.current;
     if (batch.length === 0) return;
@@ -379,6 +405,10 @@ export default function App() {
   const dbgLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
       try {
+        // DROP BEFORE BUFFERING, not at flush. A buffer that fills at debug volume and is discarded
+        // later still costs the memory and still exists to be accidentally flushed; the cheapest
+        // request is the one never assembled.
+        if (levelForEvent(event) > logLevelRef.current) return;
         dbgBufferRef.current.push({
           t: Date.now(),
           dev: dbgDeviceRef.current,
@@ -393,7 +423,7 @@ export default function App() {
         /* ignore */
       }
     },
-    [dbgFlush],
+    [dbgFlush, levelForEvent],
   );
   // ── Fleet readiness check-in (native → the SAME /fleet dashboard as signovivo.com) ──
   // Reports this iPad's native build + role so the director sees who's ready before Mass. Reuses
@@ -746,7 +776,14 @@ export default function App() {
       } catch {
         /* network flaps are expected; the next tick / page change re-publishes */
       }
-    }, 12000);
+      // 12s -> 30s. This is ONLY a keepalive: every real page turn publishes immediately via
+      // broadcastPage, so its sole job is keeping the snapshot inside RELAY_LIVE_MAX_AGE_S (90s) so
+      // followers still count the director as live. At 12s it spent 7,200 requests a day to say
+      // nothing had changed — 7% of the account's entire daily quota, on a keepalive.
+      //
+      // 30s, not 45s: at 45 a SINGLE lost publish reaches the 90s window and every follower declares
+      // the director dead. 30 gives three attempts inside the window and still costs only 2,880/day.
+    }, 30000);
   }, [stopDirectorHeartbeat]);
 
   // ── Become follower ──────────────────────────────────────────────────────────

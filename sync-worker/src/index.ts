@@ -18,7 +18,7 @@ import { decideBookUpdate } from "./bookArming.js";
 // Diagnostic ring-buffer sizing + run-length folding. Plain JS for the same reason as above:
 // this is the instrument every mesh diagnosis depends on, so it gets real tests.
 // @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
-import { foldLogEntries, logIntervalMs, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
+import { foldLogEntries, logIntervalMs, logLevel, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
 
 export interface Env {
   SYNC_ROOM: DurableObjectNamespace<SyncRoom>;
@@ -48,6 +48,10 @@ export interface Env {
    *  scripts/telemetry-budget-sim.mjs: 15 s batching is a 4.8x cut with 100% of rows still
    *  delivered (87,258 -> ~18,000/day). Raising it cuts further; "0" stops the fleet dead. */
   LOG_INTERVAL_MS?: string;
+
+  /** Telemetry verbosity the fleet should log at: off | error | warn | info | debug (default off).
+   *  Echoed on POST /log, so this + `wrangler deploy` retunes every device in ~20s. */
+  LOG_LEVEL?: string;
 
   // ── Songbook OTA arming (docs/choir-pdf-distribution-plan.md §5.3) ─────────
   // SHIPPED DORMANT: with BOOK_UPDATE_VERSION empty the `bookUpdate` field never appears in any
@@ -745,7 +749,7 @@ export default {
           // NOTE the asymmetry that makes this necessary: refusing a request inside the Worker does
           // NOT save Cloudflare quota, because the Worker already ran to refuse it. The rate limiter
           // below protects the ring BUFFER; only the client backing off protects the ACCOUNT.
-          const policy = { logIntervalMs: logIntervalMs(env) };
+          const policy = { logIntervalMs: logIntervalMs(env), logLevel: logLevel(env) };
           if (result.rateLimited) {
             return json({ ok: false, error: "rate_limited", ...policy }, 429, cors);
           }

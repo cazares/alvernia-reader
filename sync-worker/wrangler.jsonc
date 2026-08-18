@@ -33,7 +33,13 @@
     // still delivered. Sampling was rejected: it saves ~1% more and costs two thirds of
     // the evidence, because the request count is set by how many WINDOWS contain an
     // event, not how many events.
-    "LOG_INTERVAL_MS": "15000",
+    "LOG_INTERVAL_MS": "60000",
+
+    // Telemetry verbosity: off | error | warn | info | debug. OFF is the default and the resting
+    // state — two outages in two days came from telemetry nobody had asked for. Raise it for a
+    // debugging session (`error` and `warn` are cheap enough to leave on; `debug` is per-second
+    // volume and is a deliberate, temporary choice), then put it back.
+    "LOG_LEVEL": "off",
 
     // ── QUOTA RESERVATION FOR signovivo.com ──────────────────────────────────
     //

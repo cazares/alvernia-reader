@@ -98,3 +98,61 @@ test("the worker RESERVES quota for signovivo.com, and never counts the product'
   assert.ok(cap > 0 && cap <= 25_000,
     `a ${cap}/day non-essential budget leaves too little of the 100k daily quota for signovivo.com`);
 });
+
+test("telemetry levels exist, default OFF, and a typo goes QUIET not loud", async () => {
+  const m = await import("../sync-worker/src/logBuffer.js");
+  assert.deepEqual(Object.keys(m.LOG_LEVELS), ["off", "error", "warn", "info", "debug"]);
+  assert.equal(m.logLevel({}), 0, "the default is not OFF — two outages came from unrequested telemetry");
+  assert.equal(m.logLevel({ LOG_LEVEL: "bogus" }), 0,
+    "a level typo falls back to a NOISY default; it must go quiet — a lost debugging session beats a spent quota");
+  assert.equal(m.logLevel({ LOG_LEVEL: "debug" }), 4);
+  assert.equal(m.logLevel({ LOG_LEVEL: "ERROR" }), 1, "levels are case-sensitive");
+  assert.equal(m.logLevel({ LOG_LEVEL: "2" }), 2, "a numeric level is rejected");
+});
+
+test("the native classifier and the worker classifier cannot drift", async () => {
+  // Two copies of one rule drift the moment either moves, and the drift is silent: the fleet would
+  // filter by one table while the operator tuned the other. So both are EXECUTED and compared.
+  const m = await import("../sync-worker/src/logBuffer.js");
+  const src = fs.readFileSync("PdfReaderApp.tsx", "utf8");
+  const body = src.slice(src.indexOf("const levelForEvent = useCallback"), src.indexOf("}, []);", src.indexOf("const levelForEvent")));
+  const inner = body.slice(body.indexOf("{") + 1);
+  const LOG_LEVELS = { off: 0, error: 1, warn: 2, info: 3, debug: 4 };
+  const nativeLevelFor = new Function("LOG_LEVELS", "event", inner.replace(/:\s*number/g, ""));
+
+  const SAMPLES = [
+    "mesh:error", "refresh:STORM", "watchdog:wedged-rebuild", "session:peer-not-director",
+    "invite:retry", "ble:page-send", "ble:rebase", "become:director", "boot", "resync:force-reconnect",
+    "page:send", "session:connected", "refresh:peers-cleared", "ble:contention", "watchdog:half-open-reconnect",
+  ];
+  for (const e of SAMPLES) {
+    assert.equal(nativeLevelFor(LOG_LEVELS, e), m.levelForEvent(e),
+      `"${e}" classifies differently in the app than in the worker — the tables have drifted`);
+  }
+  // And the classification must be USEFUL: the per-second chatter has to be the level you turn off.
+  assert.equal(m.levelForEvent("ble:page-send"), LOG_LEVELS.debug, "1 Hz BLE chatter is not debug-level");
+  assert.equal(m.levelForEvent("mesh:error"), LOG_LEVELS.error, "errors are not error-level");
+});
+
+test("dbgLog drops below-level events BEFORE buffering them", () => {
+  const src = fs.readFileSync("PdfReaderApp.tsx", "utf8");
+  const fn = src.slice(src.indexOf("const dbgLog = useCallback"));
+  const body = fn.slice(0, fn.indexOf("[dbgFlush"));
+  assert.match(body, /if \(levelForEvent\(event\) > logLevelRef\.current\) return;/, "dbgLog ignores levels");
+  assert.ok(body.indexOf("levelForEvent(event)") < body.indexOf("dbgBufferRef.current.push"),
+    "events are buffered first and filtered later — the cheapest request is the one never assembled");
+});
+
+test("the relay keepalive is a keepalive, not a poll", () => {
+  const src = fs.readFileSync("PdfReaderApp.tsx", "utf8");
+  const hb = src.slice(src.indexOf("relayHeartbeatRef.current = setInterval"));
+  const ms = Number(hb.match(/\}, (\d+)\);/)[1]);
+  const perDay = Math.floor((24 * 60 * 60 * 1000) / ms);
+  assert.ok(perDay < 3000,
+    `a ${ms}ms relay keepalive spends ${perDay}/day saying nothing changed — page turns already publish`);
+  // But it must stay comfortably inside the liveness window, or followers declare the director dead.
+  const APPJS = fs.readFileSync("web/src/app.js", "utf8");
+  const liveS = Number(APPJS.match(/const RELAY_LIVE_MAX_AGE_S = (\d+)/)[1]);
+  assert.ok(ms / 1000 < liveS / 2,
+    `a ${ms / 1000}s keepalive against a ${liveS}s liveness window leaves no margin for one lost publish`);
+});
