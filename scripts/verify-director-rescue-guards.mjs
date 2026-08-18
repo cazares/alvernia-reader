@@ -87,7 +87,11 @@ const MUTATIONS = [
   ["force-baked fires BEFORE its confirmation dialog", "PdfReaderApp.tsx",
    sub('case "request-force-baked":\n          Alert.alert(', 'case "request-force-baked":\n          onDirectorCode(BOOK_FORCE_BAKED_CODE);\n          Alert.alert(')],
   ["request-director bypasses onDirectorCode's takeover confirmation", "PdfReaderApp.tsx",
-   sub('case "request-director":\n          onDirectorCode(DIRECTOR_CODE);', 'case "request-director":\n          void becomeDirector(DIRECTOR_CODE); if (0) onDirectorCode(DIRECTOR_CODE);')],
+   // Threaded through a knownPage extraction 2026-08-18 (aa68c9e) so the web's true page rides
+   // with the tap instead of trusting the async-fed currentPageRef mirror. Anchored on the
+   // onDirectorCode call itself, not the whole case block, so future changes to the knownPage
+   // extraction above it don't silently disarm this mutation as a SKIP.
+   sub('onDirectorCode(DIRECTOR_CODE, knownPage);', 'void becomeDirector(DIRECTOR_CODE, knownPage); if (0) onDirectorCode(DIRECTOR_CODE, knownPage);')],
   ["crumb merge order swapped — the NEW session's crumbs get dropped", "PdfReaderApp.tsx",
    sub("const merged = [...prev, `${new Date().toISOString()} ── app start ──`, ...breadcrumbsRef.current];",
        "const merged = [...breadcrumbsRef.current, `${new Date().toISOString()} ── app start ──`, ...prev];")],
