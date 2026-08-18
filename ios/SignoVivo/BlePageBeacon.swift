@@ -112,6 +112,35 @@ final class BlePageBeacon: NSObject {
     log?("ble:page-send", ["page": page, "seq": seq])
   }
 
+  /// Re-assert advertising if it has stopped for any reason other than us stopping it.
+  ///
+  /// startAdvertisingIfReady is reachable from exactly three places — publish(), resumeOnForeground()
+  /// and the power-on callback — and publish() early-returns when the page has not changed. So a
+  /// director that loses its advertisement mid-session while FOREGROUNDED (radio hiccup, iOS
+  /// reclaiming the peripheral) never re-arms until it happens to turn a page. Silent, and invisible
+  /// from the device itself: it still believes it is publishing.
+  ///
+  /// Called from the director's 1 Hz heartbeat. Cheap and idempotent: a bool check, and a restart
+  /// only when iOS says we are genuinely not advertising.
+  func ensureAdvertising() {
+    guard let p = peripheral, p.state == .poweredOn, pendingAdvert != nil, !p.isAdvertising else { return }
+    log?("ble:readvertise", [:])
+    startAdvertisingIfReady()
+  }
+
+  /// Re-assert scanning on the same principle, and trust CBCentralManager over our own flag.
+  ///
+  /// scanIfReady() guards on `!isScanning`, a local bool. If iOS stops the scan without telling us,
+  /// that bool stays true and the guard refuses to restart it — the follower is deaf for the rest of
+  /// the session while believing it is listening. `central.isScanning` is the actual state, so this
+  /// asks the framework rather than our memory of it.
+  func ensureScanning() {
+    guard let c = central, c.state == .poweredOn, !c.isScanning else { return }
+    if isScanning { log?("ble:rescan", [:]) }   // only interesting when we THOUGHT we were scanning
+    isScanning = false
+    scanIfReady()
+  }
+
   private func startAdvertisingIfReady() {
     guard let p = peripheral, p.state == .poweredOn, let name = pendingAdvert else { return }
     // Restarting is required: iOS gives no way to mutate a live advertisement in place. This is

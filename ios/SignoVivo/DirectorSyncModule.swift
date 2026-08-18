@@ -1094,6 +1094,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // number inside a fixed-size advertisement.
       self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
       self.bleBeacon.publish(page: self.currentPageNumber ?? page.intValue)
+      // The heartbeat reaches here once a second whether or not the page moved, which makes it the
+      // natural place to re-assert an advertisement that stopped without us asking. publish() alone
+      // cannot do it: it early-returns on an unchanged page, so a director that went dark would stay
+      // dark until the next page turn.
+      self.bleBeacon.ensureAdvertising()
       let connected = self.allConnectedPeers
       guard !connected.isEmpty else {
         self.emitState(status: "waiting-followers")
@@ -1449,6 +1454,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         autoreleasepool {
           guard let self = self, self.resetGeneration == generation, self.appIsActive,
                 self.currentRole == "follower" else { return }
+
+          // BLE IS THE FAST PATH AND MUST NOT GO DEAF QUIETLY. If iOS stops the scan without a
+          // callback, the beacon's own `isScanning` bool stays true and its guard refuses to restart
+          // it — a follower deaf for the rest of the session while believing it is listening. This
+          // asks CoreBluetooth for the truth every tick, which costs a bool read.
+          self.bleBeacon.ensureScanning()
 
           // NOT CONNECTED: retry the handshake every tick until we are (owner's idea, 2026-08-17 —
           // "sleep 1s, setTimerRepeating every 1s until synced").

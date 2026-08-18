@@ -154,3 +154,41 @@ test("the advertised seq is bounded by page turns, not by wall-clock seconds", (
   const stop = BEACON.slice(BEACON.indexOf("func stopPublishing()"));
   assert.match(stop.slice(0, stop.indexOf("\n  }")), /advertSeq = 0/, "stopPublishing does not reset the seq");
 });
+
+
+test("BLE self-heals if the radio goes quiet without telling us", () => {
+  // THE FAILURE CLASS: both sides can stop working with no callback, no error, and no way to notice
+  // from inside the app. A director's advertisement is only ever (re)started by publish(), which
+  // early-returns on an unchanged page — so a director that went dark stayed dark until it happened
+  // to turn a page. A follower's scan is guarded by a LOCAL bool, so if iOS stopped the scan the
+  // guard refused to restart it and the device was deaf while believing it was listening.
+  assert.match(BEACON, /func ensureAdvertising\(\)/, "nothing re-asserts a lost advertisement");
+  assert.match(BEACON, /func ensureScanning\(\)/, "nothing re-asserts a lost scan");
+
+  // Must ask the FRAMEWORK, not our own memory — the local flag is exactly what lies here.
+  const adv = BEACON.slice(BEACON.indexOf("func ensureAdvertising()"));
+  assert.match(adv.slice(0, adv.indexOf("\n  }")), /!p\.isAdvertising/,
+    "ensureAdvertising trusts a local flag instead of CBPeripheralManager.isAdvertising");
+  const scan = BEACON.slice(BEACON.indexOf("func ensureScanning()"));
+  const scanBody = scan.slice(0, scan.indexOf("\n  }"));
+  assert.match(scanBody, /!c\.isScanning/,
+    "ensureScanning trusts the local isScanning bool — the very flag that goes stale");
+  assert.match(scanBody, /isScanning = false/,
+    "the stale local flag is not cleared, so scanIfReady's guard still blocks the restart");
+
+  // And both must be DRIVEN by something that ticks regardless of page changes.
+  assert.match(MODULE, /bleBeacon\.ensureAdvertising\(\)/, "the director never re-asserts advertising");
+  assert.match(MODULE, /bleBeacon\.ensureScanning\(\)/, "the follower never re-asserts scanning");
+  // The follower hook belongs in the watchdog, which runs while HUNTING — the state that needs it.
+  const wd = MODULE.slice(MODULE.indexOf("private func startFollowerWatchdog"));
+  assert.match(wd.slice(0, 2500), /bleBeacon\.ensureScanning\(\)/,
+    "ensureScanning is not on the follower watchdog, so it does not run while hunting");
+});
+
+test("a follower scans continuously — BLE is never switched off by connecting", () => {
+  // If connecting to the mesh stopped the scan, BLE would cover the first gap and then be dead for
+  // every later one — a wedged session, a director restart, a follower that drops. It is the
+  // fallback precisely for the moments the mesh is not working.
+  assert.doesNotMatch(MODULE, /bleBeacon\.stopScanning\(\)/,
+    "something now stops scanning — BLE would stop covering everything after the first connection");
+});
