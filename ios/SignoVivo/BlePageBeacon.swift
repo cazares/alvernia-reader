@@ -55,7 +55,16 @@ final class BlePageBeacon: NSObject {
   private var central: CBCentralManager?
   private var pendingAdvert: String?
   private var lastSeenSeq = -1
+  private var lastSeenNonce = ""
   private var lastPublishedPage = -1
+  /// Identifies THIS advertising session. Minted fresh every time publishing (re)starts.
+  ///
+  /// `seq` alone cannot order readings across sessions: it restarts at 0 on every director launch
+  /// and it is PER-DEVICE, so a follower holding "last applied seq 1743" would reject a different
+  /// director starting at 13, forever. The nonce lets a scanner notice "this is a different
+  /// advertiser than the one I was tracking" and reset its baseline instead of ignoring it.
+  private var sessionNonce = BlePageBeacon.newNonce()
+  private static func newNonce() -> String { String(UUID().uuidString.prefix(4)).lowercased() }
   private var lastAppliedPage = -1
   private var isScanning = false
 
@@ -73,7 +82,7 @@ final class BlePageBeacon: NSObject {
     // An advertisement is STATE, not an event: if the page has not moved there is nothing to say.
     guard page != lastPublishedPage else { return }
     lastPublishedPage = page
-    let name = "\(Self.namePrefix)\(seq).\(page)"
+    let name = "\(Self.namePrefix)\(sessionNonce).\(seq).\(page)"
     pendingAdvert = name
     if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
     startAdvertisingIfReady()
@@ -92,9 +101,26 @@ final class BlePageBeacon: NSObject {
     ])
   }
 
+  /// STOP ADVERTISING. This existed from the first cut and was NEVER CALLED — dead code, while the
+  /// beacon it was meant to switch off advertised forever.
+  ///
+  /// That is the bug behind build 444's wrong-song flash. A device that had been director on song
+  /// 357 published it, later stopped directing, and kept broadcasting 357 through role changes and
+  /// through resetTransport, which never touched this class. Followers on 444 (where BLE was
+  /// ungated) read that ghost advertisement and rendered 357 before the mesh corrected them to 101.
+  ///
+  /// Resetting lastPublishedPage matters as much as stopping: publish() early-returns when the page
+  /// has not changed, so a device that stops directing on 357 and is later re-promoted while still
+  /// on 357 would otherwise never re-advertise at all.
+  ///
+  /// A fresh nonce marks the next session as a new advertiser, so scanners rebase their seq
+  /// tracking rather than filtering the new session out as "older".
   func stopPublishing() {
     pendingAdvert = nil
+    lastPublishedPage = -1
+    sessionNonce = Self.newNonce()
     peripheral?.stopAdvertising()
+    log?("ble:stop-publishing", [:])
   }
 
   // MARK: - Follower side
@@ -135,13 +161,20 @@ final class BlePageBeacon: NSObject {
     central?.stopScan()
   }
 
-  /// "SV1743.59" -> (seq 1743, page 59). Returns nil for anything that is not ours.
-  private func parse(_ name: String) -> (seq: Int, page: Int)? {
+  /// "SVa3f9.1743.59" -> (nonce a3f9, seq 1743, page 59). Returns nil for anything that is not ours.
+  ///
+  /// The LEGACY two-field form ("SV1743.59") is deliberately REJECTED rather than accepted with a
+  /// synthetic nonce. Builds 433-445 shipped a beacon that is never switched off, so any device
+  /// still running one is broadcasting a page frozen at whatever it last directed — possibly hours
+  /// stale. Those are exactly the advertisements that produced the wrong-song flash, and during a
+  /// mixed-build window they will be in the air. Ignoring the old format is what makes it safe to
+  /// render from BLE at all.
+  private func parse(_ name: String) -> (nonce: String, seq: Int, page: Int)? {
     guard name.hasPrefix(Self.namePrefix) else { return nil }
     let body = name.dropFirst(Self.namePrefix.count)
     let parts = body.split(separator: ".")
-    guard parts.count == 2, let seq = Int(parts[0]), let page = Int(parts[1]) else { return nil }
-    return (seq, page)
+    guard parts.count == 3, let seq = Int(parts[1]), let page = Int(parts[2]) else { return nil }
+    return (String(parts[0]), seq, page)
   }
 }
 
@@ -164,7 +197,19 @@ extension BlePageBeacon: CBCentralManagerDelegate {
   ) {
     guard let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String,
           let parsed = parse(name) else { return }
-    // Monotonic guard: a cached or out-of-order advertisement must never move a follower BACKWARD.
+    // A DIFFERENT ADVERTISER RESETS THE BASELINE. seq is monotonic only WITHIN one advertising
+    // session — it restarts at 0 on every director launch and it is per-device — so comparing seqs
+    // across sessions is meaningless. Without this, a follower holding "last seen 1743" would
+    // silently ignore a brand-new director starting at 1, forever, and look exactly like the mesh
+    // being broken.
+    if parsed.nonce != lastSeenNonce {
+      lastSeenNonce = parsed.nonce
+      lastSeenSeq = -1
+      lastAppliedPage = -1
+      log?("ble:new-advertiser", ["nonce": parsed.nonce, "page": parsed.page])
+    }
+    // Monotonic guard WITHIN a session: a cached or out-of-order packet must never move a follower
+    // backward. Across sessions the nonce check above has already rebased us.
     guard parsed.seq > lastSeenSeq else { return }
     lastSeenSeq = parsed.seq
     // Log only when the PAGE moves. A scan with allowDuplicates reports every advertisement packet,

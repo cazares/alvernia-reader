@@ -339,80 +339,58 @@ test("the 90s prune is gone — it is what let ghosts outlive their browser", ()
   );
 });
 
-// ── BLE renders only after the mesh establishes context ──────────────────────
-//
-// Build 444 pinned lastKnownBookId to "standard" so BLE could render standalone. Reverted the same
-// night: every device flashed song 357 before correcting to 101. BLE has NO freshness guarantee —
-// bleSeq restarts at 0 each director launch and a follower's bleAppliedSeq starts at -1, so the
-// first reading after launch is applied whatever its age, including a cached advertisement from an
-// earlier session. Persisting the seq cannot fix it: seq is per-device, so a follower would reject a
-// different director whose seq started lower. Needs a director-scoped nonce, which the two-field BLE
-// payload makes a real design problem.
-test("BLE does not render before the mesh has established book context", () => {
-  const swift = fs.readFileSync(
-    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
-  assert.match(swift, /private var lastKnownBookId = ""/,
-    "pinning the book lets a STALE BLE advertisement render — a wrong song in front of a congregation");
-  const fn = swift.slice(swift.indexOf("self.bleBeacon.onPage"));
-  assert.match(fn.slice(0, 900), /guard !self\.lastKnownBookId\.isEmpty else/,
-    "the mesh-first gate must remain until BLE carries a freshness signal");
-});
 
-// ── Never restart a browser that is demonstrably working ──────────────────────
+// ── BLE: the beacon must be switched OFF when not directing ───────────────────
 //
-// Build 445 measured on hardware: followers DID converge (the ghost-peer fix worked) but took
-// 10-20+ s, against the owner's standard that "staleness longer than a few seconds is a failure".
+// BlePageBeacon.stopPublishing() existed from the first cut and was NEVER CALLED. resetTransport —
+// which runs on every role change — never touched the class. So a device that had once directed
+// advertised its last page FOREVER, including while it was a follower.
 //
-// Cause: refreshDiscovery now clears every discovered peer — correct, an MCPeerID dies with the
-// browser that found it — but it fires on a fixed 5-12 s tick regardless of whether the browser is
-// healthy. A follower that had found the director and was about to invite it got its discovery
-// wiped and started over, so convergence became "however many cycles until an invite happens to fit
-// inside one window". The director already had this protection; the follower's browser did not.
-test("a follower holds its browser steady while sightings are still arriving", () => {
+// That ghost is what build 444 rendered: devices flashed song 357 (a page some device had directed
+// earlier) before the mesh corrected them to 101. It was misdiagnosed at the time as a freshness
+// problem needing a nonce; the nonce is needed too, but the actual defect was a missing lifecycle.
+test("the beacon stops advertising whenever the device stops directing", () => {
   const swift = fs.readFileSync(
     path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
-  assert.match(swift, /browserHealthySeconds: TimeInterval = \d+/, "the health window must exist");
-  const fn = swift.slice(swift.indexOf("private func scheduleNextDiscoveryRefresh"));
-  const body = fn.slice(0, fn.indexOf("\n  }\n"));
-  assert.match(body, /refresh:hold-browsing/, "the hold must be observable in telemetry");
-  assert.match(body, /discoveredDirectorSeenAt\.values\.max\(\)/,
-    "the hold must key on the most recent SIGHTING — that is the evidence the browser works");
-  // It must not hold once connected: a connected follower has no reason to suppress refreshes.
-  assert.match(body, /connectedDirectorPeer == nil/,
-    "the hold applies only while still hunting, never once attached");
-});
-
-// ── 1 Hz retry while hunting (owner's idea, 2026-08-17) ───────────────────────
-//
-// "sleep 1s, setTimerRepeating every 1s until synced". The timer already existed at 1 Hz — it just
-// did nothing unless already CONNECTED, so the one state needing a fast pulse was the one it sat
-// out. Meanwhile a failed handshake waited out inviteTimeout (8s) then followerRetryDelay (2s), so
-// ~10s of a measured 10-20s convergence was a follower doing nothing at all.
-//
-// Safe at 1 Hz only because reconsiderFollowerTarget is idempotent: it returns when connected, and
-// while an invite is inside its timeout it emits "connecting" and returns WITHOUT a parallel invite.
-test("an unconnected follower retries the handshake every tick", () => {
-  const swift = fs.readFileSync(
-    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
-  const fn = swift.slice(swift.indexOf("private func startFollowerWatchdog"));
-  const body = fn.slice(0, fn.indexOf("\n  }\n"));
-  assert.match(body, /guard self\.connectedDirectorPeer != nil else \{[\s\S]{0,200}?reconsiderFollowerTarget\(\)/,
-    "while unconnected the 1 Hz tick must re-attempt the handshake, not return");
-  // The pulse is worthless if the timer only runs once already connected.
+  const reset = swift.slice(swift.indexOf("private func resetTransport"));
+  assert.match(reset.slice(0, reset.indexOf("\n  }")), /bleBeacon\.stopPublishing\(\)/,
+    "resetTransport runs on every role change and MUST silence the beacon");
   const follower = swift.slice(swift.indexOf("func startFollower("));
-  assert.match(follower.slice(0, 3000), /startFollowerWatchdog\(\)/,
-    "the watchdog must start when the follower role begins, not on .connected");
+  assert.match(follower.slice(0, 3000), /bleBeacon\.stopPublishing\(\)/,
+    "a follower must never advertise a page");
 });
 
-test("the 1 Hz pulse re-evaluates, it does NOT restart the transport", () => {
+test("stopPublishing resets state, or a re-promoted director stays silent", () => {
+  const ble = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  const fn = ble.slice(ble.indexOf("func stopPublishing()"));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+  // publish() early-returns when the page has not changed, so a device that stops directing on 357
+  // and is re-promoted still on 357 would never re-advertise.
+  assert.match(body, /lastPublishedPage = -1/, "must clear the published page");
+  assert.match(body, /sessionNonce = Self\.newNonce\(\)/, "the next session must be a NEW advertiser");
+});
+
+test("a scanner rebases on a new advertiser instead of mis-ordering seqs", () => {
+  const ble = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  // seq is monotonic only WITHIN a session — it restarts at 0 per launch and is per-device. Without
+  // a rebase a follower holding "last seen 1743" ignores a new director starting at 1, forever.
+  assert.match(ble, /parsed\.nonce != lastSeenNonce/, "a different advertiser must reset the baseline");
+  assert.match(ble, /lastSeenSeq = -1/, "the rebase must clear the seq floor");
+});
+
+test("legacy two-field BLE advertisements are rejected", () => {
+  const ble = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  const fn = ble.slice(ble.indexOf("private func parse("));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+  // Builds 433-445 ship a beacon that never stops. During a mixed-build window those frozen
+  // advertisements are in the air, and accepting them is exactly the wrong-song flash.
+  assert.match(body, /parts\.count == 3/, "only the 3-field nonce format may be accepted");
+  assert.doesNotMatch(body, /parts\.count == 2/, "the legacy format must not be parsed");
+});
+
+test("BLE renders standalone again, now that no stale beacon can exist", () => {
   const swift = fs.readFileSync(
     path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
-  const fn = swift.slice(swift.indexOf("private func startFollowerWatchdog"));
-  const body = fn.slice(0, fn.indexOf("\n  }\n"));
-  // A 1 Hz transport restart IS the discovery storm — 66 events/sec — and the cause of the slow
-  // convergence this is fixing. The browser must stay up and accumulate sightings.
-  for (const forbidden of ["startBrowsing()", "startAdvertising()", "refreshDiscovery()", "stopBrowsingForPeers()"]) {
-    assert.ok(!body.includes(forbidden),
-      `the 1 Hz tick must never call ${forbidden} — that is the storm, not a retry`);
-  }
+  assert.match(swift, /private var lastKnownBookId = "standard"/,
+    "BLE must not wait on a mesh page — that gate disabled the fallback exactly when the mesh broke");
 });

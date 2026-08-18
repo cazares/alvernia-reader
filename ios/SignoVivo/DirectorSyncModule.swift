@@ -73,7 +73,19 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// On foreground a follower must PROVE its session is alive rather than assume it. See the note
   /// in handleAppDidBecomeActive.
   private static let foregroundVerifySeconds: TimeInterval = 2.0
-  private static let followerWatchdogInterval: TimeInterval = 1.0
+  /// 1.0 -> 0.5 s (owner, 2026-08-17: "it needs to feel snappy").
+  ///
+  /// This tick does two jobs and both want to be fast. While CONNECTED it is the half-open
+  /// watchdog; while HUNTING it re-attempts the handshake, which is where the felt latency lives —
+  /// live telemetry measured 4/4 followers converging in 4.6-9.4 s against a standard of "longer
+  /// than a few seconds is a failure".
+  ///
+  /// Safe to halve because the tick does no work of its own: reconsiderFollowerTarget returns
+  /// immediately when connected, and while an invite is inside its window it emits "connecting" and
+  /// returns WITHOUT issuing a parallel invite. Doubling the rate doubles the number of times we ask
+  /// "should I act yet?", not the number of invites. It never touches the transports — a fast tick
+  /// that restarted the browser is the discovery storm, and a test forbids it.
+  private static let followerWatchdogInterval: TimeInterval = 0.5
   /// One-shot snapshot-recovery probe delay. MPC can drop the first reliable send right at
   /// .connected, so if the director's proactive snapshot AND the follower's first hello both
   /// land in that fragile window, the follower would otherwise wait a full followerHelloInterval
@@ -181,7 +193,24 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// So the gate returns: empty until a mesh page establishes context. BLE stays a fast follower of
   /// the mesh rather than an independent source. A wrong song on screen in front of a congregation
   /// is worse than a slow one.
-  private var lastKnownBookId = ""
+  /// Pinned to the single book so BLE can render WITHOUT waiting for a mesh page.
+  ///
+  /// Build 444 tried this and had to be reverted the same night: devices flashed song 357 before
+  /// correcting to 101. The cause was NOT the pin — it was that BlePageBeacon.stopPublishing()
+  /// existed but was never called, so a device that had once directed advertised its last page
+  /// forever, and followers read that ghost. resetTransport now stops the beacon on every role
+  /// change, becoming a follower stops it explicitly, and the advertisement carries a per-session
+  /// nonce so a scanner rebases instead of mis-ordering seqs across sessions. Legacy two-field
+  /// advertisements (builds 433-445, which never stop) are rejected outright.
+  ///
+  /// With no stale beacon possible, the reason for the mesh-first gate is gone — and the gate was
+  /// costing the entire fallback. BLE has no handshake, which is where EVERY failure found on
+  /// 2026-08-17 lived, and it is the faster path on the number that matters: 0.83 s worst case
+  /// across five devices, against a mesh worst case of 112 s.
+  ///
+  /// Still updated from mesh pages below; if a second book ever returns, this pin is wrong and the
+  /// BLE payload must carry a book id.
+  private var lastKnownBookId = "standard"
   private var bleLastSeenSeq = -1
   private var bleAppliedSeq = -1
 
@@ -749,6 +778,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.emitPage(page: max(1, page), totalPages: self.lastKnownTotalPages,
                       mode: self.lastKnownMode, bookId: self.lastKnownBookId)
       }
+      // A FOLLOWER MUST NEVER ADVERTISE. Belt-and-braces alongside resetTransport: whatever path
+      // reached this role, stop publishing before we start listening.
+      self.bleBeacon.stopPublishing()
       self.bleBeacon.startScanning()
       self.configureTransport()
       // Start the 1 Hz pulse NOW, not on .connected — hunting is exactly when it has work to do.
@@ -1624,6 +1656,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
     for s in mcSessions { s.disconnect(); s.delegate = nil }
     mcSessions = []
+    // STOP THE BEACON. resetTransport runs on every role change, and until now it never touched
+    // BlePageBeacon — so a device that had directed kept broadcasting its last page forever, even
+    // as a follower. That ghost advertisement is what build 444 rendered as song 357.
+    bleBeacon.stopPublishing()
     localPeerID = nil
     discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredDirectorInfo = [:]
     discoveredFollowers = []; discoveredFollowerInfo = [:]
