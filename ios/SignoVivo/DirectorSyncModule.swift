@@ -142,6 +142,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var lastFollowerPageReceivedAt: TimeInterval = 0
   /// When this follower started hunting with nothing connected. 0 means "not hunting".
   private var followerHuntingSince: TimeInterval = 0
+  /// Keeps the BLE radios alive independently of every mesh timer. See startBleHealthTimer.
+  private var bleHealthTimer: Timer?
   private var currentPageNumber: Int?
   private var currentTotalPages: Int = 0
   private var currentMode = ""
@@ -744,6 +746,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.currentDirectorToken = Self.randomToken()
       self.bleBeacon.primeRadios()   // belt-and-braces: a director that never passed through startFollower
       self.configureTransport()
+      self.startBleHealthTimer()
       self.startAdvertising()
       self.startBrowsing()
       self.startDiscoveryRefreshTimer()
@@ -825,6 +828,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.bleBeacon.primeRadios()
       self.bleBeacon.startScanning()
       self.configureTransport()
+      self.startBleHealthTimer()
       // Start the 1 Hz pulse NOW, not on .connected — hunting is exactly when it has work to do.
       self.startFollowerWatchdog()
       self.startAdvertising()
@@ -1493,6 +1497,27 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   /// Fast half-open watchdog — see followerStaleReconnectSeconds. Runs only while a follower is
   /// connected; forces a reconnect the moment the director's heartbeat stream goes silent.
+  /// BLE IS THE SUB-1s PATH, SO ITS HEALTH MUST NOT DEPEND ON THE MESH.
+  ///
+  /// ensureScanning lived on the follower watchdog, which stops on disconnect, on backgrounding and
+  /// on every transport reset — so the fast path went deaf at exactly the moments the slow path was
+  /// already struggling, which is when it was the only thing still working. Coupling a fallback to
+  /// the health of the thing it is a fallback FOR defeats the point of having one.
+  ///
+  /// This timer runs for BOTH roles, from configureTransport until resetTransport, regardless of
+  /// sessions, peers or connection state. It costs two bool reads a second.
+  private func startBleHealthTimer() {
+    bleHealthTimer?.invalidate()
+    let generation = resetGeneration
+    bleHealthTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      DispatchQueue.main.async {
+        guard let self = self, self.resetGeneration == generation, self.appIsActive else { return }
+        if self.currentRole == "director" { self.bleBeacon.ensureAdvertising() }
+        else if self.currentRole == "follower" { self.bleBeacon.ensureScanning() }
+      }
+    }
+  }
+
   private func startFollowerWatchdog() {
     followerWatchdogTimer?.invalidate()
     let generation = resetGeneration
@@ -1794,6 +1819,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private func resetTransport(emitState shouldEmitState: Bool) {
     resetGeneration = UUID()
     discoveryRefreshTimer?.invalidate(); discoveryRefreshTimer = nil
+    bleHealthTimer?.invalidate(); bleHealthTimer = nil
     cancelSelfDirectedTimer()
     stopFollowerHelloTimer()
     stopFollowerWatchdog()
@@ -2235,7 +2261,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           }
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
-          self.stopFollowerWatchdog()
+          // HUNTING RESUMES HERE, so the hunting pulse must too. This stopped the watchdog — the
+          // 0.5 Hz retry, the BLE scan self-heal and the wedged-session escalation all went with
+          // it — leaving reconnection to one retry at followerRetryDelay and then the 5-12s
+          // discovery cadence. Same mistake as forceFollowerReconnect, second location.
+          self.followerHuntingSince = Date().timeIntervalSince1970
+          self.startFollowerWatchdog()
           self.resumeDiscoveryRefreshAfterDisconnect()
           // Give the director a grace window to reconnect before going self-directed.
           self.startSelfDirectedTimer()

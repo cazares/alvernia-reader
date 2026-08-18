@@ -215,3 +215,36 @@ test("neither radio is created on the critical path", () => {
   assert.match(BEACON, /"coldRadio": cold/, "nothing reports when a publish hit a cold radio");
   assert.match(BEACON, /ble:on-air/, "nothing measures request -> on-air latency");
 });
+
+
+test("BLE health does not depend on the mesh it is a fallback FOR", () => {
+  // ensureScanning lived on the follower watchdog, which stops on disconnect, on backgrounding and
+  // on every transport reset. So the fast path went deaf at exactly the moments the slow path was
+  // already failing — which is when it was the only thing still working. A fallback coupled to the
+  // health of the thing it backs up is not a fallback.
+  assert.match(MODULE, /private func startBleHealthTimer\(\)/, "BLE has no independent health timer");
+  const t = MODULE.slice(MODULE.indexOf("private func startBleHealthTimer()"));
+  const body = t.slice(0, t.indexOf("\n  private func"));
+  assert.match(body, /ensureAdvertising\(\)/, "a director never re-asserts its beacon");
+  assert.match(body, /ensureScanning\(\)/, "a follower never re-asserts its scan");
+  // It must NOT be gated on sessions, peers or connection state — that is the whole point.
+  assert.doesNotMatch(body, /connectedDirectorPeer|mcSessions|discoveredDirectors/,
+    "the BLE health timer is gated on mesh state, which re-couples it to what it backs up");
+  // Torn down only with the transport itself.
+  const reset = MODULE.slice(MODULE.indexOf("private func resetTransport"));
+  assert.match(reset.slice(0, 1200), /bleHealthTimer\?\.invalidate\(\)/, "the timer leaks past a reset");
+});
+
+test("losing the director resumes HUNTING, with the pulse still running", () => {
+  // The disconnect path stopped the follower watchdog, so the 0.5 Hz retry, the BLE scan self-heal
+  // and the wedged-session escalation all died at the moment reconnection began. Recovery fell back
+  // to one retry and then the 5-12s discovery cadence. Same mistake as forceFollowerReconnect, in a
+  // second location — which is why the test asserts the behaviour rather than one call site.
+  const disc = MODULE.slice(MODULE.indexOf("self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil"));
+  const body = disc.slice(0, disc.indexOf("resumeDiscoveryRefreshAfterDisconnect"));
+  assert.match(body, /startFollowerWatchdog\(\)/, "reconnection starts without a retry pulse");
+  assert.doesNotMatch(body.replace(/\/\/.*$/gm, ""), /stopFollowerWatchdog\(\)/,
+    "the pulse is stopped again on the path that begins reconnecting");
+  assert.match(body, /followerHuntingSince = Date\(\)\.timeIntervalSince1970/,
+    "the wedged-session clock does not restart, so escalation never fires after a drop");
+});
