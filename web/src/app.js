@@ -3821,8 +3821,22 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   if (!lib || typeof lib.decideRelaySnapshot !== "function") {
     if (!snap || !Number.isFinite(snap.page)) return;
     const hasPub = Number.isFinite(snap.seq) && snap.seq > 0;
-    const fresh = hasPub && (!Number.isFinite(snap.ts) ||
-      (Date.now() + (relay.clockOffsetMs || 0)) / 1000 - snap.ts <= RELAY_LIVE_MAX_AGE_S);
+    // FAIL CLOSED ON AN UNDATEABLE SNAPSHOT (2026-08-18).
+    //
+    // This read `!Number.isFinite(snap.ts) || <within window>` — so a snapshot with NO timestamp
+    // was treated as FRESH and applied unconditionally. A snapshot that cannot prove its age is
+    // exactly the one that must not be trusted: it is indistinguishable from something written
+    // hours ago, and applying it puts a wrong song in front of the whole choir with no way for them
+    // to know why. Every device jumping to a stale song 2 before the mesh corrected them to 372 on
+    // 2026-08-18 is what this looks like from the loft.
+    //
+    // A missing ts now means NOT fresh. The cost of being wrong in this direction is a follower
+    // that waits for the next update; the cost of being wrong in the other direction is confusion
+    // during Mass, and confusion is the thing worth spending latency to avoid.
+    const dateable = Number.isFinite(snap.ts);
+    const ageS = dateable ? (Date.now() + (relay.clockOffsetMs || 0)) / 1000 - snap.ts : Infinity;
+    const fresh = hasPub && dateable && ageS <= RELAY_LIVE_MAX_AGE_S;
+    if (hasPub && !dateable) { try { console.warn("[sv] relay snapshot has no ts — refusing to apply"); } catch {} }
     if (!fresh) { relay.hasDirector = false; relay.browsing = false; relay.lastSeq = -1; hideGoLiveBar(); renderRelayPill(); return; }
     if (!force && snap.seq <= relay.lastSeq) { relay.hasDirector = true; renderRelayPill(); return; }
     relay.lastSeq = Math.max(relay.lastSeq, snap.seq);

@@ -13,6 +13,15 @@
      the vertical and horizontal positions can be tuned independently — every top: anchor reads this,
      every left:/right: anchor reads --fab-gutter. */
   --fab-gutter-top: 0.96rem;   /* 1.58rem, then -5px twice */
+  /* CLAMPED, so two devices cannot disagree about where the row sits.
+     mPad (iOS 26) and iPad1/2 (iOS 16) placed these at different heights, and the cause was not the
+     OS version — it was env(safe-area-inset-top), which is 0 in fullscreen and ~20px with a status
+     bar, and which the two versions report differently besides. The row was being positioned by
+     whatever state each device happened to be in.
+     max() let the inset win by an unbounded amount. Clamping its contribution keeps the
+     dodge-the-status-bar behaviour on a notched device while capping how far the row can drift, so
+     one build looks the same on every iPad in the loft. */
+  --fab-inset-cap: 0.5rem;     /* the most a safe-area inset may push the row down */
   /* THE CLUSTER IS DERIVED, NOT HAND-COMPUTED. Every top control is --fab-size square (the DIRECTOR
      status is --fab-status-w wide), separated by exactly --fab-gap. The slot offsets below are
      calc()s off these three numbers, so the spacing is uniform BY CONSTRUCTION rather than by me
@@ -210,7 +219,7 @@ button:disabled {
      how high it went. That is why the follower dot vanished after being moved onto the ⟳ button —
      it was rendering UNDERNEATH it. Same positioning scheme = comparable z-index. */
   position: fixed;
-  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */
+  top: calc(var(--fab-gutter-top) + min(env(safe-area-inset-top, 0px), var(--fab-inset-cap)));   /* match the ♪/⌕ fabs' top */
   left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
   z-index: 46;                 /* above the fabs so the exit tap always lands */
   display: flex;
@@ -2287,7 +2296,7 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
 .resync-fab,
 .fullscreen-fab {
   position: fixed;
-  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
+  top: calc(var(--fab-gutter-top) + min(env(safe-area-inset-top, 0px), var(--fab-inset-cap)));
   z-index: 45;
   /* ONE SIZE FOR EVERY CORNER CONTROL (owner, 2026-08-17: "same size and same icon to button size
      ratio... I like the current ratio of top left, but I like the size of top right").
@@ -2905,7 +2914,7 @@ body.sv-drawer-open .director-mode-badge { display: none !important; }
    this is follower-only, so the corner never holds both. */
 .become-director-pill {
   position: fixed;
-  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
+  top: calc(var(--fab-gutter-top) + min(env(safe-area-inset-top, 0px), var(--fab-inset-cap)));
   /* TOP-RIGHT, ONE SLOT LEFT OF IR A CANTO (owner, 2026-08-18). Ir a Canto stays flush in the corner
      where the choir already looks for it; this is ADDED to its left, in space that was empty. For a
      follower ⌕ is hidden, so the right cluster is ★ Ser Director · Ir a Canto. */

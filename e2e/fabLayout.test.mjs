@@ -279,8 +279,15 @@ test("the top edge and the side edges are independently tunable", () => {
   assert.ok(GUTTER_TOP > 0 && GUTTER > 0, "a gutter went to zero — controls would touch the bezel");
   assert.doesNotMatch(CSS, /top:\s*max\(var\(--fab-gutter\)/,
     "a top: anchor is back on --fab-gutter — raising the row will drag the clusters sideways again");
+  // The safe-area inset must be CLAMPED, not merely max()'d. Unbounded, it placed the row at
+  // different heights on iOS 16 and iOS 26 depending on each device's fullscreen state — the row
+  // was positioned by the OS rather than by this stylesheet.
+  assert.match(CSS, /min\(env\(safe-area-inset-top, 0px\), var\(--fab-inset-cap\)\)/,
+    "the safe-area inset is unbounded again — two iPads will disagree about where the row sits");
+  assert.doesNotMatch(CSS, /top:\s*max\(var\(--fab-gutter-top\), env\(/,
+    "an unclamped max() top anchor is back");
   // Every fixed top control must share ONE top edge, or the row stops reading as a band.
-  const tops = [...CSS.matchAll(/top:\s*max\(var\((--fab-gutter[a-z-]*)\)/g)].map((m) => m[1]);
+  const tops = [...CSS.matchAll(/top:\s*calc\(var\((--fab-gutter[a-z-]*)\)/g)].map((m) => m[1]);
   assert.ok(tops.length >= 3, `only ${tops.length} top anchors found — the cluster shrank or a selector moved`);
   assert.equal(new Set(tops).size, 1, `top anchors disagree: ${[...new Set(tops)].join(", ")}`);
 });
