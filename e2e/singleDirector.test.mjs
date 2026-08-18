@@ -69,7 +69,10 @@ test("becomeDirector is reachable from exactly one place: the human confirm in o
     `expected exactly one becomeDirector( call site, found ${sites.length}:\n` + sites.map((s) => `  ${s.n}: ${s.l.trim()}`).join("\n"),
   );
   const [only] = sites;
-  assert.match(only.l, /onPress:\s*\(\)\s*=>\s*becomeDirector\(code\)/, `the one call site is not the confirm-dialog onPress: ${only.l.trim()}`);
+  // becomeDirector now also takes the web's true page threaded through from the request (see
+  // relayQuotaGuards.test.mjs) — match the call site, not its exact argument list.
+  assert.match(only.l, /onPress:\s*\(\)\s*=>\s*becomeDirector\(code(?:,[^)]*)?\)/,
+    `the one call site is not the confirm-dialog onPress: ${only.l.trim()}`);
   // …and that dialog lives inside onDirectorCode.
   const fnStart = SRC.indexOf("const onDirectorCode = useCallback(");
   const fnEnd = SRC.indexOf("[injectEvent, performSoftReset, becomeDirector]", fnStart);
@@ -85,9 +88,11 @@ test("onDirectorCode is fed only by human actions: the numpad code and the pill"
     .filter(({ l }) => /onDirectorCode\(/.test(l) && !/const onDirectorCode/.test(l));
   // Each caller must be one of: the bridge "director-code" (typed), "request-director" (pill tap),
   // or a rescue confirm passing a NON-director code (soft reset / force baked).
+  // DIRECTOR_CODE's caller now also threads the web's true page (relayQuotaGuards.test.mjs) — an
+  // optional second argument, matched loosely; the others take no second argument and stay exact.
   const allowed = [
     /onDirectorCode\(msg\.code\)/,
-    /onDirectorCode\(DIRECTOR_CODE\)/,
+    /onDirectorCode\(DIRECTOR_CODE(?:,[^)]*)?\)/,
     /onDirectorCode\(BOOK_FORCE_BAKED_CODE\)/,
     /onDirectorCode\(SOFT_RESET_CODE\)/,
   ];
@@ -95,7 +100,7 @@ test("onDirectorCode is fed only by human actions: the numpad code and the pill"
     assert.ok(allowed.some((re) => re.test(c.l)), `unexpected onDirectorCode caller at ${c.n}: ${c.l.trim()}`);
   }
   // The DIRECTOR_CODE caller is the pill's request-director bridge case, and nothing else.
-  const pill = callers.filter((c) => /onDirectorCode\(DIRECTOR_CODE\)/.test(c.l));
+  const pill = callers.filter((c) => /onDirectorCode\(DIRECTOR_CODE(?:,[^)]*)?\)/.test(c.l));
   assert.equal(pill.length, 1, "DIRECTOR_CODE is passed to onDirectorCode from more than one place");
   const before = SRC.split("\n").slice(pill[0].n - 12, pill[0].n).join("\n");
   assert.match(before, /case "request-director":/, "the DIRECTOR_CODE call is not the request-director bridge case");

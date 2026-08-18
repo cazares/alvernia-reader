@@ -841,10 +841,16 @@ export default function App() {
 
   // ── Become director ────────────────────────────────────────────────────────
   const becomeDirector = useCallback(
-    async (code: string) => {
+    async (code: string, knownCurrentPage?: number) => {
       // Claim this role transition; a later flip bumps the generation and supersedes us.
       const myGen = ++roleGenerationRef.current;
       becomeDirectorInFlightRef.current = true;
+      // CORRECT THE MIRROR BEFORE ANYTHING CAN READ IT. Every broadcast below — the no-mesh
+      // transmitter path, the mesh path, the 1s/30s heartbeats — reads currentPageRef.current
+      // rather than asking the web again, so the fix has to land here, once, before the first read.
+      if (typeof knownCurrentPage === "number" && knownCurrentPage > 0) {
+        currentPageRef.current = knownCurrentPage;
+      }
       // Allow this device to publish. BEFORE any broadcast, or the first frame is dropped by the
       // gate in directorRelaySync. No credential is involved — the relay stopped authorizing.
       setRelayPublishing(true);
@@ -979,7 +985,7 @@ export default function App() {
 
   // ── Director-code dispatch (codes entered on the web numpad) ────────────────
   const onDirectorCode = useCallback(
-    (rawCode: unknown) => {
+    (rawCode: unknown, knownCurrentPage?: number) => {
       // NEW-DIR-2: do NOT bump roleGenerationRef here. A code entry is not yet a committed role
       // change — becomeDirector (:400), becomeFollower (:370), and performSoftReset (:479) each bump
       // on their OWN commit. Bumping up front superseded an in-flight boot becomeFollower: if the
@@ -1053,11 +1059,13 @@ export default function App() {
         {
           text: liveDirector ? "Tomar el control" : "Sí, dirigir",
           style: liveDirector ? "destructive" : "default",
-          onPress: () => becomeDirector(code),
+          onPress: () => becomeDirector(code, knownCurrentPage),
         },
       ]);
     },
     [injectEvent, performSoftReset, becomeDirector],
+    // knownCurrentPage is read, not depended on for identity — it is a per-call primitive threaded
+    // straight through closures, not state this callback needs to re-create over.
   );
 
   // ── Web -> Native message router ───────────────────────────────────────────
@@ -1216,9 +1224,14 @@ export default function App() {
         // This handler ships in the BINARY even though the button that sends it ships over the air,
         // because a web bundle that sends a message no shell understands is a button that does
         // nothing. Native first, web whenever.
-        case "request-director":
-          onDirectorCode(DIRECTOR_CODE);
+        case "request-director": {
+          // See web/src/app.js's postNativeBridge call: the web's OWN true page rides with this
+          // message, with zero lag, because rendering never waits on a native round trip.
+          const knownPage = typeof msg.currentPage === "number" && msg.currentPage > 0
+            ? msg.currentPage : undefined;
+          onDirectorCode(DIRECTOR_CODE, knownPage);
           break;
+        }
         // ── Debug settings, editable from the diagnostics dump ──────────────────────────────────
         //
         // sv.telemetry ("1" | "") and sv.logSink (a LAN URL) live in AsyncStorage, which only the

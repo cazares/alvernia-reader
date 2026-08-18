@@ -3183,7 +3183,16 @@ const bindReaderEvents = () => {
     closeSongJump();
     // `request-director` is the shell's existing entry point (PdfReaderApp.tsx:1141 -> DIRECTOR_CODE).
     // The web bundle never holds the code; it asks, and the shell decides.
-    postNativeBridge({ type: "request-director" });
+    //
+    // currentPage RIDES WITH THE REQUEST (2026-08-18). becomeDirector used to trust
+    // currentPageRef.current — a native-side MIRROR updated asynchronously by an earlier bridge
+    // message — for its very first broadcast. On real hardware that mirror was caught mid-lag: the
+    // web renders a jump instantly (no native round trip needed to draw a page), so tapping Ser
+    // Director right after a jump could broadcast whatever page was true a moment ago — the WebView
+    // boot default, or the page before the jump — to the whole choir, correcting only once the mesh
+    // heartbeat caught up ~10s later. The web always knows its OWN true page with zero lag; sending
+    // it inline removes the race instead of chasing the mirror.
+    postNativeBridge({ type: "request-director", currentPage: state.currentPage });
   });
 
   // (The keypad ✕ that used to live here was removed on 2026-08-18 along with #role-exit-x. The way

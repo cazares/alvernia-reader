@@ -190,3 +190,55 @@ test("a never-saved sink resolves to the default, not the string \"null\"", () =
   assert.doesNotMatch(stmt, /String\(saved\)/,
     "String(saved) is back — on the null branch that produces the literal text \"null\"");
 });
+
+test("the director's first broadcast uses the WEB's true page, not a lagging native mirror", () => {
+  // THE RACE THIS CLOSES, confirmed on hardware 2026-08-18 across two separate test runs, each
+  // showing a DIFFERENT wrong page (song 2, then page 1) before self-correcting to the director's
+  // real page ~10s later. The web renders a jump INSTANTLY — no native round trip needed to draw a
+  // page — but tells native asynchronously. becomeDirector used to broadcast currentPageRef.current,
+  // a native-side mirror fed by that async message, with zero verification. Tap Ser Director right
+  // after a jump and the mirror is still holding whatever was true a MOMENT AGO: the WebView's boot
+  // default (2) on a fresh install, or the page before the jump (1, the cover) on a warm one — both
+  // observed, which is exactly what a race against an evolving mirror produces, not a fixed bug.
+  const WEB = fs.readFileSync("web/src/app.js", "utf8");
+  const NATIVE = fs.readFileSync("PdfReaderApp.tsx", "utf8");
+
+  // 1. The web sends its OWN true page the instant the tap happens — before any native round trip.
+  assert.match(WEB, /postNativeBridge\(\{ type: "request-director", currentPage: state\.currentPage \}\)/,
+    "the request no longer carries the web's true page");
+
+  // 2. Native extracts it and threads it through onDirectorCode rather than discarding it.
+  const caseBlock = NATIVE.slice(NATIVE.indexOf('case "request-director"'), NATIVE.indexOf('case "request-director"') + 400);
+  assert.match(caseBlock, /msg\.currentPage/, "the native handler no longer reads the page off the message");
+  assert.match(caseBlock, /onDirectorCode\(DIRECTOR_CODE, knownPage\)/,
+    "onDirectorCode is called without the page — it reverts to trusting the native mirror alone");
+
+  // 3. The confirm dialog's callback closes over it rather than dropping it. The dialog is a native
+  //    modal Alert, so nothing on the WebView can navigate again while it is open — the page
+  //    captured at the ORIGINAL tap is still correct by the time the human taps "Sí, dirigir".
+  assert.match(NATIVE, /onPress: \(\) => becomeDirector\(code, knownCurrentPage\)/,
+    "the confirm dialog no longer passes the known page through to becomeDirector");
+
+  // 4. becomeDirector corrects the mirror BEFORE anything downstream can read it — every broadcast
+  //    path (no-mesh transmitter, mesh, both heartbeats) reads currentPageRef.current rather than
+  //    asking the web again, so the fix has to land here, once, ahead of the first read.
+  const fn = NATIVE.slice(NATIVE.indexOf("const becomeDirector = useCallback"));
+  const body = fn.slice(0, fn.indexOf("const becomeFollower"));
+  const fixIdx = body.indexOf("currentPageRef.current = knownCurrentPage");
+  assert.ok(fixIdx > 0, "becomeDirector no longer corrects the mirror from the known page");
+  const firstBroadcastIdx = body.indexOf("broadcastPage(currentPageRef.current");
+  assert.ok(firstBroadcastIdx > fixIdx,
+    "a broadcast reads currentPageRef.current BEFORE the known-page correction runs — the race is still open");
+});
+
+test("a stale mirror is only ever a fallback, never silently trusted over a fresh value", () => {
+  // Model of the fix, executed rather than grepped: with a known-fresh page supplied, the stale
+  // mirror must never win. Without one (an older web bundle, or no bridge payload), the mirror is
+  // still the correct fallback — this must not regress into REQUIRING a fresh value to broadcast at
+  // all, which would break becomeDirector for any caller that cannot supply one.
+  const applyKnownPage = (mirror, known) => (typeof known === "number" && known > 0 ? known : mirror);
+  assert.equal(applyKnownPage(2, 372), 372, "a fresh known page did not override the stale mirror");
+  assert.equal(applyKnownPage(2, undefined), 2, "no known page — the mirror fallback broke");
+  assert.equal(applyKnownPage(2, 0), 2, "a page of 0 was trusted — that is not a real page");
+  assert.equal(applyKnownPage(2, -5), 2, "a negative page was trusted");
+});

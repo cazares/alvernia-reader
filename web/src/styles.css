@@ -2417,7 +2417,11 @@ html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), e
    It is in em so it survives any further size change, and it moves only the glyph: padding would
    have shifted the box and re-broken the horizontal centring, which measurement confirms is already
    exact (ink centre 26.97px == advance 53.94 / 2). */
-.resync-icon { display: inline-block; line-height: 1; transform: translateY(-0.057em); }
+/* +2.5px horizontal (owner, 2026-08-18): the GLYPH, not the button — the button itself got its own
+   independent +2.5px earlier the same night (.resync-fab's own left:). Two separate nudges, two
+   separate elements; this one moves the character within its box without touching where the box
+   sits on the page. */
+.resync-icon { display: inline-block; line-height: 1; transform: translateY(-0.057em) translateX(2.5px); }
 .resync-fab.is-spinning .resync-icon { animation: sv-resync-pulse 1.5s ease-in-out infinite; }
 @keyframes sv-resync-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 /* Reconnect loading dots — three small circles that appear only while is-spinning */
