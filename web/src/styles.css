@@ -2448,23 +2448,31 @@ html[data-role="director"] .director-mode-badge {
      uses ("¿Salir de director?"), so the button and the dialog it opens speak with one word.
      The button's mere presence is what reports the role — it is shown to nobody else — so nothing
      is lost by labelling the exit instead of the status.
-     Common background, not the blue wash: it is an ordinary control in the row now, not a status
-     that had to look different. Sizing comes from the shared square block below. */
-  /* A WHISPER OF THE SAME iOS BLUE as ★ Ser Director, so entering the role and holding it read as
-     one idea. Layered as a 0.16 wash OVER the standard fab navy rather than a different colour, so
-     the pill stays unmistakably part of the corner cluster — it is a status, and a status that
-     stands out competes with the music it sits on top of. The text lifts a few points toward the
-     same blue for the same reason: recognisable, not loud. */
-  background:
-    linear-gradient(rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0.16)),
-    rgba(26, 26, 46, 0.61);
+     NO background override (owner, 2026-08-18: "style it just like Ir a Canto... meaning
+     background color... and opacity"). A blue wash used to sit here, layered over the standard
+     fab navy — it read as a status that had to look different, which is exactly what this
+     control should NOT do: it is an ordinary control in the row now. Falls through to the base
+     .director-mode-badge background below, rgba(26, 26, 46, 0.61) — byte-identical to
+     .song-jump-fab/.search-fab's own background, so the two pills are indistinguishable but for
+     their glyphs. Sizing comes from the shared square block below. */
 }
-html[data-role="director"] .director-mode-badge .director-mode-badge-title { color: #E4EEFF; }
+/* PRESSED state too (owner, 2026-08-18: "opacities matched too"). Without this override it fell
+   through to the base .director-mode-badge:active (0.55) below — a DIFFERENT opacity than every
+   other corner control's pressed state (0.73, .song-jump-fab/.search-fab/.resync-fab/
+   .fullscreen-fab/.become-director-pill:active), so tapping Salir Director looked subtly lighter
+   than tapping anything else in the row. */
+html[data-role="director"] .director-mode-badge:active { background: rgba(26, 26, 46, 0.73); }
+/* Plain white (owner, 2026-08-18: "scope includes text color too") — matching
+   .song-jump-fab/.search-fab exactly rather than the blue-tinted #E4EEFF used before. */
+html[data-role="director"] .director-mode-badge .director-mode-badge-title { color: #fff; }
 /* OUTLINE star (☆ U+2606), not filled. Filled reads as "selected/favourite"; hollow reads as a
    mark on a status, which is what this is. Matches ★ Ser Director's glyph family without repeating
    its emphasis — that one is an action you take, this one is a state you are in. */
 html[data-role="director"] .director-mode-badge .director-mode-badge-star { display: none; }
-.director-exit-label { display: none; flex-direction: column; align-items: center; }
+/* Buttons don't inherit body's white text color by default in every engine — unlike
+   .director-mode-badge-title (which sets #E4EEFF explicitly), these two lines had no color rule
+   at all and fell back to the browser's default button text, unreadable on the dark navy badge. */
+.director-exit-label { display: none; flex-direction: column; align-items: center; color: #fff; }
 html[data-role="director"] .director-mode-badge .director-exit-label { display: flex; }
 /* The word is retired from the GLASS but stays in SYNC_PILL for screen readers, and the pill's
    aria-label still says "Estás dirigiendo. Tocar para salir." */
@@ -2934,13 +2942,17 @@ body.sv-drawer-open .director-mode-badge { display: none !important; }
   box-sizing: border-box;
   border: 0;
   border-radius: 14px;
-  background:
-    linear-gradient(rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0.16)),
-    rgba(26, 26, 46, 0.61);
+  /* NO blue wash (owner, 2026-08-18: "style it just like Ir a Canto... background color... and
+     opacity"). Plain rgba(26, 26, 46, 0.61) — byte-identical to .song-jump-fab/.search-fab's own
+     background, so ★ Ser Director reads as an ordinary control in the row, not a status pill that
+     had to look different. */
+  background: rgba(26, 26, 46, 0.61);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-  color: #E4EEFF;
+  /* Plain white (owner, 2026-08-18: "scope includes text color too") — matching
+     .song-jump-fab/.search-fab exactly rather than the blue-tinted #E4EEFF used before. */
+  color: #fff;
   letter-spacing: 0.01em;
   cursor: pointer;
   touch-action: manipulation;
@@ -2950,7 +2962,7 @@ body.sv-drawer-open .director-mode-badge { display: none !important; }
 /* ☆ RIDES ON LINE 1, beside "Ser" (owner, 2026-08-18) rather than standing to the left of the whole
    stack. Line 1 is the short line, so the star occupies width that was already empty instead of
    adding its own column — the pill gets narrower for free. */
-.become-director-star { font-size: 0.98rem; line-height: 1; color: rgba(228, 238, 255, 0.85); }
+.become-director-star { font-size: 0.98rem; line-height: 1; color: #fff; }
 /* TWO LINES — "Ser" over "Director" (owner). Stacking is what lets the pill be narrow: on one line
    it is as wide as the whole phrase, and the phrase was most of that 7.6rem. */
 .become-director-label { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.06; }
