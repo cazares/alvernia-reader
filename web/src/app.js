@@ -368,6 +368,29 @@ const postNativeBridge = (payload) => {
   }
 };
 
+// ── First-native-page gate (2026-08-18) ─────────────────────────────────────────
+//
+// WHY THIS EXISTS. On a native WebView (re)mount, the reader used to reveal on
+// DEFAULT_START_PAGE immediately, then correct to the real page once native's bridge-ready
+// response arrived. That correction is exactly the wrong-page flash the director-page-race fix
+// (aa68c9e) already closed for a DIRECTOR's own broadcast — but it was still wide open on the
+// FOLLOWER side of every native boot, because bridge-ready's response (native's ONLY channel for
+// saying "here is the real page") was requested at the very END of initReader, after the reader
+// had already revealed. A device that just went through an OTA book swap + binary update remounts
+// its WebView on every follower at once, so the flash became visible fleet-wide.
+//
+// firstNativePageSignal resolves the instant a real page arrives from native (any of the three
+// bridge-ready branches — director reasserting, follower resyncing, or solo-reader restore — all
+// inject a sync-event/page; see PdfReaderApp.tsx's "bridge-ready" case). initReader awaits it,
+// bounded by FIRST_NATIVE_PAGE_TIMEOUT_MS, BEFORE revealing — so a follower never shows a page
+// number that was never confirmed real. The bound exists for the one branch that injects nothing:
+// a genuinely brand-new install/book with no saved page and nobody directing yet.
+const FIRST_NATIVE_PAGE_TIMEOUT_MS = 2500;
+let resolveFirstNativePageSignal = null;
+const firstNativePageSignal = hasNativeBridge()
+  ? new Promise((resolve) => { resolveFirstNativePageSignal = resolve; })
+  : null;
+
 const openOfflineDb = () => new Promise((resolve, reject) => {
   if (!("indexedDB" in window)) {
     reject(new Error("IndexedDB no disponible"));
@@ -1671,6 +1694,10 @@ const applyNativeSyncEvent = async (payload) => {
       renderDirectorModeBadge();
       // Single-book app: ignore any event.book and just render the director's page.
       renderPage(event.page, { pushToHistory: false });
+      // First real page since this WebView mounted — let initReader's reveal gate through.
+      // Idempotent: a resolved promise ignores every later resolve() call, and this fires on
+      // every page turn for the rest of the session, not just the first one.
+      if (resolveFirstNativePageSignal) { resolveFirstNativePageSignal(); resolveFirstNativePageSignal = null; }
     }
   } catch (err) {
     try {
@@ -4287,15 +4314,35 @@ const initReader = async () => {
   // Show the reader IMMEDIATELY — never block the congregation behind the big offline pre-cache.
   // The service worker caches every page in the background.
   setOfflineGateState({ visible: false });
-  // Open directly on the director's current page if one is broadcasting (the relay state is tiny —
-  // just a page number — so this barely delays first paint). Bounded by a short timeout so a slow/
-  // dead relay can't block the reader. The native app / offline bundle skip the relay (the native
-  // bridge drives the page there).
-  if (!hasNativeBridge() && !NATIVE_FILE_MODE) {
+  if (hasNativeBridge() || NATIVE_FILE_MODE) {
+    // NATIVE: ask native for the real page BEFORE revealing anything, so a follower's WebView
+    // (re)mount never shows a page number that was never confirmed real (see
+    // firstNativePageSignal's comment above for the full "why"). bridge-ready is native's ONLY
+    // channel for this, so it moves up here instead of firing at the very end of initReader —
+    // posting it after the reveal was the bug: the correction always arrived after the wrong
+    // page was already on screen. Bounded so a genuinely first-ever boot (nothing saved, no
+    // director broadcasting yet) still reveals promptly rather than hanging behind a spinner.
+    postNativeBridge({
+      type: "bridge-ready",
+      page: state.currentPage,
+      totalPages: state.totalPages,
+      book: state.currentBook,
+    });
+    if (firstNativePageSignal) {
+      await Promise.race([
+        firstNativePageSignal,
+        new Promise((resolve) => setTimeout(resolve, FIRST_NATIVE_PAGE_TIMEOUT_MS)),
+      ]);
+    }
+  } else {
+    // Open directly on the director's current page if one is broadcasting (the relay state is
+    // tiny — just a page number — so this barely delays first paint). Bounded by a short timeout
+    // so a slow/dead relay can't block the reader.
     await Promise.race([relayPollOnce(true), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    if (!relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
   }
-  if (!relay.hasDirector) renderPage(DEFAULT_START_PAGE, { pushToHistory: false });
-  // Fully public + single-book: reveal the reader immediately (no geo, nothing to wait for).
+  // Fully public + single-book: reveal now — either a real page arrived (native) or there is
+  // nothing further to wait for (web, no geo, no book gate).
   revealReader();
   // Hydrate the song index in the background if it wasn't inlined — keeps ~50 KB
   // off the critical first paint without losing titles, themes, or jump-to-song.
@@ -4320,13 +4367,9 @@ const initReader = async () => {
   // Search index is loaded lazily on first search-open (see activateTab) so it
   // never weighs down the follower's first paint.
   renderActiveTab();
-  // bridge-ready is for the native shell.
-  postNativeBridge({
-    type: "bridge-ready",
-    page: state.currentPage,
-    totalPages: state.totalPages,
-    book: state.currentBook,
-  });
+  // bridge-ready (native shell) is posted earlier now, before the reveal gate above — see
+  // firstNativePageSignal's comment. Posting it twice per mount would run native's bridge-ready
+  // handler twice (AsyncStorage writes, a possible re-broadcast) for zero benefit.
 };
 
 // THREE INDEPENDENT NUMBERS, NEVER COLLAPSED INTO ONE.
