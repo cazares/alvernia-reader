@@ -157,7 +157,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   ///
   /// Still updated from mesh pages below — if a second book ever returns, this is the one line to
   /// revisit, and the BLE payload would need to carry the book id before it could stay ungated.
-  private var lastKnownBookId = "standard"
+  /// REVERTED 2026-08-17, same night it shipped. This was pinned to "standard" so the BLE channel
+  /// could render without waiting for a mesh page — correct in principle (BLE has no handshake and
+  /// is the faster path) and WRONG as shipped, because BLE has no freshness guarantee.
+  ///
+  /// Observed on the owner's fleet within minutes of build 444: every device rendered song 357,
+  /// then corrected to 101. A cached/leftover BLE advertisement from an earlier session was applied
+  /// because the monotonic guard cannot reject it — `bleSeq` restarts at 0 on every director launch
+  /// and a follower's `bleAppliedSeq` starts at -1, so the FIRST reading after launch always passes
+  /// whatever its age. The mesh then corrected it (see "mesh is authoritative" below), which is why
+  /// it presented as a flash of the wrong song rather than a stuck one.
+  ///
+  /// Persisting the seq does not fix it: seq is PER-DEVICE, so a follower that had applied 1743
+  /// from one director would reject a different director starting at 13, forever. Making BLE safe
+  /// to render first needs a director-scoped nonce with a freshness window, in a payload iOS limits
+  /// to two fields — a real design, not a one-line pin.
+  ///
+  /// So the gate returns: empty until a mesh page establishes context. BLE stays a fast follower of
+  /// the mesh rather than an independent source. A wrong song on screen in front of a congregation
+  /// is worse than a slow one.
+  private var lastKnownBookId = ""
   private var bleLastSeenSeq = -1
   private var bleAppliedSeq = -1
 
