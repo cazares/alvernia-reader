@@ -138,7 +138,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// once we know which book that number refers to.
   private var lastKnownTotalPages = 0
   private var lastKnownMode = ""
-  private var lastKnownBookId = ""
+  /// THE ONLY BOOK. Pinned, not discovered.
+  ///
+  /// This was "" until a MESH page arrived, and the BLE handler refused to apply anything while it
+  /// was empty — so the connectionless channel could only ever work AFTER the handshake channel had
+  /// already succeeded. That inverted the whole point of having it. BLE needs no browse, no invite,
+  /// no session and no peer identity, which is to say none of the machinery that failed all day on
+  /// 2026-08-17; and it is the faster one on the numbers that matter (measured across five devices:
+  /// BLE 0.10-0.18 s median, 0.83 s WORST, versus a mesh worst case of 112 s). Gating it behind the
+  /// mesh meant the reliable path was switched off exactly when the unreliable one broke.
+  ///
+  /// The gate guarded a real ambiguity once: with two books a bare page number was meaningless, and
+  /// guessing wrong yanked a follower onto the wrong hymnal. That ended on 2026-07-02 — the app has
+  /// been single-book since, pinned in PdfReaderApp.tsx ("the only book is the standard (Alvernia)
+  /// manual"), in web/src/app.js (`currentBook: "standard"`), and in the manifest, which ships one
+  /// book of 372 pages. A page number is now unambiguous, so the guard protects nothing and costs
+  /// the whole fallback.
+  ///
+  /// Still updated from mesh pages below — if a second book ever returns, this is the one line to
+  /// revisit, and the BLE payload would need to carry the book id before it could stay ungated.
+  private var lastKnownBookId = "standard"
   private var bleLastSeenSeq = -1
   private var bleAppliedSeq = -1
 
@@ -693,6 +712,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.bleBeacon.onPage = { [weak self] page, seq in
         guard let self = self, self.currentRole == "follower" else { return }
         self.bleLastSeenSeq = seq
+        // Unreachable now that the book is pinned above, and kept deliberately: if a future
+        // change ever blanks the id, refusing to render a page whose book is unknown is still the
+        // right call. `ble:skip-no-book` appearing in telemetry would mean that regression.
         guard !self.lastKnownBookId.isEmpty else {
           self.dbgLog("ble:skip-no-book", ["page": page, "seq": seq])
           return

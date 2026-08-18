@@ -338,3 +338,39 @@ test("the 90s prune is gone — it is what let ghosts outlive their browser", ()
     "a time-based prune is the wrong lifetime entirely: peers die with their BROWSER, not on a clock",
   );
 });
+
+// ── BLE must not be gated behind the mesh ─────────────────────────────────────
+//
+// The two transports are not peers in reliability. Multipeer needs browse -> invite -> session, and
+// EVERY failure chased on 2026-08-17 lived in that handshake: ghost peers invited through a browser
+// that never saw them, identities remade on every role change, a timer storm restarting the
+// advertiser 66x/second. BLE has none of it — connectionless advertisement, no session, no peer
+// identity — and it is the faster one where it counts: 0.83 s WORST case across five devices,
+// against a mesh worst case of 112 s.
+//
+// And yet BLE could only apply a page AFTER a mesh page had arrived, because lastKnownBookId started
+// empty and only a mesh page set it. The reliable channel was switched off exactly when the
+// unreliable one broke, which is the opposite of a fallback.
+//
+// The gate was real once: with two books a bare page number was meaningless. That ended 2026-07-02.
+test("BLE can render without waiting for the mesh", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  assert.match(
+    swift, /private var lastKnownBookId = "standard"/,
+    "the single book must be PINNED — an empty id makes the BLE fallback depend on the mesh it exists to survive",
+  );
+  assert.doesNotMatch(
+    swift, /private var lastKnownBookId = ""/,
+    "lastKnownBookId starts empty again: BLE is gated behind a successful mesh page",
+  );
+});
+
+test("the app really is single-book, which is what makes pinning correct", () => {
+  // If a second book ever returns, the pin above is wrong and the BLE payload must carry a book id.
+  // Pin the premise so that change cannot happen quietly.
+  const app = fs.readFileSync(path.join(APP_ROOT, "PdfReaderApp.tsx"), "utf8");
+  const web = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
+  assert.match(app, /single-book/i, "PdfReaderApp no longer claims to be single-book");
+  assert.match(web, /currentBook:\s*"standard"/, "the web no longer pins the book to standard");
+});
