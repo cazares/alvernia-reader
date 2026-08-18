@@ -65,13 +65,20 @@ const MUTATIONS = [
    sub('if (prev === "director") {\n            // Written back as follower',
        'if (prev === "director") {\n            void becomeDirector(DIRECTOR_CODE);\n            // Written back as follower')],
   ["the ex-director toast fires on every boot forever (lastSyncRole never written back)", "PdfReaderApp.tsx",
-   sub('            AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});\n            injectEvent({\n              type: "toast",\n              text: "Estabas dirigiendo.',
-       '            injectEvent({\n              type: "toast",\n              text: "Estabas dirigiendo.')],
+   // Text drifted 2026-08-18 ("Estabas dirigiendo." -> "...cuando se cerró el app.") when the notice
+   // stopped describing a control and started carrying one. Anchored on the setItem + injectEvent
+   // PAIR rather than the copy, so a future wording change cannot silently disarm this again.
+   // Anchored on the write ALONE. It was anchored on the write plus the injectEvent that follows it,
+   // which broke the moment a comment was added between them — a mutation that cannot apply is a
+   // guard proving nothing, and it fails silently as a SKIP. The write is what the guard is about.
+   sub('            AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});\n', '')],
   ["the demoted director is not told another device took the seat", "PdfReaderApp.tsx",
    sub('              text: "Otro dispositivo tomó la dirección del coro. Este dispositivo ahora sigue.",',
        '              text: "",')],
   ["the rediscovery kick after becoming director dropped — two directors wait out a browse cycle", "PdfReaderApp.tsx",
-   sub('        if (syncAvailable) refreshNearbyDiscovery().catch(() => {});\n        breadcrumb("director");',
+   // Renamed 2026-08-18: refreshNearbyDiscovery -> refreshDirectorBrowse, because the old call
+   // destroyed the ADVERTISER as its first act — at the exact moment every follower was inviting it.
+   sub('        if (syncAvailable) refreshDirectorBrowse().catch(() => {});\n        breadcrumb("director");',
        '        breadcrumb("director");')],
   ["the Swift tiebreak inverted — the OLDER director demotes and the newest never wins", "ios/SignoVivo/DirectorSyncModule.swift",
    sub("    if otherToken > currentDirectorToken {", "    if otherToken < currentDirectorToken {")],
@@ -80,7 +87,11 @@ const MUTATIONS = [
   ["force-baked fires BEFORE its confirmation dialog", "PdfReaderApp.tsx",
    sub('case "request-force-baked":\n          Alert.alert(', 'case "request-force-baked":\n          onDirectorCode(BOOK_FORCE_BAKED_CODE);\n          Alert.alert(')],
   ["request-director bypasses onDirectorCode's takeover confirmation", "PdfReaderApp.tsx",
-   sub('case "request-director":\n          onDirectorCode(DIRECTOR_CODE);', 'case "request-director":\n          void becomeDirector(DIRECTOR_CODE); if (0) onDirectorCode(DIRECTOR_CODE);')],
+   // Threaded through a knownPage extraction 2026-08-18 (aa68c9e) so the web's true page rides
+   // with the tap instead of trusting the async-fed currentPageRef mirror. Anchored on the
+   // onDirectorCode call itself, not the whole case block, so future changes to the knownPage
+   // extraction above it don't silently disarm this mutation as a SKIP.
+   sub('onDirectorCode(DIRECTOR_CODE, knownPage);', 'void becomeDirector(DIRECTOR_CODE, knownPage); if (0) onDirectorCode(DIRECTOR_CODE, knownPage);')],
   ["crumb merge order swapped — the NEW session's crumbs get dropped", "PdfReaderApp.tsx",
    sub("const merged = [...prev, `${new Date().toISOString()} ── app start ──`, ...breadcrumbsRef.current];",
        "const merged = [...breadcrumbsRef.current, `${new Date().toISOString()} ── app start ──`, ...prev];")],

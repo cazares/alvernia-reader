@@ -47,7 +47,13 @@ final class BlePageBeacon: NSObject {
   private static let namePrefix = "SV"
 
   /// Called with (page, seq) whenever a scan observes a NEWER reading than the last one.
-  var onPage: ((Int, Int) -> Void)?
+  /// (page, seq, nonce). THE NONCE IS PART OF THE CONTRACT, not a detail. seq is monotonic only
+  /// WITHIN one advertising session and restarts at 0 on every director launch, so any consumer that
+  /// compares seqs across sessions is wrong. This class rebases itself on a new nonce — but it used
+  /// to keep that knowledge private while the caller kept its OWN seq guard, which then rejected
+  /// every page from a new director whose seq had not yet climbed past the old one. Handing the
+  /// nonce out makes that mistake impossible to repeat silently.
+  var onPage: ((Int, Int, String) -> Void)?
   /// Telemetry sink — wired to DirectorSyncModule's dbgLog so this shares one log stream.
   var log: ((String, [String: Any]) -> Void)?
 
@@ -55,16 +61,58 @@ final class BlePageBeacon: NSObject {
   private var central: CBCentralManager?
   private var pendingAdvert: String?
   private var lastSeenSeq = -1
+  private var lastSeenNonce = ""
   private var lastPublishedPage = -1
+  /// When the current pendingAdvert was requested, so the trace can show request -> on-air latency.
+  private var publishRequestedAt: TimeInterval = 0
+  /// Identifies THIS advertising session. Minted fresh every time publishing (re)starts.
+  ///
+  /// `seq` alone cannot order readings across sessions: it restarts at 0 on every director launch
+  /// and it is PER-DEVICE, so a follower holding "last applied seq 1743" would reject a different
+  /// director starting at 13, forever. The nonce lets a scanner notice "this is a different
+  /// advertiser than the one I was tracking" and reset its baseline instead of ignoring it.
+  private var sessionNonce = BlePageBeacon.newNonce()
+  private static func newNonce() -> String { String(UUID().uuidString.prefix(4)).lowercased() }
   private var lastAppliedPage = -1
   private var isScanning = false
+
+  /// The advertised seq, owned HERE and incremented once per real page change.
+  ///
+  /// It used to be the caller's counter, which the director's mesh heartbeat bumps ONCE PER SECOND
+  /// whether the page moved or not. Over a 90-minute Mass that reaches ~5400 and keeps climbing,
+  /// lengthening a name that already shares a 31-byte advertisement with a 128-bit service UUID.
+  /// A number that grows forever inside a fixed-size packet is a bug with a fuse on it. Bounded by
+  /// page turns instead, this stays in the low hundreds for any real session.
+  private var advertSeq = 0
+
+  /// Nonces heard recently, for contention detection. BLE carries no authority — nothing in an
+  /// advertisement proves the sender is the real director — so when two advertisers disagree the
+  /// only safe answer is to render NEITHER and let the mesh, which does have authority, decide.
+  private var recentNonces: [String: TimeInterval] = [:]
+  private static let contentionWindow: TimeInterval = 4.0
+
+  /// Power both radios up BEFORE they are needed, so neither pays a cold start on the critical path.
+  ///
+  /// CBPeripheralManager was created lazily inside publish(), which put CoreBluetooth's power-on
+  /// (~200-500ms, more when it triggers the permission prompt) directly between "Braulio taps Ser
+  /// Director" and "the page is on the air" — the one moment the whole beacon exists to make fast.
+  /// Called from BOTH roles at startup: a follower needs the central warm to hear the first
+  /// advertisement, and it needs the PERIPHERAL warm too, because any follower may become the
+  /// director a second later.
+  ///
+  /// Creating a manager does not advertise or scan; it only brings the radio up. Advertising still
+  /// requires pendingAdvert, scanning still requires an explicit startScanning.
+  func primeRadios() {
+    if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
+    if central == nil { central = CBCentralManager(delegate: self, queue: .main) }
+  }
 
   // MARK: - Director side
 
   /// Publish a page. Safe to call before Bluetooth is powered on — the value is held and advertised
   /// as soon as the radio is ready, so a director that taps the pill and turns a page immediately
   /// does not lose the first update.
-  func publish(page: Int, seq: Int) {
+  func publish(page: Int) {
     // PUBLISH ONLY ON A REAL CHANGE. The director's mesh heartbeat calls sendPageUpdate once per
     // SECOND, not once per page turn — so the first cut of this bumped seq, restarted the
     // advertiser and emitted telemetry every second forever. Measured over a 33-minute run: 280
@@ -73,11 +121,47 @@ final class BlePageBeacon: NSObject {
     // An advertisement is STATE, not an event: if the page has not moved there is nothing to say.
     guard page != lastPublishedPage else { return }
     lastPublishedPage = page
-    let name = "\(Self.namePrefix)\(seq).\(page)"
+    advertSeq += 1
+    let seq = advertSeq
+    let name = "\(Self.namePrefix)\(sessionNonce).\(seq).\(page)"
     pendingAdvert = name
+    let cold = peripheral == nil
     if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
+    publishRequestedAt = Date().timeIntervalSince1970
     startAdvertisingIfReady()
-    log?("ble:page-send", ["page": page, "seq": seq])
+    // `cold` should be false in normal operation — primeRadios runs at startup. If it is ever true
+    // the radio was not warm and this publish paid a power-on delay, which is exactly the cost this
+    // beacon exists to avoid. Worth seeing in a trace rather than guessing.
+    log?("ble:page-send", ["page": page, "seq": seq, "coldRadio": cold])
+  }
+
+  /// Re-assert advertising if it has stopped for any reason other than us stopping it.
+  ///
+  /// startAdvertisingIfReady is reachable from exactly three places — publish(), resumeOnForeground()
+  /// and the power-on callback — and publish() early-returns when the page has not changed. So a
+  /// director that loses its advertisement mid-session while FOREGROUNDED (radio hiccup, iOS
+  /// reclaiming the peripheral) never re-arms until it happens to turn a page. Silent, and invisible
+  /// from the device itself: it still believes it is publishing.
+  ///
+  /// Called from the director's 1 Hz heartbeat. Cheap and idempotent: a bool check, and a restart
+  /// only when iOS says we are genuinely not advertising.
+  func ensureAdvertising() {
+    guard let p = peripheral, p.state == .poweredOn, pendingAdvert != nil, !p.isAdvertising else { return }
+    log?("ble:readvertise", [:])
+    startAdvertisingIfReady()
+  }
+
+  /// Re-assert scanning on the same principle, and trust CBCentralManager over our own flag.
+  ///
+  /// scanIfReady() guards on `!isScanning`, a local bool. If iOS stops the scan without telling us,
+  /// that bool stays true and the guard refuses to restart it — the follower is deaf for the rest of
+  /// the session while believing it is listening. `central.isScanning` is the actual state, so this
+  /// asks the framework rather than our memory of it.
+  func ensureScanning() {
+    guard let c = central, c.state == .poweredOn, !c.isScanning else { return }
+    if isScanning { log?("ble:rescan", [:]) }   // only interesting when we THOUGHT we were scanning
+    isScanning = false
+    scanIfReady()
   }
 
   private func startAdvertisingIfReady() {
@@ -90,11 +174,37 @@ final class BlePageBeacon: NSObject {
       CBAdvertisementDataLocalNameKey: name,
       CBAdvertisementDataServiceUUIDsKey: [Self.serviceUUID],
     ])
+    // THE NUMBER THAT MATTERS on the director side: how long the page took to reach the air after
+    // it was requested. With warm radios this is sub-millisecond; a large value means something put
+    // a cold radio on the critical path again.
+    if publishRequestedAt > 0 {
+      let ms = Int((Date().timeIntervalSince1970 - publishRequestedAt) * 1000)
+      log?("ble:on-air", ["ms": ms])
+      publishRequestedAt = 0
+    }
   }
 
+  /// STOP ADVERTISING. This existed from the first cut and was NEVER CALLED — dead code, while the
+  /// beacon it was meant to switch off advertised forever.
+  ///
+  /// That is the bug behind build 444's wrong-song flash. A device that had been director on song
+  /// 357 published it, later stopped directing, and kept broadcasting 357 through role changes and
+  /// through resetTransport, which never touched this class. Followers on 444 (where BLE was
+  /// ungated) read that ghost advertisement and rendered 357 before the mesh corrected them to 101.
+  ///
+  /// Resetting lastPublishedPage matters as much as stopping: publish() early-returns when the page
+  /// has not changed, so a device that stops directing on 357 and is later re-promoted while still
+  /// on 357 would otherwise never re-advertise at all.
+  ///
+  /// A fresh nonce marks the next session as a new advertiser, so scanners rebase their seq
+  /// tracking rather than filtering the new session out as "older".
   func stopPublishing() {
     pendingAdvert = nil
+    lastPublishedPage = -1
+    advertSeq = 0
+    sessionNonce = Self.newNonce()
     peripheral?.stopAdvertising()
+    log?("ble:stop-publishing", [:])
   }
 
   // MARK: - Follower side
@@ -135,13 +245,20 @@ final class BlePageBeacon: NSObject {
     central?.stopScan()
   }
 
-  /// "SV1743.59" -> (seq 1743, page 59). Returns nil for anything that is not ours.
-  private func parse(_ name: String) -> (seq: Int, page: Int)? {
+  /// "SVa3f9.1743.59" -> (nonce a3f9, seq 1743, page 59). Returns nil for anything that is not ours.
+  ///
+  /// The LEGACY two-field form ("SV1743.59") is deliberately REJECTED rather than accepted with a
+  /// synthetic nonce. Builds 433-445 shipped a beacon that is never switched off, so any device
+  /// still running one is broadcasting a page frozen at whatever it last directed — possibly hours
+  /// stale. Those are exactly the advertisements that produced the wrong-song flash, and during a
+  /// mixed-build window they will be in the air. Ignoring the old format is what makes it safe to
+  /// render from BLE at all.
+  private func parse(_ name: String) -> (nonce: String, seq: Int, page: Int)? {
     guard name.hasPrefix(Self.namePrefix) else { return nil }
     let body = name.dropFirst(Self.namePrefix.count)
     let parts = body.split(separator: ".")
-    guard parts.count == 2, let seq = Int(parts[0]), let page = Int(parts[1]) else { return nil }
-    return (seq, page)
+    guard parts.count == 3, let seq = Int(parts[1]), let page = Int(parts[2]) else { return nil }
+    return (String(parts[0]), seq, page)
   }
 }
 
@@ -164,7 +281,34 @@ extension BlePageBeacon: CBCentralManagerDelegate {
   ) {
     guard let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String,
           let parsed = parse(name) else { return }
-    // Monotonic guard: a cached or out-of-order advertisement must never move a follower BACKWARD.
+    // A DIFFERENT ADVERTISER RESETS THE BASELINE. seq is monotonic only WITHIN one advertising
+    // session — it restarts at 0 on every director launch and it is per-device — so comparing seqs
+    // across sessions is meaningless. Without this, a follower holding "last seen 1743" would
+    // silently ignore a brand-new director starting at 1, forever, and look exactly like the mesh
+    // being broken.
+    // CONTENTION => ABSTAIN. Two advertisers means either a split brain or a stale beacon, and
+    // nothing in a BLE packet says which one is the real director. Rendering the newest packet
+    // ping-pongs the follower between two pages; preferring the incumbent pins it to a possibly
+    // dead one, which is the 444 wrong-song failure made permanent. Both are worse than showing
+    // nothing for a few seconds: BLE only ever buys time before the mesh arrives, and the mesh
+    // resolves director conflicts by token within seconds. So when it is ambiguous, say nothing.
+    let now = Date().timeIntervalSince1970
+    recentNonces[parsed.nonce] = now
+    recentNonces = recentNonces.filter { now - $0.value <= Self.contentionWindow }
+    if recentNonces.count > 1 {
+      if lastAppliedPage != -1 { log?("ble:contention", ["advertisers": recentNonces.count]) }
+      lastAppliedPage = -1        // so the next uncontested reading logs as a fresh apply
+      return
+    }
+
+    if parsed.nonce != lastSeenNonce {
+      lastSeenNonce = parsed.nonce
+      lastSeenSeq = -1
+      lastAppliedPage = -1
+      log?("ble:new-advertiser", ["nonce": parsed.nonce, "page": parsed.page])
+    }
+    // Monotonic guard WITHIN a session: a cached or out-of-order packet must never move a follower
+    // backward. Across sessions the nonce check above has already rebased us.
     guard parsed.seq > lastSeenSeq else { return }
     lastSeenSeq = parsed.seq
     // Log only when the PAGE moves. A scan with allowDuplicates reports every advertisement packet,
@@ -174,6 +318,6 @@ extension BlePageBeacon: CBCentralManagerDelegate {
       lastAppliedPage = parsed.page
       log?("ble:page-recv", ["page": parsed.page, "seq": parsed.seq, "rssi": RSSI.intValue])
     }
-    onPage?(parsed.page, parsed.seq)
+    onPage?(parsed.page, parsed.seq, parsed.nonce)
   }
 }

@@ -92,7 +92,7 @@
       id: "puente",
       label: "Puente nativo",
       ok: isNative ? d.bridgeAvailable === true : true,
-      detail: isNative ? (d.bridgeAvailable === true ? "conectado" : "sin conexión con la app") : "—",
+      detail: isNative ? (d.bridgeAvailable === true ? "conectado" : "sin conexión con el app") : "—",
       applicable: isNative,
     }));
 

@@ -193,13 +193,16 @@ try {
   // be read in exactly ONE place (inside isOfflineBundleReady, where it is confirmed against the
   // real caches); any second reader is something claiming readiness from the flag alone.
   const readyFlagReads = (appJs.match(/localStorage\.getItem\(OFFLINE_READY_KEY\)/g) || []).length;
+  // The "webCached: verifiedReady" half of this guard went with the fleet dashboard on 2026-08-18 —
+  // there is no readiness payload to be honest IN any more. What survives is the invariant that
+  // actually prevented the bug: OFFLINE_READY_KEY is read in exactly ONE place, inside
+  // isOfflineBundleReady, where it is confirmed against the real caches. A second reader anywhere is
+  // something claiming readiness from a flag that nothing ever clears.
   check(
-    "app.js verifies the offline bundle before claiming webCached",
-    /isOfflineBundleReady\(totalPages\)/.test(appJs)
-      && appJs.includes("webCached: verifiedReady,")
-      && readyFlagReads === 1,
-    `fleetCheckin no longer verifies — webCached is back to trusting the never-cleared ready flag `
-      + `(OFFLINE_READY_KEY read in ${readyFlagReads} place(s), expected exactly 1)`,
+    "the offline-ready flag is read in exactly one place, where it is verified",
+    readyFlagReads === 1,
+    `OFFLINE_READY_KEY read in ${readyFlagReads} place(s), expected exactly 1 — a second reader is `
+      + `something trusting the never-cleared ready flag instead of the real caches`,
   );
   // Read-only inspection must not CREATE the current book's cache: an empty husk is something the
   // SW's activate keep-policy then has to score and reason about.

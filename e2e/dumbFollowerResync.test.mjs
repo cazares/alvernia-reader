@@ -155,7 +155,12 @@ test("every mesh breadcrumb is also written to the device's own log", () => {
   assert.match(swift, /^import os$/m, "os must be imported for Logger");
   assert.match(swift, /Logger\(subsystem:\s*"com\.cazares\.signovivo"/,
     "a Logger with a stable subsystem is what makes `log stream --predicate` usable");
-  assert.match(swift, /deviceLog\.info\(/, "dbgLog must mirror to the device log");
+  // .notice, NOT .info — os_log's .info is MEMORY-ONLY by default, so it never reaches
+  // `log collect` or a sysdiagnose. Build 438 shipped .info and the channel was silent in every
+  // collected archive: a real 440 capture converted to ZERO com.cazares.signovivo rows. The whole
+  // point is reading a device after the fact, offline, so persistence is the feature.
+  assert.match(swift, /deviceLog\.notice\(/, "breadcrumbs must be logged at .notice or they do not persist");
+  assert.doesNotMatch(swift, /deviceLog\.info\(/, ".info is memory-only — sysdiagnose and log collect will not see it");
   // .public or the whole log reads <private> — an unreadable log is the problem, not the fix.
   assert.match(swift, /privacy:\s*\.public/);
 });
@@ -164,7 +169,7 @@ test("the local log is written BEFORE the batching queue, so nothing can silence
   const swift = fs.readFileSync(
     path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
   const body = swift.slice(swift.indexOf("private func dbgLog("));
-  const local = body.indexOf("deviceLog.info(");
+  const local = body.indexOf("deviceLog.notice(");
   const queued = body.indexOf("logQueue.async");
   assert.ok(local > 0 && queued > 0, "both paths must exist");
   assert.ok(
@@ -172,4 +177,227 @@ test("the local log is written BEFORE the batching queue, so nothing can silence
     "the device log must be written before the relay queue — the LOG_INTERVAL_MS kill switch " +
       "silences the network, and it must never also blind the device in front of you",
   );
+});
+
+// ── Discovery storm: the timer leak behind issue #352 ──────────────────────────
+//
+// scheduleNextDiscoveryRefresh assigned discoveryRefreshTimer WITHOUT invalidating the previous
+// timer. A Timer.scheduledTimer retains itself in the run loop, so overwriting the property loses
+// the handle without stopping the timer; the orphan fires and schedules another. Ten call sites
+// reach that function, so the live timer population DOUBLED on every overlapping schedule — and the
+// biggest doubler was foregrounding, which PdfReaderApp.tsx made twice as bad by calling
+// refreshNearbyDiscovery TWICE per foreground.
+//
+// Measured from the iPhone's own unified log on 2026-08-17: 66 advertiser start/stop events per
+// SECOND, sustained, against an intended one every 5-12 s. An MCSession invite cannot complete when
+// the advertiser it must answer on lives ~15 ms. That is the "handshake fails, delivery is fine"
+// signature in #352 — an issue carrying EIGHT disproved theories, every one about the device rather
+// than the timer, and it explains why the iPhone was worst: it is the one picked up all day.
+test("scheduleNextDiscoveryRefresh invalidates before it schedules", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func scheduleNextDiscoveryRefresh"));
+  // Anchor on the ASSIGNMENT, not the words "Timer.scheduledTimer" — the explanatory
+  // comment above the fix contains that phrase, so searching for it cut the slice before the fix
+  // and the assertion failed against code that was correct.
+  const body = fn.slice(0, fn.indexOf("discoveryRefreshTimer = Timer.scheduledTimer"));
+  assert.match(
+    body, /discoveryRefreshTimer\?\.invalidate\(\)/,
+    "a new discovery timer must never be scheduled without stopping the old one — that leak is #352",
+  );
+});
+
+test("discovery churn has a hard floor no caller can bypass", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  assert.match(swift, /minRefreshInterval: TimeInterval = 2\.0/);
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  assert.match(
+    fn.slice(0, 2600), /now - lastRefreshAt >= Self\.minRefreshInterval/,
+    "refreshDiscovery must throttle regardless of caller",
+  );
+});
+
+test("a refresh loop raises an alarm, and counts attempts the throttle drops", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  const body = fn.slice(0, 2600);
+  assert.match(body, /refresh:STORM/, "a loop must announce itself");
+  // The alarm must sit BEFORE the throttle's early return, or the guard that contains the loop
+  // also hides it — turning a loud bug into a silent one.
+  const alarm = body.indexOf("refreshAttemptTimes.append");
+  const guardIdx = body.indexOf("now - lastRefreshAt >= Self.minRefreshInterval");
+  assert.ok(alarm > 0 && guardIdx > 0 && alarm < guardIdx,
+    "attempts must be counted before the throttle drops them");
+});
+
+test("foreground triggers exactly ONE discovery refresh", () => {
+  const fg = appCode.slice(appCode.indexOf("AppState.addEventListener"));
+  const window = fg.slice(0, fg.indexOf("return () => sub.remove()"));
+  const calls = (window.match(/refreshNearbyDiscovery\(\)/g) || []).length;
+  assert.equal(calls, 1, `foreground calls refreshNearbyDiscovery ${calls}x; each one schedules a timer`);
+});
+
+// ── Peer identity must be STABLE across role changes ──────────────────────────
+//
+// configureTransport minted `UIDevice.name + UUID().prefix(6)` fresh on EVERY call, and it is
+// called on every role transition — startDirector, startFollower, approveDirectorTakeover. So a
+// device became a stranger to the whole mesh each time it changed role.
+//
+// MEASURED on the owner's fleet, build 440, from mPad's own unified log:
+//
+//     21:06:26  advertising as iPad-92A6C5
+//     21:08:07  advertising as iPad-CF034B     <- same iPad, two minutes later
+//     21:08:34  advertising as iPad-AE6CD6     <- and again
+//     11 distinct peer identities for a 4-device fleet
+//
+// Fatal for sync: a follower tracks its director by MCPeerID (connectedDirectorPeer,
+// discoveredDirectors), so a director that renames itself silently abandons every follower. It also
+// manufactured a phantom split-brain — iPad-92A6C5 and iPad-AE6CD6 were the same iPad.
+//
+// The random suffix must STAY: since iOS 16 UIDevice.name returns a generic "iPad" to apps without
+// a special entitlement, so without it every device in the loft advertises the same name.
+test("the peer identity is persisted, not minted per role change", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func configureTransport"));
+  const body = fn.slice(0, fn.indexOf("mcSessions"));
+  assert.doesNotMatch(
+    body, /MCPeerID\(displayName:\s*"\\\(peerName\)-\\\(UUID\(\)/,
+    "configureTransport is minting a random peer name again — every role change renames the device",
+  );
+  assert.match(body, /localPeerID \?\? loadOrCreatePeerID\(\)/,
+    "configureTransport must reuse the existing peer, then fall back to the persisted one");
+});
+
+test("the peer id survives resetTransport, which nils it", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  // resetTransport clearing localPeerID is WHY an in-memory cache is not enough — it runs at the
+  // top of startDirector and approveDirectorTakeover, the exact transitions this must survive.
+  const reset = swift.slice(swift.indexOf("private func resetTransport"));
+  assert.match(reset.slice(0, reset.indexOf("\n  }")), /localPeerID = nil/,
+    "if reset no longer nils the peer, this test's premise changed — re-read the fix");
+  // So the identity has to come off disk, archived. A stable NAME alone is not enough: Apple treats
+  // the MCPeerID OBJECT as the identity.
+  assert.match(swift, /NSKeyedArchiver\.archivedData\(withRootObject:/);
+  assert.match(swift, /NSKeyedUnarchiver\.unarchivedObject\(ofClass: MCPeerID\.self/);
+  assert.match(swift, /UserDefaults\.standard/);
+});
+
+test("the uniqueness suffix is kept — iOS 16+ gives every device the same UIDevice.name", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const prop = swift.slice(swift.indexOf("private var stablePeerName"));
+  const body = prop.slice(0, prop.indexOf("\n  }"));
+  assert.match(body, /UUID\(\)\.uuidString\.prefix\(6\)/, "the suffix must still exist");
+  assert.match(body, /defaults\.set\(suffix, forKey: key\)/, "and it must be persisted, not random");
+});
+
+// ── A remembered peer dies with the browser that found it ─────────────────────
+//
+// An MCPeerID is only meaningful to the MCNearbyServiceBrowser instance that discovered it.
+// refreshDiscovery tears down and recreates the browser every 5-12 s, so the new one starts with an
+// EMPTY peers dictionary — but discoveredDirectors/discoveredFollowers used to keep entries for 90
+// seconds, more than SEVEN browser generations. reconsiderFollowerTarget invites straight out of
+// those maps, so it invited peers the live browser had never seen. Multipeer does not fail loudly:
+//
+//     Cannot find peer with idString [2gbyj11r6mftw] in the peers dictionary.
+//
+// ...and the invite evaporates. No error, no delegate callback, no session. That is the symptom that
+// survived six builds — every peer found at -37 dBm, nothing ever connecting — and it explains the
+// intermittency exactly: an invite only worked when it happened to fire in the same generation that
+// discovered its target, so one device would follow and the rest would not.
+//
+// Caught from Apple's own message in the owner's Xcode console, not from ours.
+test("recreating the browser forgets the peers the old browser found", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+
+  const cleared = body.indexOf("discoveredDirectors.removeAll()");
+  const restart = body.indexOf("startBrowsing()");
+  assert.ok(cleared > 0, "discovered peers must be cleared when the browser is recreated");
+  assert.ok(restart > 0 && cleared < restart,
+    "they must be cleared BEFORE browsing restarts, or the new browser inherits ghosts");
+  for (const m of ["discoveredFollowers.removeAll()", "discoveredDirectorInfo.removeAll()",
+                   "discoveredFollowerInfo.removeAll()", "discoveredDirectorSeenAt.removeAll()"]) {
+    assert.ok(body.includes(m), `${m} — every peer map must be cleared, not just some`);
+  }
+});
+
+test("the 90s prune is gone — it is what let ghosts outlive their browser", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+  assert.doesNotMatch(
+    body, /discoveredDirectorSeenAt\.filter\s*\{[^}]*>\s*90/,
+    "a time-based prune is the wrong lifetime entirely: peers die with their BROWSER, not on a clock",
+  );
+});
+
+
+// ── BLE: the beacon must be switched OFF when not directing ───────────────────
+//
+// BlePageBeacon.stopPublishing() existed from the first cut and was NEVER CALLED. resetTransport —
+// which runs on every role change — never touched the class. So a device that had once directed
+// advertised its last page FOREVER, including while it was a follower.
+//
+// That ghost is what build 444 rendered: devices flashed song 357 (a page some device had directed
+// earlier) before the mesh corrected them to 101. It was misdiagnosed at the time as a freshness
+// problem needing a nonce; the nonce is needed too, but the actual defect was a missing lifecycle.
+test("the beacon stops advertising whenever the device stops directing", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const reset = swift.slice(swift.indexOf("private func resetTransport"));
+  assert.match(reset.slice(0, reset.indexOf("\n  }")), /bleBeacon\.stopPublishing\(\)/,
+    "resetTransport runs on every role change and MUST silence the beacon");
+  // SLICE TO THE FUNCTION'S END, not to a fixed character count. This read the first 3000 chars of
+  // startFollower and broke on 2026-08-18 when a comment pushed the call to 3639 — a passing test
+  // turning red because an explanation got longer is a test measuring the wrong thing, and the
+  // tempting "fix" is to bump the number until it passes again, which just resets the fuse.
+  const fStart = swift.indexOf("func startFollower(");
+  assert.ok(fStart > 0, "startFollower is gone — re-derive this test");
+  const fEnd = swift.indexOf("\n  func ", fStart + 1);
+  const follower = swift.slice(fStart, fEnd > fStart ? fEnd : undefined);
+  assert.match(follower, /bleBeacon\.stopPublishing\(\)/,
+    "a follower must never advertise a page");
+});
+
+test("stopPublishing resets state, or a re-promoted director stays silent", () => {
+  const ble = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  const fn = ble.slice(ble.indexOf("func stopPublishing()"));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+  // publish() early-returns when the page has not changed, so a device that stops directing on 357
+  // and is re-promoted still on 357 would never re-advertise.
+  assert.match(body, /lastPublishedPage = -1/, "must clear the published page");
+  assert.match(body, /sessionNonce = Self\.newNonce\(\)/, "the next session must be a NEW advertiser");
+});
+
+test("a scanner rebases on a new advertiser instead of mis-ordering seqs", () => {
+  const ble = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  // seq is monotonic only WITHIN a session — it restarts at 0 per launch and is per-device. Without
+  // a rebase a follower holding "last seen 1743" ignores a new director starting at 1, forever.
+  assert.match(ble, /parsed\.nonce != lastSeenNonce/, "a different advertiser must reset the baseline");
+  assert.match(ble, /lastSeenSeq = -1/, "the rebase must clear the seq floor");
+});
+
+test("legacy two-field BLE advertisements are rejected", () => {
+  const ble = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  const fn = ble.slice(ble.indexOf("private func parse("));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+  // Builds 433-445 ship a beacon that never stops. During a mixed-build window those frozen
+  // advertisements are in the air, and accepting them is exactly the wrong-song flash.
+  assert.match(body, /parts\.count == 3/, "only the 3-field nonce format may be accepted");
+  assert.doesNotMatch(body, /parts\.count == 2/, "the legacy format must not be parsed");
+});
+
+test("BLE renders standalone again, now that no stale beacon can exist", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  assert.match(swift, /private var lastKnownBookId = "standard"/,
+    "BLE must not wait on a mesh page — that gate disabled the fallback exactly when the mesh broke");
 });

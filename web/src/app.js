@@ -331,6 +331,13 @@ const setViewportCssVars = () => {
   const height = Math.max(1, Math.round((viewport?.height || window.innerHeight) * 100) / 100);
   document.documentElement.style.setProperty("--viewport-width", `${width}px`);
   document.documentElement.style.setProperty("--viewport-height", `${height}px`);
+  // The version stamp is pinned to where the PAGE was drawn, so it must be repositioned AFTER these
+  // vars change — they are what size the <img>. Called from here rather than from its own listener
+  // so the ordering is guaranteed and so it inherits this function's full event coverage: plain
+  // resize, orientationchange, AND visualViewport resize/scroll, which is how iOS actually reports a
+  // rotation. A separate listener got only two of the four and would have gone stale on device.
+  // Hoisted function declaration, so calling it from above its definition is fine.
+  positionBuildBadge();
 };
 const bindViewportMetrics = () => {
   setViewportCssVars();
@@ -356,7 +363,7 @@ const postNativeBridge = (payload) => {
     }));
     return true;
   } catch (error) {
-    console.error("No se pudo hablar con la app nativa", error);
+    console.error("No se pudo hablar con el app nativa", error);
     return false;
   }
 };
@@ -847,7 +854,6 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
     totalPages,
     verifiedAt: new Date().toISOString(),
   });
-  fleetCheckin(); // tell the readiness dashboard this iPad is cached — verified, not asserted
 };
 
 // Defer the ~13 MB background pre-cache until AFTER the reader is revealed. On weak connections
@@ -877,7 +883,6 @@ const deferOfflinePrecache = (totalPages) => {
       console.warn("Pre-cache offline incompleto:", error);
       // Surface honest progress to the fleet dashboard even on failure — a device stuck
       // mid-migration should read as "recaching", not freeze at its boot-time snapshot.
-      fleetCheckin().catch(() => {});
     });
   };
   // Retry entry for the armed triggers: cooldown after a failure so a persistent problem (e.g.
@@ -1182,7 +1187,7 @@ const SYNC_PILL = {
   // What never varies is where you end up: directing the choir. The pill says that. The TITLE
   // (SIGUIENDO vs NADIE DIRIGE) and the tint carry the difference between the two situations, and
   // the red takeover warning still appears when it applies.
-  directing: { cls: "", title: "Dirigir", action: "✕ Salir" },
+  directing: { cls: "", title: "DIRECTOR", action: "" },
   // "Tomar", not "Pedir". Nothing approves this: tap, confirm, and you are the director — whoever
   // currently holds it is never asked. A word like "request" would promise a handshake that exists
   // nowhere in this system, and the person tapping would wait for a reply that never comes. The red
@@ -1194,7 +1199,10 @@ const SYNC_PILL = {
   // is true in every case and needs no context to read.
   // SIGUIENDO is gone: CSS collapses this state to a bare breathing dot. The strings stay for
   // screen readers and for the non-native web, where there is no mesh and no dot styling.
+  // FOLLOWING collapses to a dot on the ⟳ fab — a word there was a CLAIM, and it lied all morning
+  // on 2026-08-17 while devices sat on the wrong song. A light is just a light.
   following: { cls: "is-following", title: "Siguiendo", action: "" },
+  // NOBODY is the one state that earns words: it is the only one needing a human to act.
   nobody:    { cls: "is-nobody", title: "Nadie dirige", action: "" },
 };
 
@@ -1227,28 +1235,72 @@ const BUILD_BADGE_PAGE = 1;
 function syncBuildBadgeVisibility() {
   const el = document.getElementById("build-badge");
   if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE);
+  positionBuildBadge();
 }
+
+/**
+ * GLUE THE STAMP TO THE PAGE, not to the screen.
+ *
+ * It was fixed to the VIEWPORT's bottom-right at 8px / 38% black. On an iPad in portrait the page
+ * fills the width, so it landed on white paper and read fine. On an iPhone the page is letterboxed
+ * — object-fit: contain puts BLACK bars above and below — so the stamp landed on black, dark grey
+ * on black, and looked like it was missing entirely. It never was; it was invisible.
+ *
+ * The printed date stamp in the page's lower-LEFT is part of the image and therefore always sits on
+ * paper, at the paper's corner, in every orientation and on every device. This makes the version
+ * stamp behave the same way: compute where object-fit: contain actually drew the image and pin the
+ * badge to THAT rectangle's bottom-right corner.
+ *
+ * Cheap and idempotent, so it is safe to call from render, resize and orientation change.
+ */
+function positionBuildBadge() {
+  const el = document.getElementById("build-badge");
+  const img = document.getElementById("page-image");
+  if (!el || !img) return;
+  // Defensive: e2e tests execute syncBuildBadgeVisibility against stub elements that have no DOM
+  // geometry. Positioning is a nicety; the VISIBILITY rule above is the contract, and it must not
+  // be taken down by a missing method on a fake node.
+  if (typeof img.getBoundingClientRect !== "function") return;
+  const nW = img.naturalWidth, nH = img.naturalHeight;
+  const r = img.getBoundingClientRect();
+  if (!nW || !nH || !r.width || !r.height) return;   // nothing drawn yet; a later call will fix it
+  // object-fit: contain — the drawn box is the natural size scaled to fit, then centred.
+  const scale = Math.min(r.width / nW, r.height / nH);
+  const drawnW = nW * scale, drawnH = nH * scale;
+  const right = r.left + (r.width - drawnW) / 2 + drawnW;
+  const bottom = r.top + (r.height - drawnH) / 2 + drawnH;
+  // A hair inside the paper's edge, scaled with the page so it looks the same at any size.
+  const inset = Math.max(3, Math.round(drawnW * 0.008));
+  el.style.right = `${Math.max(0, Math.round(window.innerWidth - right + inset))}px`;
+  el.style.bottom = `${Math.max(0, Math.round(window.innerHeight - bottom + inset))}px`;
+}
+// No listeners here on purpose: setViewportCssVars owns every viewport event and calls this once
+// the CSS vars that size the <img> have been written. Two independent listeners racing to position
+// against the same element is how you get a stamp that is correct on resize but not on rotation.
 
 const renderDirectorModeBadge = () => {
   const isDirector = state.nativeSyncRole === "director";
   // Drive the control layout: followers (web + any non-director native) get ⟳ resync + ♪;
   // a director gets ♪ + ⌕ search. Default "follower" so signovivo.com is right from boot.
   document.documentElement.dataset.role = isDirector ? "director" : "follower";
-  const rl = document.getElementById("role-toggle-label");
-  const rt = document.getElementById("role-toggle");
-  if (rl && rt) {
-    rt.classList.toggle("is-directing", isDirector);
-    rl.textContent = isDirector ? "Salir de director" : "Dirigir";
-  }
   if (!directorModeBadge) return;
   // Native shell only. On signovivo.com there is no mesh and no role to take, so the pill would be
   // describing a room the viewer is not in.
   const inShell = NATIVE_FILE_MODE || hasNativeBridge();
+  // Published for CSS so ★ Ser Director can be gated on it. Set on EVERY render rather than once at
+  // init: the function that used to hide the keypad's copy of that control ran exactly once and
+  // never again on a role change, so it never actually hid once you were directing.
+  document.documentElement.dataset.shell = inShell ? "native" : "web";
   if (!inShell) {
     directorModeBadge.classList.add("is-hidden");
     return;
   }
-  const st = SYNC_PILL[syncPillState()];
+  const key = syncPillState();
+  const st = SYNC_PILL[key];
+  // Drive the crossed-out ⟳ from the SAME verdict that drives the pill, so the two can never
+  // disagree — one state, one source. On <html> beside data-role rather than a body class, to
+  // match the existing pattern and to be in place before first paint.
+  document.documentElement.dataset.mesh = key;
   directorModeBadge.classList.remove("is-following", "is-nobody");
   if (st.cls) directorModeBadge.classList.add(st.cls);
   directorModeBadge.classList.remove("is-hidden");
@@ -1256,12 +1308,25 @@ const renderDirectorModeBadge = () => {
   const actionEl = document.getElementById("sync-pill-action");
   if (titleEl) titleEl.textContent = st.title;
   if (actionEl) actionEl.textContent = st.action;
+  // BRANCH ON THE KEY, NOT THE TITLE. This compared st.title === "NADIE DIRIGE" while the title is
+  // "Nadie dirige" — the branch could never match, so a follower with NO director was announced to
+  // a screen reader as "Estás siguiendo al director": the opposite of the truth, in the one state
+  // that needs a human. Both surviving labels also promised that tapping takes the role, which it
+  // has not done since build 435.
   directorModeBadge.setAttribute(
     "aria-label",
-    st.title === "DIRECTOR" ? "Estás dirigiendo. Tocar para salir."
-      : st.title === "NADIE DIRIGE" ? "Nadie está dirigiendo. Tocar para dirigir."
-      : "Estás siguiendo al director. Tocar para tomar el control.",
+    key === "directing" ? "Estás dirigiendo. Tocar para salir."
+      : key === "nobody" ? "Nadie está dirigiendo."
+      : "Estás siguiendo al director.",
   );
+  // While nobody directs, the pill is display:none and the crossed-out ⟳ IS the indicator — so the
+  // announcement has to move to the control that is actually on screen, or the state goes silent.
+  const resyncEl = document.getElementById("resync-fab");
+  if (resyncEl) {
+    resyncEl.setAttribute("aria-label", key === "nobody"
+      ? "Nadie está dirigiendo. Tocar para saber más."
+      : "Volver a sincronizar con el director");
+  }
 };
 
 // ── Sync "working" indicator ──────────────────────────────────────────────────
@@ -1350,7 +1415,12 @@ const hideRelayAuthWarning = () => {
 // a courtesy, not a decision.
 let syncNoticeEl = null;
 let syncNoticeTimer = null;
-const showSyncNotice = (text) => {
+// Set from inside the init closure below. A toast needs to be able to OPEN the role gate, and the
+// gate's opener lives in that closure; without this the toast could only describe the control, which
+// is exactly how it went stale for weeks.
+let requestRoleGate = null;
+
+const showSyncNotice = (text, action) => {
   if (!text) return;
   if (!syncNoticeEl) {
     const style = document.createElement("style");
@@ -1361,6 +1431,9 @@ const showSyncNotice = (text) => {
       "background:#1e293b;color:#fff;font:600 0.92rem/1.35 system-ui,-apple-system,sans-serif;" +
       "box-shadow:0 6px 22px rgba(0,0,0,.45);-webkit-tap-highlight-color:transparent}" +
       "#sv-sync-note.is-on{display:flex}" +
+      "#sv-sync-note .sv-sn-act{flex:0 0 auto;margin-left:0.4rem;padding:0.4rem 0.7rem;border:0;" +
+      "border-radius:0.6rem;background:#0A84FF;color:#fff;font:700 0.86rem/1 system-ui,sans-serif;" +
+      "cursor:pointer;-webkit-tap-highlight-color:transparent}" +
       "#sv-sync-note .sv-sn-x{flex:0 0 auto;margin-left:0.25rem;width:1.6rem;height:1.6rem;border:0;" +
       "border-radius:50%;background:rgba(255,255,255,0.22);color:#fff;font-size:1.05rem;line-height:1;" +
       "cursor:pointer;-webkit-tap-highlight-color:transparent}";
@@ -1377,11 +1450,29 @@ const showSyncNotice = (text) => {
     closeBtn.setAttribute("aria-label", "Cerrar aviso");
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => syncNoticeEl.classList.remove("is-on"));
+    // OPTIONAL ACTION. A notice that tells someone to go find a control is a promise about the UI
+    // that rots the moment the UI moves — the "toca el estado arriba a la izquierda" text outlived
+    // the pill that took the role by three builds and pointed at the wrong corner the whole time.
+    // Carrying the control removes the description, and with it that whole class of bug.
+    const actBtn = document.createElement("button");
+    actBtn.type = "button";
+    actBtn.className = "sv-sn-act";
+    actBtn.style.display = "none";
     syncNoticeEl.appendChild(msg);
+    syncNoticeEl.appendChild(actBtn);
     syncNoticeEl.appendChild(closeBtn);
     document.body.appendChild(syncNoticeEl);
   }
   syncNoticeEl.querySelector(".sv-sn-msg").textContent = String(text);
+  const actBtn = syncNoticeEl.querySelector(".sv-sn-act");
+  if (action && action.label && typeof action.onTap === "function") {
+    actBtn.textContent = action.label;
+    actBtn.style.display = "";
+    actBtn.onclick = () => { syncNoticeEl.classList.remove("is-on"); action.onTap(); };
+  } else {
+    actBtn.style.display = "none";
+    actBtn.onclick = null;
+  }
   // Synchronously, not via rAF — a backgrounded WebView throttles rAF and the notice would never
   // appear (same reason the relay banner does it this way).
   syncNoticeEl.classList.add("is-on");
@@ -1415,7 +1506,45 @@ const showDiagnostics = (payload) => {
     header.appendChild(close);
     const pre = document.createElement("pre");
     pre.className = "sv-diag-body";
+
+    // ── Debug settings, right where you are already looking ────────────────────────────────────
+    //
+    // sv.logSink and sv.telemetry live in AsyncStorage, which only the native shell can write, so
+    // until now they could only be set by rebuilding — absurd for two strings whose entire purpose
+    // is to be changed mid-session. This is the one screen a person opens when something is wrong,
+    // so it is where they belong.
+    //
+    // Pointing the sink at scripts/log-sink.mjs on Miguel's Mac makes telemetry cost Cloudflare
+    // NOTHING, which is what allows debug-level logging without competing with signovivo.com for
+    // the same 100,000/day quota.
+    const dbg = document.createElement("div");
+    dbg.className = "sv-diag-dbg";
+    const sinkInput = document.createElement("input");
+    sinkInput.type = "url";
+    sinkInput.placeholder = "http://192.168.x.x:8787  (vacío = Cloudflare)";
+    sinkInput.className = "sv-diag-sink";
+    sinkInput.autocapitalize = "none";
+    sinkInput.autocomplete = "off";
+    sinkInput.spellcheck = false;
+    const telLabel = document.createElement("label");
+    telLabel.className = "sv-diag-tel";
+    const telBox = document.createElement("input");
+    telBox.type = "checkbox";
+    telLabel.appendChild(telBox);
+    telLabel.appendChild(document.createTextNode(" Telemetría"));
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "sv-diag-save";
+    save.textContent = "Guardar";
+    save.addEventListener("click", () => {
+      postNativeBridge({ type: "set-debug-settings", logSink: sinkInput.value, telemetry: telBox.checked });
+    });
+    dbg.appendChild(sinkInput);
+    dbg.appendChild(telLabel);
+    dbg.appendChild(save);
+
     diagEl.appendChild(header);
+    diagEl.appendChild(dbg);
     diagEl.appendChild(pre);
     document.body.appendChild(diagEl);
   }
@@ -1431,6 +1560,12 @@ const showDiagnostics = (payload) => {
     ].join(" · ") + `\n${payload.book || "?"}`;
   diagEl.querySelector(".sv-diag-body").textContent =
     lines.length ? lines.join("\n") : "Sin eventos registrados todavía.";
+  // Native echoes the live values in the payload, so the fields show what IS set rather than
+  // whatever was typed last time — a settings box that lies is worse than no settings box.
+  const sinkEl = diagEl.querySelector(".sv-diag-sink");
+  const telEl = diagEl.querySelector(".sv-diag-tel input");
+  if (sinkEl && typeof payload.logSink === "string") sinkEl.value = payload.logSink;
+  if (telEl) telEl.checked = Boolean(payload.telemetry);
   diagEl.classList.add("is-on");
 };
 // True while the dump covers the screen. The rescue handlers closeSongJump() before posting, so
@@ -1490,7 +1625,13 @@ const applyNativeSyncEvent = async (payload) => {
     // Neutral operator notices from the native shell — director role resumed after a crash, or
     // refused because another device picked it up during the reboot.
     if (payload.type === "toast") {
-      showSyncNotice(payload.text);
+      // The one action a toast can carry today. Named rather than passed as a function because this
+      // arrives over the native bridge as JSON, and it still goes through the SAME typed-word gate —
+      // it opens the gate, it does not take the role.
+      const act = payload.action === "resume-director" && requestRoleGate
+        ? { label: "Volver a dirigir", onTap: () => requestRoleGate() }
+        : null;
+      showSyncNotice(payload.text, act);
       return;
     }
 
@@ -1517,6 +1658,13 @@ const applyNativeSyncEvent = async (payload) => {
     }
 
     if (event.type === "page" && Number.isFinite(event.page)) {
+      // WHERE DID THIS PAGE COME FROM? Native tags every page with the channel that delivered it
+      // ("mesh" or "ble"); the relay path logs itself separately in applyRelaySnapshot. Without this
+      // a page simply APPEARS in front of the choir and the only honest answer to "why is it on song
+      // 2" is a guess — which is exactly where 2026-08-18 left us.
+      try {
+        console.info("[sv] page", event.page, "via", event.src || "mesh?", "(was", state.currentPage + ")");
+      } catch {}
       // A page arriving over the mesh is proof a director is alive right now — the only such proof
       // this layer gets, and enough to keep the pill honest without any new plumbing.
       lastDirectorPageAt = Date.now();
@@ -1572,7 +1720,7 @@ const loadPageImage = async (pageNumber, retryToken = "") => {
   return { url, loadState };
 };
 
-const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = {}) => {
+const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, userInitiated = false } = {}) => {
   const nextPage = clampPage(pageNumber);
 
   // ALREADY ON THIS PAGE — do nothing. A director's mesh heartbeat arrives once per SECOND, and
@@ -1598,7 +1746,18 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
   // re-driving us once a second; without this the retry rate is the heartbeat rate. Cleared on any
   // successful render and by an explicit human retry, so this only ever paces a page that is
   // genuinely not renderable right now.
-  if (svShouldPaceRender(state.lastRenderFailure, nextPage, Date.now())) return;
+  // PACING NEVER APPLIES TO A HUMAN. This guard exists to blunt the director's 1 Hz re-drive when a
+  // page genuinely cannot render, and it does that job. But it lives in renderPage, so it was also
+  // swallowing SWIPES: a page that failed once became unreachable by hand for five seconds, with no
+  // error and no feedback — the swipe simply did nothing.
+  //
+  // Reported 2026-08-17: "I was on song 3 or 4 and it wouldn't let me swipe to songs 4 or 5... going
+  // back and returning then retrying fixed the issue". That is this window expiring, not a fix.
+  //
+  // svRenderPace's own docstring already said retries are cleared "by an explicit human retry" —
+  // that intent was never wired to a caller. A person asking for a page is not a retry storm; they
+  // asked once, and they are entitled to the attempt and to the error overlay if it fails.
+  if (!userInitiated && svShouldPaceRender(state.lastRenderFailure, nextPage, Date.now())) return;
 
   const requestId = state.pageLoadRequest + 1;
   state.pageLoadRequest = requestId;
@@ -1771,7 +1930,7 @@ const goToDraftSong = () => {
     return;
   }
   const targetPage = findSongPage(songNumber);
-  renderPage(targetPage);
+  renderPage(targetPage, { userInitiated: true });                    // IR A CANTO keypad
   addToRecientes(songNumber);
   closeSongJump();
   // Jumping OFF the director's live page = intentional browsing: pause auto-follow and
@@ -1788,7 +1947,7 @@ const goToDraftSong = () => {
 const goBackInHistory = () => {
   if (state.pageHistory.length === 0) return;
   const prevPage = state.pageHistory.pop();
-  renderPage(prevPage, { pushToHistory: false });
+  renderPage(prevPage, { pushToHistory: false, userInitiated: true }); // back
 };
 
 // ── Search index loading ──────────────────────────────────────────────────────
@@ -2552,7 +2711,7 @@ const turnSong = (direction, { keepOverlay = false } = {}) => {
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
   if (currentSongIndex < 0) {
     if (direction > 0) {
-      renderPage(state.songIndex[0].page, { direction });
+      renderPage(state.songIndex[0].page, { direction, userInitiated: true });
       clearDraft();
       if (!keepOverlay) closeDrawer();
     }
@@ -2560,7 +2719,7 @@ const turnSong = (direction, { keepOverlay = false } = {}) => {
   }
   const nextIndex = clampSongIndex(currentSongIndex + direction);
   if (nextIndex === currentSongIndex) return;
-  renderPage(state.songIndex[nextIndex].page, { direction });
+  renderPage(state.songIndex[nextIndex].page, { direction, userInitiated: true });  // next/prev song
   clearDraft();
   if (!keepOverlay) closeDrawer();
 };
@@ -2568,7 +2727,7 @@ const turnSong = (direction, { keepOverlay = false } = {}) => {
 const turnPage = (direction) => {
   const nextPage = clampPage(state.currentPage + direction);
   if (nextPage === state.currentPage) return;
-  renderPage(nextPage, { direction });
+  renderPage(nextPage, { direction, userInitiated: true });          // swipe / arrow
 };
 
 // ── Fullscreen toggle ─────────────────────────────────────────────────────────
@@ -2992,9 +3151,7 @@ const bindReaderEvents = () => {
   songJumpTrigger.addEventListener("click", () => { haptic(); openSongJump(); });
   // Tapping the song title is the discoverable, deliberate entry to jump-to-song / browse.
   songStatus.addEventListener("click", () => { haptic(); openSongJump(); });
-  // ── Role control (inside IR A CANTO) + the take-the-role gate ──────────────────
-  const roleToggle = document.getElementById("role-toggle");
-  const roleLabel = document.getElementById("role-toggle-label");
+  // ── The take-the-role gate (opened by ★ Ser Director, top-right) ──────────────
   const roleGate = document.getElementById("role-gate");
   const roleGateInput = document.getElementById("role-gate-input");
   const roleGateConfirm = document.getElementById("role-gate-confirm");
@@ -3005,15 +3162,6 @@ const bindReaderEvents = () => {
   // whose muscle memory is digits.
   const ROLE_GATE_WORD = "braulio";
 
-  const syncRoleToggle = () => {
-    if (!roleToggle || !roleLabel) return;
-    const directing = state.nativeSyncRole === "director";
-    roleToggle.classList.toggle("is-directing", directing);
-    roleLabel.textContent = directing ? "Salir de director" : "Dirigir";
-    // Native shell only — signovivo.com has no mesh and no role to take.
-    roleToggle.style.display = (NATIVE_FILE_MODE || hasNativeBridge()) ? "flex" : "none";
-  };
-  syncRoleToggle();
 
   const closeRoleGate = () => {
     if (!roleGate) return;
@@ -3035,26 +3183,42 @@ const bindReaderEvents = () => {
     closeSongJump();
     // `request-director` is the shell's existing entry point (PdfReaderApp.tsx:1141 -> DIRECTOR_CODE).
     // The web bundle never holds the code; it asks, and the shell decides.
-    postNativeBridge({ type: "request-director" });
+    //
+    // currentPage RIDES WITH THE REQUEST (2026-08-18). becomeDirector used to trust
+    // currentPageRef.current — a native-side MIRROR updated asynchronously by an earlier bridge
+    // message — for its very first broadcast. On real hardware that mirror was caught mid-lag: the
+    // web renders a jump instantly (no native round trip needed to draw a page), so tapping Ser
+    // Director right after a jump could broadcast whatever page was true a moment ago — the WebView
+    // boot default, or the page before the jump — to the whole choir, correcting only once the mesh
+    // heartbeat caught up ~10s later. The web always knows its OWN true page with zero lag; sending
+    // it inline removes the race instead of chasing the mirror.
+    postNativeBridge({ type: "request-director", currentPage: state.currentPage });
   });
 
-  if (roleToggle) roleToggle.addEventListener("click", () => {
-    haptic();
-    if (state.nativeSyncRole === "director") {
-      // Stepping DOWN is recoverable, so it gets a plain confirm. Asymmetric friction, matched to
-      // consequence: only the direction that changes everyone else's page earns the red gate.
-      if (window.confirm("¿Salir de director?")) {
-        closeSongJump();
-        postNativeBridge({ type: "exit-director" });
-      }
-      return;
-    }
-    if (roleGate) {
-      roleGate.classList.remove("is-hidden");
-      if (roleGateInput) { roleGateInput.value = ""; roleGateInput.focus(); }
-      if (roleGateConfirm) roleGateConfirm.disabled = true;
-    }
-  });
+  // (The keypad ✕ that used to live here was removed on 2026-08-18 along with #role-exit-x. The way
+  // out of the role is the DIRECTOR status pill itself — see its handler below. This block outlived
+  // its element and its comment claimed the ✕ was "the ONLY way out", which had stopped being true.)
+
+  // Two things open this gate — the keypad's ★ Ser Director and the tip's "¿Eres Braulio?" — so it
+  // is a function rather than the same six lines twice. Opening the gate is not taking the role:
+  // the typed word and the red warning are still the only way through, and the ONE
+  // request-director call site is still the gate's own Confirmar.
+  const openRoleGate = () => {
+    // Guarded even though both callers are hidden while directing: a second director is the failure
+    // that breaks a Mass, and a guard is cheaper than the Sunday that finds the hole.
+    if (state.nativeSyncRole === "director") return;
+    if (!roleGate) return;
+    roleGate.classList.remove("is-hidden");
+    if (roleGateInput) { roleGateInput.value = ""; roleGateInput.focus(); }
+    if (roleGateConfirm) roleGateConfirm.disabled = true;
+  };
+
+  // ★ Ser Director — the ONE way into the role, now visible in the top-right instead of buried in
+  // a modal named IR A CANTO. It OPENS THE GATE; it does not take the role. request-director still
+  // has exactly one call site (the gate's Confirmar), which e2e/directorButton.test.mjs pins.
+  const becomePill = document.getElementById("become-director-pill");
+  if (becomePill) becomePill.addEventListener("click", () => { haptic(); openRoleGate(); });
+  requestRoleGate = openRoleGate;   // let a toast offer the same gate, without describing where it is
 
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); navigationDrawer.classList.add("as-dropdown"); openDrawer(); activateTab("buscar"); });
@@ -3063,8 +3227,31 @@ const bindReaderEvents = () => {
   // it sends a request and the shell runs the same confirmation, live-director takeover warning and
   // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection.
   // Spin the icon for ~1.1s on tap so it's obvious it's reconnecting/refreshing.
+  // The "nobody directing" tip — a bubble anchored under the ⟳, opened by tapping the crossed-out
+  // button. Tapping anywhere, or OK, closes it. No auto-dismiss: it is three lines of explanation
+  // and vanishing mid-sentence is worse than a stray tap.
+  const noDirTip = document.getElementById("nodir-info");
+  const closeNoDirTip = () => { if (noDirTip) noDirTip.classList.add("is-hidden"); };
+  if (noDirTip) {
+    const closeBtn = document.getElementById("nodir-info-close");
+    const catcher = document.getElementById("nodir-info-backdrop");
+    if (closeBtn) closeBtn.addEventListener("click", () => { haptic(); closeNoDirTip(); });
+    if (catcher) catcher.addEventListener("click", closeNoDirTip);
+    const braulio = document.getElementById("nodir-info-braulio");
+    if (braulio) braulio.addEventListener("click", () => { haptic(); closeNoDirTip(); openRoleGate(); });
+  }
+
   const resyncFab = document.getElementById("resync-fab");
   if (resyncFab) resyncFab.addEventListener("click", () => {
+    // NOTHING TO RESYNC TO. With no director the reconnect is a no-op that looks like a fix, so the
+    // button explains itself instead of spinning and changing nothing — which is exactly what the
+    // crossing-out is telling you before you tap.
+    if (document.documentElement.dataset.mesh === "nobody") {
+      haptic();
+      if (noDirTip) noDirTip.classList.remove("is-hidden");
+      return;
+    }
+    closeNoDirTip();
     resyncFab.classList.add("is-spinning");
     window.setTimeout(() => resyncFab.classList.remove("is-spinning"), 1100);
     reconnectRelay();
@@ -3090,7 +3277,17 @@ const bindReaderEvents = () => {
   // drift it exists to prevent.
   if (directorModeBadge) directorModeBadge.addEventListener("click", () => {
     haptic();
-    if (syncPillState() === "directing") return;   // exiting lives in the modal too
+    if (syncPillState() === "directing") {
+      // THE STATUS IS ALSO THE WAY OUT. It reads DIRECTOR, and tapping it asks whether you meant
+      // to stop — so the label never lies and the destructive step still needs an explicit yes.
+      // A separate ✕ lived beside this briefly: two controls for one act, and the ✕ said nothing
+      // about which role you were in.
+      //
+      // Plain confirm, not the red typed-word gate. Stepping DOWN is recoverable; only TAKING the
+      // role from someone else changes everyone's page and earns the heavy friction.
+      if (window.confirm("¿Salir de director?")) postNativeBridge({ type: "exit-director" });
+      return;
+    }
     openSongJump();   // point at the control instead of acting: discoverable, not destructive
   });
 
@@ -3242,7 +3439,7 @@ const bindReaderEvents = () => {
       haptic();
       const pageNum = Number.parseInt(item.dataset.page, 10);
       if (Number.isFinite(pageNum)) {
-        renderPage(pageNum);
+        renderPage(pageNum, { userInitiated: true });                  // song index tap
         // Find song for this page and track it
         const songForPage = state.songIndex.find((s) => s.page === pageNum);
         if (songForPage) addToRecientes(songForPage.song);
@@ -3529,156 +3726,17 @@ const RELAY_ROOM = (function resolveRelayRoomSafely() {
 })();
 const RELAY_LIVE_MAX_AGE_S = 90; // a director counts as "live" if its last update is this recent
 
-// ── Fleet readiness check-in (signovivo.com PWA only — the native app reports itself) ─────────
-// A device self-reports its cache + home-screen state so the director's gated /fleet-dashboard
-// shows who's ready before Mass. A device sends ONLY a self-entered label — NEVER a phone number
-// (phones live server-side in the gated roster). Fire-and-forget; failures are swallowed so this
-// can never block or slow the reader.
-const FLEET_DEVICE_KEY = "svFleetDeviceId";
-
-const fleetDeviceId = () => {
-  try {
-    let id = localStorage.getItem(FLEET_DEVICE_KEY);
-    if (!id) {
-      id = window.crypto?.randomUUID?.()
-        || "d-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
-      localStorage.setItem(FLEET_DEVICE_KEY, id);
-    }
-    return id;
-  } catch {
-    return "anon-" + Math.random().toString(36).slice(2);
-  }
-};
-
-// ── Crash telemetry → /log (M2 Slice D) ──────────────────────────────────────
-// So a crash is a GLANCE on the dashboard, not a guess. The boot guard (top of file)
-// already catches window "error"/"unhandledrejection" and records __SV_LAST_ERROR; it
-// calls this reporter (via window.__svReportCrash) when present. Best-effort POST to the
-// OPEN /log endpoint (A2-rate-limited + 64 KB-capped; reads are gated by P6-LOG). NEVER
-// throws, debounced by signature, and session-capped so a crash LOOP can't hammer /log.
-// PII hygiene: only an opaque device id, build, error text, and location.pathname (no
-// query — a ?k= dashboard secret must never ride along).
-const CRASH_REPORT_MAX = 20;      // hard session cap (crash-loop backstop)
-const CRASH_DEDUP_MS = 30000;     // same signature within 30s → skip
-let crashReportCount = 0;
-const crashReportedAt = new Map();
-const reportCrash = (where, msg, stack) => {
-  try {
-    if (crashReportCount >= CRASH_REPORT_MAX) return;
-    const sig = String(where || "").slice(0, 60) + "|" + String(msg || "").slice(0, 80);
-    const now = Date.now();
-    if (now - (crashReportedAt.get(sig) || 0) < CRASH_DEDUP_MS) return;
-    crashReportedAt.set(sig, now);
-    crashReportCount += 1;
-    const build = (BUILD_NUMBER && BUILD_NUMBER[0] !== "_")
-      ? BUILD_NUMBER
-      : (window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION || (CACHE_VERSION && CACHE_VERSION[0] !== "_" ? CACHE_VERSION : ""));
-    const payload = {
-      kind: "crash",
-      dev: fleetDeviceId(),
-      surface: NATIVE_FILE_MODE || hasNativeBridge() ? "native-web" : "web",
-      build: String(build || ""),
-      where: String(where || "").slice(0, 60),
-      msg: String(msg || "").slice(0, 300),
-      stack: String(stack || "").slice(0, 600),
-      // pathname ONLY — deliberately drops query/hash so a ?k= secret can't leak into /log.
-      url: (typeof location === "object" && location && location.pathname) || "",
-      t: now,
-    };
-    fetch(RELAY_BASE + "/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify([payload]),
-      keepalive: true,   // still sends if the crash is about to unload the page
-    }).catch(() => { /* best-effort telemetry — never affects the reader */ });
-  } catch (_) { /* reporting a crash must never itself crash */ }
-};
-// Register so the boot guard's error handlers can call us. Then flush any error the guard
-// already recorded BEFORE we registered (a boot-time crash) exactly once.
-try {
-  window.__svReportCrash = reportCrash;
-  const boot = window.__SV_LAST_ERROR;
-  if (boot && typeof boot === "object") reportCrash(boot.where || "boot", boot.msg || "", boot.stack || "");
-} catch (_) {}
-
-// Count of cached page images in the CURRENT book's cache ONLY. This feeds the pre-Mass
-// readiness dashboard's webCached claim, and that claim must mean "has THIS edition" — counting
-// the max across surviving previous-edition caches (as this once did, under an "immutable pages"
-// assumption) reported every device fully cached immediately after a book deploy, which is the
-// one moment the dashboard exists to catch stragglers in.
-const countCachedPageImages = async () => {
-  if (!("caches" in window)) return 0;
-  try {
-    // NON-CREATING on purpose: caches.open() would mint an empty current-book cache on every
-    // boot even when the precache never ran — and an empty cache that EXISTS is newest by
-    // insertion order, so the SW's activate keep-policy could later evict the full previous
-    // edition in favor of the husk. Only count what actually exists.
-    if (!(await caches.keys()).includes(PAGE_CACHE)) return 0;
-    const c = await caches.open(PAGE_CACHE);
-    const keys = await c.keys();
-    return keys.filter((r) => r.url.includes("/pages/")).length;
-  } catch {
-    return 0;
-  }
-};
-
-let fleetCheckinInFlight = false;
-const fleetCheckin = async (extra = {}) => {
-  if (NATIVE_FILE_MODE) return; // the native app does its own check-in
-  if (fleetCheckinInFlight) return;
-  fleetCheckinInFlight = true;
-  try {
-    const totalPages = Number(state.totalPages) || STANDARD_TOTAL_PAGES;
-    // A MEASUREMENT of the live caches, not the bare OFFLINE_READY_KEY flag this used to read.
-    // Keeping round 4's rule — no `|| pagesCached >= totalPages` fallback, because pages landing
-    // while the manifests failed is exactly the half-updated state the dashboard must surface —
-    // and closing the hole on the other side: the flag is written once per BOOK_VERSION and
-    // nothing ever clears it, so on its own it is a memory. iOS evicts CacheStorage under storage
-    // pressure while localStorage survives, and such an iPad kept reporting green with zero pages
-    // cached, the exact straggler this exists to catch, on the one morning it matters.
-    //
-    // isOfflineBundleReady is a strict SUPERSET of what the flag promises: it re-confirms the
-    // flag against the book metadata, every core asset (manifests included — see coreAssets)
-    // AND page completeness. It can only ever downgrade this claim, never invent one, so the
-    // residual error is a false NEGATIVE (an IndexedDB-less device reads as not-ready). That is
-    // the safe direction: a needless walk to the sacristy costs a minute, a false green costs
-    // the Mass. pagesCached still reports alongside for partial-progress display.
-    // The .catch is structural: Promise.all rejects if EITHER input rejects, and that would
-    // escape to the outer catch and skip the whole check-in — a device that silently vanishes
-    // from the dashboard is worse than one reported not-ready. This must degrade, never abort.
-    const [verifiedReady, pagesCached] = await Promise.all([
-      isOfflineBundleReady(totalPages).catch(() => false),
-      countCachedPageImages().catch(() => 0),
-    ]);
-    const payload = {
-      deviceId: fleetDeviceId(),
-      surface: "web",
-      webCached: verifiedReady,
-      pagesCached,
-      totalPages,
-      homeScreen: isStandaloneApp,
-      cacheVersion: String(CACHE_VERSION || ""),
-      ...extra,
-    };
-    await fetch(RELAY_BASE + "/fleet/checkin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    });
-  } catch {
-    /* offline / relay unreachable — presence just isn't reported; reader is unaffected */
-  } finally {
-    fleetCheckinInFlight = false;
-  }
-};
+// (The fleet readiness check-in was removed entirely on 2026-08-18 — dashboard, routes, roster and
+//  all. It posted every 90s from every device so a pre-Mass page could show green lights, and held
+//  choir phone numbers. isOfflineBundleReady below was its only consumer and is now unused; it is
+//  kept because it encodes how to verify a cached bundle against the real caches, which is worth
+//  more than the lines it costs if readiness reporting ever returns.)
 
 // Report presence + cache state on load so the director's gated /fleet-dashboard shows which web
 // devices are cached and ready. Anonymous by device — the old one-time "¿Quién usa este iPad?"
 // self-ID prompt (name + role) was removed; it was more annoying than useful.
 const scheduleFleetCheckin = () => {
   if (NATIVE_FILE_MODE) return;
-  fleetCheckin();
 };
 
 const relay = {
@@ -3697,6 +3755,7 @@ const relay = {
   hasDirector: false,
   clockOffsetMs: 0,  // (serverClock - deviceClock), calibrated from /state Date header (P2-CLOCKSKEW)
   healthTimer: 0,    // F3: independent time-driven relay-health watchdog (started once)
+  cooldownUntil: 0,  // circuit breaker: no relay traffic at all until this timestamp (see tripRelayCooldown)
 };
 
 let relayPill = null;
@@ -3814,13 +3873,30 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   if (!lib || typeof lib.decideRelaySnapshot !== "function") {
     if (!snap || !Number.isFinite(snap.page)) return;
     const hasPub = Number.isFinite(snap.seq) && snap.seq > 0;
-    const fresh = hasPub && (!Number.isFinite(snap.ts) ||
-      (Date.now() + (relay.clockOffsetMs || 0)) / 1000 - snap.ts <= RELAY_LIVE_MAX_AGE_S);
+    // FAIL CLOSED ON AN UNDATEABLE SNAPSHOT (2026-08-18).
+    //
+    // This read `!Number.isFinite(snap.ts) || <within window>` — so a snapshot with NO timestamp
+    // was treated as FRESH and applied unconditionally. A snapshot that cannot prove its age is
+    // exactly the one that must not be trusted: it is indistinguishable from something written
+    // hours ago, and applying it puts a wrong song in front of the whole choir with no way for them
+    // to know why. Every device jumping to a stale song 2 before the mesh corrected them to 372 on
+    // 2026-08-18 is what this looks like from the loft.
+    //
+    // A missing ts now means NOT fresh. The cost of being wrong in this direction is a follower
+    // that waits for the next update; the cost of being wrong in the other direction is confusion
+    // during Mass, and confusion is the thing worth spending latency to avoid.
+    const dateable = Number.isFinite(snap.ts);
+    const ageS = dateable ? (Date.now() + (relay.clockOffsetMs || 0)) / 1000 - snap.ts : Infinity;
+    const fresh = hasPub && dateable && ageS <= RELAY_LIVE_MAX_AGE_S;
+    if (hasPub && !dateable) { try { console.warn("[sv] relay snapshot has no ts — refusing to apply"); } catch {} }
     if (!fresh) { relay.hasDirector = false; relay.browsing = false; relay.lastSeq = -1; hideGoLiveBar(); renderRelayPill(); return; }
     if (!force && snap.seq <= relay.lastSeq) { relay.hasDirector = true; renderRelayPill(); return; }
     relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
     relay.hasDirector = true; relay.livePage = snap.page;
     if (relay.browsing) { renderRelayPill(); revealReader(); return; }
+    try {
+      console.info("[sv] page", snap.page, "via relay (age", Math.round(ageS) + "s, seq", snap.seq + ")");
+    } catch {}
     relay.following = true; relay.appliedPage = snap.page;
     if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
     renderRelayPill(); revealReader();
@@ -3865,9 +3941,39 @@ const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) 
 const relayWsUrl = () => RELAY_BASE.replace(/^http/, "ws") + "/r/" + encodeURIComponent(RELAY_ROOM) + "/subscribe";
 
 const stopRelayPolling = () => { if (relay.pollTimer) { clearInterval(relay.pollTimer); relay.pollTimer = 0; } };
+
+// ── CIRCUIT BREAKER ──────────────────────────────────────────────────────────────────────────
+//
+// THE OUTAGE THIS EXISTS FOR (2026-08-18, and 2026-08-17 before it). Cloudflare's free plan allows
+// 100,000 Worker requests a day. When the account crossed it, every request returned 429 — and this
+// client answered by trying HARDER: the socket died, backoff climbed to its 8s cap and ALSO started
+// a 4s /state poll, and then the 10s health timer reset backoff to 500ms and restarted both. About
+// 20-25 requests a minute per device, ~30k/day each, four devices — over the daily cap on their own,
+// forever. The outage fed itself and could not recover even after the traffic that started it
+// stopped.
+//
+// A 429 is the server saying stop. Retrying through it is not resilience, it is a denial of service
+// against your own account, and it takes signovivo.com down with the relay because both ride the
+// same quota. So: when the relay says stop, STOP — for minutes, not milliseconds.
+//
+// Deliberately blunt. The relay is a convenience path; the mesh and BLE carry Mass, where there is
+// no internet at all. Losing relay sync for ten minutes costs a web viewer some latency. Not losing
+// it costs everyone the whole day.
+const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+const relayCooling = () => Date.now() < (relay.cooldownUntil || 0);
+const tripRelayCooldown = (reason) => {
+  if (relayCooling()) return;
+  relay.cooldownUntil = Date.now() + RELAY_COOLDOWN_MS;
+  stopRelayPolling();
+  if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
+  try { relay.ws && relay.ws.close(); } catch {}
+  relay.ws = null;
+  try { console.warn("[sv] relay cooldown", reason, Math.round(RELAY_COOLDOWN_MS / 1000) + "s"); } catch {}
+};
 // Poll the relay for the director's current snapshot and apply it. Single-book + fully public:
 // there is no geo header to read and no book to resolve — just fetch /state and apply the page.
 const relayPollOnce = async (force = false) => {
+  if (relayCooling()) return;
   try {
     // Time-box the /state fetch with an AbortController so a HUNG connection fails FAST.
     // navigator.onLine is TRUE on wifi-without-internet, so the fetch can hang indefinitely.
@@ -3879,6 +3985,10 @@ const relayPollOnce = async (force = false) => {
     } finally {
       if (abortTimer) clearTimeout(abortTimer);
     }
+    // 429 / 1027 is the account over its daily quota. Nothing this client does can fix that, and
+    // every further request digs the hole deeper — including the ones that would tell us it is
+    // fixed. Back all the way off and let the reset happen.
+    if (r.status === 429) { tripRelayCooldown("429 daily limit"); return; }
     if (r.ok) {
       const recvMs = Date.now();
       const dateHeader = r.headers.get("date");
@@ -3906,7 +4016,16 @@ const relayPollOnce = async (force = false) => {
 };
 // Fallback polling (when the WS won't hold): force every tick so a stationary director
 // still keeps the follower in sync.
-const startRelayPolling = () => { stopRelayPolling(); relay.pollTimer = setInterval(() => relayPollOnce(true), 4000); relayPollOnce(true); };
+// 4s -> 15s. A fallback that may run all day cannot poll at debug speed: 4s is 21,600 requests per
+// device per day, and four devices exceed the entire account quota by themselves. 15s keeps a
+// stationary director's followers in sync within one page turn's patience and costs a quarter as much.
+const RELAY_POLL_MS = 15000;
+const startRelayPolling = () => {
+  if (relayCooling()) return;
+  stopRelayPolling();
+  relay.pollTimer = setInterval(() => relayPollOnce(true), RELAY_POLL_MS);
+  relayPollOnce(true);
+};
 
 const connectRelay = () => {
   // F5: cancel any pending backoff reconnect on EVERY entry — BEFORE the dupe-guard return —
@@ -3915,6 +4034,9 @@ const connectRelay = () => {
   // guard, so the early-return path leaked the timer.) Keeps the "only ONE reconnect scheduled"
   // invariant on all paths.
   if (relay.reconnectTimer) { clearTimeout(relay.reconnectTimer); relay.reconnectTimer = 0; }
+  // The account is over its daily quota; reconnecting is what put it there. Every path in — online,
+  // foreground, manual, backoff — funnels through here, so one guard covers them all.
+  if (relayCooling()) return;
   // Idempotent: if a socket is already CONNECTING (0) or OPEN (1), don't open a duplicate.
   // iOS fires `online` on network changes even while a socket is healthy, and the close-
   // handler's backoff reconnect can race with it — without this guard each call would stack
@@ -4021,7 +4143,33 @@ const connectRelay = () => {
   });
 };
 
+// OPT-IN, AND ONLY IN THE NATIVE SHELL. signovivo.com is UNTOUCHED by this gate: the relay is the
+// only sync a web follower has, so switching it off there would delete the product. The check is
+// deliberately written as "native AND not opted in" so the web path cannot be caught by it even by
+// accident, and a test asserts that.
+//
+// What this DOES turn off is a native follower SUBSCRIBING to the relay, which is pure redundancy:
+// that device already has the mesh and BLE, both of which work at Mass where there is no internet at
+// all. It is not free redundancy either — it is what made every device jump to a stale song 2 on
+// 2026-08-18 before the mesh corrected them, and its 4s /state poll is what exhausted the account's
+// 100k daily Worker quota and took signovivo.com down WITH the relay.
+//
+// The director's relay PUBLISH is not gated. That is what feeds signovivo.com, it fires once per
+// page turn, and it is the whole reason web followers exist.
+const relaySubscribeEnabled = () => {
+  const native = NATIVE_FILE_MODE || hasNativeBridge();
+  if (!native) return true;   // signovivo.com — always on, never gated
+  try {
+    if (/[?&]relay=1/.test(location.search)) return true;
+    return localStorage.getItem("sv.relaySubscribe") === "1";
+  } catch { return false; }
+};
+
 const startRelayFollow = () => {
+  if (!relaySubscribeEnabled()) {
+    try { console.info("[sv] relay subscribe off (native default) — mesh + BLE carry sync"); } catch {}
+    return;
+  }
   if (hasNativeBridge() || NATIVE_FILE_MODE) return;  // native app / offline bundle: skip
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
@@ -4058,13 +4206,16 @@ const startRelayFollow = () => {
   // (no-op when healthy); leaves a CONNECTING socket alone (the 6s connectTimer owns that case).
   if (!relay.healthTimer) {
     relay.healthTimer = setInterval(() => {
-      if (relay.manualClose) return;
+      if (relay.manualClose || relayCooling()) return;
       const s = relay.ws;
       const dead = !s || s.readyState >= 2 || (s.readyState === WebSocket.OPEN && Date.now() - relay.lastMsgAt > 15000);
       if (!dead) return;
       try { s && s.close(); } catch {}
       relay.ws = null;
-      relay.backoff = 500;
+      // DO NOT RESET THE BACKOFF HERE. This ran every 10s and slammed backoff back to 500ms, so the
+      // exponential climb never survived one cycle — a socket that had earned an 8s wait was handed
+      // a half-second one instead, forever, on exactly the paths where the far end was already
+      // overloaded. Backoff resets on a SUCCESSFUL open, the only event that proves it is healthy.
       startRelayPolling();   // sync stays alive while a fresh socket re-establishes
       connectRelay();
     }, 10000);
@@ -4230,16 +4381,20 @@ const slot = (v) => (v ? String(v) : "—");
 const buildLabel = [
   nativeBuild ? slot(nativeBuild) : "web",
   slot(webBuild),
-  slot(bookPages),
 ].join("-");
+// SONGS, NOT PAGES (owner, 2026-08-17). The third slot was a raw page count, which reads as "how
+// long is this document" — a fact nobody in a choir loft needs. Song n IS page n in this book, so
+// the number is identical and only the noun was wrong. Named rather than positional, because a
+// bare integer in a triple is exactly what made it ambiguous.
+const songCount = bookPages ? `${bookPages} cantos` : "";
 // Device kind stays OUTSIDE the parentheses — it is not a build number, and putting it in a
 // positional triple would make the triple mean different things on different devices.
 const kindSuffix = deviceKind ? ` ${deviceKind}` : "";
 
 if (appVersionLabel) {
   appVersionLabel.textContent = baseVersion
-    ? `Versión ${baseVersion} (${buildLabel})${kindSuffix}`
-    : `Versión ${buildLabel}${kindSuffix}`;
+    ? `Versión ${baseVersion} (${buildLabel})${kindSuffix}${songCount ? ` · ${songCount}` : ""}`
+    : `Versión ${buildLabel}${kindSuffix}${songCount ? ` · ${songCount}` : ""}`;
 }
 // Small always-visible badge — shown on BOTH web and native (rendered in the WebView, so it
 // respects env(safe-area-inset-bottom) via viewport-fit=cover and never tucks under the iPhone home
@@ -4249,8 +4404,8 @@ if (buildBadge) {
   // Same shape as the settings line, with the leading "v" — this is the string someone reads out
   // over the phone, so the two surfaces must never disagree about what they are showing.
   buildBadge.textContent = baseVersion
-    ? `v${baseVersion} (${buildLabel})${kindSuffix}`
-    : `${buildLabel}${kindSuffix}`;
+    ? `v${baseVersion} (${buildLabel})${kindSuffix}${songCount ? ` · ${songCount}` : ""}`
+    : `${buildLabel}${kindSuffix}${songCount ? ` · ${songCount}` : ""}`;
   syncBuildBadgeVisibility();
 
   // TAP THE BADGE TO READ THIS DEVICE'S CRUMB LOG. Native has captured up to 200 breadcrumbs across

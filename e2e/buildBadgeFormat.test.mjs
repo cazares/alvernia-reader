@@ -4,7 +4,12 @@ import fs from "node:fs";
 
 const APP = fs.readFileSync("web/src/app.js", "utf8");
 
-// v1.0.4 (404-406-373) — binary, web bundle, pages. Owner's format, 2026-08-06.
+// v1.0.4 (404-406) · 373 cantos — binary, web bundle, then a NAMED song count.
+//
+// The count left the parenthesised triple on 2026-08-17: a bare third integer read as "how long is
+// this document", which nobody in a loft needs, and the owner asked for songs rather than pages.
+// Song n IS page n in this book, so only the noun changed — but naming it also removes the one slot
+// whose meaning you had to know positionally.
 //
 // These three numbers get read aloud across a choir loft and compared between two devices, so the
 // ORDER is the whole contract: if slot 1 and slot 2 ever swapped, "the first number didn't change"
@@ -14,37 +19,47 @@ const buildLabel = (() => {
   const src = APP.slice(APP.indexOf("const slot = (v) =>"), APP.indexOf("if (appVersionLabel)"));
   return (nativeBuild, webBuild, bookPages, baseVersion, deviceKind) =>
     new Function("nativeBuild", "webBuild", "bookPages", "baseVersion", "deviceKind",
-      `${src}; return { buildLabel, kindSuffix };`,
+      `${src}; return { buildLabel, kindSuffix, songCount };`,
     )(nativeBuild, webBuild, bookPages, baseVersion, deviceKind);
 })();
 
-test("the badge reads v<base> (binary-web-pages)", () => {
-  const { buildLabel: label, kindSuffix } = buildLabel("404", "406", 373, "1.0.4", "PAD");
-  assert.equal(label, "404-406-373");
-  assert.equal(`v1.0.4 (${label})${kindSuffix}`, "v1.0.4 (404-406-373) PAD");
+test("the badge reads v<base> (binary-web) · N cantos", () => {
+  const { buildLabel: label, kindSuffix, songCount } = buildLabel("404", "406", 373, "1.0.4", "PAD");
+  assert.equal(label, "404-406");
+  assert.equal(songCount, "373 cantos", "the count must be NAMED, and must say cantos, not páginas");
+  assert.equal(`v1.0.4 (${label})${kindSuffix} · ${songCount}`, "v1.0.4 (404-406) PAD · 373 cantos");
 });
 
 test("slot 1 is the BINARY and slot 2 is the WEB bundle, never swapped", () => {
   // The proof that an OTA worked is "the first number did not move while the second did". A swap
   // would keep every test that merely checks for three hyphen-separated numbers green while
   // inverting the only signal anyone reads.
-  const { buildLabel: label } = buildLabel("404", "411", 380, "1.0.4", "PAD");
+  const { buildLabel: label, songCount } = buildLabel("404", "411", 380, "1.0.4", "PAD");
   assert.equal(label.split("-")[0], "404", "slot 1 is not the binary build");
   assert.equal(label.split("-")[1], "411", "slot 2 is not the web build");
-  assert.equal(label.split("-")[2], "380", "slot 3 is not the page count");
+  assert.equal(songCount, "380 cantos", "the count must survive leaving the triple");
 });
 
 test("the public web has no binary, and says so", () => {
   const { buildLabel: label, kindSuffix } = buildLabel("", "406", 373, "1.0.4", "");
-  assert.equal(label, "web-406-373", "the missing binary slot must read 'web', not be dropped");
+  assert.equal(label, "web-406", "the missing binary slot must read 'web', not be dropped");
   assert.equal(kindSuffix, "", "device kind must be absent on the web — it is never guessed from a UA");
 });
 
-test("a missing value holds its column instead of collapsing the triple", () => {
-  // Dropping a slot would shift the others left, so "404-373" could be read as binary 404 / web 373.
-  const { buildLabel: label } = buildLabel("404", "406", 0, "1.0.4", "PAD");
-  assert.equal(label.split("-").length, 3, "a missing value collapsed the positional triple");
-  assert.equal(label, "404-406-—");
+test("a missing value holds its column instead of collapsing the pair", () => {
+  // Dropping a slot would shift the other left, so "406" alone could be read as the BINARY build —
+  // exactly inverting the one signal anyone checks ("the first number didn't move, the second did").
+  // Still the whole point of the placeholder; there are just two columns now instead of three.
+  const { buildLabel: label } = buildLabel("404", "", 373, "1.0.4", "PAD");
+  assert.equal(label.split("-").length, 2, "a missing value collapsed the positional pair");
+  assert.equal(label, "404-—");
+});
+
+test("a missing song count is omitted, not shown as an empty noun", () => {
+  // Unlike the positional slots, this one is NAMED — nothing shifts if it is absent, and "— cantos"
+  // would be worse than saying nothing at all.
+  const { songCount } = buildLabel("404", "406", 0, "1.0.4", "PAD");
+  assert.equal(songCount, "", "a zero/absent count must vanish rather than render a placeholder");
 });
 
 test("device kind stays outside the parentheses", () => {

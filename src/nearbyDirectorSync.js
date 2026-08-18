@@ -64,6 +64,24 @@ export const refreshNearbyDiscovery = async () => {
   return null;
 };
 
+// SPLIT-BRAIN KICK FOR A BRAND-NEW DIRECTOR — browser only, never the advertiser.
+//
+// becomeDirector used refreshNearbyDiscovery for this, which destroys the advertiser as its first
+// act. It fired the instant the device started serving, so every follower whose foundPeer had
+// already triggered had its invite evaporate silently and then waited out a timeout. The intent was
+// only ever "find other directors fast"; going invisible was an accident of reusing the full
+// refresh. Falls back to the full refresh on an older shell that lacks this method.
+export const refreshDirectorBrowse = async () => {
+  if (!isNearbyDirectorSyncAvailable()) return null;
+  if (typeof nativeModule.refreshDirectorBrowse === "function") {
+    return nativeModule.refreshDirectorBrowse();
+  }
+  if (typeof nativeModule.refreshNearbyDiscovery === "function") {
+    return nativeModule.refreshNearbyDiscovery();
+  }
+  return null;
+};
+
 // A human tapping the reconnect button outranks every "don't disturb a live session" heuristic:
 // they can already see it is not working. This tears the session down so discovery can resume,
 // which refreshNearbyDiscovery alone cannot do.

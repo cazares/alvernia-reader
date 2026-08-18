@@ -39,10 +39,50 @@ const ALLOWED_DRIFT = new Map([
    "2026-08-17: fab backing 0.38 -> 0.72 alpha. Owner-reviewed on a real iPad in PORTRAIT, which " +
    "is how the whole choir uses the app and which 381 was never checked in: landscape letterboxes " +
    "the page so these sit on black margins, while portrait puts them on a WHITE song sheet where a " +
-   "38%-navy wash is nearly invisible. Geometry, size and z-index are UNCHANGED — only the alpha."],
+   "38%-navy wash is nearly invisible. " +
+   "2026-08-18, SAME selector and MORE than the alpha now: size 4rem -> var(--fab-size) and the " +
+   "edge offset 0.55rem -> var(--fab-gutter), so the corner cluster is DERIVED from :root instead " +
+   "of hand-computed — hand-computed offsets are what left \u2315 0.1rem from Ir a Canto. The numbers " +
+   "live in --fab-size/--fab-gap/--fab-gutter and are pinned arithmetically by e2e/fabLayout.test.mjs " +
+   "rather than frozen as literals here. z-index and geometry ROLE are unchanged."],
   [".song-jump-fab:active, .search-fab:active, .resync-fab:active, .fullscreen-fab:active",
    "2026-08-17: matching :active alpha 0.55 -> 0.86, so the pressed state stays visibly darker " +
    "than the new resting 0.72. Same reason as above."],
+
+  // THE DRAWER HIDES THE WHOLE CLUSTER NOW, so this shared selector list grew.
+  // 381 hid only the two corner controls that existed then. By 2026-08-18 the cluster also holds
+  // the resync fab, the become-director pill and the sync status, and all three floated over a panel
+  // that covers the page. The status is the one that mattered: it is a CONTROL now (tapping it
+  // leaves the role), so a stray tap while reading search results would drop the choir's director.
+  ["body.sv-drawer-open .song-jump-fab, body.sv-drawer-open .search-fab",
+   "2026-08-18, SUPERSEDED: the 381 pair. Replaced by the full-cluster list below — enumerating a " +
+   "subset means each control added later is hidden only if someone remembers this rule exists."],
+  ["body.sv-drawer-open .song-jump-fab, body.sv-drawer-open .search-fab, body.sv-drawer-open .resync-fab, body.sv-drawer-open .become-director-pill, body.sv-drawer-open .director-mode-badge",
+   "2026-08-18: every corner control hides with the drawer, not just the two that existed in 381. " +
+   "The search panel's own geometry and behaviour are untouched; this is only about what stays on " +
+   "top of it. e2e/fabLayout.test.mjs asserts the SET, so an omission fails loudly."],
+
+  // HISTORY, kept deliberately — these two keys match nothing today. A \u2715 exit fab and a
+  // "Ser Director" entry fab each joined this shared selector list during 2026-08-17/18 and each
+  // left again, once the DIRECTOR status itself became the exit (tapping it asks) and the keypad's
+  // \u2605 Ser Director became the single entry. One home per direction. The selector list is
+  // therefore back to its 381 SHAPE, which is why the entries above suffice.
+  //
+  // They stay because ALLOWED_DRIFT is the audit trail, not just a silencer: a stale key is inert
+  // (nothing looks it up), while deleting it erases the only written record that this cluster was
+  // reshaped twice in one night. If either control returns, the reasoning is already here.
+  [".song-jump-fab, .search-fab, .resync-fab, .sync-exit-fab, .fullscreen-fab",
+   "2026-08-17, SUPERSEDED: \u2715 (exit director) joined the shared corner-control block, splitting " +
+   "the status from its action so a mis-tap could not drop the director mid-Mass. Removed 2026-08-18 " +
+   "— two controls for one act, and the \u2715 never said which role you were in."],
+  [".song-jump-fab:active, .search-fab:active, .resync-fab:active, .sync-exit-fab:active, .fullscreen-fab:active",
+   "2026-08-17, SUPERSEDED: same selector list, :active half."],
+  [".song-jump-fab, .search-fab, .resync-fab, .sync-exit-fab, .become-director-fab, .fullscreen-fab",
+   "2026-08-18, SUPERSEDED same day: 'Ser Director' briefly joined the cluster as the entry to the " +
+   "role. Removed — a permanently visible become-director button on six choir iPads is a " +
+   "split-brain generator; entering belongs behind a dialog opened on purpose."],
+  [".song-jump-fab:active, .search-fab:active, .resync-fab:active, .sync-exit-fab:active, .become-director-fab:active, .fullscreen-fab:active",
+   "2026-08-18, SUPERSEDED same day: same selector list, :active half."],
 ]);
 
 const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -82,7 +122,12 @@ test("every search/drawer CSS rule is IDENTICAL to build 381, at rule granularit
 
   const problems = [];
   for (const [sel, body] of ref) {
-    if (!now.has(sel)) problems.push(`MISSING vs 381: ${sel}`);
+    // ALLOWED_DRIFT must cover all THREE axes, not two. It was consulted for a changed body and for
+    // a new selector, but not for a MISSING one — so a rule whose SELECTOR LIST legitimately changes
+    // shape (a control joining the shared corner-fab block) could never be allowlisted: recording
+    // the new form silenced "NEW" while the old form kept failing as "MISSING", with no way out
+    // except regenerating the fixture, which is precisely what this file exists to prevent.
+    if (!now.has(sel) && !ALLOWED_DRIFT.has(sel)) problems.push(`MISSING vs 381: ${sel}`);
     else if (now.get(sel) !== body && !ALLOWED_DRIFT.has(sel)) {
       problems.push(`CHANGED vs 381: ${sel}\n      381: ${body}\n      now: ${now.get(sel)}`);
     }

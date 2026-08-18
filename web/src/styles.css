@@ -1,4 +1,50 @@
 :root {
+  /* BREATHING ROOM FROM THE EDGE (owner, 2026-08-17). Was 0.55rem (~9px) — the controls sat almost
+     flush against the bezel, and against the page's own edge, which reads as crowded and puts a tap
+     target where a palm rests. One variable so the four corners can never drift apart again; the
+     max() keeps the notch/home-indicator insets winning wherever they are larger. */
+  /* 0.95 -> 1.89 -> 1.58rem. First +15px inward on every edge, then 5px back out (owner: "5px up,
+     5px left" for the top-left and "5px up, 5px right" for the top-right — which is one uniform
+     gutter change, since left-anchored controls move left, right-anchored move right, and every
+     control shares the top edge). One variable moves BOTH clusters in BOTH roles. */
+  --fab-gutter: 0.8rem;      /* out another 2.5px per side; the top edge keeps its own 0.96rem */
+  /* THE TOP EDGE IS ITS OWN VARIABLE (owner, 2026-08-18: "nudge all buttons up by 5px"). Until now
+     one var drove top, left AND right, so raising the row also pulled both clusters inward. Split so
+     the vertical and horizontal positions can be tuned independently — every top: anchor reads this,
+     every left:/right: anchor reads --fab-gutter. */
+  --fab-gutter-top: 0.96rem;   /* 1.58rem, then -5px twice */
+  /* REVERTED 2026-08-18, SAME DAY. This briefly capped how far env(safe-area-inset-top) could push
+     the row down, on the theory that the cross-OS placement difference was the inset "winning by an
+     unbounded amount". It was wrong, and it shipped a real regression: on mPad running build 453 in
+     TestFlight (status bar + TestFlight banner visible, inset well over the 0.5rem cap), the capped
+     row sat UNDER the system chrome — Salir Director rendered clipped, its text cut off at the top
+     of the screen, confirmed on device.
+     A safe-area inset exists so content clears exactly this case. Capping it does not fix
+     inconsistent placement, it reintroduces the overlap the inset was already preventing — trading a
+     real, confirmed bug (a clipped, half-hidden EXIT control) for a cosmetic one (two devices sit at
+     slightly different heights, which is often correct: a notched device SHOULD sit lower than one
+     without a status bar showing). max() is restored below, uncapped. */
+  /* THE CLUSTER IS DERIVED, NOT HAND-COMPUTED. Every top control is --fab-size square (the DIRECTOR
+     status is --fab-status-w wide), separated by exactly --fab-gap. The slot offsets below are
+     calc()s off these three numbers, so the spacing is uniform BY CONSTRUCTION rather than by me
+     getting the arithmetic right — which I did not, twice tonight: once leaving ⌕ and Ir a Canto
+     0.1rem apart, once leaving the pill 0.15rem from ⟳. Change a size here and every position
+     follows. */
+  --fab-size: 5.39rem;       /* 3.875 -> +15% -> +5px -> +10px. Square, so one var does both axes. */
+  --fab-gap: 0.5rem;
+  /* Vestigial: the DIRECTOR status content-hugs around a lone ☆ now, so nothing derives a position
+     from this width any more. Kept only as the base .director-mode-badge width, which every real
+     state overrides. Safe to auto-size because that pill no longer holds text that can change. */
+  --fab-status-w: 7.13rem;
+  /* ★ Ser Director has NO width var any more — it content-fits (owner: "as small as possible" +
+     "content-fit ... with reasonable margins/padding"). It is the one control whose text never
+     changes, so it cannot shove a neighbour by resizing, which is what fixed widths guard against. */
+  /* slot 2 = one control + one gap from the edge; slot 3 = past the wider status pill. */
+  --fab-slot2: calc(var(--fab-size) + var(--fab-gap));
+  /* NO SLOT 3. The empty-seat state used to be a text pill sitting third in this row; it is now
+     the ⟳ button itself, crossed out (see html[data-mesh="nobody"] below). One indicator, one
+     place, in every state — which also retires the class of bug where slot 3 kept measuring a
+     control that had moved out of the row. The follower row is exactly two controls. */
   color-scheme: dark;
   --text: #ffffff;
   --text-secondary: #d8dff0;
@@ -170,9 +216,13 @@ button:disabled {
 .director-mode-badge.is-following .director-mode-badge-exit { opacity: 0.62; }
 
 .director-mode-badge {
-  position: absolute;
-  top: max(0.55rem, env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */
-  left: max(0.55rem, env(safe-area-inset-left, 0px));
+  /* FIXED, not absolute. The fabs are position:fixed (root stacking context); this was absolute
+     inside .viewer-shell, so its z-index was scoped to that ancestor and lost to the fab no matter
+     how high it went. That is why the follower dot vanished after being moved onto the ⟳ button —
+     it was rendering UNDERNEATH it. Same positioning scheme = comparable z-index. */
+  position: fixed;
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */
+  left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
   z-index: 46;                 /* above the fabs so the exit tap always lands */
   display: flex;
   flex-direction: column;
@@ -180,8 +230,19 @@ button:disabled {
   justify-content: center;     /* center DIRECTOR + ✕ Salir within the fixed height */
   gap: 0.15rem;
   margin: 0;
-  height: 4rem;                /* same height as the upper-right ♪/⌕ fabs */
-  padding: 0 0.82rem;
+  /* A 5rem SQUARE, exactly like every other top control (owner: "match styling of top right
+     buttons"). Fixed size is what makes the slot ladder work — a content-width pill would move
+     whatever sits beside it every time its text changed. */
+  /* WIDER THAN TALL (owner, 2026-08-17). A square forced DIRECTOR down to an unreadable 0.58rem
+     and it still overflowed onto its neighbour. Fixed width, not content-width: the slot ladder
+     beside it must not shift every time the word changes. Same height as the buttons so the row
+     reads as one band. */
+  width: var(--fab-status-w);
+  height: var(--fab-size);
+  box-sizing: border-box;
+  padding: 0.3rem 0.5rem;
+  align-items: center;
+  text-align: center;
   /* Styled to MATCH the ♪/⌕ fabs (upper-right): translucent navy + blur, low opacity so it
      blends in instead of standing out as a bold box. */
   border-radius: 14px;
@@ -191,7 +252,7 @@ button:disabled {
      the loft is actually used — the page fills the width and these land on a WHITE song sheet,
      where a 38%-navy wash is nearly invisible. 0.72 is legible over white without becoming a heavy
      black box over the music. */
-  background: rgba(26, 26, 46, 0.72);
+  background: rgba(26, 26, 46, 0.61);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
@@ -218,11 +279,22 @@ button:disabled {
   text-transform: uppercase;
 }
 
+/* MUST FIT THE SQUARE. At the previous size this overflowed its box and bled over the control
+   beside it. The box is fixed, so the type has to yield: sized to the box's own width rather than a
+   guessed constant, and clipped rather than allowed to escape. */
+/* MUST FIT THE PILL. This carried TWO font-size and TWO letter-spacing declarations for a while —
+   an earlier edit inserted new ones above the originals instead of replacing them, so the old 0.96rem
+   silently won and DIRECTOR rendered as "DIREC…". Measured: 84px pill, 16px padding, 68px for text;
+   at 0.96rem it needed 88px. One declaration each now, sized to fit with room to spare. */
 .director-mode-badge-title {
-  color: #fff;
-  font-size: 0.96rem;
+  max-width: 100%;
+  font-size: 0.785rem;
   font-weight: 900;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
 }
 
 .director-mode-badge-code {
@@ -2116,6 +2188,9 @@ button:disabled {
    pointer-events:none so it never blocks a tap. Hidden until app.js populates + adds .is-shown. */
 .build-badge {
   position: fixed;
+  /* Placeholder only — positionBuildBadge() in app.js overwrites right/bottom every render so the
+     stamp sits on the PAGE's corner rather than the screen's. On a letterboxed device (any iPhone)
+     the screen corner is black, and 38% black on black is why this looked missing. */
   bottom: max(6px, env(safe-area-inset-bottom, 0px));
   right: 8px;
   z-index: 200;
@@ -2125,8 +2200,12 @@ button:disabled {
      control". Same treatment, one step smaller. */
   padding: 0;
   background: none;
-  color: rgba(0, 0, 0, 0.38);
-  font-size: 8px;
+  /* 8px / 38% was unreadable at arm's length — which is WHY it read as missing on the iPhone, not
+     just because it sat on the black letterbox. 10px / 52% is still a document note rather than a
+     control (the printed date stamp opposite it is the house style), but it can actually be read
+     out over the phone, which is the one thing it exists for. */
+  color: rgba(0, 0, 0, 0.52);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   pointer-events: none;
@@ -2135,18 +2214,11 @@ button:disabled {
 
 /* ── Role control inside IR A CANTO ──────────────────────────────────────────
    Quieter than the primary action: this is a rare, deliberate act, not the thing people came for. */
-.song-jump-role {
-  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
-  width: 100%; margin-bottom: 0.6rem; padding: 0.7rem 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 12px;
-  background: rgba(26, 26, 46, 0.55); color: rgba(255, 255, 255, 0.92);
-  font-size: 1.05rem; font-weight: 600; cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.song-jump-role:active { background: rgba(26, 26, 46, 0.75); transform: scale(0.99); }
-.song-jump-role-star { font-size: 1.15rem; line-height: 1; }
+
+
+
 /* Directing = the destructive-to-others state is already entered; the exit is calm and amber. */
-.song-jump-role.is-directing { border-color: rgba(245, 158, 11, 0.5); color: #fbbf24; }
+
 
 /* ── Take-the-role gate ──────────────────────────────────────────────────────
    Red, blunt, and gated on a typed word so it cannot be tapped through by reflex. */
@@ -2186,17 +2258,33 @@ button:disabled {
    a word they have learned to ignore. Directing shows no dot at all: a director is the SOURCE, not
    a receiver, so there is nothing to indicate. */
 html[data-role="follower"] .director-mode-badge.is-following {
-  width: 0.75rem; height: 0.75rem; min-width: 0; padding: 0; gap: 0;
+  /* 0.75 -> 0.6rem (20%, not the 30% first tried). It is a status light, not a control — but it is
+     read across a choir loft, and 0.525rem (8.4px) is below what carries at that distance. 0.6rem
+     still reads as a badge on the ⟳ button rather than a second control. */
+  width: 0.6rem; height: 0.6rem; min-width: 0; padding: 0; gap: 0;
   border-radius: 50%; background: #22c55e; overflow: hidden;
-  /* margin-top, NOT a top: calc(). e2e/fabLayout.test.mjs derives the pill's horizontal offset by
-     finding the calc() in this selector's rule, so a vertical calc() here reads as a LEFT offset
-     and reports a phantom overlap with the ⟳ fab. Centres the 0.75rem dot against the 4rem fab. */
-  margin-top: 1.6rem;
+  /* ON the ⟳ fab, not beside it (owner, 2026-08-17). The dot belongs TO the resync button — it says
+     "this button's link is alive" — so it now sits in that button's upper-left corner like a badge
+     instead of floating in its own slot 5.15rem to the right.
+     The overlap is DELIBERATE, and e2e/fabLayout.test.mjs pins it as such. That test guards the
+     is-nobody PILL, which carries text and must still clear the fab; it reads the max offset across
+     matching rules, so the 5.15rem rule below keeps satisfying it. z-index 46 vs the fab's 45 keeps
+     the dot on top.
+     margin-top, NOT a top: calc() — that test derives horizontal offsets from calc() in this
+     selector's rules, so a vertical calc() here would read as a LEFT offset. */
+  /* 0.42 -> 0.58rem (owner, 2026-08-18: ~2.5px further right and down). Both axes share one value so
+     the dot stays on the button's corner diagonal as --fab-size changes. Measured, not guessed:
+     0.42rem put it 6.7px off each edge of an 86px button. */
+  left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + 0.58rem);
+  margin-top: 0.58rem;
   animation: sv-follow-breathe 2.4s ease-in-out infinite;
 }
 html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-title,
 html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-exit { display: none; }
-@keyframes sv-follow-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+/* Floor raised 0.35 -> 0.6. At 0.35 a 0.525rem dot on a dark fab read as a smudge for half of every
+   cycle, which is how it looked "lost". It still breathes — the point is that it is alive — but it
+   is never ambiguous about being there. */
+@keyframes sv-follow-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
 /* ════════════════════════════════════════════════════════════════════════════
    Jump-to-song modal — mirrors the iOS "IR A CANTO" modal exactly (no more).
@@ -2210,17 +2298,32 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
 .resync-fab,
 .fullscreen-fab {
   position: fixed;
-  top: max(0.55rem, env(safe-area-inset-top, 0px));
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
   z-index: 45;
-  width: 4rem;
-  height: 4rem;
+  /* ONE SIZE FOR EVERY CORNER CONTROL (owner, 2026-08-17: "same size and same icon to button size
+     ratio... I like the current ratio of top left, but I like the size of top right").
+     Top-right was 5rem, top-left's glyph-to-box ratio was 3.45/4 = 0.8625. So: 5rem boxes, and
+     every glyph at 5 x 0.8625 = 4.31rem. Both halves of the request, and now they match. */
+  width: var(--fab-size);
+  height: var(--fab-size);
+  /* SQUARE, GUARANTEED (owner, 2026-08-17). width/height alone are not enough: any padding or
+     border added later inflates one axis under the default content-box, and a fab in a flex context
+     can be stretched. border-box + aspect-ratio + no flex growth pin it to a true square whatever
+     else changes. */
+  box-sizing: border-box;
+  padding: 0;
+  aspect-ratio: 1 / 1;
+  flex: 0 0 auto;
   border-radius: 14px;
   border: 0;
-  background: rgba(26, 26, 46, 0.72);
+  background: rgba(26, 26, 46, 0.61);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   color: #fff;
-  font-size: 2.85rem;
+  /* 0.8625 of the 4.5rem box — the top-left ratio the owner liked, at the size he settled on
+     (5rem, then 10% smaller). Keep these two numbers in step: changing the box without the glyph is
+     what made these controls read as smaller than they are. */
+  font-size: 4.65rem;   /* 0.8625 of the 5.39rem box — the glyph:box ratio is held as the box grows */
   line-height: 1;
   display: flex;
   align-items: center;
@@ -2230,15 +2333,42 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.search-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); font-size: 3.85rem; }  /* ⌕ glyph 35% bigger than the 2.85rem base fab */
+.search-fab { right: max(var(--fab-gutter), env(safe-area-inset-right, 0px)); }  /* inherits the shared 4.31rem glyph */
 /* FOLLOWER (⌕ hidden): ♪ sits flush in the top-right corner. Only when the director's ⌕ is
    actually showing does ♪ shift 4.5rem left to make room for it. */
-.song-jump-fab { right: max(0.55rem, env(safe-area-inset-right, 0px)); }
+/* ── The top-left slot ladder ────────────────────────────────────────────────
+   Position is an index, not a hand-computed number. Slot 1 = gutter; each later slot is one
+   --fab-gap past the WIDTH OF WHAT ACTUALLY PRECEDES IT — which is the part that kept breaking,
+   because the two roles do not put the same-width control in the same slot.
+
+     FOLLOWER  : ⟳ (--fab-size)      · Ir a Canto (--fab-size)  · "Nadie dirige" (slot 3)
+     DIRECTOR  : DIRECTOR status (--fab-status-w, wider — it holds a WORD and a word should not be
+                 shrunk to fit a square) · Ir a Canto        …        ⌕ alone top-RIGHT
+
+   ⟳ and the DIRECTOR status share slot 1: ⟳ is for followers, the status for the director, and
+   they are never both on screen. The status is also the way OUT of the role — tapping it asks —
+   so no separate ✕ occupies the corner any more. */
+
+
+/* IR A CANTO IS TOP-RIGHT, WHERE IT HAS ALWAYS BEEN (owner, 2026-08-18: "this is to make all these
+   changes additive not scramble shit up and confuse the fuck out of everyone"). It spent 2026-08-17
+   in the top-left cluster; six people already know where this button lives, and moving it costs more
+   than any arrangement gains. The new controls go in corners that were EMPTY instead.
+   FOLLOWER: ⌕ is hidden, so this sits flush in the corner. */
+.song-jump-fab { right: max(var(--fab-gutter), env(safe-area-inset-right, 0px)); left: auto; }
+/* DIRECTOR: ⌕ appears flush in the corner, so Ir a Canto steps one slot left of it — exactly the
+   relationship these two have always had. */
+html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), env(safe-area-inset-right, 0px)) + var(--fab-slot2)); left: auto; }
 /* 4.5rem left only 8 px between two 4rem fabs whose glyphs (3.85rem ⌕, 2.85rem ♪) nearly fill
    their boxes, so they read as one smudged control on a Pro iPad in portrait. 5.1rem gives a clear
    gap without pushing ♪ into the title. */
-html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-area-inset-right, 0px)) + 5.1rem); }
-.resync-fab { left: max(0.55rem, env(safe-area-inset-left, 0px)); font-size: 3.05rem; }
+/* No director-specific offset any more: Ir a Canto is always slot 2 on the LEFT, and ⌕ has the
+   whole top-right to itself. */
+/* SAME PLACEMENT RULE AS THE TOP-RIGHT FAB (owner: "placement and sizing of sync button should
+   follow this") — identical gutter, identical box, identical glyph ratio, mirrored.
+   +2.5px (owner, 2026-08-18): its own rule, not --fab-gutter, so the nudge is just ⟳ — every other
+   control anchored on --fab-gutter (the role pill, Ir a Canto, ⌕) stays exactly where it was. */
+.resync-fab { left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + 2.5px); }
 /* ── 123→ song-index fab ─────────────────────────────────────────────────────
    ♪ was ambiguous: it says "audio" in an app that plays none, while the button opens a NUMBERED
    index. Digits say what kind of thing; the arrow makes it a verb, not a label. Straight arrow —
@@ -2246,26 +2376,52 @@ html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-ar
    MUST sit after the shared .song-jump-fab/.search-fab/... block: same specificity, so source order
    decides, and the shared 2.85rem was winning and overflowing the 4rem box by 27 px. */
 .song-jump-fab {
-  /* Three glyphs fill the 4rem box edge to edge, so a size that LOOKS right for a single ♪ reads
-     as shouting here. ~0.8rem sits at the same visual weight as the old note. */
-  font-size: 0.82rem; font-weight: 700; letter-spacing: 0.01em;
-  gap: 0.08rem; padding: 0; line-height: 1;
+  /* "Ir a Canto", not "123→" (owner, 2026-08-17: "123 is vague as fuck"). Digits say "numbers",
+     not "songs", and an arrow does not rescue that. This button opens a modal titled IR A CANTO,
+     so naming it the same thing means there is no vocabulary to learn — the strongest affordance
+     available to a non-technical choir. Two lines so it fills the square without shrinking. */
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  font-size: 1.03rem;   /* 0.84 x 1.08 (+8%), then scaled with the box */
 }
-.song-jump-fab-arrow { font-size: 0.78rem; font-weight: 400; opacity: 0.85; }
+/* "Ir a" was 0.86em AND dimmed to 0.82 — small and faint at once, which read as too small at any
+   base size (owner, 2026-08-18: "way too small"). It is half the name of the button, not a
+   footnote, so it now sits just under "Canto" in size and barely under it in weight. */
+.song-jump-fab-l1 { font-size: 1.02em; opacity: 0.9; }
+.song-jump-fab-l2 { font-size: 1.18em; }                  /* "Canto" — the noun people look for */
 .resync-fab.is-spinning { flex-direction: column; justify-content: center; padding-bottom: 4px; }  /* ⟳ ~35% bigger */
 /* Fullscreen fab — bottom-right (override the base top); SVG icon sized to match the glyphs. */
 .fullscreen-fab {
   top: auto;
-  bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
-  right: max(0.55rem, env(safe-area-inset-right, 0px));
+  bottom: max(var(--fab-gutter), env(safe-area-inset-bottom, 0px));
+  right: max(var(--fab-gutter), env(safe-area-inset-right, 0px));
 }
-.fullscreen-fab svg { width: 2rem; height: 2rem; }
+.fullscreen-fab svg { width: 2.78rem; height: 2.78rem; }   /* scaled with the boxes */
 .song-jump-fab:active,
 .search-fab:active,
 .resync-fab:active,
-.fullscreen-fab:active { background: rgba(26, 26, 46, 0.86); transform: scale(0.96); }
+.fullscreen-fab:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
 /* ⟳ icon pulses opacity while reconnecting — soft breath, plus staggered dots below */
-.resync-icon { display: inline-block; line-height: 1; }
+/* ⟳ CARRIES ITS OWN SIZE (owner, 2026-08-18: +5px). It used to inherit the shared 4.65rem, so any
+   change here silently moved ⌕ with it. */
+.resync-fab { font-size: 4.96rem; }   /* 4.65rem + 5px */
+/* OPTICALLY CENTRED, AND THE NUMBER IS MEASURED RATHER THAN EYEBALLED. Flex centring centres the
+   glyph's LINE BOX, not its ink, and those are not the same thing: measured in-browser at 79.36px,
+   the baseline sits 64.5px into a 79.4px box while ⟳'s ink spans -37.5..-3.1 from that baseline, so
+   its ink centre landed 6.1px BELOW the button's centre — clearly low to the eye, which is what the
+   owner saw. 6.1 / 79.36 = 0.0769em of correction from the previous +0.02em, hence -0.057em.
+   It is in em so it survives any further size change, and it moves only the glyph: padding would
+   have shifted the box and re-broken the horizontal centring, which measurement confirms is already
+   exact (ink centre 26.97px == advance 53.94 / 2). */
+/* +2.5px horizontal (owner, 2026-08-18): the GLYPH, not the button — the button itself got its own
+   independent +2.5px earlier the same night (.resync-fab's own left:). Two separate nudges, two
+   separate elements; this one moves the character within its box without touching where the box
+   sits on the page. */
+.resync-icon { display: inline-block; line-height: 1; transform: translateY(-0.057em) translateX(2.5px); }
 .resync-fab.is-spinning .resync-icon { animation: sv-resync-pulse 1.5s ease-in-out infinite; }
 @keyframes sv-resync-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 /* Reconnect loading dots — three small circles that appear only while is-spinning */
@@ -2282,24 +2438,95 @@ html[data-role="director"] .song-jump-fab { right: calc(max(0.55rem, env(safe-ar
    DIRECTOR (native iPad after a director code → html[data-role="director"]):
      ♪ + ⌕ (top-RIGHT). No ⟳ (a director is the source; nothing to resync to). */
 .search-fab { display: none; }                              /* hidden for followers */
-html[data-role="director"] .search-fab { display: flex; }   /* shown for the director */
+html[data-role="director"] .search-fab { display: flex; }   /* shown for the director, top-RIGHT */
+/* Slot 2, and inert: the ✕ beside it owns the action, so this must neither invite a tap nor eat one. */
+html[data-role="director"] .director-mode-badge {
+  left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
+  cursor: pointer;
+  /* SALIR / DIRECTOR — it names the ACT, not the state (owner, 2026-08-18: "come up with text to
+     exit director mode that fits in a SQUARE button"). "Salir" is the same verb the confirm already
+     uses ("¿Salir de director?"), so the button and the dialog it opens speak with one word.
+     The button's mere presence is what reports the role — it is shown to nobody else — so nothing
+     is lost by labelling the exit instead of the status.
+     Common background, not the blue wash: it is an ordinary control in the row now, not a status
+     that had to look different. Sizing comes from the shared square block below. */
+  /* A WHISPER OF THE SAME iOS BLUE as ★ Ser Director, so entering the role and holding it read as
+     one idea. Layered as a 0.16 wash OVER the standard fab navy rather than a different colour, so
+     the pill stays unmistakably part of the corner cluster — it is a status, and a status that
+     stands out competes with the music it sits on top of. The text lifts a few points toward the
+     same blue for the same reason: recognisable, not loud. */
+  background:
+    linear-gradient(rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0.16)),
+    rgba(26, 26, 46, 0.61);
+}
+html[data-role="director"] .director-mode-badge .director-mode-badge-title { color: #E4EEFF; }
+/* OUTLINE star (☆ U+2606), not filled. Filled reads as "selected/favourite"; hollow reads as a
+   mark on a status, which is what this is. Matches ★ Ser Director's glyph family without repeating
+   its emphasis — that one is an action you take, this one is a state you are in. */
+html[data-role="director"] .director-mode-badge .director-mode-badge-star { display: none; }
+.director-exit-label { display: none; flex-direction: column; align-items: center; }
+html[data-role="director"] .director-mode-badge .director-exit-label { display: flex; }
+/* The word is retired from the GLASS but stays in SYNC_PILL for screen readers, and the pill's
+   aria-label still says "Estás dirigiendo. Tocar para salir." */
+html[data-role="director"] .director-mode-badge .director-mode-badge-title { display: none; }
+.director-mode-badge-star { display: none; }
+html[data-role="director"] .director-mode-badge .director-mode-badge-exit { display: none; }
 html[data-role="director"] .resync-fab { display: none; }   /* hidden for the director */
 
 /* CLEAR THE ⟳ FAB. The pill and the resync fab both sit at top-left with the same offset, and until
    the pill existed they could never be on screen together: the old badge showed only for the
    DIRECTOR, and the ⟳ fab is hidden for exactly that role. Making the pill visible to followers put
    its text underneath the fab.
-   Shift by the fab's own width (4rem) plus the same 0.55rem gutter, and only while the fab is
+   Shift by the fab's own width plus the same var(--fab-gutter), and only while the fab is
    actually shown — the director keeps the flush-left position it always had. */
-html[data-role="follower"] .director-mode-badge {
-  /* 4.55rem left ~9 px, and the pill's second line ("Tomar") ran right up against the ⟳ glyph,
-     which overflows its own box. 5.15rem clears it properly. */
-  left: calc(max(0.55rem, env(safe-area-inset-left, 0px)) + 5.15rem);
+/* ── Nobody directing: the ⟳ button is CROSSED OUT ──────────────────────────
+   Owner, 2026-08-18: "why even show nadie dirige if the green dot can turn red or orange"; then
+   "an X drawn from top left to bottom right and from bottom left to top right".
+
+   Why an X beats a colour: it is the only version of this that does not depend on colour at all.
+   Red/green is the commonest colour blindness, the loft is a distance read, and a 10px dot is a
+   poor alarm. A 62px cross survives all three. It is also literally TRUE — with no director there
+   is nothing to resync to, so the button it crosses out is the button that cannot help.
+
+   The word "Nadie dirige" stays in SYNC_PILL for screen readers and for the non-native web; what
+   is retired is the 99px pill that used to migrate into this row and shove its neighbours around.
+   Tapping the crossed ⟳ opens #nodir-info, because a struck-through button reads as "my iPad is
+   broken" to a non-technical singer, and it is not broken. */
+html[data-mesh="nobody"] .resync-fab {
+  /* A wash over the navy, not a repaint — same treatment as the DIRECTOR pill's blue, so the
+     cluster still reads as one family rather than one alarming stranger. */
+  background: linear-gradient(rgba(239, 68, 68, 0.18), rgba(239, 68, 68, 0.18)), rgba(26, 26, 46, 0.61);
 }
+html[data-mesh="nobody"] .resync-icon { opacity: 0.45; }   /* the ⟳ recedes; the X is the message */
+html[data-mesh="nobody"] .resync-fab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  pointer-events: none;   /* the tap must still land on the button underneath */
+  /* Two corner-to-corner diagonals. Gradients rather than an SVG so it inherits the fab's exact
+     box and radius for free, and scales with --fab-size without a second source of truth. */
+  background:
+    linear-gradient(to bottom right, transparent calc(50% - 1.6px), rgba(239, 68, 68, 0.95) calc(50% - 1.6px),
+                    rgba(239, 68, 68, 0.95) calc(50% + 1.6px), transparent calc(50% + 1.6px)),
+    linear-gradient(to bottom left,  transparent calc(50% - 1.6px), rgba(239, 68, 68, 0.95) calc(50% - 1.6px),
+                    rgba(239, 68, 68, 0.95) calc(50% + 1.6px), transparent calc(50% + 1.6px));
+}
+/* The pill itself renders nothing in this state — the X above IS the indicator. */
+html[data-role="follower"] .director-mode-badge.is-nobody { display: none; }
 /* Hide the right-side fabs WHILE the drawer is open (director-only; the drawer has its own
    nav). !important so it still wins over the director rule above. */
+/* THE WHOLE CLUSTER HIDES TOGETHER, not most of it. This listed only ♪ and ⌕, so opening the search
+   dropdown left the role controls — Salir Director and ★ Ser Director — and the ⟳ floating over a
+   panel that covers the page. Enumerating a subset means every control added later is hidden by
+   default only if someone remembers this line; naming all of them makes the omission visible.
+   The sync status is included for the same reason: it is a control now (tapping it leaves the role),
+   so a stray tap while reading the search results would drop the choir's director. */
 body.sv-drawer-open .song-jump-fab,
-body.sv-drawer-open .search-fab { display: none !important; }
+body.sv-drawer-open .search-fab,
+body.sv-drawer-open .resync-fab,
+body.sv-drawer-open .become-director-pill,
+body.sv-drawer-open .director-mode-badge { display: none !important; }
 
 /* Modal shell + backdrop */
 .song-jump-modal {
@@ -2425,11 +2652,35 @@ body.sv-drawer-open .search-fab { display: none !important; }
 .song-jump-card .numberpad-key-back {
   background: #E5E7EB;
   border: 1px solid rgba(0, 0, 0, 0.06);
-  font-size: 28px;
+  /* 28 -> 46px (owner, 2026-08-17): the ⌫ glyph is meant to FILL its 78px key the way the digits
+     do, minus a sensible margin. At 28px it sat as a small mark in a large empty button and read as
+     disabled next to the 33px digits — and it is the key people hit fastest, mid-Mass, without
+     looking. */
+  /* 46 -> 80 -> 60px. The 75% jump overshot: at 80px the ⌫ dominated a key it only needs to be
+     legible on, and read louder than the digits it sits beside. 60px keeps it comfortably bigger
+     than the 33px digits without taking over the row. Softened 10% for the same reason. */
+  /* 46 -> 80 -> 60 -> 45px. Each step tried the glyph against the 33px digits beside it;
+     45px is clearly the ⌫ without competing with the numbers, which are what the key row
+     is for. */
+  font-size: 45px;
+  line-height: 1;
+  opacity: 0.9;
 }
 .song-jump-card .numberpad-key-back:active { background: #D1D5DB; }
 /* Empty bottom-left cell */
+/* The keypad's bottom-left cell is EMPTY again. A role control lived here briefly; it moved out
+   because the top-left cluster already owns the role, and two exits are one too many. */
 .song-jump-card .numberpad-key-blank { height: 78px; }
+/* The role key. Styled EXACTLY like a digit — the owner's rule is that it must not draw the eye,
+   because the loud control in this card is "open the song". Two lines so "Ser Director" names the
+   role in full rather than shrinking to fit. */
+
+
+/* Hidden, not blanked: while directing there is no entry to offer, and the cell returns to the dead
+   space it was before. The grid keeps its shape because the row is a 3-column grid either way. */
+
+
+
 
 /* Action buttons */
 .song-jump-actions {
@@ -2438,6 +2689,36 @@ body.sv-drawer-open .search-fab { display: none !important; }
   gap: 10px;
   margin-top: 8px;
 }
+/* Cancelar + Abrir Canto share ONE row (owner, 2026-08-17); Dirigir keeps its own full-width row
+   above, unchanged. Stacked, the three buttons pushed the primary action toward the fold on a 10.2"
+   portrait iPad — the same problem that moved the old director control out of this card.
+   align-items: stretch equalises their heights without touching either button's own padding or
+   font size, so each keeps the height it already had. Cancel sits left, primary right. */
+.song-jump-actions-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.song-jump-actions-row > .song-jump-cancel,
+.song-jump-actions-row > .song-jump-go {
+  flex: 1 1 0;
+  min-width: 0;
+  /* ONE LINE EACH. At full width "♪ Abrir Canto ♪" fitted on one line; at half width it wrapped to
+     two and drove the row to 119 px, when the owner asked for the height these buttons already had.
+     Sized down just enough to fit rather than padded down, so the buttons keep their generous tap
+     target — this is a control people hit mid-Mass without looking. Measured back to ~82 px, which
+     is where the taller of the two (Cancelar) already sat.
+     The primary still dominates by FILL, not by type size: solid blue against flat grey. */
+  white-space: nowrap;
+}
+/* FLUID, not fixed. A flat 21px fitted the tablet I measured on and CLIPPED "♪ Abrir Canto ♪" on a
+   375px phone — nowrap plus a fixed size is a promise you cannot keep across devices. clamp() ties
+   the type to the viewport so the label always fits on one line, on any screen, without the wrap
+   that pushed this row from 86px to 119px. */
+.song-jump-actions-row > .song-jump-go { font-size: clamp(14px, 4.4vw, 21px); }
+.song-jump-actions-row > .song-jump-cancel { font-size: clamp(15px, 4.8vw, 23px); }
+.song-jump-actions-row > .song-jump-go,
+.song-jump-actions-row > .song-jump-cancel { padding-left: 8px; padding-right: 8px; }
 .song-jump-go {
   padding: 24px 16px;
   border: 0;
@@ -2562,3 +2843,175 @@ body.sv-drawer-open .search-fab { display: none !important; }
 .offline-spinner.is-hidden { display: none; }
 @keyframes offline-spin { to { transform: rotate(360deg); } }
 
+
+
+/* ── "Nadie está dirigiendo" tip ─────────────────────────────────────────────
+   A speech bubble anchored under the ⟳ it explains (owner, 2026-08-18), not a modal: a backdropped
+   dialog reads as an app-level failure, which is the opposite of the message. Shape is [i] … OK.
+
+   Anchored off the SAME ladder variables as the fab itself, so it stays glued if --fab-size or
+   --fab-gutter ever move — the class of bug that put the old empty-seat pill 2.3rem out of place. */
+.nodir-tip { position: fixed; inset: 0; z-index: 260; }
+.nodir-tip.is-hidden { display: none; }
+/* Invisible catcher: tapping anywhere dismisses. No dimming — the music must stay readable. */
+.nodir-tip-catch { position: absolute; inset: 0; }
+.nodir-tip-bubble {
+  position: absolute;
+  top: calc(max(var(--fab-gutter), env(safe-area-inset-top, 0px)) + var(--fab-size) + 0.65rem);
+  left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
+  width: min(19rem, calc(100vw - 2 * var(--fab-gutter)));
+  box-sizing: border-box;
+  padding: 0.85rem 0.95rem 0.8rem;
+  background: rgba(16, 24, 38, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+/* The tail points at the ⟳'s horizontal centre — derived, not a magic number. */
+.nodir-tip-tail {
+  position: absolute; top: -6px; left: calc(var(--fab-size) / 2 - 6px);
+  width: 12px; height: 12px; transform: rotate(45deg);
+  background: rgba(16, 24, 38, 0.97);
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
+}
+.nodir-tip-title {
+  display: flex; align-items: center; gap: 0.45rem;
+  margin: 0 0 0.4rem; color: #fff; font-size: 1rem; font-weight: 700; line-height: 1.25;
+}
+.nodir-tip-mark {
+  flex: 0 0 auto; width: 1.25rem; height: 1.25rem; border-radius: 50%;
+  background: rgba(10, 132, 255, 0.22); color: #6BB6FF;
+  font: 700 0.85rem/1.25rem Georgia, "Times New Roman", serif;   /* a serif i reads as an info mark */
+  text-align: center;
+}
+.nodir-tip-body { margin: 0 0 0.75rem; color: rgba(255, 255, 255, 0.82); font-size: 0.9rem; line-height: 1.45; }
+.nodir-tip-body strong { color: #fff; }
+.nodir-tip-ok {
+  width: 100%; padding: 0.6rem 1rem; border: 0; border-radius: 10px;
+  background: #0A84FF; color: #fff; font: 600 0.95rem/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.nodir-tip-ok:active { background: #0968CC; transform: scale(0.98); }
+/* QUIET BY DESIGN. Five of the six people who ever see this bubble are not Braulio, so the default
+   action is OK and this sits below it as a plain link — present for the one person who needs it,
+   never competing to be tapped by the five who do not. */
+.nodir-tip-braulio {
+  display: block; width: 100%; margin-top: 0.55rem; padding: 0.35rem;
+  border: 0; background: none; color: rgba(255, 255, 255, 0.5);
+  font: 500 0.82rem/1 system-ui, -apple-system, sans-serif;
+  text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.nodir-tip-braulio:active { color: rgba(255, 255, 255, 0.8); }
+
+
+/* ── ★ Ser Director — top-RIGHT, the only way into the role ───────────────────
+   Owner, 2026-08-18: Braulio "NEEDS a become director pill button on the top right with a star w/
+   outline and a super subtle blue hue/tint... same margins/padding as top left buttons/pills".
+
+   Deliberately a SIBLING OF THE DIRECTOR PILL, mirrored across the screen: same height, same gutter,
+   same 0.16 blue wash over the same navy, same OUTLINE star (☆ U+2606, not the filled ★). Entering
+   the role and holding it are one idea, so they look like one idea — the only difference is which
+   corner it sits in and which word it carries.
+
+   It shares the top-right with ⌕ the way ⟳ shares the top-left with DIRECTOR: ⌕ is director-only,
+   this is follower-only, so the corner never holds both. */
+.become-director-pill {
+  position: fixed;
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
+  /* TOP-RIGHT, ONE SLOT LEFT OF IR A CANTO (owner, 2026-08-18). Ir a Canto stays flush in the corner
+     where the choir already looks for it; this is ADDED to its left, in space that was empty. For a
+     follower ⌕ is hidden, so the right cluster is ★ Ser Director · Ir a Canto. */
+  right: calc(max(var(--fab-gutter), env(safe-area-inset-right, 0px)) + var(--fab-slot2));
+  z-index: 46;
+  display: none;               /* shown only for a follower inside the native shell — see below */
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 14px;
+  background:
+    linear-gradient(rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0.16)),
+    rgba(26, 26, 46, 0.61);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  color: #E4EEFF;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.become-director-pill:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
+/* ☆ RIDES ON LINE 1, beside "Ser" (owner, 2026-08-18) rather than standing to the left of the whole
+   stack. Line 1 is the short line, so the star occupies width that was already empty instead of
+   adding its own column — the pill gets narrower for free. */
+.become-director-star { font-size: 0.98rem; line-height: 1; color: rgba(228, 238, 255, 0.85); }
+/* TWO LINES — "Ser" over "Director" (owner). Stacking is what lets the pill be narrow: on one line
+   it is as wide as the whole phrase, and the phrase was most of that 7.6rem. */
+.become-director-label { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.06; }
+.become-director-l1 {
+  display: flex; align-items: center; gap: 0.22rem;
+  font: 700 0.78rem/1.06 system-ui, -apple-system, sans-serif; opacity: 0.82;
+}
+.become-director-l2 { font: 700 0.95rem/1.06 system-ui, -apple-system, sans-serif; white-space: nowrap; }
+/* FOLLOWER + NATIVE SHELL ONLY. Driven by attributes on <html> that renderDirectorModeBadge sets on
+   every render, rather than by a one-shot JS call: the function that used to hide the keypad's copy
+   of this ran exactly once at init and never again on a role change, so it never actually hid.
+   signovivo.com has no mesh and no role to take, hence the shell gate. */
+html[data-shell="native"][data-role="follower"] .become-director-pill { display: flex; }
+
+/* SQUARE, WITH THE TYPE SCALED TO FIT (owner, 2026-08-18: "try hard to keep buttons square, scale
+   contents to get them square when necessary"). Both role buttons carry the word "Director", and
+   that word sets the floor: at Ir a Canto's size it overflows a --fab-size box, so the TYPE shrinks
+   instead of the box growing. Same two-line treatment as Ir a Canto otherwise, so the whole top row
+   reads as one family. */
+.become-director-pill,
+html[data-role="director"] .director-mode-badge {
+  width: var(--fab-size);
+  height: var(--fab-size);
+  aspect-ratio: 1 / 1;
+  padding: 0 0.22rem;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.05rem;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  font-size: 0.9rem;          /* below Ir a Canto's 1.03: "Director" is longer than "Canto" */
+}
+.become-director-l1, .director-exit-l1 { font-size: 1.02em; opacity: 0.9; }
+.become-director-l2, .director-exit-l2 { font-size: 1.18em; white-space: nowrap; }
+
+
+/* ── Diagnostics: debug settings row ─────────────────────────────────────────
+   sv.logSink + sv.telemetry, editable where a person already is when something is wrong. Compact
+   because the dump's job is the event list below it; this is a control strip, not a form. */
+.sv-diag-dbg {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+.sv-diag-sink {
+  flex: 1 1 auto; min-width: 0;
+  padding: 0.4rem 0.55rem; border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22); background: rgba(0, 0, 0, 0.35);
+  color: #fff; font: 500 0.82rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sv-diag-tel {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 0.3rem;
+  color: rgba(255, 255, 255, 0.85); font: 600 0.82rem/1 system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+}
+.sv-diag-save {
+  flex: 0 0 auto; padding: 0.42rem 0.7rem; border: 0; border-radius: 8px;
+  background: #0A84FF; color: #fff;
+  font: 700 0.82rem/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.sv-diag-save:active { background: #0968CC; transform: scale(0.97); }

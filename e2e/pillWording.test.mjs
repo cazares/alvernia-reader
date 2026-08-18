@@ -13,7 +13,12 @@ const renderPill = (nativeFileMode, hasBridge, role, meshStatus = "", lastPageAg
   const end = APP.indexOf("// ── Sync \"working\"");
   const body = APP.slice(start, end);
   let hidden = null;
-  const titleEl = { textContent: "" }, actionEl = { textContent: "" };
+  // setAttribute on BOTH: renderDirectorModeBadge now also relabels #resync-fab, because while
+  // nobody directs the pill is display:none and the crossed-out ⟳ is the only thing on screen — so
+  // the announcement has to live there or the state goes silent to a screen reader. The fallback
+  // stub stands in for that button, and a bare {textContent} threw "setAttribute is not a function".
+  const titleEl = { textContent: "", setAttribute() {} };
+  const actionEl = { textContent: "", setAttribute() {} };
   const badge = {
     classList: {
       remove: (...c) => { if (c.includes("is-hidden")) hidden = false; },
@@ -30,6 +35,13 @@ const renderPill = (nativeFileMode, hasBridge, role, meshStatus = "", lastPageAg
         if (id === "sync-pill-title") return titleEl;
         if (id === "role-toggle") return { classList: { toggle() {} } };
         if (id === "role-toggle-label") return { textContent: "" };
+        // The directing state is now shown by a SEPARATE ✕ control and an inert DIRECTOR status,
+        // rather than by relabelling one button. Stub them so this file keeps testing the WORDING.
+        if (id === "role-exit-x" || id === "role-status-pill" || id === "sync-exit-fab"
+            || id === "become-director-fab" || id === "role-gate" || id === "role-gate-input"
+            || id === "role-gate-confirm") {
+          return { classList: { toggle() {}, remove() {}, add() {} }, dataset: {}, addEventListener() {} };
+        }
         return actionEl;
       } },
     { now: () => lastPageAgoMs });
@@ -107,13 +119,34 @@ test("the role control names the role, and is not a bare verb", () => {
   // label "Tomar" failed because it was a bare verb ("take WHAT?"), and both paths to directing must
   // describe the same destination. The control is now #role-toggle inside the IR A CANTO modal.
   const HTML = fs.readFileSync("web/src/index.html", "utf8");
-  assert.match(HTML, /id="role-toggle"/, "the role control is gone");
+  // ONE HOME PER DIRECTION, and as of 2026-08-18 entering is VISIBLE rather than buried.
+  // ★ Ser Director moved out of the IR A CANTO keypad and into a top-left pill, because Braulio
+  // forgets the procedure most weeks and a control hidden inside a modal named "IR A CANTO" is not
+  // findable by someone who has forgotten there is a procedure at all. The empty seat that causes
+  // is what produced the 2026-07-01 no-director-all-night outage.
+  //
+  // Visibility does NOT weaken the role: #role-gate is what protects it, not obscurity. Tapping this
+  // opens the red "ESTO CAMBIA LA PÁGINA DE TODOS" wall and you must type the word.
+  assert.match(HTML, /id="become-director-pill"/, "the entry to the role is gone entirely");
+  assert.doesNotMatch(HTML, /id="role-toggle"/,
+    "the keypad copy is back — two homes for one act is the redundancy that was just removed");
+  // Leaving is the DIRECTOR status itself: it reads the role you hold, and tapping it asks whether
+  // you meant to stop. A separate ✕ lived beside it briefly — two controls for one act, and the ✕
+  // said nothing about which role you were in.
+  assert.match(APP, /exit-director/, "nothing can leave the role any more");
+  assert.doesNotMatch(HTML, /id="sync-exit-fab"/, "the separate ✕ is back — the status owns the exit");
+  assert.doesNotMatch(HTML, /id="role-exit-x"/, "an exit is back in the keypad — it must live only in the top bar");
+  assert.doesNotMatch(HTML, /id="role-status-pill"/, "a DIRECTOR status is back in the keypad");
   // Sentence case, not caps: all-caps is fine for a one-time alarm, distracting on a label you live
   // with. The two labels are set in app.js.
-  assert.match(APP, /"Salir de director"\s*:\s*"Dirigir"/,
-    "the role control must read Dirigir / Salir de director");
-  // Naming the ROLE is what "Tomar" lacked — both labels do.
-  for (const label of ["Dirigir", "Salir de director"]) {
+  // The control no longer relabels itself. While directing it is REPLACED by an inert DIRECTOR
+  // status plus a separate ✕ — one element wearing two meanings is what made "Salir de director"
+  // ambiguous on a control that also ENTERS the role, and what let a mis-tap drop the choir's
+  // director mid-Mass. So the key says one thing, always.
+  // "Ser Director" names the ROLE. "Tomar" failed as a bare verb ("take WHAT?") and
+  // "Convertirme en director" was right but too long for the square.
+  assert.match(HTML, /Ser Director/, "the entry control must name the role, not be a bare verb");
+  for (const label of ["Ser Director", "DIRECTOR"]) {
     assert.ok(/dirig|director/i.test(label), `${label} does not name the role`);
   }
 });

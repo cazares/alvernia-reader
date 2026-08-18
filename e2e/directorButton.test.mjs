@@ -38,7 +38,7 @@ test("the way in is the pill, not a button buried in the song-jump modal", () =>
   // card's fold. The pill shows the room's state AND is the control for it.
   assert.ok(!/id="direct-button"/.test(HTML), "the modal director button is back");
   assert.ok(!/directButton/.test(APP), "dead references to the removed button remain");
-  assert.match(APP, /postNativeBridge\(\{ type: "request-director" \}\)/,
+  assert.match(APP, /postNativeBridge\(\{ type: "request-director", currentPage: state\.currentPage \}\)/,
     "nothing asks native for the role any more");
 });
 
@@ -62,7 +62,8 @@ test("the web never learns the director code — it asks", () => {
     const digits = [...text.matchAll(/(?<![\d.])(\d{9})(?![\d.])/g)].map((m) => m[1]);
     assert.deepEqual(digits, [], `${name} contains 9-digit literal(s) that may be operator codes: ${digits}`);
   }
-  assert.match(APP, /postNativeBridge\(\{ type: "request-director" \}\)/, "button does not ask native");
+  assert.match(APP, /postNativeBridge\(\{ type: "request-director", currentPage: state\.currentPage \}\)/,
+    "button does not ask native");
 });
 
 test("the native shell understands request-director", () => {
@@ -78,6 +79,8 @@ test("the request goes through the same confirmation as a typed code", () => {
   // accepted `void becomeDirector(DIRECTOR_CODE); if (0) onDirectorCode(DIRECTOR_CODE);`.
   const at = NATIVE.indexOf('case "request-director":');
   const body = NATIVE.slice(at, NATIVE.indexOf("break;", at));
-  assert.match(body, /onDirectorCode\(DIRECTOR_CODE\)/, "bypasses onDirectorCode");
+  // onDirectorCode now also receives the web's true page (see relayQuotaGuards.test.mjs for why),
+  // so the call is no longer a bare 1-arg form — match the call, not its exact argument list.
+  assert.match(body, /onDirectorCode\(DIRECTOR_CODE(?:,[^)]*)?\)/, "bypasses onDirectorCode");
   assert.ok(!/becomeDirector\(/.test(body), "calls becomeDirector directly, skipping the confirmation");
 });

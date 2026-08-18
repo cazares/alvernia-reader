@@ -1,0 +1,2 @@
+{"t":1787060766000,"dev":"mPad","role":"director","event":"ble:page-send","page":372,"seq":1}
+{"t":1787060766000,"dev":"iPad1","role":"follower","event":"ble:page-apply","page":372,"seq":1}

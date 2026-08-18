@@ -28,6 +28,7 @@ import {
   isNearbyDirectorSyncAvailable,
   primeNearbyPermissions,
   refreshNearbyDiscovery,
+  refreshDirectorBrowse,
   forceFollowerReconnectNow,
   requestCurrentSnapshot,
   resetNearbyDirectorSync,
@@ -344,21 +345,131 @@ export default function App() {
   const dbgDeviceRef = useRef<string>("?");
   const dbgBufferRef = useRef<Array<Record<string, unknown>>>([]);
   const dbgFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // TELEMETRY IS OPT-IN AND OFF BY DEFAULT (Miguel, 2026-08-18: "we only want to turn on the faucet
+  // when we need water not suck up a whole lake").
+  //
+  // It has zero user value — it exists to debug the mesh — and it is what exhausted the account's
+  // 100,000-request daily Worker quota twice, on 2026-08-17 and again on 2026-08-18, taking
+  // signovivo.com down WITH the relay both times because they share one quota. It is also useless
+  // at Mass, where followers have no internet and these POSTs are dropped on the floor.
+  //
+  // Turn it on deliberately for a debugging session via the ⌕ diagnostics dump or by setting
+  // sv.telemetry, and it stays on only for that install.
+  const telemetryEnabledRef = useRef(false);
+  // Where breadcrumbs go. Empty = the Cloudflare worker; a LAN URL = scripts/log-sink.mjs running on
+  // Miguel's Mac. During a debugging session the devices are metres from that machine on the same
+  // wifi, so there is no reason for their telemetry to cross the internet — and every request that
+  // does is drawn from the SAME 100,000/day account quota signovivo.com depends on. Pointing here
+  // makes debugging cost the product nothing.
+  //
+  // TEMPORARY DEFAULT (Miguel, 2026-08-18): pre-fill the sink field with his Mac's LAN address so
+  // the diagnostics dump opens with it already typed — he still flips telemetry ON himself, this
+  // only saves re-typing an IP. ONLY EVER A PRE-FILL, never an override: the moment a device saves
+  // ANY value (via the diagnostics dump), that saved value wins forever and this constant is never
+  // consulted again — see the `?? DEFAULT_LOG_SINK` below.
+  //
+  // This IP is only valid on Miguel's home network and will go stale the moment his router hands
+  // out a different lease. Delete this default after this weekend's testing is done; it is not a
+  // permanent address to bake into the app.
+  const DEFAULT_LOG_SINK = "http://192.168.1.197:8787";
+  const logSinkRef = useRef<string>(DEFAULT_LOG_SINK);
+  useEffect(() => {
+    AsyncStorage.multiGet(["sv.telemetry", "sv.logSink"])
+      .then((pairs) => {
+        const map = Object.fromEntries(pairs);
+        telemetryEnabledRef.current = map["sv.telemetry"] === "1";
+        // AsyncStorage.multiGet resolves a MISSING key to null, never undefined — checking for
+        // undefined here meant "never saved" was never true, so String(null) ran and the field
+        // showed the literal text "null" on every device that had not explicitly saved a sink.
+        // Distinguish "never saved" (null) from "saved as empty, meaning use the worker" ("") —
+        // only the former falls back to the default; an explicit empty save must still stick.
+        const saved = map["sv.logSink"];
+        logSinkRef.current = (saved === null || saved === undefined ? DEFAULT_LOG_SINK : saved).replace(/\/+$/, "");
+      })
+      .catch(() => {});
+  }, []);
+
+  // ── TELEMETRY LEVELS ───────────────────────────────────────────────────────
+  //
+  // Off-by-default fixed the idle cost; this fixes the ON cost. Turning telemetry on used to mean
+  // turning on EVERYTHING — a 1 Hz mesh heartbeat, every BLE packet, every discovery tick — which is
+  // the firehose that exhausted a 100,000/day account quota twice in two days.
+  //
+  // Mirrors sync-worker/src/logBuffer.js exactly (LOG_LEVELS / levelForEvent); a test executes BOTH
+  // and asserts they classify identically, because two copies of a rule drift the moment one moves.
+  // The worker echoes logLevel on every POST /log, so `LOG_LEVEL` + `wrangler deploy` retunes the
+  // fleet in ~20s with no TestFlight round trip.
+  //
+  // INFERRED FROM THE EVENT NAME rather than passed at the call site: a level argument that must be
+  // remembered at ~100 call sites is one that will be forgotten, and forgetting would default to
+  // the loudest setting — which is exactly the failure being fixed.
+  const LOG_LEVELS = { off: 0, error: 1, warn: 2, info: 3, debug: 4 } as const;
+  const levelForEvent = useCallback((event: string): number => {
+    const e = String(event || "");
+    if (/error|STORM|conflict|denied|fail|wedged|revoke|abort/i.test(e)) return LOG_LEVELS.error;
+    if (/stale|retry|reconnect|rebuild|half-open|not-director|skip|cold/i.test(e)) return LOG_LEVELS.warn;
+    if (/^(become|role|boot|resync|director|follower)[:.]?|ready|start|stop/i.test(e)) return LOG_LEVELS.info;
+    return LOG_LEVELS.debug;
+  }, []);
+  // Starts OFF. Raised only by the policy the worker echoes back, so the resting state of a device
+  // that never talks to the relay is silence.
+  const logLevelRef = useRef<number>(LOG_LEVELS.off);
   const dbgFlush = useCallback(() => {
     const batch = dbgBufferRef.current;
     if (batch.length === 0) return;
+    if (!telemetryEnabledRef.current) { dbgBufferRef.current = []; return; }
+
+    // WHERE IT GOES DECIDES WHETHER IT MAY BE KEPT.
+    //
+    // To the Cloudflare worker: drop on failure. A queue that survives a Mass is a burst waiting to
+    // fire the moment a device finds wifi — the same outage with a delay on it, drawn from the same
+    // 100,000/day quota signovivo.com lives on.
+    //
+    // To the LAN sink (scripts/log-sink.mjs on Miguel's Mac): KEEP it. There is no quota to blow, and
+    // this is the only way to see what happened at MASS, where the iPads join no network at all and
+    // telemetry has simply never existed. Buffer through the whole run with no connectivity, rejoin
+    // wifi afterwards, and the trace flushes to the Mac. Post-hoc telemetry from a no-network room.
+    //
+    // Bounded hard: the cap discards the OLDEST rows, because when a buffer overflows the interesting
+    // part is what happened most recently, and an unbounded buffer on a device with no network is a
+    // memory leak with a nice name.
+    const sink = logSinkRef.current;
     dbgBufferRef.current = [];
-    fetch(`${RELAY_BASE}/log`, {
+    // TIME-BOX THE POST. On a wifi-off device this should fail fast (no route), but "should" is not
+    // a bound — a hung request would sit on the flush timer with no signal for the whole test, which
+    // is exactly the run we cannot afford to lose data from. 4s is generous for a LAN and short
+    // enough that it never meaningfully delays the next flush cycle either way.
+    const ac = typeof AbortController === "function" ? new AbortController() : undefined;
+    const timer = ac ? setTimeout(() => ac.abort(), 4000) : null;
+    fetch(`${sink || RELAY_BASE}/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(batch),
-    }).catch(() => {
-      /* best-effort telemetry */
-    });
+      signal: ac?.signal,
+    })
+      .then((r) => {
+        // Adopt the flush cadence and level the sink (or worker) hands back, so either can retune
+        // this device without a rebuild.
+        r.json?.().then((j: { policy?: { logIntervalMs?: number; logLevel?: number } }) => {
+          const p = j?.policy;
+          if (p && Number.isFinite(p.logLevel)) logLevelRef.current = Number(p.logLevel);
+        }).catch(() => {});
+      })
+      .catch(() => {
+        if (!sink) return;   // worker: drop, per above
+        const MAX = 5000;
+        const merged = batch.concat(dbgBufferRef.current);
+        dbgBufferRef.current = merged.length > MAX ? merged.slice(merged.length - MAX) : merged;
+      })
+      .finally(() => { if (timer) clearTimeout(timer); });
   }, []);
   const dbgLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
       try {
+        // DROP BEFORE BUFFERING, not at flush. A buffer that fills at debug volume and is discarded
+        // later still costs the memory and still exists to be accidentally flushed; the cheapest
+        // request is the one never assembled.
+        if (levelForEvent(event) > logLevelRef.current) return;
         dbgBufferRef.current.push({
           t: Date.now(),
           dev: dbgDeviceRef.current,
@@ -373,44 +484,38 @@ export default function App() {
         /* ignore */
       }
     },
-    [dbgFlush],
+    [dbgFlush, levelForEvent],
   );
   // ── Fleet readiness check-in (native → the SAME /fleet dashboard as signovivo.com) ──
-  // Reports this iPad's native build + role so the director sees who's ready before Mass. Reuses
-  // the stable sv_devid; sends a self-entered label but NEVER a phone number. Best-effort.
-  const fleetLabelRef = useRef<string>("");
-  const fleetCheckin = useCallback((extra?: Record<string, unknown>) => {
+  // ── OTA check-in — RESTORED, narrower (Miguel, 2026-08-18) ─────────────────────────────
+  //
+  // The 90s FLEET DASHBOARD heartbeat (device label, role, readiness — human-facing, and it stored
+  // a roster with choir phone numbers) was correctly killed the same day for costing ~3,840 req/day
+  // across the fleet. But arming a songbook update was piggybacked on THAT SAME call's response —
+  // "no new endpoint, no new poll" — so deleting it silently also deleted the only way a device
+  // ever learns BOOK_UPDATE_VERSION exists, and the client-side signal (lastCheckinOkAt) that
+  // canApplyNow's safety gate depends on to know this device has recently proven it has internet.
+  //
+  // This restores JUST those two things, on their OWN endpoint (/ota/checkin), reporting ONLY
+  // {deviceId, bookVersion, bookStage} — no label, no role, nothing PII-adjacent — and at a far
+  // slower cadence (below) than the dashboard ever needed, since arming is a rare, deliberate,
+  // Miguel-supervised action, not something that needs 90s freshness.
+  const otaCheckin = useCallback(() => {
     const deviceId = dbgDeviceRef.current;
     if (!deviceId || deviceId === "?") return;
-    fetch(`${RELAY_BASE}/fleet/checkin`, {
+    fetch(`${RELAY_BASE}/ota/checkin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         deviceId,
-        surface: "native",
-        nativeBuild: Number(BUILD_VERSION) || 0,
-        // "PAD" | "PHN". `surface` already separates native from web; this separates two NATIVE
-        // devices, which nothing could do before — an iPad on an old build read as the owner's
-        // iPhone for an hour on 2026-08-05 because the deviceId is an opaque 6-char random.
-        ...(DEVICE_KIND ? { deviceKind: DEVICE_KIND } : {}),
-        label: fleetLabelRef.current || "",
-        // Native only knows director/follower — report "Director" or leave role blank so the
-        // dashboard fills it from the seeded roster (never a wrong "Cantor" for a Bajo/Guitarrista).
-        role: roleRef.current === "director" ? "Director" : "",
-        ...(extra || {}),
-        // Which BOOK this device holds. nativeBuild is the SHELL's number and can read "current"
-        // over a songbook months old (D1), so without this the dashboard cannot answer the only
-        // question the rollout cares about: did the update actually arrive?
         ...(activeBookVersionRef.current ? { bookVersion: activeBookVersionRef.current } : {}),
-        ...(activeBundleSourceRef.current ? { bundleSource: activeBundleSourceRef.current } : {}),
         ...(bookStageRef.current ? { bookStage: bookStageRef.current } : {}),
-        ...(extra || {}),
       }),
     })
       .then(async (r) => {
         if (!r.ok) return;
-        // A SUCCESSFUL check-in is the live-internet proof the apply gate depends on. It is
-        // recorded here and nowhere else, so it can never be faked by a cached response.
+        // A SUCCESSFUL check-in is the live-internet proof canApplyNow's safety gate depends on.
+        // Recorded here and nowhere else, so it can never be faked by a cached response.
         const at = Date.now();
         lastCheckinOkAtRef.current = at;
         AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
@@ -423,8 +528,8 @@ export default function App() {
         onCheckinResponseRef.current?.(body);
       })
       .catch(() => {
-        /* offline / relay unreachable — presence just isn't reported. Inside the church this is
-           the NORMAL case and must stay completely silent: no error state, no UI. */
+        /* offline / relay unreachable — inside the church this is the NORMAL case and must stay
+           completely silent: no error state, no UI. */
       });
   }, []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
@@ -441,6 +546,7 @@ export default function App() {
         dbgDeviceRef.current = "?";
       }
       dbgLog("boot", { syncAvailable });
+      otaCheckin();
       // Fleet identity: report readiness under whatever label this device ALREADY has. The
       // one-time "¿Quién usa este iPad?" Alert.prompt is gone.
       //
@@ -455,20 +561,20 @@ export default function App() {
       // written); new devices report anonymously by sv_devid, matching the web PWA's
       // "anonymous by device" behaviour (web/src/app.js:2986). sv_fleet_skip is now dead — it
       // only ever existed to suppress this prompt.
-      try {
-        fleetLabelRef.current = (await AsyncStorage.getItem("sv_fleet_label")) || "";
-      } catch {
-        /* ignore */
-      }
-      fleetCheckin();
+      // (sv_fleet_label was read here to name this device on the readiness dashboard; the dashboard
+      // is gone, so the label has nowhere to go and the key is simply left in storage.)
     })();
-  }, [dbgLog, syncAvailable, fleetCheckin]);
-  // Re-report readiness every 90s while mounted — captures a follower who later becomes director
-  // without touching the liturgy-critical sync callbacks.
+  }, [dbgLog, syncAvailable, otaCheckin]);
+
+  // Re-check every 4 minutes while mounted — far below the old 90s dashboard cadence, which existed
+  // for HUMAN-readable freshness on a readiness page that no longer exists. Arming is deliberate and
+  // rare; a few minutes of latency on top of the boot + foreground checks (below) costs nothing and
+  // is never the bottleneck on a "prove it on ONE iPad" test Miguel is standing in front of.
   useEffect(() => {
-    const t = setInterval(() => fleetCheckin(), 90000);
-    return () => clearInterval(t);
-  }, [fleetCheckin]);
+    const OTA_CHECKIN_INTERVAL_MS = 4 * 60 * 1000;
+    const id = setInterval(otaCheckin, OTA_CHECKIN_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [otaCheckin]);
 
   // ── Native -> Web injection (queued until the web app signals bridge-ready) ──
   // Bound the pending-inject backlog: if the WebView never signals bridge-ready (broken/blank
@@ -726,7 +832,14 @@ export default function App() {
       } catch {
         /* network flaps are expected; the next tick / page change re-publishes */
       }
-    }, 12000);
+      // 12s -> 30s. This is ONLY a keepalive: every real page turn publishes immediately via
+      // broadcastPage, so its sole job is keeping the snapshot inside RELAY_LIVE_MAX_AGE_S (90s) so
+      // followers still count the director as live. At 12s it spent 7,200 requests a day to say
+      // nothing had changed — 7% of the account's entire daily quota, on a keepalive.
+      //
+      // 30s, not 45s: at 45 a SINGLE lost publish reaches the 90s window and every follower declares
+      // the director dead. 30 gives three attempts inside the window and still costs only 2,880/day.
+    }, 30000);
   }, [stopDirectorHeartbeat]);
 
   // ── Become follower ──────────────────────────────────────────────────────────
@@ -769,10 +882,16 @@ export default function App() {
 
   // ── Become director ────────────────────────────────────────────────────────
   const becomeDirector = useCallback(
-    async (code: string) => {
+    async (code: string, knownCurrentPage?: number) => {
       // Claim this role transition; a later flip bumps the generation and supersedes us.
       const myGen = ++roleGenerationRef.current;
       becomeDirectorInFlightRef.current = true;
+      // CORRECT THE MIRROR BEFORE ANYTHING CAN READ IT. Every broadcast below — the no-mesh
+      // transmitter path, the mesh path, the 1s/30s heartbeats — reads currentPageRef.current
+      // rather than asking the web again, so the fix has to land here, once, before the first read.
+      if (typeof knownCurrentPage === "number" && knownCurrentPage > 0) {
+        currentPageRef.current = knownCurrentPage;
+      }
       // Allow this device to publish. BEFORE any broadcast, or the first frame is dropped by the
       // gate in directorRelaySync. No credential is involved — the relay stopped authorizing.
       setRelayPublishing(true);
@@ -838,7 +957,13 @@ export default function App() {
         // SPLIT-BRAIN MITIGATION: a brand-new director's token must propagate fast so peers
         // (and any prior director) re-find it and converge, instead of waiting out the ~25s
         // browse cycle while both broadcast and followers flap. Kick an immediate re-browse.
-        if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
+        //
+        // BROWSER ONLY. This called refreshNearbyDiscovery, which destroys the ADVERTISER first —
+        // at the exact moment every follower's foundPeer has fired and their invites are in flight,
+        // so those invites evaporated silently and each follower then waited out a timeout before
+        // retrying. The same failure was already diagnosed and guarded on the follower side; the
+        // director had no equivalent protection while doing it to everyone reaching for it.
+        if (syncAvailable) refreshDirectorBrowse().catch(() => {});
         breadcrumb("director");
         becomeDirectorInFlightRef.current = false;
       } catch {
@@ -901,7 +1026,7 @@ export default function App() {
 
   // ── Director-code dispatch (codes entered on the web numpad) ────────────────
   const onDirectorCode = useCallback(
-    (rawCode: unknown) => {
+    (rawCode: unknown, knownCurrentPage?: number) => {
       // NEW-DIR-2: do NOT bump roleGenerationRef here. A code entry is not yet a committed role
       // change — becomeDirector (:400), becomeFollower (:370), and performSoftReset (:479) each bump
       // on their OWN commit. Bumping up front superseded an in-flight boot becomeFollower: if the
@@ -935,7 +1060,7 @@ export default function App() {
           pendingInjectRef.current = [];
           if (next) setBundleUri(next);
           setMountKey((k) => k + 1);
-          Alert.alert("Cancionero original", "Se restauró el cancionero incluido en la app.");
+          Alert.alert("Cancionero original", "Se restauró el cancionero incluido en el app.");
         })();
         return;
       }
@@ -975,11 +1100,13 @@ export default function App() {
         {
           text: liveDirector ? "Tomar el control" : "Sí, dirigir",
           style: liveDirector ? "destructive" : "default",
-          onPress: () => becomeDirector(code),
+          onPress: () => becomeDirector(code, knownCurrentPage),
         },
       ]);
     },
     [injectEvent, performSoftReset, becomeDirector],
+    // knownCurrentPage is read, not depended on for identity — it is a per-call primitive threaded
+    // straight through closures, not state this callback needs to re-create over.
   );
 
   // ── Web -> Native message router ───────────────────────────────────────────
@@ -1098,6 +1225,39 @@ export default function App() {
             // Actively pull the director's CURRENT page (like the foreground path does) instead of
             // waiting for the next 1s heartbeat. Best-effort.
             if (syncAvailable) requestCurrentSnapshot().catch(() => {});
+          } else {
+            // SOLO READER, restored (Miguel, 2026-08-18: "after OTA update the app goes back to the
+            // page it was on before").
+            //
+            // Neither branch above applies here: not a director/transmitter (that path re-asserts
+            // its OWN currentPageRef, which survives a WebView-only remount in native memory and
+            // needs no restore), and not a follower with a live director snapshot to resync to
+            // (that path already lands on the director's real page). What's left is a device that
+            // is simply reading on its own — nobody to be authoritative FOR it — and for that case
+            // the web's post-reload boot-default page was the only place it could land.
+            //
+            // performApplySwap saves the page under this exact key moments before triggering the
+            // remount that fires this handler ("Save the reader's place so nobody loses it across
+            // the swap") — but nothing ever read it back. Read it now, once, and only for a fresh
+            // reload with nothing else to go on; a genuinely brand-new install has no key to find
+            // and correctly falls through to the web's own default.
+            void (async () => {
+              try {
+                const raw = await AsyncStorage.getItem(
+                  `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
+                );
+                const page = Number(raw);
+                if (Number.isFinite(page) && page >= 1) {
+                  currentPageRef.current = page;
+                  injectEvent({
+                    type: "sync-event",
+                    event: { type: "page", page, book: currentBookRef.current },
+                  });
+                }
+              } catch {
+                /* no saved page — the web's own default stands, same as a fresh install */
+              }
+            })();
           }
           break;
         }
@@ -1138,9 +1298,35 @@ export default function App() {
         // This handler ships in the BINARY even though the button that sends it ships over the air,
         // because a web bundle that sends a message no shell understands is a button that does
         // nothing. Native first, web whenever.
-        case "request-director":
-          onDirectorCode(DIRECTOR_CODE);
+        case "request-director": {
+          // See web/src/app.js's postNativeBridge call: the web's OWN true page rides with this
+          // message, with zero lag, because rendering never waits on a native round trip.
+          const knownPage = typeof msg.currentPage === "number" && msg.currentPage > 0
+            ? msg.currentPage : undefined;
+          onDirectorCode(DIRECTOR_CODE, knownPage);
           break;
+        }
+        // ── Debug settings, editable from the diagnostics dump ──────────────────────────────────
+        //
+        // sv.telemetry ("1" | "") and sv.logSink (a LAN URL) live in AsyncStorage, which only the
+        // shell can write — so without this they could only be set by rebuilding, which is absurd
+        // for two strings whose whole purpose is to be changed during a debugging session.
+        //
+        // They take effect on the NEXT flush, no relaunch needed. Pointing sv.logSink at
+        // scripts/log-sink.mjs on Miguel's Mac also means telemetry costs Cloudflare nothing, so
+        // the debug level can be raised without competing with signovivo.com for the daily quota.
+        case "set-debug-settings": {
+          const sink = String((msg as Record<string, unknown>).logSink ?? "").trim().replace(/\/+$/, "");
+          const tel = (msg as Record<string, unknown>).telemetry ? "1" : "";
+          logSinkRef.current = sink;
+          telemetryEnabledRef.current = tel === "1";
+          AsyncStorage.multiSet([["sv.logSink", sink], ["sv.telemetry", tel]]).catch(() => {});
+          dbgLog("debug:settings", { sink: sink || "(worker)", telemetry: tel === "1" });
+          injectEvent({ type: "toast", text: tel === "1"
+            ? `Telemetría activada -> ${sink || "Cloudflare"}`
+            : "Telemetría desactivada." });
+          break;
+        }
         // ── The two panic switches, reachable without remembering a number ──────────────────────
         // These exist for the five minutes before Mass when something has already gone wrong: a
         // device holding a broken book, or one whose role is wedged. Requiring a memorised 9-digit
@@ -1154,7 +1340,7 @@ export default function App() {
         case "request-force-baked":
           Alert.alert(
             "¿Usar el cancionero original?",
-            "Se descartará el cancionero descargado y volverá el que viene con la app. Úsalo si el actual no abre bien.",
+            "Se descartará el cancionero descargado y volverá el que viene con el app. Úsalo si el actual no abre bien.",
             [
               { text: "Cancelar", style: "cancel" },
               // destructive, not the soft reset: THIS is the one that throws away the downloaded
@@ -1173,9 +1359,13 @@ export default function App() {
             type: "diagnostics",
             build: BUILD_VERSION,
             role: roleRef.current,
-            book: activeBookVersionRef.current || "(incluido en la app)",
+            book: activeBookVersionRef.current || "(incluido en el app)",
             pages: totalPagesRef.current || 0,
             lines: breadcrumbsRef.current.slice(-BREADCRUMB_LIMIT),
+            // Echo the LIVE debug settings so the dump's fields show what is actually set rather
+            // than whatever was typed last time. A settings box that lies is worse than none.
+            logSink: logSinkRef.current,
+            telemetry: telemetryEnabledRef.current,
           });
           break;
         case "request-soft-reset":
@@ -1802,7 +1992,6 @@ export default function App() {
     manualRefreshRef.current = true;
     breadcrumb("manual-refresh:start");
     try {
-      await fleetCheckin();
       // A pointer seen on an earlier routine check-in was recorded but deliberately not acted on.
       // Honour it now, so ⟳ works even if this tap's check-in cannot reach the relay.
       if (!stagingInFlightRef.current && pendingPointerRef.current) {
@@ -1814,7 +2003,7 @@ export default function App() {
       manualRefreshRef.current = false;
       breadcrumb("manual-refresh:end");
     }
-  }, [breadcrumb, fleetCheckin]);
+  }, [breadcrumb]);
   refreshBookNowRef.current = refreshBookNow;
 
   /**
@@ -1850,7 +2039,7 @@ export default function App() {
       return;
     }
 
-    Alert.alert("¿Actualizar el cancionero?", "La app se recargará con el libro nuevo.", [
+    Alert.alert("¿Actualizar el cancionero?", "El app se recargará con el libro nuevo.", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Actualizar",
@@ -1912,7 +2101,8 @@ export default function App() {
         lastKnownRoleRef.current = "director";
         injectEvent({
           type: "toast",
-          text: "Estabas transmitiendo. Toca el estado arriba a la izquierda para volver a dirigir.",
+          text: "Estabas transmitiendo cuando se cerró el app.",
+          action: "resume-director",
         });
       })
       .catch(() => {});
@@ -1942,9 +2132,17 @@ export default function App() {
           if (prev === "director") {
             // Written back as follower so the toast fires once per crash, not on every boot forever.
             AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
+            // NO INSTRUCTIONS — THE NOTICE CARRIES THE BUTTON (owner, 2026-08-18: "really shitty
+            // UX"). It used to say "toca el estado arriba a la izquierda", which had been WRONG
+            // since build 435: the top-left status stopped taking the role then, and after
+            // 2026-08-18 that corner is Salir/Director or ⟳ while the way in moved to the RIGHT.
+            // So it sent whoever read it to the wrong control, for weeks, at the one moment they
+            // were already flustered. A notice that describes a control is a promise about the UI
+            // that rots as soon as the UI moves; carrying the control cannot rot.
             injectEvent({
               type: "toast",
-              text: "Estabas dirigiendo. Toca el estado arriba a la izquierda para volver a dirigir.",
+              text: "Estabas dirigiendo cuando se cerró el app.",
+              action: "resume-director",
             });
           }
         })
@@ -2106,9 +2304,14 @@ export default function App() {
       // This is safe to run unattended only because the GATING is gone, not because the automation
       // was ever the problem: canApplyNow is down to two physical impossibilities, so a device that
       // does nothing now really is a device that had nothing to do.
-      fleetCheckin();
       void autoApplyIfSafeRef.current?.();
-      if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
+      otaCheckin();
+      // ONE refresh, not two. This was duplicated, and each call scheduled another discovery timer
+      // without invalidating the previous one (DirectorSyncModule.scheduleNextDiscoveryRefresh) —
+      // so every foreground DOUBLED the live timer population. Measured on the owner's iPhone:
+      // 66 advertiser start/stop events per second, which is why the device that gets picked up and
+      // put down all day was the one that could never complete a handshake. The Swift side now
+      // invalidates properly and floors the churn at 2 s, but the duplicate had no reason to exist.
       if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (roleRef.current === "follower") {
         requestCurrentSnapshot().catch(() => {});
@@ -2148,7 +2351,7 @@ export default function App() {
       }
     });
     return () => sub.remove();
-  }, [syncAvailable, broadcastPage, injectEvent, fleetCheckin, startDirectorHeartbeat]);
+  }, [syncAvailable, broadcastPage, injectEvent, startDirectorHeartbeat]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {
@@ -2288,7 +2491,7 @@ export default function App() {
       {webDead ? (
         <View style={styles.fallback}>
           <Text style={styles.fallbackTitle}>Signo Vivo se está recuperando</Text>
-          <Text style={styles.fallbackMsg}>La app no cargó bien. Toca para reintentar.</Text>
+          <Text style={styles.fallbackMsg}>El app no cargó bien. Toca para reintentar.</Text>
           <TouchableOpacity
             style={styles.fallbackBtn}
             accessibilityRole="button"

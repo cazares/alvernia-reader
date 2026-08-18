@@ -56,6 +56,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   // four failures at ~32 s. Not lower: a too-short timeout abandons handshakes that would have
   // completed on a marginal link, which trades staleness for churn.
   private static let inviteTimeout: TimeInterval = 8
+  /// How long WE wait before assuming an invite died and re-issuing it. NOT the same number as
+  /// inviteTimeout, which is how long MULTIPEER holds the invite open.
+  ///
+  /// They were the same value, so a silently-dropped invite — one that never fires a delegate
+  /// callback at all, which is exactly what happens when the target's advertiser restarts — cost a
+  /// full 8 seconds of a follower doing nothing before anything retried. That is most of a 10s
+  /// convergence, spent waiting out a worst case rather than noticing a failure.
+  private static let inviteRetryAfter: TimeInterval = 2.5
+  /// How long a follower may hunt, WITH a director in sight, before rebuilding its session.
+  ///
+  /// Retrying an invite cannot fix a wedged MCSession — same broken session, same result, forever.
+  /// The human escape hatch for that is the resync button; this is the same escalation without
+  /// needing someone to notice. Deliberately long: a rebuild is disruptive, and normal convergence
+  /// must be given room to finish first.
+  private static let followerWedgedSeconds: TimeInterval = 20
+  /// How recently the browser must have seen a director for it to count as WORKING. Below this,
+  /// a scheduled refresh is skipped rather than destroying live discovery. Comfortably longer than
+  /// the 5 s early-refresh tick so a healthy hunt is never interrupted, and short enough that a
+  /// browser which has genuinely gone deaf is rebuilt within one extra cycle.
+  private static let browserHealthySeconds: TimeInterval = 20
   private static let followerRetryDelay: TimeInterval = 2
   private static let followerHelloInterval: TimeInterval = 8
   /// Fast half-open watchdog. The director re-sends the current page every ~1s (mesh heartbeat), so
@@ -68,7 +88,19 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// On foreground a follower must PROVE its session is alive rather than assume it. See the note
   /// in handleAppDidBecomeActive.
   private static let foregroundVerifySeconds: TimeInterval = 2.0
-  private static let followerWatchdogInterval: TimeInterval = 1.0
+  /// 1.0 -> 0.5 s (owner, 2026-08-17: "it needs to feel snappy").
+  ///
+  /// This tick does two jobs and both want to be fast. While CONNECTED it is the half-open
+  /// watchdog; while HUNTING it re-attempts the handshake, which is where the felt latency lives —
+  /// live telemetry measured 4/4 followers converging in 4.6-9.4 s against a standard of "longer
+  /// than a few seconds is a failure".
+  ///
+  /// Safe to halve because the tick does no work of its own: reconsiderFollowerTarget returns
+  /// immediately when connected, and while an invite is inside its window it emits "connecting" and
+  /// returns WITHOUT issuing a parallel invite. Doubling the rate doubles the number of times we ask
+  /// "should I act yet?", not the number of invites. It never touches the transports — a fast tick
+  /// that restarted the browser is the discovery storm, and a test forbids it.
+  private static let followerWatchdogInterval: TimeInterval = 0.5
   /// One-shot snapshot-recovery probe delay. MPC can drop the first reliable send right at
   /// .connected, so if the director's proactive snapshot AND the follower's first hello both
   /// land in that fragile window, the follower would otherwise wait a full followerHelloInterval
@@ -108,6 +140,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var followerWatchdogTimer: Timer?
   private var lastFollowerHelloAt: TimeInterval = 0
   private var lastFollowerPageReceivedAt: TimeInterval = 0
+  /// When this follower started hunting with nothing connected. 0 means "not hunting".
+  private var followerHuntingSince: TimeInterval = 0
+  /// Keeps the BLE radios alive independently of every mesh timer. See startBleHealthTimer.
+  private var bleHealthTimer: Timer?
   private var currentPageNumber: Int?
   private var currentTotalPages: Int = 0
   private var currentMode = ""
@@ -133,14 +169,75 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// question every proposed rewrite depends on: how fast does a page reach a follower when there
   /// is no handshake to fail? Pair `ble:page-send` with `ble:page-recv` in stress-analyze.
   private let bleBeacon = BlePageBeacon()
-  private var bleSeq = 0
   /// Book context last seen from a MESH page. BLE carries only a page number, so it renders only
   /// once we know which book that number refers to.
   private var lastKnownTotalPages = 0
   private var lastKnownMode = ""
-  private var lastKnownBookId = ""
+  /// THE ONLY BOOK. Pinned, not discovered.
+  ///
+  /// This was "" until a MESH page arrived, and the BLE handler refused to apply anything while it
+  /// was empty — so the connectionless channel could only ever work AFTER the handshake channel had
+  /// already succeeded. That inverted the whole point of having it. BLE needs no browse, no invite,
+  /// no session and no peer identity, which is to say none of the machinery that failed all day on
+  /// 2026-08-17; and it is the faster one on the numbers that matter (measured across five devices:
+  /// BLE 0.10-0.18 s median, 0.83 s WORST, versus a mesh worst case of 112 s). Gating it behind the
+  /// mesh meant the reliable path was switched off exactly when the unreliable one broke.
+  ///
+  /// The gate guarded a real ambiguity once: with two books a bare page number was meaningless, and
+  /// guessing wrong yanked a follower onto the wrong hymnal. That ended on 2026-07-02 — the app has
+  /// been single-book since, pinned in PdfReaderApp.tsx ("the only book is the standard (Alvernia)
+  /// manual"), in web/src/app.js (`currentBook: "standard"`), and in the manifest, which ships one
+  /// book of 372 pages. A page number is now unambiguous, so the guard protects nothing and costs
+  /// the whole fallback.
+  ///
+  /// Still updated from mesh pages below — if a second book ever returns, this is the one line to
+  /// revisit, and the BLE payload would need to carry the book id before it could stay ungated.
+  /// REVERTED 2026-08-17, same night it shipped. This was pinned to "standard" so the BLE channel
+  /// could render without waiting for a mesh page — correct in principle (BLE has no handshake and
+  /// is the faster path) and WRONG as shipped, because BLE has no freshness guarantee.
+  ///
+  /// Observed on the owner's fleet within minutes of build 444: every device rendered song 357,
+  /// then corrected to 101. A cached/leftover BLE advertisement from an earlier session was applied
+  /// because the monotonic guard cannot reject it — `bleSeq` restarts at 0 on every director launch
+  /// and a follower's `bleAppliedSeq` starts at -1, so the FIRST reading after launch always passes
+  /// whatever its age. The mesh then corrected it (see "mesh is authoritative" below), which is why
+  /// it presented as a flash of the wrong song rather than a stuck one.
+  ///
+  /// Persisting the seq does not fix it: seq is PER-DEVICE, so a follower that had applied 1743
+  /// from one director would reject a different director starting at 13, forever. Making BLE safe
+  /// to render first needs a director-scoped nonce with a freshness window, in a payload iOS limits
+  /// to two fields — a real design, not a one-line pin.
+  ///
+  /// So the gate returns: empty until a mesh page establishes context. BLE stays a fast follower of
+  /// the mesh rather than an independent source. A wrong song on screen in front of a congregation
+  /// is worse than a slow one.
+  /// Pinned to the single book so BLE can render WITHOUT waiting for a mesh page.
+  ///
+  /// Build 444 tried this and had to be reverted the same night: devices flashed song 357 before
+  /// correcting to 101. The cause was NOT the pin — it was that BlePageBeacon.stopPublishing()
+  /// existed but was never called, so a device that had once directed advertised its last page
+  /// forever, and followers read that ghost. resetTransport now stops the beacon on every role
+  /// change, becoming a follower stops it explicitly, and the advertisement carries a per-session
+  /// nonce so a scanner rebases instead of mis-ordering seqs across sessions. Legacy two-field
+  /// advertisements (builds 433-445, which never stop) are rejected outright.
+  ///
+  /// With no stale beacon possible, the reason for the mesh-first gate is gone — and the gate was
+  /// costing the entire fallback. BLE has no handshake, which is where EVERY failure found on
+  /// 2026-08-17 lived, and it is the faster path on the number that matters: 0.83 s worst case
+  /// across five devices, against a mesh worst case of 112 s.
+  ///
+  /// Still updated from mesh pages below; if a second book ever returns, this pin is wrong and the
+  /// BLE payload must carry a book id.
+  private var lastKnownBookId = "standard"
   private var bleLastSeenSeq = -1
   private var bleAppliedSeq = -1
+  /// The advertising session bleAppliedSeq belongs to. WITHOUT THIS, BLE NEVER HELPED ANYONE.
+  /// bleSeq restarts at 0 on every director launch, so a follower holding bleAppliedSeq = 50 from a
+  /// previous director rejected seq 1, 2, 3 … from the next one and stayed silent for ~50 page turns
+  /// — indistinguishable from BLE being switched off, which is how it looked on the fleet.
+  /// BlePageBeacon already rebased on a new nonce internally (build 448); this second guard, one
+  /// layer up, never learned about nonces. The fix was half-landed for four builds.
+  private var bleAppliedNonce = ""
 
   // ── Telemetry batching state (build 436) ─────────────────────────────────────
   /// Serial queue guarding `logBuffer` + `logSuspended`. dbgLog is called from MCSession and
@@ -302,7 +399,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       .map { "\($0.key)=\($0.value)" }
       .sorted()
       .joined(separator: " ")
-    Self.deviceLog.info(
+    // .notice, NOT .info. os_log's .info and .debug levels are MEMORY-ONLY by default: they are
+    // visible in a live Console.app stream but are never written to the persistent store, so
+    // `log collect` and `sysdiagnose` return nothing. Build 438 shipped this as .info, which made
+    // the whole channel useless for the exact case it was built for — reading a device AFTER the
+    // fact, offline, when it was never on a network. Confirmed by converting a real 440 archive:
+    // zero com.cazares.signovivo entries. .notice is the lowest level that persists by default.
+    Self.deviceLog.notice(
       "\(self.currentRole, privacy: .public) \(self.localPeerID?.displayName ?? "?", privacy: .public) \(event, privacy: .public) \(extras, privacy: .public)"
     )
 
@@ -641,7 +744,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.currentRole = "director"
       self.currentSessionCode = normalizedSessionCode
       self.currentDirectorToken = Self.randomToken()
+      self.bleBeacon.primeRadios()   // belt-and-braces: a director that never passed through startFollower
       self.configureTransport()
+      self.startBleHealthTimer()
       self.startAdvertising()
       self.startBrowsing()
       self.startDiscoveryRefreshTimer()
@@ -684,9 +789,26 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // is unrecoverable, so this no-ops until a mesh page has told us which book we are in.
       // (2) Monotonic: never apply an older seq than one already applied, so a stale advertisement
       // cannot drag a follower backwards.
-      self.bleBeacon.onPage = { [weak self] page, seq in
+      self.bleBeacon.onPage = { [weak self] page, seq, nonce in
         guard let self = self, self.currentRole == "follower" else { return }
         self.bleLastSeenSeq = seq
+        // A NEW ADVERTISER RESETS THIS GUARD TOO. seq is per-session and restarts at 0, so comparing
+        // it across directors is meaningless — the beacon rebases for exactly this reason and now
+        // says so out loud by handing us the nonce.
+        //
+        // Safe to trust a nonce change today in a way it was not when this guard was written:
+        // parse() rejects the legacy 2-field format outright, so pre-448 devices (the ones that
+        // never stopped advertising) cannot reach here at all, and 448 wired stopPublishing() into
+        // resetTransport() so a device that stops directing stops advertising. The stale-advertiser
+        // case that produced the 444 wrong-song flash is closed on both sides.
+        if nonce != self.bleAppliedNonce {
+          self.bleAppliedNonce = nonce
+          self.bleAppliedSeq = -1
+          self.dbgLog("ble:rebase", ["nonce": nonce, "page": page, "seq": seq])
+        }
+        // Unreachable now that the book is pinned above, and kept deliberately: if a future
+        // change ever blanks the id, refusing to render a page whose book is unknown is still the
+        // right call. `ble:skip-no-book` appearing in telemetry would mean that regression.
         guard !self.lastKnownBookId.isEmpty else {
           self.dbgLog("ble:skip-no-book", ["page": page, "seq": seq])
           return
@@ -695,10 +817,20 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.bleAppliedSeq = seq
         self.dbgLog("ble:page-apply", ["page": page, "seq": seq])
         self.emitPage(page: max(1, page), totalPages: self.lastKnownTotalPages,
-                      mode: self.lastKnownMode, bookId: self.lastKnownBookId)
+                      mode: self.lastKnownMode, bookId: self.lastKnownBookId, src: "ble")
       }
+      // A FOLLOWER MUST NEVER ADVERTISE. Belt-and-braces alongside resetTransport: whatever path
+      // reached this role, stop publishing before we start listening.
+      self.bleBeacon.stopPublishing()
+      // Warm BOTH radios now, not when they are first needed. A follower may become the director a
+      // second later, and creating the peripheral inside publish() put CoreBluetooth's power-on
+      // between the tap and the page reaching the air.
+      self.bleBeacon.primeRadios()
       self.bleBeacon.startScanning()
       self.configureTransport()
+      self.startBleHealthTimer()
+      // Start the 1 Hz pulse NOW, not on .connected — hunting is exactly when it has work to do.
+      self.startFollowerWatchdog()
       self.startAdvertising()
       self.startBrowsing()
       self.startDiscoveryRefreshTimer()
@@ -881,6 +1013,23 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   // Lightweight discovery refresh exposed to JS — restarts browser+advertiser without
   // tearing down existing MCSession connections. Used for the first tap on the reconnect
   // button so followers can re-find the director without dropping the current session.
+  /// The split-brain kick from becomeDirector. Browser-only ON PURPOSE — see refreshBrowserOnly.
+  /// A brand-new director must find rivals fast; it must NOT stop being findable to do it, because
+  /// every follower is inviting it at exactly that moment.
+  @objc(refreshDirectorBrowse:rejecter:)
+  func refreshDirectorBrowse(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole != "off" else { resolve(nil); return }
+      self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+      self.refreshBrowserOnly()
+      self.scheduleNextDiscoveryRefresh()
+      resolve(nil)
+    }
+  }
+
   @objc(refreshNearbyDiscovery:rejecter:)
   func refreshNearbyDiscovery(
     _ resolve: @escaping RCTPromiseResolveBlock,
@@ -983,9 +1132,16 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // BLE PROBE — published before the connected-peers guard on purpose. The mesh gives up here
       // when nobody is attached; a beacon does not care whether anyone is listening, which is
       // exactly the property being measured.
-      self.bleSeq += 1
+      // The beacon owns its own seq now. This used to pass bleSeq, which THIS function bumps once
+      // per second via the director heartbeat rather than once per page turn — an ever-growing
+      // number inside a fixed-size advertisement.
       self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
-      self.bleBeacon.publish(page: self.currentPageNumber ?? page.intValue, seq: self.bleSeq)
+      self.bleBeacon.publish(page: self.currentPageNumber ?? page.intValue)
+      // The heartbeat reaches here once a second whether or not the page moved, which makes it the
+      // natural place to re-assert an advertisement that stopped without us asking. publish() alone
+      // cannot do it: it early-returns on an unchanged page, so a director that went dark would stay
+      // dark until the next page turn.
+      self.bleBeacon.ensureAdvertising()
       let connected = self.allConnectedPeers
       guard !connected.isEmpty else {
         self.emitState(status: "waiting-followers")
@@ -1021,10 +1177,77 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   // MARK: - Transport setup
 
+  /// This device's peer name, STABLE for the life of the install.
+  ///
+  /// It used to be minted fresh on every call to configureTransport — `UIDevice.name` plus a random
+  /// UUID prefix — and configureTransport runs on EVERY role transition (startDirector,
+  /// startFollower, approveDirectorTakeover). So a device became a stranger to the whole mesh every
+  /// time it changed role.
+  ///
+  /// MEASURED on the owner's fleet, build 440, from mPad's own unified log:
+  ///
+  ///     21:06:26  advertising as iPad-92A6C5
+  ///     21:08:07  advertising as iPad-CF034B     <- same iPad, two minutes later
+  ///     21:08:34  advertising as iPad-AE6CD6     <- and again
+  ///
+  ///     11 distinct peer identities for a 4-device fleet
+  ///
+  /// That is fatal for sync, because a follower tracks its director by MCPeerID
+  /// (connectedDirectorPeer, discoveredDirectors). WHEN THE DIRECTOR RENAMES ITSELF IT SILENTLY
+  /// ABANDONS EVERY FOLLOWER: they go on hunting a peer that no longer exists while a "new" director
+  /// they have never seen appears beside it. It is also what produced the apparent split-brain in
+  /// that capture — iPad-92A6C5 and iPad-AE6CD6 are the SAME iPad, not two directors.
+  ///
+  /// The random suffix itself is NOT the mistake and must stay: since iOS 16, UIDevice.name returns
+  /// a generic "iPad"/"iPhone" to apps without a special entitlement, so every device in the loft
+  /// would advertise the same displayName and collide. It only has to be stable, so it is generated
+  /// once and persisted.
+  private var stablePeerName: String {
+    let key = "sv.peerNameSuffix"
+    let defaults = UserDefaults.standard
+    let suffix: String
+    if let saved = defaults.string(forKey: key), !saved.isEmpty {
+      suffix = saved
+    } else {
+      suffix = String(UUID().uuidString.prefix(6))
+      defaults.set(suffix, forKey: key)
+    }
+    let rawName = UIDevice.current.name.isEmpty ? "SignoVivo" : UIDevice.current.name
+    // 63 is MCPeerID's hard limit; leave room for the "-XXXXXX" suffix.
+    let peerName = String(rawName.prefix(50))
+    return "\(peerName)-\(suffix)"
+  }
+
+  /// The archived MCPeerID for this install.
+  ///
+  /// A stable NAME is not sufficient. Apple's documentation is explicit that an MCPeerID's identity
+  /// is the object, not its displayName — two MCPeerIDs created independently with the same name are
+  /// not the same peer to Multipeer's bookkeeping — and that a peer ID must be ARCHIVED to be stable
+  /// across launches. resetTransport() sets localPeerID = nil and runs at the top of startDirector
+  /// and approveDirectorTakeover, so an in-memory cache alone would still mint a new peer on exactly
+  /// the transitions this is meant to survive.
+  ///
+  /// Falls back to a fresh peer on any archive failure rather than refusing to start: a device that
+  /// cannot read its own UserDefaults must still be able to join the mesh, and a fresh identity is
+  /// the pre-existing behaviour, not a regression.
+  private func loadOrCreatePeerID() -> MCPeerID {
+    let key = "sv.peerID.v1"
+    let defaults = UserDefaults.standard
+    if let data = defaults.data(forKey: key),
+       let restored = try? NSKeyedUnarchiver.unarchivedObject(ofClass: MCPeerID.self, from: data) {
+      return restored
+    }
+    let created = MCPeerID(displayName: stablePeerName)
+    if let data = try? NSKeyedArchiver.archivedData(withRootObject: created, requiringSecureCoding: true) {
+      defaults.set(data, forKey: key)
+    }
+    return created
+  }
+
   private func configureTransport() {
-    let rawName = UIDevice.current.name.isEmpty ? UUID().uuidString : UIDevice.current.name
-    let peerName = String(rawName.prefix(50)) // MCPeerID displayName hard limit is 63 chars
-    let peerID = MCPeerID(displayName: "\(peerName)-\(UUID().uuidString.prefix(6))")
+    // The SAME peer, every time. Reconfiguring the transport must not change who this device IS —
+    // only how it is talking.
+    let peerID = localPeerID ?? loadOrCreatePeerID()
     localPeerID = peerID
 
     // Create first session (director will lazily create second when first fills up)
@@ -1062,6 +1285,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     b.startBrowsingForPeers()
     browser = b
     browserFailureCount = 0
+    // A BRAND-NEW BROWSER IS ALREADY AS FRESH AS A REFRESH CAN MAKE IT.
+    //
+    // startDirector calls startBrowsing directly, and becomeDirector then kicks a re-browse
+    // milliseconds later for split-brain convergence — which tore that browser down and rebuilt it,
+    // discarding any peer it had already found, to achieve a state it was already in. Stamping the
+    // refresh clock here makes the existing minRefreshInterval throttle suppress that automatically,
+    // for every caller, instead of each one having to know how old the browser is.
+    lastRefreshAt = Date().timeIntervalSince1970
   }
 
   // Adaptive discovery refresh: fast burst for the first earlyRefreshCycleCount cycles,
@@ -1074,6 +1305,29 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   private func scheduleNextDiscoveryRefresh() {
+    // FIX 1 — THE TIMER LEAK THAT CAUSED THE DISCOVERY STORM (measured 2026-08-17).
+    //
+    // This assigned `discoveryRefreshTimer` WITHOUT invalidating the previous timer. A
+    // Timer.scheduledTimer retains itself in the run loop, so overwriting the property does not
+    // stop the old one — it only loses the handle. The orphan still fires, and its callback
+    // schedules another. Ten call sites reach this function and only startDiscoveryRefreshTimer
+    // invalidated first, so the live timer population DOUBLED on every overlapping schedule.
+    //
+    // The biggest doubler was foregrounding: refreshNearbyDiscovery schedules without
+    // invalidating, and PdfReaderApp.tsx called it TWICE per foreground. Pick a device up, put it
+    // down, repeat, and the rate compounds.
+    //
+    // Measured on the owner's iPhone from its own unified log: 66 advertiser start/stop events per
+    // SECOND, sustained — ~33 full teardown/rebuild cycles a second against an intended one every
+    // 5-12 s. An MCSession invite cannot complete when the advertiser it must answer on lives ~15
+    // ms, which is exactly the "handshake fails, delivery is fine" signature recorded in issue
+    // #352. That issue holds EIGHT disproved theories — discovery backoff, the M-F1 clock, a render
+    // -layer bug, radio duty-cycling, AWDL/iOS incompatibility — every one of them about the
+    // device. It was a missing invalidate(), and it explains why the iPhone was worst: it is the
+    // device that gets picked up and put down all day.
+    discoveryRefreshTimer?.invalidate()
+    discoveryRefreshTimer = nil
+
     let generation = resetGeneration
     let interval: TimeInterval
     if earlyRefreshCyclesRemaining > 0 {
@@ -1111,6 +1365,35 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
              Date().timeIntervalSince1970 - self.pendingInviteTimestamp < Self.inviteTimeout {
             self.dbgLog("refresh:hold-connecting", ["target": self.pendingInvitePeer?.displayName ?? ""])
             self.reconsiderFollowerTarget() // maintain/re-issue the invite on the LIVE browser
+            self.scheduleNextDiscoveryRefresh()
+            return
+          }
+
+          // STABILITY PROTECTION FOR THE FOLLOWER'S BROWSER — the mirror of the director's rule
+          // below, and the fix for slow convergence measured on the owner's fleet with build 445:
+          // followers DID converge (the ghost-peer fix worked) but took 10-20+ s, against a
+          // standard of "longer than a few seconds is a failure".
+          //
+          // refreshDiscovery() now clears every discovered peer, because an MCPeerID dies with the
+          // browser that found it. That is correct and it stopped the ghost invites. But it runs on
+          // a fixed 5-12 s tick REGARDLESS of whether the browser is working, so a follower that had
+          // found the director and was about to invite it got its discovery wiped and started over.
+          // Convergence became "however many cycles until an invite happens to fit inside one
+          // window" — 5 s, 10 s, 20 s. Exactly the numbers observed.
+          //
+          // The rule is the same one the director already follows: DO NOT RESTART A TRANSPORT THAT
+          // IS DEMONSTRABLY WORKING. A browser that produced a sighting seconds ago is not wedged,
+          // and restarting it destroys the only progress the follower has. The refresh exists to
+          // recover a browser that has gone deaf; it should fire when that is actually in evidence.
+          //
+          // Bounded on purpose: the hold lasts only while sightings keep arriving. If the director
+          // truly disappears, sightings stop, this guard lapses within browserHealthySeconds and the
+          // normal refresh resumes — so a genuinely dead browser still gets rebuilt.
+          if self.currentRole == "follower", self.connectedDirectorPeer == nil,
+             let newest = self.discoveredDirectorSeenAt.values.max(),
+             Date().timeIntervalSince1970 - newest < Self.browserHealthySeconds {
+            self.dbgLog("refresh:hold-browsing", ["seenAgo": Int(Date().timeIntervalSince1970 - newest)])
+            self.reconsiderFollowerTarget() // act on what the LIVE browser already found
             self.scheduleNextDiscoveryRefresh()
             return
           }
@@ -1214,6 +1497,27 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   /// Fast half-open watchdog — see followerStaleReconnectSeconds. Runs only while a follower is
   /// connected; forces a reconnect the moment the director's heartbeat stream goes silent.
+  /// BLE IS THE SUB-1s PATH, SO ITS HEALTH MUST NOT DEPEND ON THE MESH.
+  ///
+  /// ensureScanning lived on the follower watchdog, which stops on disconnect, on backgrounding and
+  /// on every transport reset — so the fast path went deaf at exactly the moments the slow path was
+  /// already struggling, which is when it was the only thing still working. Coupling a fallback to
+  /// the health of the thing it is a fallback FOR defeats the point of having one.
+  ///
+  /// This timer runs for BOTH roles, from configureTransport until resetTransport, regardless of
+  /// sessions, peers or connection state. It costs two bool reads a second.
+  private func startBleHealthTimer() {
+    bleHealthTimer?.invalidate()
+    let generation = resetGeneration
+    bleHealthTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      DispatchQueue.main.async {
+        guard let self = self, self.resetGeneration == generation, self.appIsActive else { return }
+        if self.currentRole == "director" { self.bleBeacon.ensureAdvertising() }
+        else if self.currentRole == "follower" { self.bleBeacon.ensureScanning() }
+      }
+    }
+  }
+
   private func startFollowerWatchdog() {
     followerWatchdogTimer?.invalidate()
     let generation = resetGeneration
@@ -1221,8 +1525,62 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       DispatchQueue.main.async {
         autoreleasepool {
           guard let self = self, self.resetGeneration == generation, self.appIsActive,
-                self.currentRole == "follower", self.connectedDirectorPeer != nil,
-                self.lastFollowerPageReceivedAt > 0 else { return }
+                self.currentRole == "follower" else { return }
+
+          // BLE IS THE FAST PATH AND MUST NOT GO DEAF QUIETLY. If iOS stops the scan without a
+          // callback, the beacon's own `isScanning` bool stays true and its guard refuses to restart
+          // it — a follower deaf for the rest of the session while believing it is listening. This
+          // asks CoreBluetooth for the truth every tick, which costs a bool read.
+          self.bleBeacon.ensureScanning()
+
+          // LAST RESORT: rebuild the session when retrying the invite is provably not working.
+          //
+          // Everything above this retries the HANDSHAKE. None of it can fix a wedged MCSession —
+          // the same broken session produces the same result no matter how many invites go into it,
+          // which is how a follower sits at "connecting" indefinitely with the director plainly
+          // visible. That is the state the resync button exists for; this reaches it without
+          // needing a human to notice, once, after a deliberately generous window.
+          //
+          // Gated on a director actually being IN SIGHT: if nothing is discovered the problem is
+          // discovery, and rebuilding the session would churn for no reason. The clock resets on
+          // every escalation, so this is bounded to one rebuild per window and cannot storm.
+          if self.connectedDirectorPeer == nil, self.followerHuntingSince > 0,
+             !self.discoveredDirectors.isEmpty {
+            let hunting = Date().timeIntervalSince1970 - self.followerHuntingSince
+            if hunting > Self.followerWedgedSeconds {
+              self.dbgLog("watchdog:wedged-rebuild", [
+                "huntingSec": Int(hunting), "visibleDirectors": self.discoveredDirectors.count,
+              ])
+              self.followerHuntingSince = Date().timeIntervalSince1970
+              self.forceFollowerReconnect(staleFor: hunting)
+              return
+            }
+          }
+
+          // NOT CONNECTED: retry the handshake every tick until we are (owner's idea, 2026-08-17 —
+          // "sleep 1s, setTimerRepeating every 1s until synced").
+          //
+          // This timer already ran at 1 Hz; it just did nothing unless already connected, so the
+          // one state that needed a fast pulse — still hunting — was the one state it sat out.
+          //
+          // The dead time it removes is real and measured in the constants: a failed handshake
+          // waits out inviteTimeout (8 s) and then followerRetryDelay (2 s) before anything tries
+          // again, so ~10 s of a 10-20 s convergence was a follower doing nothing at all.
+          //
+          // Safe at 1 Hz because reconsiderFollowerTarget is idempotent by construction: it returns
+          // immediately when already connected, and while an invite is inside its timeout window it
+          // emits "connecting" and returns WITHOUT issuing a parallel invite. So this pulses the
+          // retry without ever spamming invitePeer.
+          //
+          // Deliberately NOT a 1 Hz transport restart — that is the discovery storm (66 events/sec)
+          // and the cause of the slow convergence in the first place. The browser stays up and
+          // accumulates sightings; only the decision to act on them is re-evaluated.
+          guard self.connectedDirectorPeer != nil else {
+            self.reconsiderFollowerTarget()
+            return
+          }
+
+          guard self.lastFollowerPageReceivedAt > 0 else { return }
           let stale = Date().timeIntervalSince1970 - self.lastFollowerPageReceivedAt
           if stale > Self.followerStaleReconnectSeconds {
             self.forceFollowerReconnect(staleFor: stale)
@@ -1252,8 +1610,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     connectedDirectorPeer = nil
     pendingInvitePeer = nil
     lastFollowerPageReceivedAt = 0
+    followerHuntingSince = Date().timeIntervalSince1970
     stopFollowerHelloTimer()
-    stopFollowerWatchdog() // restarts cleanly on the next .connected
+    // RESTART the watchdog, do not stop it. It used to stop here "and restart cleanly on the next
+    // .connected" — but this function runs precisely when we are NOT connected, so the 0.5 Hz pulse
+    // that retries the handshake died at the exact moment it was needed, and stayed dead until a
+    // connection it was supposed to help produce. Since 2026-08-18 it also drives the BLE scan
+    // self-heal, so stopping it here went deaf as well as blind. startFollowerWatchdog invalidates
+    // any existing timer first, so restarting is idempotent.
+    startFollowerWatchdog()
     startSelfDirectedTimer()
     emitState(status: "searching", message: "Reconectando con el director...")
     // M-F5: the watchdog can fire because the director genuinely LEFT (not just a data half-open),
@@ -1317,21 +1682,123 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
+  // ── Discovery churn: hard floor + loop alarm ─────────────────────────────────
+  //
+  // Fix 1 (the invalidate above) removes the KNOWN driver of the storm. These two are the safety
+  // net for the unknown ones, at the owner's instruction: throttle it anyway, and make it shout.
+  // Ten call sites can reach refreshDiscovery, several from JS, so "no caller misbehaves" is not a
+  // property this code can assume — Murphy's Law applies to our own call graph.
+
+  /// No caller may tear down the transports faster than this, ever. 2 s is far below the intended
+  /// 5-12 s cadence so it never interferes with correct behaviour, and far above the ~15 ms
+  /// observed during the storm, so it converts a pathological loop into a survivable one: a
+  /// handshake gets whole seconds to complete instead of milliseconds.
+  private static let minRefreshInterval: TimeInterval = 2.0
+  private var lastRefreshAt: TimeInterval = 0
+
+  /// Loop alarm. Refreshes are DESIGNED to happen every 5-12 s, so more than 8 attempts inside 10 s
+  /// cannot be legitimate — it means something is driving this in a loop.
+  private static let refreshStormWindow: TimeInterval = 10
+  private static let refreshStormThreshold = 8
+  private var refreshAttemptTimes: [TimeInterval] = []
+  /// Latched so the alarm reports ONCE per episode rather than 33 times a second — an alarm that
+  /// floods the log is indistinguishable from the fault it is reporting. Re-arms when things calm.
+  private var refreshStormReported = false
+
+  /// Re-browse WITHOUT going invisible.
+  ///
+  /// THE BUG THIS EXISTS FOR. becomeDirector kicks refreshNearbyDiscovery() the instant it starts
+  /// serving, to make a split brain converge fast. That lands in refreshDiscovery(), whose first act
+  /// is to destroy the advertiser — at precisely the moment every follower's foundPeer has fired and
+  /// their invites are in flight. Those invites evaporate silently.
+  ///
+  /// This codebase already diagnosed the mirror-image case on the FOLLOWER side and guarded it:
+  /// "NEVER tear down the advertiser/browser while a connection is actively being established …
+  /// makes this device's advertiser vanish, firing a spurious lostPeer on the peer, so the MCSession
+  /// never reaches .connected". The director had no equivalent protection while doing the same thing
+  /// to everyone trying to reach it.
+  ///
+  /// The split-brain purpose only ever needed the BROWSER — finding other directors. Stopping being
+  /// findable was never part of the intent, just a side effect of reusing the full refresh.
+  private func refreshBrowserOnly() {
+    guard currentRole != "off" else { return }
+    let now = Date().timeIntervalSince1970
+    guard now - lastRefreshAt >= Self.minRefreshInterval else { return }
+    lastRefreshAt = now
+    autoreleasepool {
+      browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
+      // Same reasoning as refreshDiscovery: an MCPeerID is meaningful only to the browser instance
+      // that found it, so everything discovered by the old browser is a ghost. The advertiser is
+      // untouched, so peers mid-invite to US keep their target.
+      let forgotten = discoveredDirectors.count + discoveredFollowers.count
+      discoveredDirectors.removeAll(); discoveredDirectorSeenAt.removeAll()
+      discoveredDirectorInfo.removeAll()
+      discoveredFollowers.removeAll(); discoveredFollowerInfo.removeAll()
+      if forgotten > 0 { dbgLog("refresh:browser-only", ["forgotten": forgotten]) }
+      startBrowsing()
+    }
+  }
+
   private func refreshDiscovery() {
     guard currentRole != "off" else { return }
-    autoreleasepool {
-      // Prune directors that haven't been seen by the browser in over 90 s (stale MPC state).
-      let now = Date().timeIntervalSince1970
-      let stale = discoveredDirectorSeenAt.filter { now - $0.value > 90 }.map { $0.key }
-      for key in stale {
-        discoveredDirectors.removeValue(forKey: key)
-        discoveredDirectorSeenAt.removeValue(forKey: key)
-        discoveredDirectorInfo.removeValue(forKey: key)
-        discoveredFollowers.remove(key)
-        discoveredFollowerInfo.removeValue(forKey: key)
+    let now = Date().timeIntervalSince1970
+
+    // ALARM — count every ATTEMPT, including ones the throttle below will drop. Counting only the
+    // ones that got through would hide the loop behind the very guard that contains it, which is
+    // how a throttle turns a loud bug into a silent one.
+    refreshAttemptTimes.append(now)
+    refreshAttemptTimes.removeAll { now - $0 > Self.refreshStormWindow }
+    if refreshAttemptTimes.count > Self.refreshStormThreshold {
+      if !refreshStormReported {
+        refreshStormReported = true
+        dbgLog("refresh:STORM", [
+          "attempts": refreshAttemptTimes.count,
+          "windowSec": Int(Self.refreshStormWindow),
+          "role": currentRole,
+        ])
       }
+    } else if refreshAttemptTimes.count <= 2 {
+      refreshStormReported = false
+    }
+
+    // THROTTLE — silent by design. The alarm above is the signal; logging every dropped call would
+    // reproduce the flood at the telemetry layer.
+    guard now - lastRefreshAt >= Self.minRefreshInterval else { return }
+    lastRefreshAt = now
+
+    autoreleasepool {
       advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
       browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
+
+      // A REMEMBERED PEER DIES WITH THE BROWSER THAT FOUND IT.
+      //
+      // An MCPeerID is only meaningful to the MCNearbyServiceBrowser instance that discovered it.
+      // The new browser created below starts with an EMPTY peers dictionary, so every peer still
+      // sitting in these maps is a ghost — and reconsiderFollowerTarget invites straight out of
+      // discoveredDirectors (:invitePeer, "Pick the HIGHEST token"). Inviting a ghost through a
+      // browser that never saw it does not fail loudly; Multipeer just logs
+      //
+      //     Cannot find peer with idString [2gbyj11r6mftw] in the peers dictionary.
+      //
+      // ...and the invite evaporates. No error, no delegate callback, no session. Which is exactly
+      // the symptom that survived six builds: discovery works perfectly, every peer is found at
+      // -37 dBm, and nothing ever connects.
+      //
+      // The maps used to be pruned only at 90 s, more than SEVEN browser generations. That made
+      // connecting a race — an invite succeeded only when it happened to fire in the same
+      // generation that discovered the target — which is why exactly one device would follow while
+      // the rest sat there, and why it looked maddeningly intermittent.
+      //
+      // Clearing costs nothing: browsing restarts on the next line and a live peer is re-found in
+      // well under a second, whereas a stale one can never be connected to at all. connectedPeers
+      // is unaffected — an established MCSession is independent of the browser that introduced it,
+      // so a follower already attached to its director does not drop here.
+      let forgotten = discoveredDirectors.count + discoveredFollowers.count
+      discoveredDirectors.removeAll(); discoveredDirectorSeenAt.removeAll()
+      discoveredDirectorInfo.removeAll()
+      discoveredFollowers.removeAll(); discoveredFollowerInfo.removeAll()
+      if forgotten > 0 { dbgLog("refresh:peers-cleared", ["forgotten": forgotten]) }
+
       startAdvertising()
       startBrowsing()
     }
@@ -1352,6 +1819,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private func resetTransport(emitState shouldEmitState: Bool) {
     resetGeneration = UUID()
     discoveryRefreshTimer?.invalidate(); discoveryRefreshTimer = nil
+    bleHealthTimer?.invalidate(); bleHealthTimer = nil
     cancelSelfDirectedTimer()
     stopFollowerHelloTimer()
     stopFollowerWatchdog()
@@ -1359,6 +1827,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
     for s in mcSessions { s.disconnect(); s.delegate = nil }
     mcSessions = []
+    // STOP THE BEACON. resetTransport runs on every role change, and until now it never touched
+    // BlePageBeacon — so a device that had directed kept broadcasting its last page forever, even
+    // as a follower. That ghost advertisement is what build 444 rendered as song 357.
+    bleBeacon.stopPublishing()
     localPeerID = nil
     discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredDirectorInfo = [:]
     discoveredFollowers = []; discoveredFollowerInfo = [:]
@@ -1405,10 +1877,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     ] as [String: Any])
   }
 
-  private func emitPage(page: Int, totalPages: Int, mode: String, bookId: String) {
+  /// `src` NAMES WHICH CHANNEL DELIVERED THE PAGE — "mesh" or "ble".
+  ///
+  /// Both arrive at the web layer through this one event, so from JS they were indistinguishable.
+  /// That is why the 2026-08-18 "every device jumped to song 2, then reached 372 ten seconds later"
+  /// could not be attributed: nothing recorded whether song 2 came over BLE, the mesh, or the relay.
+  /// A page that appears in front of the choir with no record of where it came from is the hardest
+  /// class of bug to close, and it is one field to fix.
+  private func emitPage(page: Int, totalPages: Int, mode: String, bookId: String, src: String) {
     sendEvent(withName: Self.eventName, body: [
       "type": "page", "page": page, "totalPages": totalPages,
-      "mode": mode, "bookId": bookId, "sessionCode": currentSessionCode,
+      "mode": mode, "bookId": bookId, "sessionCode": currentSessionCode, "src": src,
     ] as [String: Any])
   }
 
@@ -1459,10 +1938,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         // After the window the director may have refreshed its advertiser and silently
         // rejected the invite without firing notConnected — force a fresh attempt.
         let elapsed = Date().timeIntervalSince1970 - pendingInviteTimestamp
-        if elapsed < Self.inviteTimeout {
+        if elapsed < Self.inviteRetryAfter {
           emitState(status: "connecting")
           return
         }
+        dbgLog("invite:retry", ["to": pending.displayName, "afterSec": Int(elapsed)])
         // Invite likely stale; fall through to retry below.
         pendingInvitePeer = nil
       } else if discoveredDirectors[pending] != nil {
@@ -1744,6 +2224,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             return
           }
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
+          self.followerHuntingSince = 0   // connected: stop the wedged-session countdown
           self.cancelSelfDirectedTimer()
           self.pauseDiscoveryRefreshWhileConnected()
           self.startFollowerHelloTimer()
@@ -1787,7 +2268,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           }
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
-          self.stopFollowerWatchdog()
+          // HUNTING RESUMES HERE, so the hunting pulse must too. This stopped the watchdog — the
+          // 0.5 Hz retry, the BLE scan self-heal and the wedged-session escalation all went with
+          // it — leaving reconnection to one retry at followerRetryDelay and then the 5-12s
+          // discovery cadence. Same mistake as forceFollowerReconnect, second location.
+          self.followerHuntingSince = Date().timeIntervalSince1970
+          self.startFollowerWatchdog()
           self.resumeDiscoveryRefreshAfterDisconnect()
           // Give the director a grace window to reconnect before going self-directed.
           self.startSelfDirectedTimer()
@@ -1886,8 +2372,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.lastKnownTotalPages = max(0, totalPages)
         self.lastKnownMode = mode
         self.lastKnownBookId = bookId
-        self.bleAppliedSeq = self.bleLastSeenSeq   // mesh is authoritative; don't re-apply older BLE
-        self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId)
+        // Mesh is authoritative; don't re-apply older BLE from the SAME advertiser. A different
+        // advertiser still rebases in onPage above — otherwise this line would re-arm the exact
+        // bug it sits next to.
+        self.bleAppliedSeq = self.bleLastSeenSeq
+        self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId, src: "mesh")
       }
     }
   }

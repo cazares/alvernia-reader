@@ -18,7 +18,7 @@ import { decideBookUpdate } from "./bookArming.js";
 // Diagnostic ring-buffer sizing + run-length folding. Plain JS for the same reason as above:
 // this is the instrument every mesh diagnosis depends on, so it gets real tests.
 // @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
-import { foldLogEntries, logIntervalMs, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
+import { foldLogEntries, logIntervalMs, logLevel, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
 
 export interface Env {
   SYNC_ROOM: DurableObjectNamespace<SyncRoom>;
@@ -26,10 +26,15 @@ export interface Env {
   RELAY_DIRECTOR_TOKEN: string;
   /** Comma-separated allow-list for CORS on /state. "*" allows all (fine — no credentials). */
   ALLOWED_ORIGINS?: string;
-  /** Secret gating the /fleet readiness dashboard + roster (which expose choir phone numbers). Set
-   *  via `wrangler secret put FLEET_DASHBOARD_KEY`. This one STAYS: it guards a page listing the
-   *  parish's devices and phone numbers, which is a different thing from a page number. */
+  /** Gates reading and wiping the diagnostic log (GET/DELETE /log), which holds sync breadcrumbs.
+   *  Named for the fleet dashboard it used to guard; that dashboard was removed on 2026-08-18 but
+   *  this credential still has a job, so it stays. Renaming it would mean rotating a secret to fix
+   *  a comment. */
   FLEET_DASHBOARD_KEY?: string;
+
+  /** Daily budget for NON-ESSENTIAL requests (telemetry, fleet dashboard). Default 10000.
+   *  See nonEssentialBudget() — this is a reservation for signovivo.com, not a rate limit. */
+  NONESSENTIAL_DAILY_MAX?: string;
 
   /** How often a device should FLUSH its batched telemetry, in ms. Echoed on every POST /log
    *  response so the fleet can be throttled — or silenced with "0" — WITHOUT a TestFlight build.
@@ -44,6 +49,10 @@ export interface Env {
    *  scripts/telemetry-budget-sim.mjs: 15 s batching is a 4.8x cut with 100% of rows still
    *  delivered (87,258 -> ~18,000/day). Raising it cuts further; "0" stops the fleet dead. */
   LOG_INTERVAL_MS?: string;
+
+  /** Telemetry verbosity the fleet should log at: off | error | warn | info | debug (default off).
+   *  Echoed on POST /log, so this + `wrangler deploy` retunes every device in ~20s. */
+  LOG_LEVEL?: string;
 
   // ── Songbook OTA arming (docs/choir-pdf-distribution-plan.md §5.3) ─────────
   // SHIPPED DORMANT: with BOOK_UPDATE_VERSION empty the `bookUpdate` field never appears in any
@@ -90,43 +99,9 @@ const EMPTY_SNAPSHOT: Snapshot = {
   ts: 0,
 };
 
-// ── Fleet readiness (device pre-Mass check-in) ───────────────────────────────
-// A device self-reports (personId/label + role + native build and/or web-cache status) so the
-// director can see, before Mass, which iPads are ready and who to poke. Kept in ONE fixed DO
-// instance ("__fleet__"), separate from any sync room. NO phone numbers ever come from a device —
-// devices send only a self-entered label; phones live server-side in the roster (seeded once,
-// gated dashboard only) so the PUBLIC repo never carries anyone's number.
-type FleetDevice = {
-  deviceId: string; // stable per-install id (localStorage / AsyncStorage uuid)
-  label: string; // self-entered name ("Rita")
-  role: string; // Cantor | Cantor/Guitarrista | Bajo/Guitarrón | Director
-  surface: "web" | "native";
-  /** "PAD" | "PHN" — native only, resolved by the OS (Platform.isPad), never guessed from a UA. */
-  deviceKind?: string;
-  nativeBuild?: number; // native only
-  webCached?: boolean; // web only — offline bundle fully cached
-  pagesCached?: number; // web only
-  totalPages?: number;
-  homeScreen?: boolean; // web only — added to Home Screen (iOS keeps the cache past 7 days)
-  cacheVersion?: string;
-  // Which BOOK this device holds — distinct from nativeBuild, which is the SHELL's number and can
-  // read "current" over a songbook months old (defect D1). This is the only field that answers
-  // "did the update actually arrive?"
-  bookVersion?: string;
-  bundleSource?: string; // "baked" | "documents" — where the mounted bundle came from
-  bookStage?: string; // "active" | "downloading:37%" | "ready" | "error:disk" …
-  ts: number; // last check-in (unix seconds)
-};
-
-type RosterPerson = {
-  id: string;
-  name: string;
-  role: string;
-  phones: string[]; // server-side ONLY — never leaves the gated dashboard
-  director?: boolean;
-};
-
-// ────────────────────────────── Durable Object ──────────────────────────────
+/** A single device's OTA-relevant state — deliberately narrower than the old FleetDevice.
+ *  No label, no role, no phone-adjacent field can ever reach this shape. */
+type OtaDevice = { deviceId: string; bookVersion?: string; bookStage?: string; ts: number };
 
 export class SyncRoom extends DurableObject<Env> {
   private snapshot: Snapshot = EMPTY_SNAPSHOT;
@@ -259,106 +234,67 @@ export class SyncRoom extends DurableObject<Env> {
   }
 
   /** RPC: clear the diagnostic ring buffer. */
+  /** Count one non-essential request against today's budget and return the new total.
+   *
+   *  Deliberately counts BEFORE the caller decides, so the answer is "you are the Nth request today"
+   *  and a burst cannot slip through on a stale read. Keyed by UTC date because that is the boundary
+   *  Cloudflare resets the account quota on, so the two windows line up exactly.
+   *
+   *  One key, overwritten daily. Old days are dropped rather than accumulated: this is a meter, not
+   *  an audit log, and a growing history in a DO is another thing to pay for. */
+  async spendNonEssential(day: string, cap: number): Promise<number> {
+    const rec = (await this.ctx.storage.get<{ day: string; n: number }>("budget")) ?? { day, n: 0 };
+    if (rec.day !== day) { rec.day = day; rec.n = 0; }
+    rec.n += 1;
+    // Stop writing once well past the cap: the answer does not change, and a refused request should
+    // not keep paying for storage to say so.
+    if (rec.n <= cap + 100) await this.ctx.storage.put("budget", rec);
+    return rec.n;
+  }
+
+  /** RPC: record a device's OTA-relevant state. NARROW ON PURPOSE.
+   *
+   *  This restores what the deleted fleet dashboard's /fleet/checkin used to carry for free
+   *  (2026-08-18: "kill the fleet dashboard" removed the ONLY delivery path a device had for
+   *  learning about a new songbook, because arming was piggybacked on that endpoint's response —
+   *  see decideBookUpdate's call site in the pre-removal history). Restored as its OWN endpoint,
+   *  its OWN Durable Object instance ("__ota__", never "__fleet__"), and its OWN storage shape —
+   *  deviceId, bookVersion, bookStage, ts, nothing else — so there is no path back to storing a
+   *  label, a role, or anything PII-adjacent under this name. If a caller sends more fields, they
+   *  are silently dropped, not stored. */
+  async otaCheckin(input: unknown, ip = ""): Promise<{ ok: true }> {
+    if (this.rateLimited(ip, 10, 1)) return { ok: true };
+    const o = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+    const deviceId = String(o.deviceId ?? "").slice(0, 64);
+    if (!deviceId) return { ok: true };
+    const devices = (await this.ctx.storage.get<Record<string, OtaDevice>>("ota_devices")) ?? {};
+    const entry: OtaDevice = { deviceId, ts: Math.floor(Date.now() / 1000) };
+    if (o.bookVersion != null) entry.bookVersion = String(o.bookVersion).slice(0, 32);
+    if (o.bookStage != null) entry.bookStage = String(o.bookStage).slice(0, 40);
+    devices[deviceId] = entry;
+    // Same ring-cap idiom as the old fleet store: bounded, newest-first.
+    const kept = Object.values(devices).sort((a, b) => b.ts - a.ts).slice(0, 300);
+    const pruned: Record<string, OtaDevice> = {};
+    for (const d of kept) pruned[d.deviceId] = d;
+    await this.ctx.storage.put("ota_devices", pruned);
+    return { ok: true };
+  }
+
+  /** RPC: every device's OTA state, for decideBookUpdate's fleet-wide throttle count. */
+  async getOtaDevices(): Promise<OtaDevice[]> {
+    const devices = (await this.ctx.storage.get<Record<string, OtaDevice>>("ota_devices")) ?? {};
+    return Object.values(devices);
+  }
+
   async clearLog(): Promise<{ ok: true }> {
     await this.ctx.storage.put("dbglog", []);
     return { ok: true };
   }
 
-  // ── Fleet readiness RPCs (all on the fixed "__fleet__" instance) ──
+  // (The fleet readiness RPCs — putRoster / checkin / getFleet / resetFleet — were removed with the
+  //  dashboard on 2026-08-18. Rows already in the "__fleet__" instance are unreachable but not
+  //  deleted; removing code does not remove data.)
 
-  /** RPC: seed/replace the roster (names + phones + roles). Gated at the worker layer. Phones are
-   *  stored ONLY here — the public repo and device pings never carry them. Sanitized + capped. */
-  async putRoster(people: unknown[]): Promise<{ ok: true; count: number }> {
-    const clean: RosterPerson[] = (Array.isArray(people) ? people : [])
-      .slice(0, 200)
-      .map((p) => {
-        const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
-        return {
-          id: String(o.id ?? "").slice(0, 64),
-          name: String(o.name ?? "").slice(0, 80),
-          role: String(o.role ?? "").slice(0, 60),
-          phones: (Array.isArray(o.phones) ? o.phones : [])
-            .slice(0, 6)
-            .map((x) => String(x).slice(0, 40)),
-          director: Boolean(o.director),
-        };
-      })
-      .filter((p) => p.id || p.name);
-    await this.ctx.storage.put("roster", clean);
-    return { ok: true, count: clean.length };
-  }
-
-  /** RPC: a device reports its readiness. OPEN at the worker layer (devices hold no secret), so
-   *  every field is sanitized + length/range-capped here the same way publish() guards its input. */
-  async checkin(input: unknown, ip = ""): Promise<{ ok: true; total: number; rateLimited?: boolean }> {
-    // A2: cap check-in spam per IP so an attacker can't churn/evict real device readiness entries.
-    if (this.rateLimited(ip, 10, 1)) {
-      return { ok: true, total: 0, rateLimited: true };
-    }
-    const o = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
-    const deviceId = String(o.deviceId ?? "").slice(0, 64);
-    if (!deviceId) return { ok: true, total: 0 }; // can't key a device with no id — drop it
-    const devices =
-      (await this.ctx.storage.get<Record<string, FleetDevice>>("fleet_devices")) ?? {};
-    const prev = devices[deviceId] || ({} as Partial<FleetDevice>);
-    const surface: "web" | "native" =
-      o.surface === "native" ? "native" : o.surface === "web" ? "web" : prev.surface || "web";
-    const entry: FleetDevice = {
-      ...prev,
-      deviceId,
-      label: String(o.label ?? prev.label ?? "").slice(0, 60),
-      role: String(o.role ?? prev.role ?? "").slice(0, 60),
-      surface,
-      ts: Math.floor(Date.now() / 1000),
-    };
-    if (o.nativeBuild != null)
-      entry.nativeBuild = Math.max(0, Math.min(Number(o.nativeBuild) || 0, 1000000));
-    if (o.webCached != null) entry.webCached = Boolean(o.webCached);
-    if (o.pagesCached != null)
-      entry.pagesCached = Math.max(0, Math.min(Number(o.pagesCached) || 0, 100000));
-    if (o.totalPages != null)
-      entry.totalPages = Math.max(0, Math.min(Number(o.totalPages) || 0, 100000));
-    if (o.homeScreen != null) entry.homeScreen = Boolean(o.homeScreen);
-    if (o.cacheVersion != null) entry.cacheVersion = String(o.cacheVersion).slice(0, 40);
-    // WHICH KIND of native device. `surface` separates native from web; this separates two NATIVE
-    // devices, which nothing here could do before — deviceId is an opaque 6-char random, so an iPad
-    // on an old build was read as the owner's iPhone for an hour on 2026-08-05 while diagnosing a
-    // live rollout. Whitelisted rather than clamped: only the two values the client can send are
-    // stored, so a malformed or hostile body cannot put arbitrary text on the dashboard.
-    if (o.deviceKind === "PAD" || o.deviceKind === "PHN") entry.deviceKind = o.deviceKind;
-    // Book identity, following the existing clamp idiom exactly. WITHOUT THESE the rollout's
-    // "prove it on ONE iPad first" step has nothing to observe: a downloader failing silently on
-    // seven iPads looks identical to one that succeeded. Additive by construction — an older
-    // client simply omits them and the dashboard renders "versión desconocida".
-    if (o.bookVersion != null) entry.bookVersion = String(o.bookVersion).slice(0, 32);
-    if (o.bundleSource != null) entry.bundleSource = String(o.bundleSource).slice(0, 16);
-    if (o.bookStage != null) entry.bookStage = String(o.bookStage).slice(0, 40);
-    devices[deviceId] = entry;
-    // Ring-cap: keep the 300 most-recently-seen devices so storage can't grow unbounded.
-    const kept = Object.values(devices)
-      .sort((a, b) => b.ts - a.ts)
-      .slice(0, 300);
-    const pruned: Record<string, FleetDevice> = {};
-    for (const d of kept) pruned[d.deviceId] = d;
-    await this.ctx.storage.put("fleet_devices", pruned);
-    return { ok: true, total: kept.length };
-  }
-
-  /** RPC: roster (with phones) + all device check-ins, newest first. Gated at the worker layer. */
-  async getFleet(): Promise<{ roster: RosterPerson[]; devices: FleetDevice[] }> {
-    const roster = (await this.ctx.storage.get<RosterPerson[]>("roster")) ?? [];
-    const devices =
-      (await this.ctx.storage.get<Record<string, FleetDevice>>("fleet_devices")) ?? {};
-    return { roster, devices: Object.values(devices).sort((a, b) => b.ts - a.ts) };
-  }
-
-  /** RPC: wipe device check-ins (roster kept). For testing / a fresh season. */
-  async resetFleet(): Promise<{ ok: true }> {
-    await this.ctx.storage.put("fleet_devices", {});
-    return { ok: true };
-  }
-
-  /** WebSocket subscribe — must go through fetch() for the upgrade. */
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
@@ -468,166 +404,9 @@ const normName = (s: unknown): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
-// Only digits survive into a tel: href (defensive — the value is server-side roster data).
-const telHref = (phone: string): string => "tel:" + String(phone).replace(/[^0-9+]/g, "");
-
-function renderFleetDashboard(
-  data: { roster: RosterPerson[]; devices: FleetDevice[] },
-  k: string,
-  crashes: Array<Record<string, unknown>> = [],
-): string {
-  const roster = Array.isArray(data.roster) ? data.roster : [];
-  const devices = Array.isArray(data.devices) ? data.devices : [];
-  const nowSec = Math.floor(Date.now() / 1000);
-  const maxBuild = devices.reduce((m, d) => Math.max(m, Number(d.nativeBuild) || 0), 0);
-  const latest = Math.max(maxBuild, MIN_SYNC_BUILD);
-
-  const ago = (ts: number): string => {
-    const s = Math.max(0, nowSec - (Number(ts) || 0));
-    if (s < 90) return "ahora";
-    if (s < 3600) return `${Math.round(s / 60)} min`;
-    if (s < 86400) return `${Math.round(s / 3600)} h`;
-    return `${Math.round(s / 86400)} d`;
-  };
-  const devicesFor = (name: string): FleetDevice[] => {
-    const n = normName(name);
-    return n.length === 0 ? [] : devices.filter((d) => normName(d.label) === n);
-  };
-
-  type Row = { cls: "ok" | "warn" | "bad"; sort: number; html: string };
-  const rows: Row[] = roster.map((p) => {
-    const ds = devicesFor(p.name);
-    const bestBuild = ds.reduce((m, d) => Math.max(m, Number(d.nativeBuild) || 0), 0);
-    const webReady = ds.some((d) => d.webCached && d.homeScreen);
-    const webNoHome = ds.some((d) => d.webCached && !d.homeScreen);
-    const webPartial = ds.some((d) => !d.webCached && (Number(d.pagesCached) || 0) > 0);
-    const lastTs = ds.reduce((m, d) => Math.max(m, Number(d.ts) || 0), 0);
-
-    let cls: "ok" | "warn" | "bad" = "bad";
-    let action = "Onboarding pendiente";
-    if (ds.length === 0) {
-      cls = "bad";
-      action = "No se ha visto — invitar";
-    } else if (p.director) {
-      if (bestBuild >= latest) { cls = "ok"; action = `Listo — build ${bestBuild}`; }
-      else { cls = "bad"; action = `⚠ Director en build ${bestBuild || "—"} (debe ser ${latest})`; }
-    } else if (bestBuild >= MIN_SYNC_BUILD) {
-      cls = "ok"; action = `Listo — app ${bestBuild}`;
-    } else if (webReady) {
-      cls = "ok"; action = "Listo — web en caché";
-    } else if (webNoHome) {
-      cls = "warn"; action = "Agregar a inicio";
-    } else if (webPartial) {
-      cls = "warn"; action = "Reabrir para cachear";
-    } else if (bestBuild > 0) {
-      cls = "bad"; action = `Actualizar app (${bestBuild} &lt; ${MIN_SYNC_BUILD})`;
-    }
-    const sort = (cls === "bad" ? 0 : cls === "warn" ? 1 : 2) - (p.director ? 0.5 : 0);
-    const phoneHtml = (p.phones || [])
-      .map((ph) => `<a href="${escHtml(telHref(ph))}">${escHtml(ph)}</a>`)
-      .join(" ") || '<span class="muted">—</span>';
-    const nativeCell = bestBuild > 0 ? String(bestBuild) : '<span class="muted">—</span>';
-    // LIBRO — which SONGBOOK this person's device holds. The App column is the SHELL's build
-    // number and can read "current" over a book months old (defect D1), so it cannot answer
-    // "did the update arrive?". Amber "versión desconocida" for a client that omits the field,
-    // which is every client older than this build.
-    const bookDev = ds.find((d) => d.bookVersion) || null;
-    const stage = String(bookDev?.bookStage || "");
-    const libroCell = !bookDev
-      ? '<span class="muted">versión desconocida</span>'
-      : stage.startsWith("downloading") || stage === "ready"
-        ? `<span class="tag">${escHtml(stage)}</span> ${escHtml(String(bookDev.bookVersion).slice(3, 11))}`
-        : `${escHtml(String(bookDev.bookVersion).slice(3, 11))}${bookDev.bundleSource === "documents" ? ' <span class="muted">(descargado)</span>' : ""}`;
-    const webCell = webReady
-      ? "✓ inicio"
-      : webNoHome
-        ? "caché, sin inicio"
-        : webPartial
-          ? "parcial"
-          : '<span class="muted">—</span>';
-    const html = `<tr class="${cls}">
-      <td>${escHtml(p.name)}${p.director ? ' <span class="tag">Director</span>' : ""}</td>
-      <td class="muted">${escHtml(p.role)}</td>
-      <td>${nativeCell}</td>
-      <td>${libroCell}</td>
-      <td>${webCell}</td>
-      <td>${ds.length ? ago(lastTs) : '<span class="muted">nunca</span>'}</td>
-      <td>${phoneHtml}</td>
-      <td class="act">${action}</td>
-    </tr>`;
-    return { cls, sort, html };
-  });
-  rows.sort((a, b) => a.sort - b.sort);
-
-  const ready = rows.filter((r) => r.cls === "ok").length;
-  const warn = rows.filter((r) => r.cls === "warn").length;
-  const bad = rows.filter((r) => r.cls === "bad").length;
-
-  // Devices whose typed label matched no roster person (typo / guest) — surfaced so nobody is lost.
-  const rosterNames = new Set(roster.map((p) => normName(p.name)));
-  const orphans = devices.filter((d) => !rosterNames.has(normName(d.label)));
-  const orphanHtml = orphans.length
-    ? `<h3>Sin coincidencia en la lista (${orphans.length})</h3><table><thead><tr><th>Etiqueta</th><th>Rol</th><th>Origen</th><th>App</th><th>Web</th><th>Visto</th></tr></thead><tbody>${orphans
-        .map(
-          (d) =>
-            `<tr><td>${escHtml(d.label) || '<span class="muted">(sin nombre)</span>'}</td><td class="muted">${escHtml(d.role)}</td><td>${escHtml(d.surface)}${d.deviceKind ? ` <b>${escHtml(d.deviceKind)}</b>` : ""}</td><td>${d.nativeBuild ? escHtml(d.nativeBuild) : '<span class="muted">—</span>'}</td><td>${d.webCached ? (d.homeScreen ? "✓ inicio" : "caché") : '<span class="muted">—</span>'}</td><td>${ago(Number(d.ts) || 0)}</td></tr>`,
-        )
-        .join("")}</tbody></table>`
-    : "";
-
-  // Recent crashes panel (M2 Slice D) — "device X crashed at 12:05 on build Y" at a glance.
-  // Newest first, capped. `rx` (server receive epoch-seconds, stamped by appendLog) is used for
-  // the timestamp so a skewed device clock can't misplace it; falls back to the client `t` (ms).
-  const crashList = (Array.isArray(crashes) ? crashes : [])
-    .filter((c) => c && typeof c === "object")
-    .sort((a, b) => (Number(b.rx) || Number(b.t) / 1000 || 0) - (Number(a.rx) || Number(a.t) / 1000 || 0))
-    .slice(0, 25);
-  const crashHtml = crashList.length
-    ? `<h3>Fallos recientes (${crashList.length})</h3><table><thead><tr><th>Cuándo</th><th>Dispositivo</th><th>Origen</th><th>Build</th><th>Dónde</th><th>Mensaje</th></tr></thead><tbody>${crashList
-        .map((c) => {
-          const whenSec = Number(c.rx) || Math.floor(Number(c.t) / 1000) || 0;
-          return `<tr class="bad"><td>${ago(whenSec)}</td><td class="muted">${escHtml(c.dev) || "—"}</td><td>${escHtml(c.surface) || "web"}</td><td>${escHtml(c.build) || '<span class="muted">—</span>'}</td><td>${escHtml(c.where) || "—"}</td><td class="muted">${escHtml(c.msg) || "—"}</td></tr>`;
-        })
-        .join("")}</tbody></table>`
-    : "";
-
-  const kq = k ? `?k=${encodeURIComponent(k)}` : "";
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="20${kq ? `;url=/fleet-dashboard${kq}` : ""}">
-<title>Signo Vivo — estado del coro</title>
-<style>
-:root{color-scheme:dark}
-body{margin:0;background:#0f1216;color:#e8edf2;font:15px/1.5 -apple-system,system-ui,sans-serif;padding:16px}
-h1{font-size:20px;font-weight:600;margin:0 0 2px}
-.sub{color:#8b96a3;font-size:13px;margin-bottom:14px}
-.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.chip{padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600}
-.chip.ok{background:#12351f;color:#5fd48a}.chip.warn{background:#3a2f10;color:#e0b64a}.chip.bad{background:#3a1518;color:#f0788a}
-table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px}
-th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #1e252d;vertical-align:top}
-th{color:#8b96a3;font-weight:600}
-tr.bad td{background:rgba(240,120,138,.06)}tr.warn td{background:rgba(224,182,74,.06)}
-td.act{font-weight:600}
-tr.ok td.act{color:#5fd48a}tr.warn td.act{color:#e0b64a}tr.bad td.act{color:#f0788a}
-.muted{color:#5b6673}.tag{background:#243b57;color:#8fc0f0;padding:1px 6px;border-radius:4px;font-size:11px}
-a{color:#7fb3f0;text-decoration:none}
-h3{font-size:14px;color:#8b96a3;margin:18px 0 6px}
-</style></head><body>
-<h1>Estado del coro — Signo Vivo</h1>
-<div class="sub">Actualiza cada 20 s · el iPad reporta cuando tiene internet · orden: pendientes primero</div>
-<div class="chips">
-<span class="chip ok">${ready} listos</span>
-<span class="chip warn">${warn} por revisar</span>
-<span class="chip bad">${bad} por contactar</span>
-</div>
-<table><thead><tr><th>Persona</th><th>Rol</th><th>App</th><th>Libro</th><th>signovivo.com</th><th>Visto</th><th>Teléfono</th><th>Qué hacer</th></tr></thead>
-<tbody>${rows.map((r) => r.html).join("") || '<tr><td colspan="7" class="muted">Sin lista cargada todavía.</td></tr>'}</tbody></table>
-${orphanHtml}
-${crashHtml}
-<div class="sub">Listo = app ≥ ${MIN_SYNC_BUILD} · o signovivo.com en caché + agregado a inicio (iOS conserva la caché). Director debe estar en ${latest}.</div>
-</body></html>`;
-}
+// (renderFleetDashboard and its tel: helper were removed with the dashboard on 2026-08-18. They
+//  rendered choir phone numbers into HTML, so there is no version of this worth keeping around
+//  "just in case".)
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -651,6 +430,77 @@ export default {
       // found, invite, connect/disconnect, page sent/received) here; GET reads the ring buffer back
       // so the whole director↔follower handshake can be inspected remotely. DELETE clears it.
       // A single fixed debug DO holds the buffer (separate from any sync room).
+      // ── QUOTA RESERVATION FOR signovivo.com ──────────────────────────────────────────────
+      //
+      // Cloudflare's free plan allows 100,000 Worker/Pages-Function requests a DAY, ACCOUNT-WIDE.
+      // signovivo.com and this relay share that one number, so diagnostics can and did starve the
+      // product: on 2026-08-17 and again on 2026-08-18 telemetry exhausted the quota and took the
+      // site down with it. Cloudflare offers no way to partition a quota, so it is partitioned here.
+      //
+      // Non-essential traffic (telemetry, fleet dashboard) gets NONESSENTIAL_DAILY_MAX — 10,000 by
+      // default, 10% — and is refused beyond it. Essential traffic (the site, /state, /subscribe,
+      // director publishes) is NEVER counted and NEVER refused, so the remaining ~90,000 is reserved
+      // for the thing people actually use.
+      //
+      // 10,000 is sized from both sides: a heavy Mass day of web followers is 10-20k requests
+      // (an offline download alone is ~389), so 90k is deep headroom; and 10k buys ~10 hours of
+      // 4-device telemetry at the 15s flush interval, which is longer than any debugging session.
+      //
+      // The counter lives in a DO and is touched ONLY by non-essential paths, so metering the
+      // faucet costs the product nothing.
+      const NON_ESSENTIAL = url.pathname === "/log" || url.pathname === "/ota/checkin";
+      if (NON_ESSENTIAL) {
+        const cap = Math.max(0, Number(env.NONESSENTIAL_DAILY_MAX ?? "10000") || 0);
+        const day = new Date().toISOString().slice(0, 10);   // UTC, same boundary Cloudflare resets on
+        const spent = await env.SYNC_ROOM.getByName("__budget__").spendNonEssential(day, cap);
+        if (spent > cap) {
+          return json(
+            {
+              error: "non-essential daily budget exhausted",
+              spent,
+              cap,
+              day,
+              note: "Reserved so signovivo.com always has quota. Raise NONESSENTIAL_DAILY_MAX to lift it.",
+            },
+            503,
+            { "Retry-After": "3600" },
+          );
+        }
+      }
+
+      // ── OTA arming pointer — restored 2026-08-18 ────────────────────────────────────────
+      //
+      // The ONLY delivery path a device has for learning about a new songbook. Deliberately its
+      // own route, its own DO instance ("__ota__"), its own narrow storage shape — see otaCheckin
+      // above for why. POST-only: a device reports {deviceId, bookVersion?, bookStage?} and gets
+      // back {bookUpdate} or nothing. Absent bookUpdate is not an error, it is the dormant default
+      // (see bookArming.js) — the client must not treat a network failure the same as an explicit
+      // "no update", so this fails soft: any error here still returns 200 with no bookUpdate field
+      // rather than surfacing a 500 the client would have no correct way to react to.
+      if (url.pathname === "/ota/checkin") {
+        if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+        if (Number(request.headers.get("content-length") || 0) > 4 * 1024) {
+          return json({ ok: false, error: "payload_too_large" }, 413, cors);
+        }
+        const ota = env.SYNC_ROOM.getByName("__ota__");
+        let body: unknown = null;
+        try { body = await request.json(); } catch { body = null; }
+        const ip = request.headers.get("CF-Connecting-IP") || "";
+        let bookUpdate: { bookVersion: string; base: string } | null = null;
+        try {
+          await ota.otaCheckin(body, ip);
+          const deviceId = String((body as Record<string, unknown>)?.deviceId ?? "").slice(0, 64);
+          if (deviceId && String(env.BOOK_UPDATE_VERSION || "").trim()) {
+            const devices = await ota.getOtaDevices();
+            const me = devices.find((d) => d.deviceId === deviceId) || { deviceId, ts: 0 };
+            bookUpdate = decideBookUpdate(env, me, devices, Math.floor(Date.now() / 1000));
+          }
+        } catch {
+          bookUpdate = null; // never let an arming-decision failure surface as a broken check-in
+        }
+        return json(bookUpdate ? { ok: true, bookUpdate } : { ok: true }, 200, cors);
+      }
+
       if (url.pathname === "/log") {
         const dbg = env.SYNC_ROOM.getByName("__debug_log__");
         if (request.method === "POST") {
@@ -681,7 +531,7 @@ export default {
           // NOTE the asymmetry that makes this necessary: refusing a request inside the Worker does
           // NOT save Cloudflare quota, because the Worker already ran to refuse it. The rate limiter
           // below protects the ring BUFFER; only the client backing off protects the ACCOUNT.
-          const policy = { logIntervalMs: logIntervalMs(env) };
+          const policy = { logIntervalMs: logIntervalMs(env), logLevel: logLevel(env) };
           if (result.rateLimited) {
             return json({ ok: false, error: "rate_limited", ...policy }, 429, cors);
           }
@@ -709,116 +559,15 @@ export default {
         return json({ ok: true, count: (entries as unknown[]).length, entries }, 200, cors);
       }
 
-      // Fleet readiness — device pre-Mass check-in + gated director dashboard. Phones live ONLY in
-      // the fixed "__fleet__" DO + this dashboard; a device only ever POSTs a self-entered label.
-      if (
-        url.pathname === "/fleet" ||
-        url.pathname === "/fleet.json" ||
-        url.pathname === "/fleet-dashboard" ||
-        url.pathname.startsWith("/fleet/")
-      ) {
-        const fleet = env.SYNC_ROOM.getByName("__fleet__");
-
-        // Device check-in is OPEN (devices hold no secret). checkin() sanitizes + caps every field.
-        if (url.pathname === "/fleet/checkin") {
-          if (request.method !== "POST") {
-            return json({ ok: false, error: "method_not_allowed" }, 405, cors);
-          }
-          if (Number(request.headers.get("content-length") || 0) > 16 * 1024) {
-            return json({ ok: false, error: "payload_too_large" }, 413, cors);
-          }
-          let body: unknown = null;
-          try {
-            body = await request.json();
-          } catch {
-            body = null;
-          }
-          const result = await fleet.checkin(body, request.headers.get("CF-Connecting-IP") || "");
-          if (result.rateLimited) return json({ ok: false, error: "rate_limited" }, 429, cors);
-
-          // Book-update pointer, riding the response to a call the client ALREADY makes on
-          // foreground and every 90 s. No new endpoint, no new poll, and — critically — a failed
-          // check is a structural no-op, which is the only correct behaviour in a building with no
-          // internet. See sync-worker/src/bookArming.js for why arming takes two independent vars.
-          let bookUpdate: { bookVersion: string; base: string } | null = null;
-          try {
-            const deviceId = String((body as Record<string, unknown>)?.deviceId ?? "").slice(0, 64);
-            if (deviceId && String(env.BOOK_UPDATE_VERSION || "").trim()) {
-              const { devices } = await fleet.getFleet();
-              const me = devices.find((d) => d.deviceId === deviceId) || { deviceId };
-              bookUpdate = decideBookUpdate(env, me, devices, Math.floor(Date.now() / 1000));
-            }
-          } catch {
-            // A failure to compute the pointer must never break presence reporting.
-            bookUpdate = null;
-          }
-          return json(bookUpdate ? { ...result, bookUpdate } : result, 200, cors);
-        }
-
-        // Everything else under /fleet exposes choir phone numbers, so it is gated by the director
-        // bearer token OR a DEDICATED SECRET (?k=SECRET for a browser, X-Fleet-Key for a script).
-        // NOT the transmitter codes — those are hardcoded in this public repo, so gating PII behind
-        // them would expose every number to anyone reading the source.
-        const auth = request.headers.get("Authorization") || "";
-        const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-        const k = url.searchParams.get("k") || request.headers.get("X-Fleet-Key") || "";
-        const tokenOk = Boolean(env.RELAY_DIRECTOR_TOKEN) && bearer === env.RELAY_DIRECTOR_TOKEN;
-        const keyOk = Boolean(env.FLEET_DASHBOARD_KEY) && k === env.FLEET_DASHBOARD_KEY;
-        const isDash = url.pathname === "/fleet-dashboard" || url.pathname === "/fleet/dashboard";
-        if (!tokenOk && !keyOk) {
-          if (isDash) {
-            return new Response(
-              `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="background:#0f1216;color:#e8edf2;font:16px system-ui;padding:24px"><h2>Estado del coro</h2><p>Agrega tu c&oacute;digo al final del enlace:</p><p><code>/fleet-dashboard?k=TU_C&Oacute;DIGO</code></p></body>`,
-              { status: 401, headers: { "Content-Type": "text/html; charset=utf-8", ...cors } },
-            );
-          }
-          return json({ ok: false, error: "unauthorized" }, 401, cors);
-        }
-
-        if (url.pathname === "/fleet/roster" && request.method === "POST") {
-          if (Number(request.headers.get("content-length") || 0) > 128 * 1024) {
-            return json({ ok: false, error: "payload_too_large" }, 413, cors);
-          }
-          let body: unknown = null;
-          try {
-            body = await request.json();
-          } catch {
-            body = null;
-          }
-          const people = Array.isArray(body)
-            ? body
-            : body && typeof body === "object"
-              ? (body as { people?: unknown[] }).people
-              : [];
-          return json(await fleet.putRoster(Array.isArray(people) ? people : []), 200, cors);
-        }
-        if (url.pathname === "/fleet/reset" && request.method === "POST") {
-          return json(await fleet.resetFleet(), 200, cors);
-        }
-        if (isDash) {
-          const data = await fleet.getFleet();
-          // Recent crashes (M2 Slice D): read the gated debug buffer and surface kind:"crash"
-          // entries on the dashboard. Best-effort — a debug-log hiccup must not break the roster.
-          let crashes: Array<Record<string, unknown>> = [];
-          try {
-            const log = await env.SYNC_ROOM.getByName("__debug_log__").readLog();
-            crashes = (Array.isArray(log) ? log : [])
-              .filter((e) => Boolean(e) && typeof e === "object" && (e as { kind?: unknown }).kind === "crash")
-              .map((e) => e as Record<string, unknown>);
-          } catch {
-            crashes = [];
-          }
-          return new Response(renderFleetDashboard(data, k, crashes), {
-            status: 200,
-            headers: { "Content-Type": "text/html; charset=utf-8", ...cors },
-          });
-        }
-        if (url.pathname === "/fleet" || url.pathname === "/fleet.json") {
-          return json(await fleet.getFleet(), 200, cors);
-        }
-        return json({ ok: false, error: "not_found" }, 404, cors);
-      }
-
+      // ── FLEET DASHBOARD — REMOVED (Miguel, 2026-08-18: "kill the fleet dashboard") ────
+      //
+      // Devices posted /fleet/checkin every 90 SECONDS — 960/day each, ~3,840/day across the fleet,
+      // more than the director's relay keepalive — so a pre-Mass page could show green lights. It
+      // also held a roster containing choir phone numbers, which is a thing worth not having.
+      //
+      // Every route under /fleet now falls through to the 404 below. The DO's fleet RPCs went with
+      // it. NOTE: rows already written to the "__fleet__" Durable Object are unreachable but NOT
+      // deleted — removing code does not remove data. Purging them is a separate, deliberate act.
       const m = url.pathname.match(ROUTE);
       if (!m) return json({ ok: false, error: "not_found" }, 404, cors);
 

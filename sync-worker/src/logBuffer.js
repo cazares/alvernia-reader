@@ -122,9 +122,20 @@ export const foldLogEntries = (existing, incoming, rx) => {
 // It lives here in plain JS, beside the ring buffer, for the same reason the buffer does: it can
 // then be covered by node --test. A kill switch nobody tested is not a kill switch.
 
-/** Default flush cadence. 15 s measured (scripts/telemetry-budget-sim.mjs) as a 4.8x request cut
- *  with 100% of rows still delivered — 87,258/day -> ~18,000/day. */
-export const DEFAULT_LOG_INTERVAL_MS = 15000;
+/** Default flush cadence.
+ *
+ *  15s was measured (scripts/telemetry-budget-sim.mjs) as a 4.8x request cut with 100% of rows still
+ *  delivered — 87,258/day -> ~18,000/day. 60s takes another 4x on top, for the same rows.
+ *
+ *  FEWER, FATTER REQUESTS IS THE WHOLE GAME, because the Cloudflare quota counts REQUESTS, not
+ *  bytes: 100,000 a day regardless of size. Halving each entry saves nothing; halving the number of
+ *  flushes halves the cost exactly. A 64 KB payload cap bounds the other end, and even a busy
+ *  minute of mesh breadcrumbs is far under it.
+ *
+ *  The cost of the longer window is latency, and only for a human reading a live trace: a breadcrumb
+ *  can now sit up to a minute before it is visible. Nothing in the app waits on it — telemetry is
+ *  fire-and-forget by design and useless at Mass anyway, where there is no internet. */
+export const DEFAULT_LOG_INTERVAL_MS = 60000;
 
 /**
  * Resolve the flush interval (ms) to hand back to devices.
@@ -145,4 +156,63 @@ export const logIntervalMs = (env) => {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return DEFAULT_LOG_INTERVAL_MS;
   return Math.floor(n);
+};
+
+
+// ── TELEMETRY LEVELS ─────────────────────────────────────────────────────────
+//
+// Off-by-default fixed the idle cost. This fixes the ON cost: turning telemetry on used to mean
+// turning on EVERYTHING, and "everything" is a 1 Hz mesh heartbeat, every BLE packet, every
+// discovery tick — the firehose that exhausted a 100,000/day account quota twice.
+//
+// Levels are ordered by how much you would regret NOT having the line, so a lower number is always
+// safe to keep on:
+//   0 off   — send nothing
+//   1 error — conflicts, storms, wedged sessions, failures. The things that ruin a Mass.
+//   2 warn  — reconnects, retries, staleness. Recoverable, but they explain the errors above.
+//   3 info  — role changes, boot, resync. The narrative of a session.
+//   4 debug — page/BLE/session chatter. Per-second volume; a deliberate, temporary choice.
+//
+// Echoed on POST /log beside logIntervalMs, so `LOG_LEVEL` + `wrangler deploy` retunes the whole
+// fleet in ~20 seconds with no TestFlight round trip.
+export const LOG_LEVELS = { off: 0, error: 1, warn: 2, info: 3, debug: 4 };
+
+/** Default OFF. Two outages in two days came from telemetry that nobody had asked for. */
+export const DEFAULT_LOG_LEVEL = "off";
+
+/**
+ * Resolve the level devices should log at.
+ *
+ * Unlike logIntervalMs, an unparseable value falls back to OFF rather than to the noisy default:
+ * the failure mode for a level typo must be "too quiet", because the failure mode for a quota is
+ * "the site is down". Quiet telemetry loses a debugging session; a spent quota loses the product.
+ *
+ * @param {{LOG_LEVEL?: string}} env
+ * @returns {number} 0-4
+ */
+export const logLevel = (env) => {
+  const raw = String(env?.LOG_LEVEL ?? "").trim().toLowerCase();
+  if (raw === "") return LOG_LEVELS[DEFAULT_LOG_LEVEL];
+  if (Object.prototype.hasOwnProperty.call(LOG_LEVELS, raw)) return LOG_LEVELS[raw];
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= 0 && n <= LOG_LEVELS.debug) return n;
+  return LOG_LEVELS[DEFAULT_LOG_LEVEL];
+};
+
+/**
+ * Classify an event name into a level, so ~100 existing call sites need no edit and new ones get a
+ * sensible level for free. Inference beats annotation here: a level argument that must be passed by
+ * hand is one that will be forgotten, and forgetting defaults to the loudest setting.
+ *
+ * Ordered most-severe-first — an event matching several patterns takes the most serious one.
+ *
+ * @param {string} event
+ * @returns {number}
+ */
+export const levelForEvent = (event) => {
+  const e = String(event || "");
+  if (/error|STORM|conflict|denied|fail|wedged|revoke|abort/i.test(e)) return LOG_LEVELS.error;
+  if (/stale|retry|reconnect|rebuild|half-open|not-director|skip|cold/i.test(e)) return LOG_LEVELS.warn;
+  if (/^(become|role|boot|resync|director|follower)[:.]?|ready|start|stop/i.test(e)) return LOG_LEVELS.info;
+  return LOG_LEVELS.debug;
 };
