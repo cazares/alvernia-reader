@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "bookVersion": "bv_cf5c3cfdcb3356e7",
+  "bookVersion": "bv_1e9cbe6885c71531",
   "totalPages": 372,
-  "builtFromShellBuild": 454,
+  "builtFromShellBuild": 458,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-18T14:31:55.524Z",
-  "sourcePdfSha256": "95c2c08a5d1dba4adb5cf291eec56ce140d3da1d47cbf8638f83cc95f5497220",
+  "generatedAt": "2026-08-18T17:42:27.927Z",
+  "sourcePdfSha256": "415d8e23f6937aa86d73e4538ebf0b6cd53907d085a63cd39dce3e0e8335761e",
   "sourcePdfPages": 372,
-  "songIndexDigest": "24ca86bdf9970c111d5930f71ebdba954d1ebaeff1294cb1028ef437f3dbb2cb",
+  "songIndexDigest": "0003e0ed142f06496a007200b16e270761e17709662739fde192bbcf4ada092f",
   "firstSong": 1,
   "lastSong": 372,
   "songPages": [
@@ -1510,9 +1510,9 @@
   "files": [
     {
       "p": "app.js",
-      "n": 221921,
-      "h": "62d4282c1e18132849fe0a7c0aac7e1ad5be0ce7766914ad25cd85927a168347",
-      "m": "04bfa1192008a0e010ed1129c5135282"
+      "n": 209488,
+      "h": "d766137fc07aef06da02119d76f3d57dec701cc4921237f19fc75c2fa716c4ed",
+      "m": "5362677c7ed59dacd07eb0731a6e40a7"
     },
     {
       "p": "books.json",
@@ -1522,15 +1522,15 @@
     },
     {
       "p": "books/standard/pages.json",
-      "n": 213465,
-      "h": "75edd84d3417e794f7388015485e448092756a2106d911761376bda44b5f33c4",
-      "m": "d9c902a4dee9505f1a8501086ae54316"
+      "n": 213467,
+      "h": "3db93dda809a0ba1503287075983c02e16529f02ce0f0142f299cf5ff0063082",
+      "m": "0e8093c9e12ec56df3bbf4f9168415fb"
     },
     {
       "p": "books/standard/pages/page-001.webp",
-      "n": 10266,
-      "h": "69ee5ef330be4c6e26df28c0cd5d1fbfb34dfda5bb2ecf33871355866fa4be0e",
-      "m": "3f06efdd93bdd86bfd3f7a96e358678c"
+      "n": 10364,
+      "h": "98238b8fe597d847688180f5a913860cd3aff2cd7bd879b7f97459a82542e5de",
+      "m": "8b5b37be5b167dc060eaa94a5cb45aa1"
     },
     {
       "p": "books/standard/pages/page-002.webp",
@@ -3760,15 +3760,15 @@
     },
     {
       "p": "books/standard/search-index.json",
-      "n": 142864,
-      "h": "3127d7d2f42dd430242f34054657e3f3819767d7f843caee01b922ab9e5a33b6",
-      "m": "f1bd3c7c5132d9ab1dea10f4f093efe6"
+      "n": 142866,
+      "h": "01b2439ede10ed45029c0a8712c1745b532fdef7275140dd56c232e10fb09f3a",
+      "m": "41c003c452ca1a0d98a36b4ca3cc346f"
     },
     {
       "p": "books/standard/song-search-index.json",
-      "n": 546457,
-      "h": "242aaf7cbe3a9cc332ce4ab9713e78eee38e116d595a6d407aab047dfca55d38",
-      "m": "80705e84f830bcf027ed10d1a517eeb4"
+      "n": 546459,
+      "h": "5292dc5bbe35d41b37ef5bab06554a3382dc5a34baaf3d7a4cc499b70d94f11b",
+      "m": "bd23fa34b8f4567effe886ea0791e1e5"
     },
     {
       "p": "books/standard/song-titles.json",
@@ -3796,9 +3796,9 @@
     },
     {
       "p": "index.html",
-      "n": 32886,
-      "h": "3623e15fc2736f127b9d0fd5016365c8bf3a875fe358c559c150b251fec86551",
-      "m": "4b0621fc40e2b99492dc3af5c1e7e2bd"
+      "n": 25702,
+      "h": "19d89eaf294acba515b43c21b1e65e1e1f5df41846168ac9dec54d6b33e881e0",
+      "m": "0197aa45f02056ccb4f45c4731b1604a"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3815,8 +3815,8 @@
     {
       "p": "lib/svSelftest.js",
       "n": 8084,
-      "h": "9247f9e41bc571eae625d85a08c7d245bdb62fca6f1704813df177b997c5ea16",
-      "m": "0942b59469cada2329b9e6901cd25118"
+      "h": "45364845b8b36b013290cfdfc3d8bdb0e9bf8c6e4b69103e11b32c3c6336a993",
+      "m": "ad8b551029d9fb07f0e2419220d662d7"
     },
     {
       "p": "lib/svSyncDecision.js",
@@ -3832,15 +3832,15 @@
     },
     {
       "p": "styles.css",
-      "n": 105640,
-      "h": "a118b20ce43ff262d37a010c7d1831786929be39eb23dc51617a0f1b25f21953",
-      "m": "4837e3641ff08d510ce11d53f6d4bd4d"
+      "n": 75685,
+      "h": "8569ba377b1a72c464b3356c109e19553d859af095166a9cf6e695467e3450d3",
+      "m": "49d8c8d481c1ce363285f55f1ed35323"
     },
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "799ad3a77b0417ee5258d9c20b984ad9b500e457cdfc397b42752a5795771151",
-      "m": "2dfb2b0a9410420768354ae743a09289"
+      "h": "d8808b5cb7d3d40c3f0dec2b59806b803b4e537f9f9776860e841c1af7e3c2ce",
+      "m": "54deea9d1b32eb2a09c420cc4416daea"
     }
   ]
 }
