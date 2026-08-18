@@ -1912,7 +1912,8 @@ export default function App() {
         lastKnownRoleRef.current = "director";
         injectEvent({
           type: "toast",
-          text: "Estabas transmitiendo. Toca el estado arriba a la izquierda para volver a dirigir.",
+          text: "Estabas transmitiendo cuando se cerró la app.",
+          action: "resume-director",
         });
       })
       .catch(() => {});
@@ -1942,9 +1943,17 @@ export default function App() {
           if (prev === "director") {
             // Written back as follower so the toast fires once per crash, not on every boot forever.
             AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
+            // NO INSTRUCTIONS — THE NOTICE CARRIES THE BUTTON (owner, 2026-08-18: "really shitty
+            // UX"). It used to say "toca el estado arriba a la izquierda", which had been WRONG
+            // since build 435: the top-left status stopped taking the role then, and after
+            // 2026-08-18 that corner is Salir/Director or ⟳ while the way in moved to the RIGHT.
+            // So it sent whoever read it to the wrong control, for weeks, at the one moment they
+            // were already flustered. A notice that describes a control is a promise about the UI
+            // that rots as soon as the UI moves; carrying the control cannot rot.
             injectEvent({
               type: "toast",
-              text: "Estabas dirigiendo. Toca el estado arriba a la izquierda para volver a dirigir.",
+              text: "Estabas dirigiendo cuando se cerró la app.",
+              action: "resume-director",
             });
           }
         })

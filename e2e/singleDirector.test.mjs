@@ -101,12 +101,18 @@ test("onDirectorCode is fed only by human actions: the numpad code and the pill"
   assert.match(before, /case "request-director":/, "the DIRECTOR_CODE call is not the request-director bridge case");
 });
 
-test("a device that was directing when it died comes back as a FOLLOWER and is told to tap the pill", () => {
+test("a device that was directing when it died comes back as a FOLLOWER and is handed the way back", () => {
   const b = bootstrap();
-  assert.match(b, /prev === "director"/, "the persisted role is not even consulted for the toast");
-  assert.match(b, /Estabas dirigiendo\. Toca el estado arriba a la izquierda para volver a dirigir\./, "no toast points the ex-director at the pill");
-  // and the flag is written back so the toast fires once per crash, not forever
-  assert.match(b, /setItem\(STORAGE_KEYS\.lastSyncRole, "follower"\)/, "lastSyncRole is not cleared after the toast");
+  assert.match(b, /prev === "director"/, "the persisted role is not even consulted for the notice");
+  // THE NOTICE CARRIES THE CONTROL, it does not describe one. This asserted the old sentence
+  // "Toca el estado arriba a la izquierda…" — which had been WRONG since build 435, when the
+  // top-left status stopped taking the role, and which this test happily pinned in place. A test
+  // that freezes a sentence cannot notice the sentence has become a lie; e2e/noticesCarryControls
+  // now bans directional wording outright, which is the property that actually matters.
+  assert.match(b, /text: "Estabas dirigiendo cuando se cerró la app\."/, "the ex-director is not told what happened");
+  assert.match(b, /action: "resume-director"/, "the notice carries no way back — it is an announcement, not a control");
+  // and the flag is written back so the notice fires once per crash, not forever
+  assert.match(b, /setItem\(STORAGE_KEYS\.lastSyncRole, "follower"\)/, "lastSyncRole is not cleared after the notice");
 });
 
 test("when the mesh demotes this director, it steps down AND the person is told", () => {

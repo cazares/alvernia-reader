@@ -1417,7 +1417,12 @@ const hideRelayAuthWarning = () => {
 // a courtesy, not a decision.
 let syncNoticeEl = null;
 let syncNoticeTimer = null;
-const showSyncNotice = (text) => {
+// Set from inside the init closure below. A toast needs to be able to OPEN the role gate, and the
+// gate's opener lives in that closure; without this the toast could only describe the control, which
+// is exactly how it went stale for weeks.
+let requestRoleGate = null;
+
+const showSyncNotice = (text, action) => {
   if (!text) return;
   if (!syncNoticeEl) {
     const style = document.createElement("style");
@@ -1428,6 +1433,9 @@ const showSyncNotice = (text) => {
       "background:#1e293b;color:#fff;font:600 0.92rem/1.35 system-ui,-apple-system,sans-serif;" +
       "box-shadow:0 6px 22px rgba(0,0,0,.45);-webkit-tap-highlight-color:transparent}" +
       "#sv-sync-note.is-on{display:flex}" +
+      "#sv-sync-note .sv-sn-act{flex:0 0 auto;margin-left:0.4rem;padding:0.4rem 0.7rem;border:0;" +
+      "border-radius:0.6rem;background:#0A84FF;color:#fff;font:700 0.86rem/1 system-ui,sans-serif;" +
+      "cursor:pointer;-webkit-tap-highlight-color:transparent}" +
       "#sv-sync-note .sv-sn-x{flex:0 0 auto;margin-left:0.25rem;width:1.6rem;height:1.6rem;border:0;" +
       "border-radius:50%;background:rgba(255,255,255,0.22);color:#fff;font-size:1.05rem;line-height:1;" +
       "cursor:pointer;-webkit-tap-highlight-color:transparent}";
@@ -1444,11 +1452,29 @@ const showSyncNotice = (text) => {
     closeBtn.setAttribute("aria-label", "Cerrar aviso");
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => syncNoticeEl.classList.remove("is-on"));
+    // OPTIONAL ACTION. A notice that tells someone to go find a control is a promise about the UI
+    // that rots the moment the UI moves — the "toca el estado arriba a la izquierda" text outlived
+    // the pill that took the role by three builds and pointed at the wrong corner the whole time.
+    // Carrying the control removes the description, and with it that whole class of bug.
+    const actBtn = document.createElement("button");
+    actBtn.type = "button";
+    actBtn.className = "sv-sn-act";
+    actBtn.style.display = "none";
     syncNoticeEl.appendChild(msg);
+    syncNoticeEl.appendChild(actBtn);
     syncNoticeEl.appendChild(closeBtn);
     document.body.appendChild(syncNoticeEl);
   }
   syncNoticeEl.querySelector(".sv-sn-msg").textContent = String(text);
+  const actBtn = syncNoticeEl.querySelector(".sv-sn-act");
+  if (action && action.label && typeof action.onTap === "function") {
+    actBtn.textContent = action.label;
+    actBtn.style.display = "";
+    actBtn.onclick = () => { syncNoticeEl.classList.remove("is-on"); action.onTap(); };
+  } else {
+    actBtn.style.display = "none";
+    actBtn.onclick = null;
+  }
   // Synchronously, not via rAF — a backgrounded WebView throttles rAF and the notice would never
   // appear (same reason the relay banner does it this way).
   syncNoticeEl.classList.add("is-on");
@@ -1557,7 +1583,13 @@ const applyNativeSyncEvent = async (payload) => {
     // Neutral operator notices from the native shell — director role resumed after a crash, or
     // refused because another device picked it up during the reboot.
     if (payload.type === "toast") {
-      showSyncNotice(payload.text);
+      // The one action a toast can carry today. Named rather than passed as a function because this
+      // arrives over the native bridge as JSON, and it still goes through the SAME typed-word gate —
+      // it opens the gate, it does not take the role.
+      const act = payload.action === "resume-director" && requestRoleGate
+        ? { label: "Volver a dirigir", onTap: () => requestRoleGate() }
+        : null;
+      showSyncNotice(payload.text, act);
       return;
     }
 
@@ -3128,6 +3160,7 @@ const bindReaderEvents = () => {
   // has exactly one call site (the gate's Confirmar), which e2e/directorButton.test.mjs pins.
   const becomePill = document.getElementById("become-director-pill");
   if (becomePill) becomePill.addEventListener("click", () => { haptic(); openRoleGate(); });
+  requestRoleGate = openRoleGate;   // let a toast offer the same gate, without describing where it is
 
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); navigationDrawer.classList.add("as-dropdown"); openDrawer(); activateTab("buscar"); });
