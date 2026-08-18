@@ -294,3 +294,47 @@ test("the uniqueness suffix is kept — iOS 16+ gives every device the same UIDe
   assert.match(body, /UUID\(\)\.uuidString\.prefix\(6\)/, "the suffix must still exist");
   assert.match(body, /defaults\.set\(suffix, forKey: key\)/, "and it must be persisted, not random");
 });
+
+// ── A remembered peer dies with the browser that found it ─────────────────────
+//
+// An MCPeerID is only meaningful to the MCNearbyServiceBrowser instance that discovered it.
+// refreshDiscovery tears down and recreates the browser every 5-12 s, so the new one starts with an
+// EMPTY peers dictionary — but discoveredDirectors/discoveredFollowers used to keep entries for 90
+// seconds, more than SEVEN browser generations. reconsiderFollowerTarget invites straight out of
+// those maps, so it invited peers the live browser had never seen. Multipeer does not fail loudly:
+//
+//     Cannot find peer with idString [2gbyj11r6mftw] in the peers dictionary.
+//
+// ...and the invite evaporates. No error, no delegate callback, no session. That is the symptom that
+// survived six builds — every peer found at -37 dBm, nothing ever connecting — and it explains the
+// intermittency exactly: an invite only worked when it happened to fire in the same generation that
+// discovered its target, so one device would follow and the rest would not.
+//
+// Caught from Apple's own message in the owner's Xcode console, not from ours.
+test("recreating the browser forgets the peers the old browser found", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+
+  const cleared = body.indexOf("discoveredDirectors.removeAll()");
+  const restart = body.indexOf("startBrowsing()");
+  assert.ok(cleared > 0, "discovered peers must be cleared when the browser is recreated");
+  assert.ok(restart > 0 && cleared < restart,
+    "they must be cleared BEFORE browsing restarts, or the new browser inherits ghosts");
+  for (const m of ["discoveredFollowers.removeAll()", "discoveredDirectorInfo.removeAll()",
+                   "discoveredFollowerInfo.removeAll()", "discoveredDirectorSeenAt.removeAll()"]) {
+    assert.ok(body.includes(m), `${m} — every peer map must be cleared, not just some`);
+  }
+});
+
+test("the 90s prune is gone — it is what let ghosts outlive their browser", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func refreshDiscovery"));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+  assert.doesNotMatch(
+    body, /discoveredDirectorSeenAt\.filter\s*\{[^}]*>\s*90/,
+    "a time-based prune is the wrong lifetime entirely: peers die with their BROWSER, not on a clock",
+  );
+});

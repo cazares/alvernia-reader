@@ -1464,18 +1464,38 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     lastRefreshAt = now
 
     autoreleasepool {
-      // Prune directors that haven't been seen by the browser in over 90 s (stale MPC state).
-      let now = Date().timeIntervalSince1970
-      let stale = discoveredDirectorSeenAt.filter { now - $0.value > 90 }.map { $0.key }
-      for key in stale {
-        discoveredDirectors.removeValue(forKey: key)
-        discoveredDirectorSeenAt.removeValue(forKey: key)
-        discoveredDirectorInfo.removeValue(forKey: key)
-        discoveredFollowers.remove(key)
-        discoveredFollowerInfo.removeValue(forKey: key)
-      }
       advertiser?.stopAdvertisingPeer(); advertiser?.delegate = nil; advertiser = nil
       browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
+
+      // A REMEMBERED PEER DIES WITH THE BROWSER THAT FOUND IT.
+      //
+      // An MCPeerID is only meaningful to the MCNearbyServiceBrowser instance that discovered it.
+      // The new browser created below starts with an EMPTY peers dictionary, so every peer still
+      // sitting in these maps is a ghost — and reconsiderFollowerTarget invites straight out of
+      // discoveredDirectors (:invitePeer, "Pick the HIGHEST token"). Inviting a ghost through a
+      // browser that never saw it does not fail loudly; Multipeer just logs
+      //
+      //     Cannot find peer with idString [2gbyj11r6mftw] in the peers dictionary.
+      //
+      // ...and the invite evaporates. No error, no delegate callback, no session. Which is exactly
+      // the symptom that survived six builds: discovery works perfectly, every peer is found at
+      // -37 dBm, and nothing ever connects.
+      //
+      // The maps used to be pruned only at 90 s, more than SEVEN browser generations. That made
+      // connecting a race — an invite succeeded only when it happened to fire in the same
+      // generation that discovered the target — which is why exactly one device would follow while
+      // the rest sat there, and why it looked maddeningly intermittent.
+      //
+      // Clearing costs nothing: browsing restarts on the next line and a live peer is re-found in
+      // well under a second, whereas a stale one can never be connected to at all. connectedPeers
+      // is unaffected — an established MCSession is independent of the browser that introduced it,
+      // so a follower already attached to its director does not drop here.
+      let forgotten = discoveredDirectors.count + discoveredFollowers.count
+      discoveredDirectors.removeAll(); discoveredDirectorSeenAt.removeAll()
+      discoveredDirectorInfo.removeAll()
+      discoveredFollowers.removeAll(); discoveredFollowerInfo.removeAll()
+      if forgotten > 0 { dbgLog("refresh:peers-cleared", ["forgotten": forgotten]) }
+
       startAdvertising()
       startBrowsing()
     }
