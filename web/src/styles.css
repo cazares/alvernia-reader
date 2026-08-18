@@ -2365,8 +2365,10 @@ html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), e
 /* No director-specific offset any more: Ir a Canto is always slot 2 on the LEFT, and ⌕ has the
    whole top-right to itself. */
 /* SAME PLACEMENT RULE AS THE TOP-RIGHT FAB (owner: "placement and sizing of sync button should
-   follow this") — identical gutter, identical box, identical glyph ratio, mirrored. */
-.resync-fab { left: max(var(--fab-gutter), env(safe-area-inset-left, 0px)); }
+   follow this") — identical gutter, identical box, identical glyph ratio, mirrored.
+   +2.5px (owner, 2026-08-18): its own rule, not --fab-gutter, so the nudge is just ⟳ — every other
+   control anchored on --fab-gutter (the role pill, Ir a Canto, ⌕) stays exactly where it was. */
+.resync-fab { left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + 2.5px); }
 /* ── 123→ song-index fab ─────────────────────────────────────────────────────
    ♪ was ambiguous: it says "audio" in an app that plays none, while the button opens a NUMBERED
    index. Digits say what kind of thing; the arrow makes it a verb, not a label. Straight arrow —
