@@ -818,10 +818,12 @@ export default function App() {
     meshHeartbeatRef.current = setInterval(() => {
       if (roleRef.current !== "director") return;
       const book = currentBookRef.current;
-      // Keep "when was this device last directing" fresh, throttled hard because this ticks every
-      // second and AsyncStorage is a real write. The boot path resumes only inside a short window
-      // after the LAST heartbeat, not after the moment the role was taken — a director who started
-      // at the beginning of Mass and crashed forty minutes in must still be inside the window.
+      // Keep "when was this device last directing" fresh. Independently throttled at
+      // DIRECTOR_STAMP_THROTTLE_MS (20s) via the check below, so tightening the tick rate below
+      // does NOT increase how often this writes to AsyncStorage — the boot path resumes only
+      // inside a short window after the LAST heartbeat, not after the moment the role was taken —
+      // a director who started at the beginning of Mass and crashed forty minutes in must still
+      // be inside the window.
       const nowMs = Date.now();
       if (nowMs - lastDirectorAtWrittenRef.current >= DIRECTOR_STAMP_THROTTLE_MS) {
         lastDirectorAtWrittenRef.current = nowMs;
@@ -831,7 +833,18 @@ export default function App() {
         mode: modeForBook(book),
         bookId: book,
       }).catch(() => {});
-    }, 1000);
+      // 1000 -> 100ms (Miguel, 2026-08-18: "just get director to pump out bluetooth messages...
+      // ok then 100ms on both BLE and mesh it is then" — settled after briefly trying 500ms).
+      // This is the SAME call that already fires BLE's publish() every tick (native's
+      // sendPageUpdate calls bleBeacon.publish unconditionally) — no new plumbing, just pumping
+      // the existing broadcast 10x more often so a follower that missed one beacon (radio timing,
+      // packet loss) catches the next one within ~100ms instead of up to ~1s. Songs run
+      // back-to-back with no gap, so this fires the whole time someone directs, not just at
+      // handoff. The receiver side is already safe at any frequency: web/app.js's renderPage()
+      // no-ops on an unchanged page (the exact fix for a 2026-08-06 crash from this same repeated-
+      // heartbeat pattern at the OLD 1Hz rate) — so faster ticks add cheap no-op bridge crossings
+      // on an unchanged page, never repeated expensive work.
+    }, 100);
     relayHeartbeatRef.current = setInterval(() => {
       if (roleRef.current !== "director" && !explicitTransmitterRef.current) return;
       const book = currentBookRef.current;
