@@ -279,15 +279,20 @@ test("the top edge and the side edges are independently tunable", () => {
   assert.ok(GUTTER_TOP > 0 && GUTTER > 0, "a gutter went to zero — controls would touch the bezel");
   assert.doesNotMatch(CSS, /top:\s*max\(var\(--fab-gutter\)/,
     "a top: anchor is back on --fab-gutter — raising the row will drag the clusters sideways again");
-  // The safe-area inset must be CLAMPED, not merely max()'d. Unbounded, it placed the row at
-  // different heights on iOS 16 and iOS 26 depending on each device's fullscreen state — the row
-  // was positioned by the OS rather than by this stylesheet.
-  assert.match(CSS, /min\(env\(safe-area-inset-top, 0px\), var\(--fab-inset-cap\)\)/,
-    "the safe-area inset is unbounded again — two iPads will disagree about where the row sits");
-  assert.doesNotMatch(CSS, /top:\s*max\(var\(--fab-gutter-top\), env\(/,
-    "an unclamped max() top anchor is back");
+  // THE SAFE-AREA INSET MUST NOT BE CLAMPED — reverted 2026-08-18, same day, after a real device
+  // regression. A clamp was tried here first: capping the inset's contribution on the theory that
+  // cross-OS placement differences meant it was "winning by an unbounded amount". Confirmed on
+  // mPad running this exact build in TestFlight: with the clamp, Salir Director rendered UNDER the
+  // status bar / TestFlight banner, clipped and half-hidden. A safe-area inset exists so content
+  // clears exactly that case; capping it reintroduces the overlap it was already preventing, in
+  // exchange for fixing a merely cosmetic inconsistency. Pin the uncapped form so the clamp cannot
+  // quietly return.
+  assert.doesNotMatch(CSS, /min\(env\(safe-area-inset-top/,
+    "the safe-area inset is capped again — confirmed on device to clip content under the status bar");
+  assert.match(CSS, /top:\s*max\(var\(--fab-gutter-top\), env\(safe-area-inset-top, 0px\)\)/,
+    "the top anchor is not the uncapped max() form — safe-area protection is weakened or gone");
   // Every fixed top control must share ONE top edge, or the row stops reading as a band.
-  const tops = [...CSS.matchAll(/top:\s*calc\(var\((--fab-gutter[a-z-]*)\)/g)].map((m) => m[1]);
+  const tops = [...CSS.matchAll(/top:\s*max\(var\((--fab-gutter[a-z-]*)\)/g)].map((m) => m[1]);
   assert.ok(tops.length >= 3, `only ${tops.length} top anchors found — the cluster shrank or a selector moved`);
   assert.equal(new Set(tops).size, 1, `top anchors disagree: ${[...new Set(tops)].join(", ")}`);
 });

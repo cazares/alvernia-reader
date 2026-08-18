@@ -361,13 +361,27 @@ export default function App() {
   // wifi, so there is no reason for their telemetry to cross the internet — and every request that
   // does is drawn from the SAME 100,000/day account quota signovivo.com depends on. Pointing here
   // makes debugging cost the product nothing.
-  const logSinkRef = useRef<string>("");
+  //
+  // TEMPORARY DEFAULT (Miguel, 2026-08-18): pre-fill the sink field with his Mac's LAN address so
+  // the diagnostics dump opens with it already typed — he still flips telemetry ON himself, this
+  // only saves re-typing an IP. ONLY EVER A PRE-FILL, never an override: the moment a device saves
+  // ANY value (via the diagnostics dump), that saved value wins forever and this constant is never
+  // consulted again — see the `?? DEFAULT_LOG_SINK` below.
+  //
+  // This IP is only valid on Miguel's home network and will go stale the moment his router hands
+  // out a different lease. Delete this default after this weekend's testing is done; it is not a
+  // permanent address to bake into the app.
+  const DEFAULT_LOG_SINK = "http://192.168.1.197:8787";
+  const logSinkRef = useRef<string>(DEFAULT_LOG_SINK);
   useEffect(() => {
     AsyncStorage.multiGet(["sv.telemetry", "sv.logSink"])
       .then((pairs) => {
         const map = Object.fromEntries(pairs);
         telemetryEnabledRef.current = map["sv.telemetry"] === "1";
-        logSinkRef.current = String(map["sv.logSink"] || "").replace(/\/+$/, "");
+        // Distinguish "never saved" (undefined) from "saved as empty, meaning use the worker"
+        // ("") — only the former falls back to the default; an explicit empty save must stick.
+        const saved = map["sv.logSink"];
+        logSinkRef.current = (saved === undefined ? DEFAULT_LOG_SINK : String(saved)).replace(/\/+$/, "");
       })
       .catch(() => {});
   }, []);
@@ -418,10 +432,17 @@ export default function App() {
     // memory leak with a nice name.
     const sink = logSinkRef.current;
     dbgBufferRef.current = [];
+    // TIME-BOX THE POST. On a wifi-off device this should fail fast (no route), but "should" is not
+    // a bound — a hung request would sit on the flush timer with no signal for the whole test, which
+    // is exactly the run we cannot afford to lose data from. 4s is generous for a LAN and short
+    // enough that it never meaningfully delays the next flush cycle either way.
+    const ac = typeof AbortController === "function" ? new AbortController() : undefined;
+    const timer = ac ? setTimeout(() => ac.abort(), 4000) : null;
     fetch(`${sink || RELAY_BASE}/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(batch),
+      signal: ac?.signal,
     })
       .then((r) => {
         // Adopt the flush cadence and level the sink (or worker) hands back, so either can retune
@@ -436,7 +457,8 @@ export default function App() {
         const MAX = 5000;
         const merged = batch.concat(dbgBufferRef.current);
         dbgBufferRef.current = merged.length > MAX ? merged.slice(merged.length - MAX) : merged;
-      });
+      })
+      .finally(() => { if (timer) clearTimeout(timer); });
   }, []);
   const dbgLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {
