@@ -111,5 +111,50 @@ for (const g of targets) {
 }
 const v = build.attributes.version;
 if (landed.length) console.log(`\nbuild ${v} assigned to: ${landed.join(", ")}`);
+
+// ATTACHING IS NOT SHIPPING. An EXTERNAL group needs a beta review submission on top of the
+// assignment; without it the build sits at "Ready to Submit" forever and no tester can install it,
+// while the API reports the group assignment as a clean success. That gap is invisible from here
+// and obvious in the App Store Connect UI, which is exactly the kind of step that gets missed.
+// This app is already through beta review, so submissions auto-approve — but the submission still
+// has to be made.
+if (landed.length) {
+  try {
+    await api("/v1/betaAppReviewSubmissions", {
+      method: "POST",
+      body: JSON.stringify({ data: { type: "betaAppReviewSubmissions",
+        relationships: { build: { data: { type: "builds", id: build.id } } } } }),
+    });
+    console.log(`build ${v} submitted for beta review`);
+  } catch (e) {
+    const msg = e.message.split("\n")[1]?.trim() || e.message;
+    // Already-submitted is fine; anything else means the build is NOT reaching testers.
+    if (/already|state/i.test(msg)) console.log(`build ${v} beta review: ${msg}`);
+    else { console.log(`build ${v} BETA REVIEW SUBMISSION FAILED: ${msg}`); process.exitCode = 1; }
+  }
+}
+
+// READ BACK THE STATE APPLE ACTUALLY HAS. Every step above can return success while the build still
+// reaches nobody — that is precisely what happened on 451: the group assignment was a clean 2xx and
+// the build sat at "Ready to Submit" until someone looked at the UI. externalBuildState is the exact
+// field that column renders, so this is the same fact the screenshot showed, checked instead of
+// assumed. A tool that reports its own POSTs rather than the resulting state is how the gap hid.
+const detail = await api(`/v1/builds/${build.id}/buildBetaDetail`).catch(() => null);
+const ext = detail?.data?.attributes?.externalBuildState;
+// EXPLICIT CLASSIFICATION, and an unknown state is NOT a pass. The first version of this map
+// omitted IN_BETA_TESTING — the actual success value — which would have reported the shipped build
+// as "unknown" and, had it defaulted to OK, would have reproduced the very bug it exists to catch.
+const SHIPPED = { IN_BETA_TESTING: 'live to testers', READY_FOR_BETA_TESTING: 'live to testers — "Testing"' };
+const PENDING = { WAITING_FOR_BETA_REVIEW: "submitted, waiting for review", IN_BETA_REVIEW: "in review" };
+const BROKEN  = {
+  READY_FOR_BETA_SUBMISSION: 'NOT SHIPPED — "Ready to Submit"; testers cannot install it',
+  BETA_REJECTED: "REJECTED by beta review",
+  EXPIRED: "expired",
+};
+const label = SHIPPED[ext] || PENDING[ext] || BROKEN[ext];
+console.log(`\nexternal state: ${ext || "unknown"} — ${label || "UNRECOGNISED — check App Store Connect"}`);
+if (ext in SHIPPED) console.log(`✅ build ${v} is reaching testers.`);
+else if (ext in PENDING) console.log(`⏳ build ${v} is submitted; it will reach testers when review clears.`);
+else { console.log(`❌ build ${v} is NOT reaching testers.`); process.exitCode = 1; }
 if (automatic.length) console.log(`build ${v} reaches automatically: ${automatic.join(", ")}`);
 if (failed.length) { console.log(`build ${v} FAILED for: ${failed.join(", ")}`); process.exitCode = 1; }

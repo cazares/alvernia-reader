@@ -230,7 +230,17 @@ else
     [ -n "${ASC_P8_PATH:-}" ] && ALT+=(--p8-file-path "$ASC_P8_PATH")
     if "${ALT[@]}"; then
       TF_UPLOADED=1
-      echo "         ✅ Uploaded to TestFlight (build $BUILD). Add it to the choir group in App Store Connect when ready."
+      echo "         ✅ Uploaded to TestFlight (build $BUILD)."
+      # UPLOADING IS NOT SHIPPING. An uploaded build reaches NOBODY until it is attached to a beta
+      # group AND — for an external group — submitted for beta review. This script used to stop at
+      # the upload and print "add it when ready", which left two steps in a human's memory at 1am.
+      # Build 451 sat at "Ready to Submit" because of exactly that. Now it is part of the release.
+      echo "==> 4c/6 Attach to beta groups + submit for beta review"
+      if ! node scripts/testflight-distribute.mjs --build "$BUILD"; then
+        echo "         ❌ build $BUILD is NOT reaching testers — see above." >&2
+        echo "            Re-run: node scripts/testflight-distribute.mjs --build $BUILD" >&2
+        exit 1
+      fi
     else
       echo "         ⚠️  altool upload failed — fall back: open -a Transporter ~/Desktop/SignoVivo-$BUILD.ipa  then click DELIVER"
     fi
@@ -303,7 +313,7 @@ if [ "$STAGING" = "1" ]; then
 else
   echo "==> 6/6  DONE — signovivo.com == native == v$BUILD"
   if [ "$TF_UPLOADED" = "1" ]; then
-    echo "         TestFlight: build $BUILD uploaded automatically. Add it to the choir group when ready."
+    echo "         TestFlight: build $BUILD uploaded, attached to its beta groups, and submitted for review."
   elif [ "${SKIP_NATIVE:-0}" != "1" ]; then
     echo "         Final manual step (native to TestFlight):"
     echo "           open -a Transporter ~/Desktop/SignoVivo-$BUILD.ipa   then click DELIVER"
