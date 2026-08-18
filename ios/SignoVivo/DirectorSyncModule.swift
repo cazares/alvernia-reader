@@ -751,6 +751,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       }
       self.bleBeacon.startScanning()
       self.configureTransport()
+      // Start the 1 Hz pulse NOW, not on .connected — hunting is exactly when it has work to do.
+      self.startFollowerWatchdog()
       self.startAdvertising()
       self.startBrowsing()
       self.startDiscoveryRefreshTimer()
@@ -1392,8 +1394,32 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       DispatchQueue.main.async {
         autoreleasepool {
           guard let self = self, self.resetGeneration == generation, self.appIsActive,
-                self.currentRole == "follower", self.connectedDirectorPeer != nil,
-                self.lastFollowerPageReceivedAt > 0 else { return }
+                self.currentRole == "follower" else { return }
+
+          // NOT CONNECTED: retry the handshake every tick until we are (owner's idea, 2026-08-17 —
+          // "sleep 1s, setTimerRepeating every 1s until synced").
+          //
+          // This timer already ran at 1 Hz; it just did nothing unless already connected, so the
+          // one state that needed a fast pulse — still hunting — was the one state it sat out.
+          //
+          // The dead time it removes is real and measured in the constants: a failed handshake
+          // waits out inviteTimeout (8 s) and then followerRetryDelay (2 s) before anything tries
+          // again, so ~10 s of a 10-20 s convergence was a follower doing nothing at all.
+          //
+          // Safe at 1 Hz because reconsiderFollowerTarget is idempotent by construction: it returns
+          // immediately when already connected, and while an invite is inside its timeout window it
+          // emits "connecting" and returns WITHOUT issuing a parallel invite. So this pulses the
+          // retry without ever spamming invitePeer.
+          //
+          // Deliberately NOT a 1 Hz transport restart — that is the discovery storm (66 events/sec)
+          // and the cause of the slow convergence in the first place. The browser stays up and
+          // accumulates sightings; only the decision to act on them is re-evaluated.
+          guard self.connectedDirectorPeer != nil else {
+            self.reconsiderFollowerTarget()
+            return
+          }
+
+          guard self.lastFollowerPageReceivedAt > 0 else { return }
           let stale = Date().timeIntervalSince1970 - self.lastFollowerPageReceivedAt
           if stale > Self.followerStaleReconnectSeconds {
             self.forceFollowerReconnect(staleFor: stale)

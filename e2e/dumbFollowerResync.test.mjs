@@ -381,3 +381,38 @@ test("a follower holds its browser steady while sightings are still arriving", (
   assert.match(body, /connectedDirectorPeer == nil/,
     "the hold applies only while still hunting, never once attached");
 });
+
+// ── 1 Hz retry while hunting (owner's idea, 2026-08-17) ───────────────────────
+//
+// "sleep 1s, setTimerRepeating every 1s until synced". The timer already existed at 1 Hz — it just
+// did nothing unless already CONNECTED, so the one state needing a fast pulse was the one it sat
+// out. Meanwhile a failed handshake waited out inviteTimeout (8s) then followerRetryDelay (2s), so
+// ~10s of a measured 10-20s convergence was a follower doing nothing at all.
+//
+// Safe at 1 Hz only because reconsiderFollowerTarget is idempotent: it returns when connected, and
+// while an invite is inside its timeout it emits "connecting" and returns WITHOUT a parallel invite.
+test("an unconnected follower retries the handshake every tick", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func startFollowerWatchdog"));
+  const body = fn.slice(0, fn.indexOf("\n  }\n"));
+  assert.match(body, /guard self\.connectedDirectorPeer != nil else \{[\s\S]{0,200}?reconsiderFollowerTarget\(\)/,
+    "while unconnected the 1 Hz tick must re-attempt the handshake, not return");
+  // The pulse is worthless if the timer only runs once already connected.
+  const follower = swift.slice(swift.indexOf("func startFollower("));
+  assert.match(follower.slice(0, 3000), /startFollowerWatchdog\(\)/,
+    "the watchdog must start when the follower role begins, not on .connected");
+});
+
+test("the 1 Hz pulse re-evaluates, it does NOT restart the transport", () => {
+  const swift = fs.readFileSync(
+    path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const fn = swift.slice(swift.indexOf("private func startFollowerWatchdog"));
+  const body = fn.slice(0, fn.indexOf("\n  }\n"));
+  // A 1 Hz transport restart IS the discovery storm — 66 events/sec — and the cause of the slow
+  // convergence this is fixing. The browser must stay up and accumulate sightings.
+  for (const forbidden of ["startBrowsing()", "startAdvertising()", "refreshDiscovery()", "stopBrowsingForPeers()"]) {
+    assert.ok(!body.includes(forbidden),
+      `the 1 Hz tick must never call ${forbidden} — that is the storm, not a retry`);
+  }
+});
