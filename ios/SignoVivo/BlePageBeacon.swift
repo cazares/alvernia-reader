@@ -63,6 +63,8 @@ final class BlePageBeacon: NSObject {
   private var lastSeenSeq = -1
   private var lastSeenNonce = ""
   private var lastPublishedPage = -1
+  /// When the current pendingAdvert was requested, so the trace can show request -> on-air latency.
+  private var publishRequestedAt: TimeInterval = 0
   /// Identifies THIS advertising session. Minted fresh every time publishing (re)starts.
   ///
   /// `seq` alone cannot order readings across sessions: it restarts at 0 on every director launch
@@ -89,6 +91,22 @@ final class BlePageBeacon: NSObject {
   private var recentNonces: [String: TimeInterval] = [:]
   private static let contentionWindow: TimeInterval = 4.0
 
+  /// Power both radios up BEFORE they are needed, so neither pays a cold start on the critical path.
+  ///
+  /// CBPeripheralManager was created lazily inside publish(), which put CoreBluetooth's power-on
+  /// (~200-500ms, more when it triggers the permission prompt) directly between "Braulio taps Ser
+  /// Director" and "the page is on the air" — the one moment the whole beacon exists to make fast.
+  /// Called from BOTH roles at startup: a follower needs the central warm to hear the first
+  /// advertisement, and it needs the PERIPHERAL warm too, because any follower may become the
+  /// director a second later.
+  ///
+  /// Creating a manager does not advertise or scan; it only brings the radio up. Advertising still
+  /// requires pendingAdvert, scanning still requires an explicit startScanning.
+  func primeRadios() {
+    if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
+    if central == nil { central = CBCentralManager(delegate: self, queue: .main) }
+  }
+
   // MARK: - Director side
 
   /// Publish a page. Safe to call before Bluetooth is powered on — the value is held and advertised
@@ -107,9 +125,14 @@ final class BlePageBeacon: NSObject {
     let seq = advertSeq
     let name = "\(Self.namePrefix)\(sessionNonce).\(seq).\(page)"
     pendingAdvert = name
+    let cold = peripheral == nil
     if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
+    publishRequestedAt = Date().timeIntervalSince1970
     startAdvertisingIfReady()
-    log?("ble:page-send", ["page": page, "seq": seq])
+    // `cold` should be false in normal operation — primeRadios runs at startup. If it is ever true
+    // the radio was not warm and this publish paid a power-on delay, which is exactly the cost this
+    // beacon exists to avoid. Worth seeing in a trace rather than guessing.
+    log?("ble:page-send", ["page": page, "seq": seq, "coldRadio": cold])
   }
 
   /// Re-assert advertising if it has stopped for any reason other than us stopping it.
@@ -151,6 +174,14 @@ final class BlePageBeacon: NSObject {
       CBAdvertisementDataLocalNameKey: name,
       CBAdvertisementDataServiceUUIDsKey: [Self.serviceUUID],
     ])
+    // THE NUMBER THAT MATTERS on the director side: how long the page took to reach the air after
+    // it was requested. With warm radios this is sub-millisecond; a large value means something put
+    // a cold radio on the critical path again.
+    if publishRequestedAt > 0 {
+      let ms = Int((Date().timeIntervalSince1970 - publishRequestedAt) * 1000)
+      log?("ble:on-air", ["ms": ms])
+      publishRequestedAt = 0
+    }
   }
 
   /// STOP ADVERTISING. This existed from the first cut and was NEVER CALLED — dead code, while the

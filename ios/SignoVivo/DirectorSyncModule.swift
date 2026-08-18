@@ -742,6 +742,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.currentRole = "director"
       self.currentSessionCode = normalizedSessionCode
       self.currentDirectorToken = Self.randomToken()
+      self.bleBeacon.primeRadios()   // belt-and-braces: a director that never passed through startFollower
       self.configureTransport()
       self.startAdvertising()
       self.startBrowsing()
@@ -818,6 +819,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // A FOLLOWER MUST NEVER ADVERTISE. Belt-and-braces alongside resetTransport: whatever path
       // reached this role, stop publishing before we start listening.
       self.bleBeacon.stopPublishing()
+      // Warm BOTH radios now, not when they are first needed. A follower may become the director a
+      // second later, and creating the peripheral inside publish() put CoreBluetooth's power-on
+      // between the tap and the page reaching the air.
+      self.bleBeacon.primeRadios()
       self.bleBeacon.startScanning()
       self.configureTransport()
       // Start the 1 Hz pulse NOW, not on .connected — hunting is exactly when it has work to do.

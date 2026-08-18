@@ -192,3 +192,26 @@ test("a follower scans continuously — BLE is never switched off by connecting"
   assert.doesNotMatch(MODULE, /bleBeacon\.stopScanning\(\)/,
     "something now stops scanning — BLE would stop covering everything after the first connection");
 });
+
+
+test("neither radio is created on the critical path", () => {
+  // THE SUB-1s REQUIREMENT LIVES OR DIES HERE. CBPeripheralManager was created lazily inside
+  // publish(), so CoreBluetooth's power-on (~200-500ms, more if it prompts for permission) sat
+  // between "Braulio taps Ser Director" and "the page is on the air" — the exact moment the beacon
+  // exists to make fast. Both radios are now brought up at startup, in BOTH roles: a follower needs
+  // the central to hear the first advertisement, and the peripheral too, because any follower may
+  // become the director a second later.
+  assert.match(BEACON, /func primeRadios\(\)/, "nothing pre-warms the radios");
+  assert.match(MODULE, /bleBeacon\.primeRadios\(\)/, "primeRadios is never called");
+  const follower = MODULE.slice(MODULE.indexOf("func startFollower("));
+  const fEnd = MODULE.indexOf("\n  func ", MODULE.indexOf("func startFollower(") + 1);
+  assert.match(MODULE.slice(MODULE.indexOf("func startFollower("), fEnd), /primeRadios\(\)/,
+    "a follower does not warm its radios, so becoming director pays a cold start");
+  const director = MODULE.slice(MODULE.indexOf("func startDirector("));
+  assert.match(director.slice(0, 2000), /primeRadios\(\)/,
+    "a director that never followed first still pays a cold start");
+
+  // And the trace must be able to PROVE it, or "it should be fast" is just a claim.
+  assert.match(BEACON, /"coldRadio": cold/, "nothing reports when a publish hit a cold radio");
+  assert.match(BEACON, /ble:on-air/, "nothing measures request -> on-air latency");
+});
