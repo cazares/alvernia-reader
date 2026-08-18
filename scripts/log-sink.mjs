@@ -5,7 +5,7 @@
 // daily quota with signovivo.com. Debugging therefore competed with the product for the same
 // budget, and twice — 2026-08-17 and 2026-08-18 — telemetry won and took the site down.
 //
-// During a debugging session the devices are on home wifi, three metres from this machine. There is
+// During a debugging session the devices are on home wifi, three metres from this Mac. There is
 // no reason for their breadcrumbs to cross the internet at all. This sink costs nothing, has no
 // quota, no signup and no tunnel, and it accepts the exact payload shape the worker's POST /log
 // does — so pointing a device here is a URL change, not a code change.

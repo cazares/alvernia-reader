@@ -70,8 +70,10 @@ test("signovivo.com is NEVER gated — only the native shell's redundant subscri
 });
 
 test("telemetry is opt-in and drops rather than queues", () => {
-  assert.match(NATIVE, /if \(!telemetryEnabledRef\.current\) return;/,
+  assert.match(NATIVE, /if \(!telemetryEnabledRef\.current\) \{ dbgBufferRef\.current = \[\]; return; \}/,
     "telemetry sends by default again — it has no user value and it caused two outages");
+  // And OFF must also clear the buffer, or a device accumulates rows it will never send.
+  assert.match(NATIVE, /telemetryEnabledRef = useRef\(false\)/, "telemetry does not default to off");
   const flush = NATIVE.slice(NATIVE.indexOf("const dbgFlush = useCallback"), NATIVE.indexOf("const dbgLog = useCallback"));
   // RETENTION DEPENDS ON THE DESTINATION. Failing to the Cloudflare worker must DROP — a queue that
   // survives a Mass is a burst waiting for the next wifi, from the same quota signovivo.com lives on.

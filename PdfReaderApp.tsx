@@ -357,7 +357,7 @@ export default function App() {
   // sv.telemetry, and it stays on only for that install.
   const telemetryEnabledRef = useRef(false);
   // Where breadcrumbs go. Empty = the Cloudflare worker; a LAN URL = scripts/log-sink.mjs running on
-  // the dev Mac. During a debugging session the devices are metres from that machine on the same
+  // Miguel's Mac. During a debugging session the devices are metres from that machine on the same
   // wifi, so there is no reason for their telemetry to cross the internet — and every request that
   // does is drawn from the SAME 100,000/day account quota signovivo.com depends on. Pointing here
   // makes debugging cost the product nothing.
@@ -408,7 +408,7 @@ export default function App() {
     // fire the moment a device finds wifi — the same outage with a delay on it, drawn from the same
     // 100,000/day quota signovivo.com lives on.
     //
-    // To the LAN sink (scripts/log-sink.mjs on the dev Mac): KEEP it. There is no quota to blow, and
+    // To the LAN sink (scripts/log-sink.mjs on Miguel's Mac): KEEP it. There is no quota to blow, and
     // this is the only way to see what happened at MASS, where the iPads join no network at all and
     // telemetry has simply never existed. Buffer through the whole run with no connectivity, rejoin
     // wifi afterwards, and the trace flushes to the Mac. Post-hoc telemetry from a no-network room.
