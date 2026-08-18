@@ -33,6 +33,11 @@ RCT_EXTERN_METHOD(primePermissions:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(refreshNearbyDiscovery:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// Browser-only refresh. A brand-new director must find rivals fast WITHOUT going invisible to the
+// followers already inviting it — see refreshBrowserOnly in DirectorSyncModule.swift.
+RCT_EXTERN_METHOD(refreshDirectorBrowse:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(requestCurrentSnapshot:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

@@ -28,6 +28,7 @@ import {
   isNearbyDirectorSyncAvailable,
   primeNearbyPermissions,
   refreshNearbyDiscovery,
+  refreshDirectorBrowse,
   forceFollowerReconnectNow,
   requestCurrentSnapshot,
   resetNearbyDirectorSync,
@@ -838,7 +839,13 @@ export default function App() {
         // SPLIT-BRAIN MITIGATION: a brand-new director's token must propagate fast so peers
         // (and any prior director) re-find it and converge, instead of waiting out the ~25s
         // browse cycle while both broadcast and followers flap. Kick an immediate re-browse.
-        if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
+        //
+        // BROWSER ONLY. This called refreshNearbyDiscovery, which destroys the ADVERTISER first —
+        // at the exact moment every follower's foundPeer has fired and their invites are in flight,
+        // so those invites evaporated silently and each follower then waited out a timeout before
+        // retrying. The same failure was already diagnosed and guarded on the follower side; the
+        // director had no equivalent protection while doing it to everyone reaching for it.
+        if (syncAvailable) refreshDirectorBrowse().catch(() => {});
         breadcrumb("director");
         becomeDirectorInFlightRef.current = false;
       } catch {

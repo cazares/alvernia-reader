@@ -56,6 +56,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   // four failures at ~32 s. Not lower: a too-short timeout abandons handshakes that would have
   // completed on a marginal link, which trades staleness for churn.
   private static let inviteTimeout: TimeInterval = 8
+  /// How long WE wait before assuming an invite died and re-issuing it. NOT the same number as
+  /// inviteTimeout, which is how long MULTIPEER holds the invite open.
+  ///
+  /// They were the same value, so a silently-dropped invite — one that never fires a delegate
+  /// callback at all, which is exactly what happens when the target's advertiser restarts — cost a
+  /// full 8 seconds of a follower doing nothing before anything retried. That is most of a 10s
+  /// convergence, spent waiting out a worst case rather than noticing a failure.
+  private static let inviteRetryAfter: TimeInterval = 2.5
   /// How recently the browser must have seen a director for it to count as WORKING. Below this,
   /// a scheduled refresh is skipped rather than destroying live discovery. Comfortably longer than
   /// the 5 s early-refresh tick so a healthy hunt is never interrupted, and short enough that a
@@ -987,6 +995,23 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   // Lightweight discovery refresh exposed to JS — restarts browser+advertiser without
   // tearing down existing MCSession connections. Used for the first tap on the reconnect
   // button so followers can re-find the director without dropping the current session.
+  /// The split-brain kick from becomeDirector. Browser-only ON PURPOSE — see refreshBrowserOnly.
+  /// A brand-new director must find rivals fast; it must NOT stop being findable to do it, because
+  /// every follower is inviting it at exactly that moment.
+  @objc(refreshDirectorBrowse:rejecter:)
+  func refreshDirectorBrowse(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      guard self.currentRole != "off" else { resolve(nil); return }
+      self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
+      self.refreshBrowserOnly()
+      self.scheduleNextDiscoveryRefresh()
+      resolve(nil)
+    }
+  }
+
   @objc(refreshNearbyDiscovery:rejecter:)
   func refreshNearbyDiscovery(
     _ resolve: @escaping RCTPromiseResolveBlock,
@@ -1242,6 +1267,14 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     b.startBrowsingForPeers()
     browser = b
     browserFailureCount = 0
+    // A BRAND-NEW BROWSER IS ALREADY AS FRESH AS A REFRESH CAN MAKE IT.
+    //
+    // startDirector calls startBrowsing directly, and becomeDirector then kicks a re-browse
+    // milliseconds later for split-brain convergence — which tore that browser down and rebuilt it,
+    // discarding any peer it had already found, to achieve a state it was already in. Stamping the
+    // refresh clock here makes the existing minRefreshInterval throttle suppress that automatically,
+    // for every caller, instead of each one having to know how old the browser is.
+    lastRefreshAt = Date().timeIntervalSince1970
   }
 
   // Adaptive discovery refresh: fast burst for the first earlyRefreshCycleCount cycles,
@@ -1602,6 +1635,40 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// floods the log is indistinguishable from the fault it is reporting. Re-arms when things calm.
   private var refreshStormReported = false
 
+  /// Re-browse WITHOUT going invisible.
+  ///
+  /// THE BUG THIS EXISTS FOR. becomeDirector kicks refreshNearbyDiscovery() the instant it starts
+  /// serving, to make a split brain converge fast. That lands in refreshDiscovery(), whose first act
+  /// is to destroy the advertiser — at precisely the moment every follower's foundPeer has fired and
+  /// their invites are in flight. Those invites evaporate silently.
+  ///
+  /// This codebase already diagnosed the mirror-image case on the FOLLOWER side and guarded it:
+  /// "NEVER tear down the advertiser/browser while a connection is actively being established …
+  /// makes this device's advertiser vanish, firing a spurious lostPeer on the peer, so the MCSession
+  /// never reaches .connected". The director had no equivalent protection while doing the same thing
+  /// to everyone trying to reach it.
+  ///
+  /// The split-brain purpose only ever needed the BROWSER — finding other directors. Stopping being
+  /// findable was never part of the intent, just a side effect of reusing the full refresh.
+  private func refreshBrowserOnly() {
+    guard currentRole != "off" else { return }
+    let now = Date().timeIntervalSince1970
+    guard now - lastRefreshAt >= Self.minRefreshInterval else { return }
+    lastRefreshAt = now
+    autoreleasepool {
+      browser?.stopBrowsingForPeers(); browser?.delegate = nil; browser = nil
+      // Same reasoning as refreshDiscovery: an MCPeerID is meaningful only to the browser instance
+      // that found it, so everything discovered by the old browser is a ghost. The advertiser is
+      // untouched, so peers mid-invite to US keep their target.
+      let forgotten = discoveredDirectors.count + discoveredFollowers.count
+      discoveredDirectors.removeAll(); discoveredDirectorSeenAt.removeAll()
+      discoveredDirectorInfo.removeAll()
+      discoveredFollowers.removeAll(); discoveredFollowerInfo.removeAll()
+      if forgotten > 0 { dbgLog("refresh:browser-only", ["forgotten": forgotten]) }
+      startBrowsing()
+    }
+  }
+
   private func refreshDiscovery() {
     guard currentRole != "off" else { return }
     let now = Date().timeIntervalSince1970
@@ -1793,10 +1860,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         // After the window the director may have refreshed its advertiser and silently
         // rejected the invite without firing notConnected — force a fresh attempt.
         let elapsed = Date().timeIntervalSince1970 - pendingInviteTimestamp
-        if elapsed < Self.inviteTimeout {
+        if elapsed < Self.inviteRetryAfter {
           emitState(status: "connecting")
           return
         }
+        dbgLog("invite:retry", ["to": pending.displayName, "afterSec": Int(elapsed)])
         // Invite likely stale; fall through to retry below.
         pendingInvitePeer = nil
       } else if discoveredDirectors[pending] != nil {

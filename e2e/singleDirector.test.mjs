@@ -125,11 +125,72 @@ test("when the mesh demotes this director, it steps down AND the person is told"
   assert.match(block, /Otro dispositivo tomó la dirección del coro/, "the demoted human is not told");
 });
 
-test("a new director forces immediate rediscovery so two directors converge in seconds, not a browse cycle", () => {
+test("a new director re-browses immediately — WITHOUT going invisible to the followers reaching for it", () => {
   const start = SRC.indexOf("const becomeDirector = useCallback(");
   const end = SRC.indexOf("// ── Soft reset", start);
   const fn = SRC.slice(start, end);
-  assert.match(fn, /roleRef\.current = "director";[\s\S]*refreshNearbyDiscovery\(\)/, "no rediscovery kick after becoming director");
+
+  // The kick must still happen: a brand-new director has to find rivals fast, or two of them sit
+  // split for a whole browse cycle while followers flap between them.
+  assert.match(fn, /roleRef\.current = "director";[\s\S]*refreshDirectorBrowse\(\)/,
+    "no rediscovery kick after becoming director");
+
+  // AND IT MUST BE BROWSER-ONLY. This used refreshNearbyDiscovery, which destroys the ADVERTISER as
+  // its first act — fired at the exact moment every follower's foundPeer had triggered and their
+  // invites were in flight. Multipeer drops an invite to a vanished advertiser SILENTLY, so each
+  // follower then waited out a timeout before retrying: most of the observed ~10s convergence.
+  //
+  // The follower side already had this exact protection ("NEVER tear down the advertiser/browser
+  // while a connection is actively being established"); the director had none while doing it to
+  // everyone trying to reach it. Asserting the ABSENCE matters as much as the presence — the old
+  // call is one autocomplete away and fails nothing else.
+  assert.doesNotMatch(fn, /refreshNearbyDiscovery\(\)/,
+    "becomeDirector destroys its own advertiser again — every in-flight follower invite dies silently");
+
+  const swift = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
+  const browserOnly = swift.slice(swift.indexOf("private func refreshBrowserOnly()"));
+  // Comments stripped: the body necessarily EXPLAINS that it leaves the advertiser alone, so a raw
+  // scan for "advertiser" fails on the rationale rather than on the code. Same trap that made an
+  // earlier test assert against its own explanation.
+  const body = browserOnly.slice(0, browserOnly.indexOf("\n  }"))
+    .replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(body.length > 20, "refreshBrowserOnly is gone");
+  assert.doesNotMatch(body, /advertiser\??\./,
+    "refreshBrowserOnly touches the advertiser — that is the whole thing it exists not to do");
+  assert.match(body, /startBrowsing\(\)/, "it does not restart browsing, so it refreshes nothing");
+  // Ghost peers still have to be cleared: an MCPeerID dies with the browser that found it.
+  assert.match(body, /discoveredDirectors\.removeAll\(\)/,
+    "stale peers survive the browser that found them — invites to them evaporate");
+});
+
+test("becoming director does not immediately tear down the browser it just created", () => {
+  // startDirector calls startBrowsing directly; becomeDirector then kicks a re-browse milliseconds
+  // later for split-brain convergence. Without a guard that kick destroys a browser that is already
+  // as fresh as a refresh could make it, discarding peers it may have just found — churn during the
+  // exact window every follower is trying to reach this device.
+  const swift = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
+  const sb = swift.slice(swift.indexOf("private func startBrowsing()"));
+  assert.match(sb.slice(0, sb.indexOf("\n  }")), /lastRefreshAt = Date\(\)\.timeIntervalSince1970/,
+    "a fresh browser does not stamp the refresh clock, so an immediate re-browse is not throttled");
+  // The throttle it relies on has to still be there, and be long enough to cover the kick.
+  const throttle = Number(swift.match(/minRefreshInterval: TimeInterval = ([\d.]+)/)[1]);
+  assert.ok(throttle >= 1.0, `minRefreshInterval ${throttle}s is too short to absorb the startup kick`);
+  assert.match(swift, /guard now - lastRefreshAt >= Self\.minRefreshInterval else \{ return \}/,
+    "the refresh throttle is gone — every caller now has to know how old the browser is");
+});
+
+test("the invite retry cadence is NOT the invite timeout", () => {
+  // They were the same number, so a silently-dropped invite — no delegate callback, which is exactly
+  // what a restarted advertiser produces — cost a full 8s of a follower doing nothing before
+  // anything retried. Two different questions: how long Multipeer holds the invite open, and how
+  // long WE wait before concluding it died.
+  const swift = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
+  const timeout = Number(swift.match(/inviteTimeout: TimeInterval = ([\d.]+)/)[1]);
+  const retry = Number(swift.match(/inviteRetryAfter: TimeInterval = ([\d.]+)/)[1]);
+  assert.ok(retry < timeout, `retry ${retry}s must be shorter than the invite timeout ${timeout}s`);
+  assert.ok(retry >= 1.5, `retry ${retry}s is too eager — invites need room to complete normally`);
+  assert.match(swift, /if elapsed < Self\.inviteRetryAfter/,
+    "the retry decision reads inviteTimeout again — that is the conflation this fixed");
 });
 
 test("the Swift mesh still resolves two directors deterministically (newest token wins) — the JS relies on it", () => {
