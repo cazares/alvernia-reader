@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "bookVersion": "bv_1e9cbe6885c71531",
+  "bookVersion": "bv_d2849f774f82a1c2",
   "totalPages": 372,
-  "builtFromShellBuild": 458,
+  "builtFromShellBuild": 459,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-18T17:42:27.927Z",
+  "generatedAt": "2026-08-18T18:20:03.827Z",
   "sourcePdfSha256": "415d8e23f6937aa86d73e4538ebf0b6cd53907d085a63cd39dce3e0e8335761e",
   "sourcePdfPages": 372,
   "songIndexDigest": "0003e0ed142f06496a007200b16e270761e17709662739fde192bbcf4ada092f",
@@ -1510,9 +1510,9 @@
   "files": [
     {
       "p": "app.js",
-      "n": 209488,
-      "h": "d766137fc07aef06da02119d76f3d57dec701cc4921237f19fc75c2fa716c4ed",
-      "m": "5362677c7ed59dacd07eb0731a6e40a7"
+      "n": 222715,
+      "h": "2f6b2a0c157b6b396b5817b002e469c02e7cad1e78aae18a6921cdca12883ee7",
+      "m": "b7bff33088328157d45b2a5db6585177"
     },
     {
       "p": "books.json",
@@ -3796,9 +3796,9 @@
     },
     {
       "p": "index.html",
-      "n": 25702,
-      "h": "19d89eaf294acba515b43c21b1e65e1e1f5df41846168ac9dec54d6b33e881e0",
-      "m": "0197aa45f02056ccb4f45c4731b1604a"
+      "n": 32886,
+      "h": "e124a0c5803896e8c8796ae7ea944531bb201a936824220023a0f625c38245bd",
+      "m": "606ede58b1e6a92467804141b537e36a"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3815,8 +3815,8 @@
     {
       "p": "lib/svSelftest.js",
       "n": 8084,
-      "h": "45364845b8b36b013290cfdfc3d8bdb0e9bf8c6e4b69103e11b32c3c6336a993",
-      "m": "ad8b551029d9fb07f0e2419220d662d7"
+      "h": "9247f9e41bc571eae625d85a08c7d245bdb62fca6f1704813df177b997c5ea16",
+      "m": "0942b59469cada2329b9e6901cd25118"
     },
     {
       "p": "lib/svSyncDecision.js",
@@ -3832,15 +3832,15 @@
     },
     {
       "p": "styles.css",
-      "n": 75685,
-      "h": "8569ba377b1a72c464b3356c109e19553d859af095166a9cf6e695467e3450d3",
-      "m": "49d8c8d481c1ce363285f55f1ed35323"
+      "n": 106193,
+      "h": "6fb514cb793ce1aafd1301e36e2c3e4e5448b8d43e1db298f4672b8cec44a03f",
+      "m": "6228362a403a3e56894dba6aee05d62d"
     },
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "d8808b5cb7d3d40c3f0dec2b59806b803b4e537f9f9776860e841c1af7e3c2ce",
-      "m": "54deea9d1b32eb2a09c420cc4416daea"
+      "h": "d228b587ca0841fd56215a404341deb541a83751ef2131792c65876dd39d019f",
+      "m": "ea02118edb5bfb07adc38b0b6fd7e166"
     }
   ]
 }
