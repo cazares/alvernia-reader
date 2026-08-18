@@ -2464,7 +2464,10 @@ html[data-role="director"] .director-mode-badge .director-mode-badge-title { col
    mark on a status, which is what this is. Matches ★ Ser Director's glyph family without repeating
    its emphasis — that one is an action you take, this one is a state you are in. */
 html[data-role="director"] .director-mode-badge .director-mode-badge-star { display: none; }
-.director-exit-label { display: none; flex-direction: column; align-items: center; }
+/* Buttons don't inherit body's white text color by default in every engine — unlike
+   .director-mode-badge-title (which sets #E4EEFF explicitly), these two lines had no color rule
+   at all and fell back to the browser's default button text, unreadable on the dark navy badge. */
+.director-exit-label { display: none; flex-direction: column; align-items: center; color: #fff; }
 html[data-role="director"] .director-mode-badge .director-exit-label { display: flex; }
 /* The word is retired from the GLASS but stays in SYNC_PILL for screen readers, and the pill's
    aria-label still says "Estás dirigiendo. Tocar para salir." */
