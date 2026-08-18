@@ -7,7 +7,7 @@
      5px left" for the top-left and "5px up, 5px right" for the top-right — which is one uniform
      gutter change, since left-anchored controls move left, right-anchored move right, and every
      control shares the top edge). One variable moves BOTH clusters in BOTH roles. */
-  --fab-gutter: 0.96rem;     /* 1.58rem - 10px: left cluster 10px left, right cluster 10px right */
+  --fab-gutter: 0.8rem;      /* out another 2.5px per side; the top edge keeps its own 0.96rem */
   /* THE TOP EDGE IS ITS OWN VARIABLE (owner, 2026-08-18: "nudge all buttons up by 5px"). Until now
      one var drove top, left AND right, so raising the row also pulled both clusters inward. Split so
      the vertical and horizontal positions can be tuned independently — every top: anchor reads this,
