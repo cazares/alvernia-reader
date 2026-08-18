@@ -148,18 +148,35 @@ test("the pill never appears on the public web", () => {
   assert.match(fn, /NATIVE_FILE_MODE \|\| hasNativeBridge\(\)/, "not gated to the native shell");
 });
 
-test("the pill REPORTS state; it no longer takes or drops the role", () => {
-  // WHAT CHANGED (build 435). The pill used to be the role control, so this asserted that a tap
-  // acted on the displayed state. Both directions moved into the IR A CANTO modal (★ Dirigir /
-  // ★ Salir de director), behind a typed-word gate — because a permanently visible
-  // become-director control on six choir iPads is a split-brain generator.
+test("the pill REPORTS state, and is the ONLY way to drop the role", () => {
+  // WHAT CHANGED, twice. In 435 the pill stopped acting entirely: both directions moved into the
+  // IR A CANTO modal behind a typed-word gate, because a permanently visible become-director
+  // control on six choir iPads is a split-brain generator.
   //
-  // The invariant that MATTERS is stronger now and is enforced in directorButton.test.mjs: exactly
-  // ONE place asks for the role. Leaving this handler acting would have been a second, UNGATED
-  // path on the control most likely to be tapped by accident — a hole straight through the gate.
-  // That is exactly what the one-request-site assertion caught.
+  // On 2026-08-18 the owner moved the EXIT back onto the pill: "tapping DIRECTOR should give you
+  // the modal if you wanna quit being a director", and then "no X pill needed anymore, remove plz".
+  // The status is now also the way out. That is one element with two meanings, which is normally
+  // the bug — it is right here because both meanings are the SAME FACT: it reads the role you hold,
+  // and tapping asks whether you meant to stop holding it. The label can never lie about the act.
+  //
+  // The asymmetry is the invariant, not the count of controls:
+  //   TAKING  the role changes the page on every device in the loft -> ONE site, behind the gate.
+  //   DROPPING it is recoverable                                    -> reachable without hunting.
   const h = APP.slice(APP.indexOf("if (directorModeBadge) directorModeBadge.addEventListener"), APP.indexOf("songCancelButton.addEventListener"));
-  assert.ok(!/request-director/.test(h), "the pill can still TAKE the role — that path must live only behind the gate");
-  assert.ok(!/exit-director/.test(h), "the pill can still DROP the role — that path must live only in the modal");
+
+  // UNCHANGED AND NON-NEGOTIABLE. The pill is the control most likely to be tapped by accident, so
+  // a take-the-role path here would be a second, UNGATED hole straight through the typed-word gate.
+  // directorButton.test.mjs pins the matching half: exactly ONE site asks for the role.
+  assert.ok(!/request-director/.test(h), "the pill can TAKE the role — that path must live only behind the gate");
+
+  // The exit lives here now, and nowhere else — the separate ✕ fab was removed with it.
+  assert.match(h, /exit-director/, "the pill no longer drops the role, and the ✕ is gone — nothing can");
+  assert.match(h, /window\.confirm\("¿Salir de director\?"\)/,
+    "the exit is unconfirmed — a stray tap on the status would drop the choir's director mid-Mass");
+  const HTML = fs.readFileSync("web/src/index.html", "utf8");
+  assert.doesNotMatch(HTML, /id="sync-exit-fab"/, "a second exit is back — one act, one control");
+
+  // While NOT directing there is nothing to drop, so the tap teaches instead of acting.
   assert.match(h, /openSongJump\(\)/, "the pill should point at the control instead of acting");
 });
+

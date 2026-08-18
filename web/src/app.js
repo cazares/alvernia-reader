@@ -1189,7 +1189,7 @@ const SYNC_PILL = {
   // What never varies is where you end up: directing the choir. The pill says that. The TITLE
   // (SIGUIENDO vs NADIE DIRIGE) and the tint carry the difference between the two situations, and
   // the red takeover warning still appears when it applies.
-  directing: { cls: "", title: "Dirigir", action: "✕ Salir" },
+  directing: { cls: "", title: "DIRECTOR", action: "" },
   // "Tomar", not "Pedir". Nothing approves this: tap, confirm, and you are the director — whoever
   // currently holds it is never asked. A word like "request" would promise a handshake that exists
   // nowhere in this system, and the person tapping would wait for a reply that never comes. The red
@@ -1201,7 +1201,10 @@ const SYNC_PILL = {
   // is true in every case and needs no context to read.
   // SIGUIENDO is gone: CSS collapses this state to a bare breathing dot. The strings stay for
   // screen readers and for the non-native web, where there is no mesh and no dot styling.
+  // FOLLOWING collapses to a dot on the ⟳ fab — a word there was a CLAIM, and it lied all morning
+  // on 2026-08-17 while devices sat on the wrong song. A light is just a light.
   following: { cls: "is-following", title: "Siguiendo", action: "" },
+  // NOBODY is the one state that earns words: it is the only one needing a human to act.
   nobody:    { cls: "is-nobody", title: "Nadie dirige", action: "" },
 };
 
@@ -1282,37 +1285,20 @@ const renderDirectorModeBadge = () => {
   // Drive the control layout: followers (web + any non-director native) get ⟳ resync + ♪;
   // a director gets ♪ + ⌕ search. Default "follower" so signovivo.com is right from boot.
   document.documentElement.dataset.role = isDirector ? "director" : "follower";
-  const rl = document.getElementById("role-toggle-label");
-  const rt = document.getElementById("role-toggle");
-  if (rl && rt) {
-    // The cell shows either the "Dirigir" key OR (✕ + DIRECTOR status) — never one control wearing
-    // two meanings. See syncRoleToggle for the reasoning.
-    rl.textContent = "Dirigir";
-    const xBtn = document.getElementById("role-exit-x");
-    const status = document.getElementById("role-status-pill");
-    rt.classList.toggle("is-hidden", isDirector);
-    if (xBtn) xBtn.classList.toggle("is-hidden", !isDirector);
-    if (status) status.classList.toggle("is-hidden", !isDirector);
-  }
   if (!directorModeBadge) return;
   // Native shell only. On signovivo.com there is no mesh and no role to take, so the pill would be
   // describing a room the viewer is not in.
-  const exitFab = document.getElementById("sync-exit-fab");
-  if (exitFab && !exitFab.dataset.wired) {
-    exitFab.dataset.wired = "1";
-    exitFab.addEventListener("click", () => {
-      haptic();
-      // Same plain confirm as the keypad's ✕ — stepping DOWN is recoverable, so it does not earn
-      // the red typed-word gate that TAKING the role from someone does.
-      if (window.confirm("¿Salir de director?")) postNativeBridge({ type: "exit-director" });
-    });
-  }
   const inShell = NATIVE_FILE_MODE || hasNativeBridge();
   if (!inShell) {
     directorModeBadge.classList.add("is-hidden");
     return;
   }
-  const st = SYNC_PILL[syncPillState()];
+  const key = syncPillState();
+  const st = SYNC_PILL[key];
+  // Drive the crossed-out ⟳ from the SAME verdict that drives the pill, so the two can never
+  // disagree — one state, one source. On <html> beside data-role rather than a body class, to
+  // match the existing pattern and to be in place before first paint.
+  document.documentElement.dataset.mesh = key;
   directorModeBadge.classList.remove("is-following", "is-nobody");
   if (st.cls) directorModeBadge.classList.add(st.cls);
   directorModeBadge.classList.remove("is-hidden");
@@ -1320,12 +1306,25 @@ const renderDirectorModeBadge = () => {
   const actionEl = document.getElementById("sync-pill-action");
   if (titleEl) titleEl.textContent = st.title;
   if (actionEl) actionEl.textContent = st.action;
+  // BRANCH ON THE KEY, NOT THE TITLE. This compared st.title === "NADIE DIRIGE" while the title is
+  // "Nadie dirige" — the branch could never match, so a follower with NO director was announced to
+  // a screen reader as "Estás siguiendo al director": the opposite of the truth, in the one state
+  // that needs a human. Both surviving labels also promised that tapping takes the role, which it
+  // has not done since build 435.
   directorModeBadge.setAttribute(
     "aria-label",
-    st.title === "DIRECTOR" ? "Estás dirigiendo. Tocar para salir."
-      : st.title === "NADIE DIRIGE" ? "Nadie está dirigiendo. Tocar para dirigir."
-      : "Estás siguiendo al director. Tocar para tomar el control.",
+    key === "directing" ? "Estás dirigiendo. Tocar para salir."
+      : key === "nobody" ? "Nadie está dirigiendo."
+      : "Estás siguiendo al director.",
   );
+  // While nobody directs, the pill is display:none and the crossed-out ⟳ IS the indicator — so the
+  // announcement has to move to the control that is actually on screen, or the state goes silent.
+  const resyncEl = document.getElementById("resync-fab");
+  if (resyncEl) {
+    resyncEl.setAttribute("aria-label", key === "nobody"
+      ? "Nadie está dirigiendo. Tocar para saber más."
+      : "Volver a sincronizar con el director");
+  }
 };
 
 // ── Sync "working" indicator ──────────────────────────────────────────────────
@@ -3083,16 +3082,10 @@ const bindReaderEvents = () => {
   const syncRoleToggle = () => {
     if (!roleToggle || !roleLabel) return;
     const directing = state.nativeSyncRole === "director";
-    // TWO MODES, NOT ONE RELABELLED CONTROL (owner, 2026-08-17). While directing, the cell shows a
-    // STATUS pill that cannot be tapped and a separate ✕ that can. One element that changes its own
-    // meaning is what made "Salir de director" ambiguous on a control that also ENTERS the role —
-    // and it is what made a mis-tap drop the choir's director mid-Mass.
-    const exitX = document.getElementById("role-exit-x");
-    const statusPill = document.getElementById("role-status-pill");
+    // The key is ENTRY only, so it simply disappears once you hold the role — the top bar's
+    // ✕ · DIRECTOR shows the state and owns the exit. Nothing here ever relabels itself.
     roleToggle.classList.toggle("is-hidden", directing);
-    if (exitX) exitX.classList.toggle("is-hidden", !directing);
-    if (statusPill) statusPill.classList.toggle("is-hidden", !directing);
-    roleLabel.textContent = "Dirigir";
+    roleLabel.textContent = "Ser Director";
     // Native shell only — signovivo.com has no mesh and no role to take.
     // VISIBILITY, NOT DISPLAY. This button now occupies a CELL in the numpad grid, so display:none
     // removes the cell and the bottom row reflows — 0 and ⌫ slide left into a keypad people navigate
@@ -3130,28 +3123,29 @@ const bindReaderEvents = () => {
     postNativeBridge({ type: "request-director" });
   });
 
-  // ✕ — the ONLY way out of the role now. Stepping DOWN is recoverable, so it keeps a plain
-  // confirm; only taking the role from someone earns the red typed-word gate. Asymmetric friction,
-  // matched to consequence.
-  const roleExitX = document.getElementById("role-exit-x");
-  if (roleExitX) roleExitX.addEventListener("click", () => {
-    haptic();
-    if (window.confirm("¿Salir de director?")) {
-      closeSongJump();
-      postNativeBridge({ type: "exit-director" });
-    }
-  });
+  // (The keypad ✕ that used to live here was removed on 2026-08-18 along with #role-exit-x. The way
+  // out of the role is the DIRECTOR status pill itself — see its handler below. This block outlived
+  // its element and its comment claimed the ✕ was "the ONLY way out", which had stopped being true.)
+
+  // Two things open this gate — the keypad's ★ Ser Director and the tip's "¿Eres Braulio?" — so it
+  // is a function rather than the same six lines twice. Opening the gate is not taking the role:
+  // the typed word and the red warning are still the only way through, and the ONE
+  // request-director call site is still the gate's own Confirmar.
+  const openRoleGate = () => {
+    // Guarded even though both callers are hidden while directing: a second director is the failure
+    // that breaks a Mass, and a guard is cheaper than the Sunday that finds the hole.
+    if (state.nativeSyncRole === "director") return;
+    if (!roleGate) return;
+    roleGate.classList.remove("is-hidden");
+    if (roleGateInput) { roleGateInput.value = ""; roleGateInput.focus(); }
+    if (roleGateConfirm) roleGateConfirm.disabled = true;
+  };
 
   if (roleToggle) roleToggle.addEventListener("click", () => {
     haptic();
-    // Never reachable while directing — the key is hidden then — but a guard costs nothing and the
-    // failure it prevents (a second director) is the one that breaks a Mass.
-    if (state.nativeSyncRole === "director") return;
-    if (roleGate) {
-      roleGate.classList.remove("is-hidden");
-      if (roleGateInput) { roleGateInput.value = ""; roleGateInput.focus(); }
-      if (roleGateConfirm) roleGateConfirm.disabled = true;
-    }
+    // ENTRY ONLY. Leaving the role is the DIRECTOR status pill in the top bar — this key never
+    // exits, so a mis-tap here cannot drop the choir's director.
+    openRoleGate();
   });
 
   const searchFab = document.getElementById("search-fab");
@@ -3161,8 +3155,31 @@ const bindReaderEvents = () => {
   // it sends a request and the shell runs the same confirmation, live-director takeover warning and
   // ⟳ resync fab (top-left, follower) — rejoin the live director + refresh the connection.
   // Spin the icon for ~1.1s on tap so it's obvious it's reconnecting/refreshing.
+  // The "nobody directing" tip — a bubble anchored under the ⟳, opened by tapping the crossed-out
+  // button. Tapping anywhere, or OK, closes it. No auto-dismiss: it is three lines of explanation
+  // and vanishing mid-sentence is worse than a stray tap.
+  const noDirTip = document.getElementById("nodir-info");
+  const closeNoDirTip = () => { if (noDirTip) noDirTip.classList.add("is-hidden"); };
+  if (noDirTip) {
+    const closeBtn = document.getElementById("nodir-info-close");
+    const catcher = document.getElementById("nodir-info-backdrop");
+    if (closeBtn) closeBtn.addEventListener("click", () => { haptic(); closeNoDirTip(); });
+    if (catcher) catcher.addEventListener("click", closeNoDirTip);
+    const braulio = document.getElementById("nodir-info-braulio");
+    if (braulio) braulio.addEventListener("click", () => { haptic(); closeNoDirTip(); openRoleGate(); });
+  }
+
   const resyncFab = document.getElementById("resync-fab");
   if (resyncFab) resyncFab.addEventListener("click", () => {
+    // NOTHING TO RESYNC TO. With no director the reconnect is a no-op that looks like a fix, so the
+    // button explains itself instead of spinning and changing nothing — which is exactly what the
+    // crossing-out is telling you before you tap.
+    if (document.documentElement.dataset.mesh === "nobody") {
+      haptic();
+      if (noDirTip) noDirTip.classList.remove("is-hidden");
+      return;
+    }
+    closeNoDirTip();
     resyncFab.classList.add("is-spinning");
     window.setTimeout(() => resyncFab.classList.remove("is-spinning"), 1100);
     reconnectRelay();
@@ -3188,7 +3205,17 @@ const bindReaderEvents = () => {
   // drift it exists to prevent.
   if (directorModeBadge) directorModeBadge.addEventListener("click", () => {
     haptic();
-    if (syncPillState() === "directing") return;   // exiting lives in the modal too
+    if (syncPillState() === "directing") {
+      // THE STATUS IS ALSO THE WAY OUT. It reads DIRECTOR, and tapping it asks whether you meant
+      // to stop — so the label never lies and the destructive step still needs an explicit yes.
+      // A separate ✕ lived beside this briefly: two controls for one act, and the ✕ said nothing
+      // about which role you were in.
+      //
+      // Plain confirm, not the red typed-word gate. Stepping DOWN is recoverable; only TAKING the
+      // role from someone else changes everyone's page and earns the heavy friction.
+      if (window.confirm("¿Salir de director?")) postNativeBridge({ type: "exit-director" });
+      return;
+    }
     openSongJump();   // point at the control instead of acting: discoverable, not destructive
   });
 

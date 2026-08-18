@@ -52,18 +52,6 @@
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
         <img id="page-image" src="books/standard/pages/page-001.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
-        <!-- The room's sync state, and the control for it, in one place. Three states: you are
-             directing / someone is / nobody is. It replaces a badge that only ever appeared for the
-             director — which meant the one state worth shouting about, an EMPTY DIRECTOR SEAT,
-             looked exactly like everything being fine. Text is filled in by renderSyncPill(). -->
-        <!-- SPLIT: the ✕ is a control, DIRECTOR is a status. Same rule as the keypad's role cell —
-             one element that changes its own meaning is how a mis-tap drops the choir's director
-             mid-Mass. Director reads left-to-right: ✕ · DIRECTOR · Ir a Canto … ⌕ -->
-        <button class="sync-exit-fab is-hidden" id="sync-exit-fab" type="button" aria-label="Salir de director">✕</button>
-        <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button">
-          <strong class="director-mode-badge-title" id="sync-pill-title">DIRECTOR</strong>
-          <span class="director-mode-badge-exit" id="sync-pill-action" aria-hidden="true">Tomar</span>
-        </button>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
           <div class="offline-gate-card">
@@ -85,6 +73,36 @@
       <!-- Drawer handle: left-edge pull-tab -->
       <button class="drawer-handle" id="drawer-handle" type="button" aria-label="Abrir controles">
         <span class="drawer-handle-lines" aria-hidden="true">›</span>
+      </button>
+
+      <!-- OUTSIDE #viewer-shell ON PURPOSE — this is a stacking-context fix, not tidying.
+           #viewer-shell sets `isolation: isolate` and `contain: content`, each of which creates a
+           stacking context. While this button lived in there, its z-index:46 was scoped INSIDE that
+           context, and #viewer-shell itself sits at z-index:auto — so the ⟳ fab's z-index:45, which
+           is a sibling of the SECTION, painted above the whole subtree. The follower's green
+           "you are synced" dot was rendering BEHIND the button it sits on, in shipped builds.
+           An earlier note here claimed `position: fixed` had fixed that. It had not: `fixed`
+           escapes normal-flow positioning, never an ancestor's stacking context. Only moving out
+           does. e2e/fabLayout.test.mjs pins the ancestry so it cannot drift back in. -->
+      <!-- The room's sync state, and the control for it, in one place. Three states: you are
+             directing / someone is / nobody is. It replaces a badge that only ever appeared for the
+             director — which meant the one state worth shouting about, an EMPTY DIRECTOR SEAT,
+             looked exactly like everything being fine. Text is filled in by renderSyncPill(). -->
+      <!-- DIRECTOR: status AND the way out. Tapping it opens the "¿Salir de director?" confirm,
+             so the label never lies and the destructive step still needs an explicit yes. A separate
+             ✕ lived here briefly and was removed — two controls for one act, and the ✕ said nothing
+             about which role you were in. -->
+      <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button">
+        <span class="director-mode-badge-star" aria-hidden="true">&#9734;</span>
+        <strong class="director-mode-badge-title" id="sync-pill-title">DIRECTOR</strong>
+        <!-- EMPTY ON PURPOSE. Every SYNC_PILL state now sets action: "" — the pill REPORTS, it does
+               not carry a verb. "Tomar" sat here as static markup that app.js overwrote on first
+               render, so it never shipped visibly, but it would flash if a render were ever delayed
+               past first paint, and it read as a live label to anyone opening this file.
+               "Tomar" was rejected as a bare verb (take WHAT?) and "Tomar el control" as a promise
+               the app cannot keep — it names a native dialog that only exists inside an 8s window
+               the pill cannot see. See SYNC_PILL in app.js. -->
+        <span class="director-mode-badge-exit" id="sync-pill-action" aria-hidden="true"></span>
       </button>
 
       <!-- ⟳ resync — top-LEFT FOLLOWER control: rejoin the live director + refresh the link.
@@ -145,20 +163,14 @@
                  space, and the card was tall enough on a 10.2" portrait iPad to push the primary
                  action toward the fold. Bottom-left is also the furthest key from the thumb that
                  reaches for a digit, which suits a rare, consequential control. -->
-            <div class="numberpad-key-role-cell" id="role-cell">
-              <!-- NOT DIRECTING: one plain key, styled exactly like a digit. -->
-              <button class="song-jump-role numberpad-key-role" id="role-toggle" type="button">
-                <span class="song-jump-role-star" aria-hidden="true">&#9733;</span>
-                <span id="role-toggle-label">Dirigir</span>
-              </button>
-              <!-- DIRECTING: a STATUS that is not a control, and a separate ✕ that is (owner,
-                   2026-08-17). One element that changes its own meaning is what made the old
-                   "Salir de director" ambiguous; splitting them means the label never lies and the
-                   action is never accidental. ✕ sits LEFT so the status reads last, and so the
-                   destructive tap is not where the thumb lands by habit. -->
-              <button class="role-exit-x is-hidden" id="role-exit-x" type="button" aria-label="Salir de director">&#10005;</button>
-              <span class="role-status-pill is-hidden" id="role-status-pill" aria-live="polite">DIRECTOR</span>
-            </div>
+            <!-- ENTER the role here; LEAVE it from the top bar. The keypad holds no ✕ and no
+                 DIRECTOR status (owner: "NO X/director button in numpad") — only the way in, in the
+                 cell that was dead space. Taking the role is a rare, deliberate act, so it sits
+                 behind a dialog you opened on purpose; stepping down is one tap from the reader. -->
+            <button class="song-jump-role numberpad-key-role" id="role-toggle" type="button">
+              <span class="song-jump-role-star" aria-hidden="true">&#9733;</span>
+              <span id="role-toggle-label">Ser Director</span>
+            </button>
             <button class="numberpad-key" type="button" data-digit="0">0</button>
             <button class="numberpad-key numberpad-key-back" id="backspace-button" type="button" aria-label="Borrar último dígito">⌫</button>
           </div>
@@ -199,6 +211,43 @@
            typed word, not a tap. All-caps is right HERE (a one-time alarm) where it is wrong on a
            label you live with. Stepping DOWN gets a plain confirm instead: that direction is
            recoverable, this one is not. -->
+      <!-- WHY THIS EXISTS. A crossed-out button is unmistakable but not self-explaining, and to a
+           non-technical singer the first reading of one is "my iPad is broken". It is not — the book
+           works perfectly, there is simply nobody driving.
+           A BUBBLE ANCHORED TO THE BUTTON, not a modal (owner, 2026-08-18). A full-screen dialog
+           with a backdrop reads as an app-level failure, which is the exact wrong message; a tip
+           with a tail pointing at the ⟳ is visibly ABOUT that button and nothing more.
+           IT DELIBERATELY DOES NOT TEACH ANYONE TO TAKE THE ROLE ("users need less complexity not
+           more"). Beyond simplicity: the audience here is six FOLLOWERS, and #role-gate warns in as
+           many words that anyone who is not Braulio taking the role "va a causar problemas para
+           TODO EL CORO". A how-to on the one screen every singer sees when the seat is empty would
+           be instructions for producing a split brain. It explains, and it closes. -->
+      <div class="nodir-tip is-hidden" id="nodir-info" role="dialog" aria-label="Nadie esta dirigiendo">
+        <div class="nodir-tip-catch" id="nodir-info-backdrop"></div>
+        <div class="nodir-tip-bubble" role="document">
+          <span class="nodir-tip-tail" aria-hidden="true"></span>
+          <p class="nodir-tip-title"><span class="nodir-tip-mark" aria-hidden="true">i</span>Nadie est&aacute; dirigiendo</p>
+          <p class="nodir-tip-body">
+            Tu iPad est&aacute; bien. El <strong>&#10227;</strong> est&aacute; tachado porque no hay a qui&eacute;n seguir.
+            Las p&aacute;ginas no van a cambiar solas hasta que alguien dirija.
+          </p>
+          <button class="nodir-tip-ok" id="nodir-info-close" type="button">OK</button>
+          <!-- THE ONE SHORTCUT WORTH HAVING, and it is a question, not an instruction. The empty
+               seat is exactly when Braulio needs the role, and without this his path is five taps
+               (close → Ir a Canto → ★ Ser Director → type → confirm). Phrased as "¿Eres Braulio?"
+               it is SELF-FILTERING: a singer named María reads it and thinks "no". A how-to line
+               would have taught all six followers to produce a split brain; a question does not.
+               It opens #role-gate — it does NOT take the role. The typed word and the red
+               "ESTO CAMBIA LA PÁGINA DE TODOS" warning are still the only way through, so this adds
+               a shortcut to the check and no authority whatsoever. request-director keeps exactly
+               one call site, which e2e/directorButton.test.mjs pins. -->
+          <button class="nodir-tip-braulio" id="nodir-info-braulio" type="button">&iquest;Eres Braulio?</button>
+        </div>
+      </div>
+      </div>
+        </div>
+      </div>
+
       <div class="role-gate is-hidden" id="role-gate" role="dialog" aria-modal="true" aria-label="Confirmar dirigir el coro">
         <div class="role-gate-backdrop" id="role-gate-backdrop"></div>
         <div class="role-gate-card" role="document">
