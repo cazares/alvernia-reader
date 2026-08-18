@@ -155,7 +155,12 @@ test("every mesh breadcrumb is also written to the device's own log", () => {
   assert.match(swift, /^import os$/m, "os must be imported for Logger");
   assert.match(swift, /Logger\(subsystem:\s*"com\.cazares\.signovivo"/,
     "a Logger with a stable subsystem is what makes `log stream --predicate` usable");
-  assert.match(swift, /deviceLog\.info\(/, "dbgLog must mirror to the device log");
+  // .notice, NOT .info — os_log's .info is MEMORY-ONLY by default, so it never reaches
+  // `log collect` or a sysdiagnose. Build 438 shipped .info and the channel was silent in every
+  // collected archive: a real 440 capture converted to ZERO com.cazares.signovivo rows. The whole
+  // point is reading a device after the fact, offline, so persistence is the feature.
+  assert.match(swift, /deviceLog\.notice\(/, "breadcrumbs must be logged at .notice or they do not persist");
+  assert.doesNotMatch(swift, /deviceLog\.info\(/, ".info is memory-only — sysdiagnose and log collect will not see it");
   // .public or the whole log reads <private> — an unreadable log is the problem, not the fix.
   assert.match(swift, /privacy:\s*\.public/);
 });
@@ -164,7 +169,7 @@ test("the local log is written BEFORE the batching queue, so nothing can silence
   const swift = fs.readFileSync(
     path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
   const body = swift.slice(swift.indexOf("private func dbgLog("));
-  const local = body.indexOf("deviceLog.info(");
+  const local = body.indexOf("deviceLog.notice(");
   const queued = body.indexOf("logQueue.async");
   assert.ok(local > 0 && queued > 0, "both paths must exist");
   assert.ok(

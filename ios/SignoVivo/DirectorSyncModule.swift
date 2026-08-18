@@ -302,7 +302,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       .map { "\($0.key)=\($0.value)" }
       .sorted()
       .joined(separator: " ")
-    Self.deviceLog.info(
+    // .notice, NOT .info. os_log's .info and .debug levels are MEMORY-ONLY by default: they are
+    // visible in a live Console.app stream but are never written to the persistent store, so
+    // `log collect` and `sysdiagnose` return nothing. Build 438 shipped this as .info, which made
+    // the whole channel useless for the exact case it was built for — reading a device AFTER the
+    // fact, offline, when it was never on a network. Confirmed by converting a real 440 archive:
+    // zero com.cazares.signovivo entries. .notice is the lowest level that persists by default.
+    Self.deviceLog.notice(
       "\(self.currentRole, privacy: .public) \(self.localPeerID?.displayName ?? "?", privacy: .public) \(event, privacy: .public) \(extras, privacy: .public)"
     )
 
