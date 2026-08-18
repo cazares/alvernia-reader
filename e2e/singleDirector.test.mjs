@@ -88,10 +88,12 @@ test("onDirectorCode is fed only by human actions: the numpad code and the pill"
     .filter(({ l }) => /onDirectorCode\(/.test(l) && !/const onDirectorCode/.test(l));
   // Each caller must be one of: the bridge "director-code" (typed), "request-director" (pill tap),
   // or a rescue confirm passing a NON-director code (soft reset / force baked).
-  // DIRECTOR_CODE's caller now also threads the web's true page (relayQuotaGuards.test.mjs) — an
-  // optional second argument, matched loosely; the others take no second argument and stay exact.
+  // Both msg.code (typed) and DIRECTOR_CODE (pill tap) now thread the web's true page — an
+  // adversarial hunt (2026-08-18) found the typed path never got the aa68c9e fix originally,
+  // only the pill did. Both matched loosely (optional second arg); the rescue codes take no
+  // second argument and stay exact — neither soft-reset nor force-baked cares what page you're on.
   const allowed = [
-    /onDirectorCode\(msg\.code\)/,
+    /onDirectorCode\(msg\.code(?:,[^)]*)?\)/,
     /onDirectorCode\(DIRECTOR_CODE(?:,[^)]*)?\)/,
     /onDirectorCode\(BOOK_FORCE_BAKED_CODE\)/,
     /onDirectorCode\(SOFT_RESET_CODE\)/,

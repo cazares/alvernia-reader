@@ -191,3 +191,46 @@ test("release.sh only moves LATEST_NATIVE_BUILD alongside a REAL native upload, 
   assert.match(body, /TF_UPLOADED" = "1"/, "not gated on a real TestFlight upload having happened");
 });
 
+
+test("becomeFollower clears lastDirectorSnapshotRef — no stale memory survives a role transition", () => {
+  // Miguel: "still has cache issue aka shows previous song on new director" — confirmed on
+  // FOLLOWERS, both fresh-launch and mid-session, on build 465 (which had already removed the
+  // solo-reader cache). Root cause: lastDirectorSnapshotRef (a follower's memory of the PREVIOUS
+  // director's last page) was never cleared on a role transition, so a follower that reloaded or
+  // resynced in the window between an old director stepping down and a new one's first broadcast
+  // resynced to the stale snapshot instead of waiting for the real one.
+  const fn = NATIVE.slice(NATIVE.indexOf("const becomeFollower = useCallback"));
+  const body = fn.slice(0, fn.indexOf("[syncAvailable, injectEvent, stopDirectorHeartbeat]"));
+  assert.match(body, /lastDirectorSnapshotRef\.current = null/,
+    "becomeFollower no longer clears the stale director snapshot on every role transition");
+});
+
+test("no page-value usage of lastDirectorSnapshotRef survives — simple and stateless", () => {
+  // Miguel: "I thought we got rid of caching which should include remembered STATE like this...
+  // why even cache at all". Three call sites pre-filled currentPageRef/injected a sync-event from
+  // this REMEMBERED ref before a fresh request completed (bridge-ready's follower-resync branch,
+  // the resync/⟳ handler, and the foreground handler) — all three removed. The ONLY surviving
+  // uses must be: the SET site (when a real page arrives) and TIMESTAMP-only reads (the
+  // live-director-warning check, canApplyNow's lastDirectorSnapshotAt gate) — never a page value
+  // read back into currentPageRef or injected into the web.
+  const pageValueReads = [...NATIVE.matchAll(/const \{ page, book \} = lastDirectorSnapshotRef\.current/g)];
+  assert.equal(pageValueReads.length, 0,
+    `${pageValueReads.length} remaining site(s) destructure a page/book out of the remembered ref`);
+});
+
+test("typing the director code threads the current page too, not just the pill tap", () => {
+  // Adversarial hunt (2026-08-18), after two prior regressions of the same bug class: the
+  // aa68c9e fix (thread state.currentPage through becomeDirector) was only ever wired for the
+  // "Ser Director" pill's request-director bridge message. Typing the code on the numpad went
+  // through case "director-code" with NO currentPage — becomeDirector's knownCurrentPage was
+  // undefined, and whatever currentPageRef already held (right or wrong) is what got broadcast.
+  const appJs = fs.readFileSync("web/src/app.js", "utf8");
+  assert.match(appJs, /postNativeBridge\(\{ type: "director-code", code, currentPage: state\.currentPage \}\)/,
+    "the web no longer sends currentPage with a typed director code");
+
+  const start = NATIVE.indexOf('case "director-code"');
+  const end = NATIVE.indexOf('case "request-director"');
+  const body = NATIVE.slice(start, end);
+  assert.match(body, /msg\.currentPage/, "the typed-code handler no longer reads currentPage from the bridge message");
+  assert.match(body, /onDirectorCode\(msg\.code, knownPage\)/, "the typed-code handler no longer threads knownPage into onDirectorCode");
+});
