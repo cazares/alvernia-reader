@@ -16,7 +16,7 @@
 // web app's job. The old 3,536-line FlatList/PDF reader was replaced wholesale.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, AppState, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, AppState, Linking, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useKeepAwake } from "expo-keep-awake";
 import * as FileSystem from "expo-file-system/legacy";
@@ -63,6 +63,13 @@ import versionJson from "./version.json";
 // ─────────────────────────────── Constants ──────────────────────────────────
 
 const BUILD_VERSION = String((versionJson as { buildNumber?: number }).buildNumber ?? "");
+
+// No known TestFlight public join link is baked into this repo, and one must never be guessed —
+// a wrong link sends someone to install a DIFFERENT app. itms-beta:// is a documented, static iOS
+// URL scheme that opens the TestFlight app itself (no app-specific ID needed); if TestFlight isn't
+// installed the OS routes it to the App Store listing for TestFlight. Closest available thing to
+// "take me to my update" without fabricating a link.
+const TESTFLIGHT_APP_URL = "itms-beta://";
 
 /**
  * Which KIND of device this is — "PAD" | "PHN" | "" (unknown).
@@ -257,6 +264,10 @@ export default function App() {
   const becomeDirectorInFlightRef = useRef(false);
   // One-shot: the transmitter notice must not re-fire when syncAvailable flips identity.
   const didTransmitterNoticeRef = useRef(false);
+  // One-shot per session: a device refused for being on too old a binary (shouldStage's
+  // "shell-too-old") checks in every ~4 minutes forever — without this it would re-toast the
+  // same "update the app" notice on every one of them.
+  const didShellTooOldNoticeRef = useRef(false);
   // A count of how often this device has directed. DIAGNOSTIC ONLY — it decides nothing. (It used
   // to rank devices for an automatic seat claim; that path is gone, see the ONE DIRECTOR note above.)
   // Read-modify-write, best effort.
@@ -1886,6 +1897,40 @@ export default function App() {
           await AsyncStorage.setItem(STORAGE_KEYS.bookStaged, JSON.stringify(rec)).catch(() => {});
           setBookStage(rec.ready ? "ready" : `error:${rec.error}`);
           breadcrumb(rec.ready ? `staged-ready:${rec.bookVersion}` : `stage-failed:${rec.error}`);
+          // A binary too old to run this book was, until now, refused SILENTLY — MIN_SHELL_BUILD
+          // (web/build.mjs) already protects against ever applying something that would break, but
+          // nothing told the person holding the device why nothing is happening. Miguel, 2026-08-18:
+          // "MUST show a modal or *something* or else choir members will be mega confused" — a
+          // toast alone (auto-dismissing, easy to miss) is not enough for something this rare and
+          // this consequential (that device is now permanently behind until someone updates it).
+          //
+          // The toast fires immediately regardless — it's the same non-blocking courtesy notice used
+          // everywhere else, and costs nothing to show. The native Alert (real modal, an "Actualizar"
+          // button that opens TestFlight) is gated on meshPeerCountRef === 0: followers have NO
+          // internet at Mass at all (this whole check-in could not have reached them then), but the
+          // DIRECTOR carries cellular and could be mid-Mass when this fires — a modal blocking their
+          // screen at that moment is worse than the confusion it's meant to prevent. If mesh is busy
+          // right now, the one-shot guard is deliberately NOT set, so the very next check-in
+          // (~4 minutes later) tries the modal again once things are quiet.
+          if (rec.error === "shell-too-old" && !didShellTooOldNoticeRef.current) {
+            const noticeText = "Hay un himnario nuevo, pero esta versión del app es muy antigua " +
+              "para instalarlo. Actualiza el app para recibirlo.";
+            injectEvent({ type: "toast", text: noticeText });
+            if (meshPeerCountRef.current === 0) {
+              didShellTooOldNoticeRef.current = true;
+              Alert.alert(
+                "Actualización requerida",
+                noticeText,
+                [
+                  { text: "Ahora no", style: "cancel" },
+                  {
+                    text: "Actualizar",
+                    onPress: () => { Linking.openURL(TESTFLIGHT_APP_URL).catch(() => {}); },
+                  },
+                ],
+              );
+            }
+          }
           // Install it. Don't wait to be asked — canApplyNow decides WHEN, and if right now is a
           // Mass or a rehearsal it defers and the next foreground/check-in retries.
           if (rec.ready) await autoApplyIfSafeRef.current?.();

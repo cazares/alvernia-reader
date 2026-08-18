@@ -99,3 +99,52 @@ test("performApplySwap still saves the page this restore depends on", () => {
   assert.match(body, /lastPagePrefix\}\$\{currentBookRef\.current\}`,\s*\n\s*String\(currentPageRef\.current\)/,
     "performApplySwap no longer saves the reader's place before swapping");
 });
+
+test("shell-too-old is already a wired refusal (MIN_SHELL_BUILD), and it's no longer silent", () => {
+  // Miguel, 2026-08-18: "can you easily bake in forced binary updates for incompat. between new
+  // OTA and old binary... where things bust unless binary is updated by user". This mechanism
+  // already existed end-to-end (web/build.mjs's MIN_SHELL_BUILD, src/bookUpdate.js's stageBook +
+  // canApplyNow gates) — a binary too old to run a book can never stage or apply it. What was
+  // missing: nothing told the PERSON. This pins the fix — an immediate toast plus a real native
+  // modal on the "shell-too-old" refusal — without re-testing the refusal itself (already covered
+  // by e2e/bookUpdate.test.mjs).
+  const start = NATIVE.indexOf("const onCheckinResponse = useCallback");
+  const end = NATIVE.indexOf("onCheckinResponseRef.current = onCheckinResponse;");
+  const body = NATIVE.slice(start, end);
+  assert.match(body, /rec\.error === "shell-too-old"/,
+    "onCheckinResponse no longer distinguishes the shell-too-old failure from any other stage failure");
+  assert.match(body, /type: "toast"/,
+    "the shell-too-old branch no longer surfaces a toast — back to silent refusal");
+});
+
+test("shell-too-old also shows a REAL modal, not just an easy-to-miss toast", () => {
+  // Miguel, 2026-08-18: "MUST show a modal or *something* or else choir members will be mega
+  // confused". A toast alone auto-dismisses and is easy to miss for something this rare and this
+  // consequential (the device is permanently behind until someone updates it).
+  const start = NATIVE.indexOf("const onCheckinResponse = useCallback");
+  const end = NATIVE.indexOf("onCheckinResponseRef.current = onCheckinResponse;");
+  const body = NATIVE.slice(start, end);
+  assert.match(body, /Alert\.alert\(/, "no native Alert — still just the toast");
+  assert.match(body, /TESTFLIGHT_APP_URL/, "the modal has no action wired to actually get them updated");
+  assert.match(body, /Linking\.openURL\(TESTFLIGHT_APP_URL\)/, "the update button doesn't open anything");
+});
+
+test("the modal is gated on mesh-idle — never blocks a director's screen mid-Mass", () => {
+  // Followers have NO internet at Mass at all (project_mass_network_reality), so this check-in
+  // could not even reach them then — but the DIRECTOR carries cellular and could be mid-Mass when
+  // this fires. A blocking modal on their screen at that exact moment is worse than the confusion
+  // it exists to prevent.
+  const start = NATIVE.indexOf("const onCheckinResponse = useCallback");
+  const end = NATIVE.indexOf("onCheckinResponseRef.current = onCheckinResponse;");
+  const body = NATIVE.slice(start, end);
+  const shellTooOldIdx = body.indexOf('rec.error === "shell-too-old"');
+  const modalSection = body.slice(shellTooOldIdx, shellTooOldIdx + 1200);
+  assert.match(modalSection, /meshPeerCountRef\.current === 0/,
+    "the modal is not gated on mesh being idle — it could interrupt an active Mass/rehearsal");
+  // The one-shot guard must be set ONLY inside the mesh-idle branch, so a busy check-in retries
+  // the modal on the next one instead of permanently suppressing it.
+  const idleGateIdx = modalSection.indexOf("meshPeerCountRef.current === 0");
+  const oneShotIdx = modalSection.indexOf("didShellTooOldNoticeRef.current = true");
+  assert.ok(idleGateIdx > 0 && oneShotIdx > idleGateIdx,
+    "the one-shot guard is set outside the mesh-idle branch — a busy device would never get the modal");
+});
