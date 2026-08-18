@@ -203,3 +203,16 @@ test("release.sh only moves LATEST_NATIVE_BUILD alongside a REAL native upload, 
   assert.match(body, /SKIP_NATIVE:-0\}" != "1"/, "no SKIP_NATIVE guard before writing LATEST_NATIVE_BUILD");
   assert.match(body, /TF_UPLOADED" = "1"/, "not gated on a real TestFlight upload having happened");
 });
+
+test("the solo-reader cached-page restore is tagged src:\"cache\" — not confirmed live", () => {
+  // Miguel, testing on hardware, 2026-08-18: "it initially shows on followers whatever song they
+  // WERE on, so off by one cache problem" — the solo-reader restore (a REMEMBERED page from a
+  // previous session) was satisfying web/app.js's firstNativePageSignal gate the same as a real
+  // mesh/BLE sync, so a follower flashed its stale cached song before the real director's song
+  // corrected it. Without this tag, the web side has no way to tell "a memory" from "a live sync".
+  const start = NATIVE.indexOf('case "bridge-ready"');
+  const end = NATIVE.indexOf('case "page-changed"');
+  const block = NATIVE.slice(start, end);
+  const solo = block.slice(block.indexOf("} else {", block.lastIndexOf("if (syncAvailable) requestCurrentSnapshot")));
+  assert.match(solo, /src: "cache"/, "the solo-reader restore no longer tags its page as a cache replay");
+});
