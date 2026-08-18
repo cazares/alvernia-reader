@@ -1290,9 +1290,16 @@ export default function App() {
                 const page = Number(raw);
                 if (Number.isFinite(page) && page >= 1) {
                   currentPageRef.current = page;
+                  // src: "cache" — a REMEMBERED page, not a confirmed one. Tagged so the web's
+                  // firstNativePageSignal gate (2026-08-18) does not treat this as "the real
+                  // answer arrived": it renders immediately (better than a blank spinner) but
+                  // must not stop the wait for an actual mesh/BLE sync, or a follower whose real
+                  // director is a DIFFERENT song from what this device was on last time flashes
+                  // the stale cached song before correcting — the exact class of bug this gate
+                  // exists to prevent, just from a different source than the one originally fixed.
                   injectEvent({
                     type: "sync-event",
-                    event: { type: "page", page, book: currentBookRef.current },
+                    event: { type: "page", page, book: currentBookRef.current, src: "cache" },
                   });
                 }
               } catch {

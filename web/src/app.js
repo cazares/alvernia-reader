@@ -1688,16 +1688,30 @@ const applyNativeSyncEvent = async (payload) => {
       try {
         console.info("[sv] page", event.page, "via", event.src || "mesh?", "(was", state.currentPage + ")");
       } catch {}
-      // A page arriving over the mesh is proof a director is alive right now — the only such proof
-      // this layer gets, and enough to keep the pill honest without any new plumbing.
-      lastDirectorPageAt = Date.now();
-      renderDirectorModeBadge();
+      // src: "cache" (2026-08-18) is a REMEMBERED page from a solo reader's last session, not
+      // proof anyone is directing right now — treating it as a live heartbeat would tell the
+      // pill/badge "a director is alive" when nobody is. Render it (better than a blank spinner)
+      // but don't let it satisfy either "proof of life" signal below.
+      const isConfirmed = event.src !== "cache";
+      if (isConfirmed) {
+        // A page arriving over the mesh is proof a director is alive right now — the only such
+        // proof this layer gets, and enough to keep the pill honest without any new plumbing.
+        lastDirectorPageAt = Date.now();
+        renderDirectorModeBadge();
+      }
       // Single-book app: ignore any event.book and just render the director's page.
       renderPage(event.page, { pushToHistory: false });
-      // First real page since this WebView mounted — let initReader's reveal gate through.
-      // Idempotent: a resolved promise ignores every later resolve() call, and this fires on
-      // every page turn for the rest of the session, not just the first one.
-      if (resolveFirstNativePageSignal) { resolveFirstNativePageSignal(); resolveFirstNativePageSignal = null; }
+      // First CONFIRMED page since this WebView mounted — let initReader's reveal gate through.
+      // A cached guess must not resolve this: it renders immediately (so the device is never left
+      // on a blank spinner) but the gate still waits, so a follower whose real director is on a
+      // DIFFERENT song than the cached value doesn't flash the stale song before correcting — the
+      // exact bug this gate exists to prevent, just from a different source than the one it was
+      // originally built for. Idempotent: a resolved promise ignores every later resolve() call,
+      // and this fires on every page turn for the rest of the session, not just the first one.
+      if (isConfirmed && resolveFirstNativePageSignal) {
+        resolveFirstNativePageSignal();
+        resolveFirstNativePageSignal = null;
+      }
     }
   } catch (err) {
     try {
