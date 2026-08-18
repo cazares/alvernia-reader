@@ -356,9 +356,19 @@ export default function App() {
   // Turn it on deliberately for a debugging session via the ⌕ diagnostics dump or by setting
   // sv.telemetry, and it stays on only for that install.
   const telemetryEnabledRef = useRef(false);
+  // Where breadcrumbs go. Empty = the Cloudflare worker; a LAN URL = scripts/log-sink.mjs running on
+  // the dev Mac. During a debugging session the devices are metres from that machine on the same
+  // wifi, so there is no reason for their telemetry to cross the internet — and every request that
+  // does is drawn from the SAME 100,000/day account quota signovivo.com depends on. Pointing here
+  // makes debugging cost the product nothing.
+  const logSinkRef = useRef<string>("");
   useEffect(() => {
-    AsyncStorage.getItem("sv.telemetry")
-      .then((v) => { telemetryEnabledRef.current = v === "1"; })
+    AsyncStorage.multiGet(["sv.telemetry", "sv.logSink"])
+      .then((pairs) => {
+        const map = Object.fromEntries(pairs);
+        telemetryEnabledRef.current = map["sv.telemetry"] === "1";
+        logSinkRef.current = String(map["sv.logSink"] || "").replace(/\/+$/, "");
+      })
       .catch(() => {});
   }, []);
 
@@ -390,17 +400,43 @@ export default function App() {
   const dbgFlush = useCallback(() => {
     const batch = dbgBufferRef.current;
     if (batch.length === 0) return;
+    if (!telemetryEnabledRef.current) { dbgBufferRef.current = []; return; }
+
+    // WHERE IT GOES DECIDES WHETHER IT MAY BE KEPT.
+    //
+    // To the Cloudflare worker: drop on failure. A queue that survives a Mass is a burst waiting to
+    // fire the moment a device finds wifi — the same outage with a delay on it, drawn from the same
+    // 100,000/day quota signovivo.com lives on.
+    //
+    // To the LAN sink (scripts/log-sink.mjs on the dev Mac): KEEP it. There is no quota to blow, and
+    // this is the only way to see what happened at MASS, where the iPads join no network at all and
+    // telemetry has simply never existed. Buffer through the whole run with no connectivity, rejoin
+    // wifi afterwards, and the trace flushes to the Mac. Post-hoc telemetry from a no-network room.
+    //
+    // Bounded hard: the cap discards the OLDEST rows, because when a buffer overflows the interesting
+    // part is what happened most recently, and an unbounded buffer on a device with no network is a
+    // memory leak with a nice name.
+    const sink = logSinkRef.current;
     dbgBufferRef.current = [];
-    // Drop the batch rather than queueing it: a queue that survives a Mass is a burst waiting to
-    // fire the moment a device finds wifi, which is the same outage with a delay on it.
-    if (!telemetryEnabledRef.current) return;
-    fetch(`${RELAY_BASE}/log`, {
+    fetch(`${sink || RELAY_BASE}/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(batch),
-    }).catch(() => {
-      /* best-effort telemetry */
-    });
+    })
+      .then((r) => {
+        // Adopt the flush cadence and level the sink (or worker) hands back, so either can retune
+        // this device without a rebuild.
+        r.json?.().then((j: { policy?: { logIntervalMs?: number; logLevel?: number } }) => {
+          const p = j?.policy;
+          if (p && Number.isFinite(p.logLevel)) logLevelRef.current = Number(p.logLevel);
+        }).catch(() => {});
+      })
+      .catch(() => {
+        if (!sink) return;   // worker: drop, per above
+        const MAX = 5000;
+        const merged = batch.concat(dbgBufferRef.current);
+        dbgBufferRef.current = merged.length > MAX ? merged.slice(merged.length - MAX) : merged;
+      });
   }, []);
   const dbgLog = useCallback(
     (event: string, data?: Record<string, unknown>) => {

@@ -72,9 +72,16 @@ test("signovivo.com is NEVER gated — only the native shell's redundant subscri
 test("telemetry is opt-in and drops rather than queues", () => {
   assert.match(NATIVE, /if \(!telemetryEnabledRef\.current\) return;/,
     "telemetry sends by default again — it has no user value and it caused two outages");
-  // A queue that survives a Mass is the same outage with a delay on it.
-  assert.ok(NATIVE.indexOf("dbgBufferRef.current = [];") < NATIVE.indexOf("if (!telemetryEnabledRef.current) return;"),
-    "the batch is retained when telemetry is off — that is a burst waiting for the next wifi");
+  const flush = NATIVE.slice(NATIVE.indexOf("const dbgFlush = useCallback"), NATIVE.indexOf("const dbgLog = useCallback"));
+  // RETENTION DEPENDS ON THE DESTINATION. Failing to the Cloudflare worker must DROP — a queue that
+  // survives a Mass is a burst waiting for the next wifi, from the same quota signovivo.com lives on.
+  // Failing to the LAN sink must KEEP: no quota exists there, and buffering through a no-network run
+  // then flushing afterwards is the only way to see what happened at Mass, where the iPads join
+  // nothing at all and telemetry has never existed.
+  assert.match(flush, /if \(!sink\) return;/, "a failed send to the WORKER is retried/queued — that is the outage");
+  assert.match(flush, /const MAX = 5000;/, "the local buffer is unbounded — a memory leak on a device with no network");
+  assert.match(flush, /merged\.slice\(merged\.length - MAX\)/,
+    "overflow discards the NEWEST rows; when a buffer overflows the recent end is the interesting one");
 });
 
 test("the worker RESERVES quota for signovivo.com, and never counts the product's own traffic", () => {
