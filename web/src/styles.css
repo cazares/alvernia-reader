@@ -2261,8 +2261,11 @@ html[data-role="follower"] .director-mode-badge.is-following {
      the dot on top.
      margin-top, NOT a top: calc() — that test derives horizontal offsets from calc() in this
      selector's rules, so a vertical calc() here would read as a LEFT offset. */
-  left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + 0.42rem);
-  margin-top: 0.42rem;
+  /* 0.42 -> 0.58rem (owner, 2026-08-18: ~2.5px further right and down). Both axes share one value so
+     the dot stays on the button's corner diagonal as --fab-size changes. Measured, not guessed:
+     0.42rem put it 6.7px off each edge of an 86px button. */
+  left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + 0.58rem);
+  margin-top: 0.58rem;
   animation: sv-follow-breathe 2.4s ease-in-out infinite;
 }
 html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-title,
@@ -2390,7 +2393,18 @@ html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), e
 .resync-fab:active,
 .fullscreen-fab:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
 /* ⟳ icon pulses opacity while reconnecting — soft breath, plus staggered dots below */
-.resync-icon { display: inline-block; line-height: 1; }
+/* ⟳ CARRIES ITS OWN SIZE (owner, 2026-08-18: +5px). It used to inherit the shared 4.65rem, so any
+   change here silently moved ⌕ with it. */
+.resync-fab { font-size: 4.96rem; }   /* 4.65rem + 5px */
+/* OPTICALLY CENTRED, AND THE NUMBER IS MEASURED RATHER THAN EYEBALLED. Flex centring centres the
+   glyph's LINE BOX, not its ink, and those are not the same thing: measured in-browser at 79.36px,
+   the baseline sits 64.5px into a 79.4px box while ⟳'s ink spans -37.5..-3.1 from that baseline, so
+   its ink centre landed 6.1px BELOW the button's centre — clearly low to the eye, which is what the
+   owner saw. 6.1 / 79.36 = 0.0769em of correction from the previous +0.02em, hence -0.057em.
+   It is in em so it survives any further size change, and it moves only the glyph: padding would
+   have shifted the box and re-broken the horizontal centring, which measurement confirms is already
+   exact (ink centre 26.97px == advance 53.94 / 2). */
+.resync-icon { display: inline-block; line-height: 1; transform: translateY(-0.057em); }
 .resync-fab.is-spinning .resync-icon { animation: sv-resync-pulse 1.5s ease-in-out infinite; }
 @keyframes sv-resync-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 /* Reconnect loading dots — three small circles that appear only while is-spinning */
