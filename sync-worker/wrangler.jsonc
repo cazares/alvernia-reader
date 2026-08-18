@@ -52,30 +52,28 @@
     // 10,000 buys ~10 hours of 4-device telemetry at the 15s flush interval.
     "NONESSENTIAL_DAILY_MAX": "10000",
 
-    // ── Songbook OTA arming — SHIPPED DORMANT, and it must stay that way until rehearsed ──
+    // ── Songbook OTA arming — STANDING FLEET-WIDE ARM (Miguel, 2026-08-18) ──
     //
-    // With BOOK_UPDATE_VERSION empty, the `bookUpdate` field never appears in ANY /fleet/checkin
-    // response, so no device can act on it. That is what lets this ship without a rehearsal.
+    // Was shipped dormant until rehearsed (see git history/PR #356 for that design). Miguel's
+    // explicit call afterward: arm every device, always, all at once — "a rollback is just
+    // another deploy anyway" (BOOK_UPDATE_VERSION="" + redeploy is a ~20s abort, no iPad
+    // required, and does not touch a device already holding a verified copy — it just stops
+    // NEW arming). BOOK_UPDATE_DEVICES="*" + BOOK_UPDATE_ALLOW_FLEET="yes" together mean every
+    // checked-in device is offered the current BOOK_UPDATE_VERSION.
     //
-    // To arm ONE iPad (the required first step — a downloader failing silently on seven iPads
-    // looks exactly like one that succeeded):
-    //   1. read the target bookVersion from https://signovivo.com/bundle-manifest.json
-    //   2. read the device's id from the fleet dashboard's Libro column
-    //   3. set BOOK_UPDATE_VERSION + BOOK_UPDATE_DEVICES="<that one id>", then `npx wrangler deploy`
-    //   4. watch that device's Libro cell go downloading:NN% -> ready -> active, and have a HUMAN
-    //      open a named new song and confirm it out loud. No hash can catch a wrong-but-valid PDF.
+    // BOOK_UPDATE_VERSION is kept in lockstep with the shipped book automatically —
+    // scripts/release.sh rewrites it to the freshly-built bookVersion and redeploys this worker
+    // on every release (see its step 5b). Do not hand-edit it between releases; it will be
+    // overwritten by the next `release.sh` run regardless.
     //
-    // Fleet-wide needs BOTH "*" and BOOK_UPDATE_ALLOW_FLEET="yes" — one var alone does nothing, so
-    // a fat-fingered edit cannot reach all eight iPads at once.
-    //
-    // ABORT: set BOOK_UPDATE_VERSION back to "" and redeploy. ~20 seconds, no iPad required. That
-    // stops further arming; devices already holding a verified copy clear it themselves on the next
-    // check-in that no longer names their version.
-    "BOOK_UPDATE_VERSION": "",
-    "BOOK_UPDATE_DEVICES": "",
-    "BOOK_UPDATE_ALLOW_FLEET": "",
+    // BOOK_UPDATE_CONCURRENCY is set high enough to never gate a fleet this size — the throttle
+    // only gates NEW starts anyway (a device already downloading/ready is always honoured, see
+    // bookArming.js), so a high number here just means "don't stagger," which is the ask.
+    "BOOK_UPDATE_VERSION": "bv_d2849f774f82a1c2",
+    "BOOK_UPDATE_DEVICES": "*",
+    "BOOK_UPDATE_ALLOW_FLEET": "yes",
     "BOOK_UPDATE_BASE": "https://signovivo.com",
-    "BOOK_UPDATE_CONCURRENCY": "2"
+    "BOOK_UPDATE_CONCURRENCY": "20"
   }
 
   // Later, to serve from sync.signovivo.com instead of *.workers.dev, add:
