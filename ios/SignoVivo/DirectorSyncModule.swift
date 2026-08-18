@@ -64,6 +64,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// full 8 seconds of a follower doing nothing before anything retried. That is most of a 10s
   /// convergence, spent waiting out a worst case rather than noticing a failure.
   private static let inviteRetryAfter: TimeInterval = 2.5
+  /// How long a follower may hunt, WITH a director in sight, before rebuilding its session.
+  ///
+  /// Retrying an invite cannot fix a wedged MCSession — same broken session, same result, forever.
+  /// The human escape hatch for that is the resync button; this is the same escalation without
+  /// needing someone to notice. Deliberately long: a rebuild is disruptive, and normal convergence
+  /// must be given room to finish first.
+  private static let followerWedgedSeconds: TimeInterval = 20
   /// How recently the browser must have seen a director for it to count as WORKING. Below this,
   /// a scheduled refresh is skipped rather than destroying live discovery. Comfortably longer than
   /// the 5 s early-refresh tick so a healthy hunt is never interrupted, and short enough that a
@@ -133,6 +140,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var followerWatchdogTimer: Timer?
   private var lastFollowerHelloAt: TimeInterval = 0
   private var lastFollowerPageReceivedAt: TimeInterval = 0
+  /// When this follower started hunting with nothing connected. 0 means "not hunting".
+  private var followerHuntingSince: TimeInterval = 0
   private var currentPageNumber: Int?
   private var currentTotalPages: Int = 0
   private var currentMode = ""
@@ -1494,6 +1503,30 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           // asks CoreBluetooth for the truth every tick, which costs a bool read.
           self.bleBeacon.ensureScanning()
 
+          // LAST RESORT: rebuild the session when retrying the invite is provably not working.
+          //
+          // Everything above this retries the HANDSHAKE. None of it can fix a wedged MCSession —
+          // the same broken session produces the same result no matter how many invites go into it,
+          // which is how a follower sits at "connecting" indefinitely with the director plainly
+          // visible. That is the state the resync button exists for; this reaches it without
+          // needing a human to notice, once, after a deliberately generous window.
+          //
+          // Gated on a director actually being IN SIGHT: if nothing is discovered the problem is
+          // discovery, and rebuilding the session would churn for no reason. The clock resets on
+          // every escalation, so this is bounded to one rebuild per window and cannot storm.
+          if self.connectedDirectorPeer == nil, self.followerHuntingSince > 0,
+             !self.discoveredDirectors.isEmpty {
+            let hunting = Date().timeIntervalSince1970 - self.followerHuntingSince
+            if hunting > Self.followerWedgedSeconds {
+              self.dbgLog("watchdog:wedged-rebuild", [
+                "huntingSec": Int(hunting), "visibleDirectors": self.discoveredDirectors.count,
+              ])
+              self.followerHuntingSince = Date().timeIntervalSince1970
+              self.forceFollowerReconnect(staleFor: hunting)
+              return
+            }
+          }
+
           // NOT CONNECTED: retry the handshake every tick until we are (owner's idea, 2026-08-17 —
           // "sleep 1s, setTimerRepeating every 1s until synced").
           //
@@ -1547,8 +1580,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     connectedDirectorPeer = nil
     pendingInvitePeer = nil
     lastFollowerPageReceivedAt = 0
+    followerHuntingSince = Date().timeIntervalSince1970
     stopFollowerHelloTimer()
-    stopFollowerWatchdog() // restarts cleanly on the next .connected
+    // RESTART the watchdog, do not stop it. It used to stop here "and restart cleanly on the next
+    // .connected" — but this function runs precisely when we are NOT connected, so the 0.5 Hz pulse
+    // that retries the handshake died at the exact moment it was needed, and stayed dead until a
+    // connection it was supposed to help produce. Since 2026-08-18 it also drives the BLE scan
+    // self-heal, so stopping it here went deaf as well as blind. startFollowerWatchdog invalidates
+    // any existing timer first, so restarting is idempotent.
+    startFollowerWatchdog()
     startSelfDirectedTimer()
     emitState(status: "searching", message: "Reconectando con el director...")
     // M-F5: the watchdog can fire because the director genuinely LEFT (not just a data half-open),
@@ -2146,6 +2186,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             return
           }
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
+          self.followerHuntingSince = 0   // connected: stop the wedged-session countdown
           self.cancelSelfDirectedTimer()
           self.pauseDiscoveryRefreshWhileConnected()
           self.startFollowerHelloTimer()

@@ -247,3 +247,43 @@ test("the pill REPORTS state, and is the ONLY way to drop the role", () => {
   assert.match(h, /openSongJump\(\)/, "the pill should point at the control instead of acting");
 });
 
+
+
+test("the hunting pulse survives a reconnect, instead of dying when it is needed most", () => {
+  // forceFollowerReconnect used to stopFollowerWatchdog() "and restart cleanly on the next
+  // .connected" — but it runs precisely when we are NOT connected, so the 0.5 Hz pulse that retries
+  // the handshake died at the moment it was needed and stayed dead until a connection it existed to
+  // help produce. It also drives the BLE scan self-heal, so stopping it went deaf as well as blind.
+  const swift = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
+  const fn = swift.slice(swift.indexOf("private func forceFollowerReconnect(staleFor"));
+  const body = fn.slice(0, fn.indexOf("\n  }"));
+  assert.match(body, /startFollowerWatchdog\(\)/, "the reconnect path leaves the follower without a pulse");
+  assert.doesNotMatch(body.replace(/\/\/.*$/gm, ""), /stopFollowerWatchdog\(\)/,
+    "the watchdog is stopped again on the one path that most needs it running");
+});
+
+test("a follower that can SEE a director but never connects rebuilds its session", () => {
+  // Retrying an invite cannot fix a wedged MCSession: same session, same result, forever — a
+  // follower stuck at "connecting" with the director plainly visible. This is the escalation the
+  // resync button performs, reached without needing a human to notice.
+  const swift = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
+  const wd = swift.slice(swift.indexOf("private func startFollowerWatchdog"));
+  const body = wd.slice(0, wd.indexOf("\n  private func"));
+  assert.match(body, /watchdog:wedged-rebuild/, "no escalation from retrying invites to rebuilding the session");
+  assert.match(body, /forceFollowerReconnect\(staleFor:/, "the escalation does not actually rebuild anything");
+
+  // Gated on a director being IN SIGHT — otherwise the problem is discovery and a rebuild is churn.
+  assert.match(body, /!self\.discoveredDirectors\.isEmpty/,
+    "it rebuilds even with no director discovered, which churns for no reason");
+  // And bounded: the clock must reset, or this fires every tick forever.
+  assert.match(body, /self\.followerHuntingSince = Date\(\)\.timeIntervalSince1970/,
+    "the hunting clock is not reset on escalation — this would rebuild the session every 0.5s");
+
+  const wedged = Number(swift.match(/followerWedgedSeconds: TimeInterval = ([\d.]+)/)[1]);
+  const retry = Number(swift.match(/inviteRetryAfter: TimeInterval = ([\d.]+)/)[1]);
+  assert.ok(wedged > retry * 4,
+    `wedged threshold ${wedged}s must leave room for several invite retries (${retry}s each) first`);
+
+  // The clock must stop on success, or a connected follower eventually rebuilds for no reason.
+  assert.match(swift, /self\.followerHuntingSince = 0/, "the hunting clock never clears on connect");
+});
