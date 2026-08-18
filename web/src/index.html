@@ -108,6 +108,21 @@
       <!-- ⟳ resync — top-LEFT FOLLOWER control: rejoin the live director + refresh the link.
            Shown for followers (incl. all of signovivo.com); hidden for a director (data-role).
            The icon spins while reconnecting so it's obvious something is happening. -->
+      <!-- ★ SER DIRECTOR — top-RIGHT, and the ONLY way into the role (owner, 2026-08-18: Braulio
+           "NEEDS a become director pill button on the top right"). He forgets the procedure most
+           weeks, and the empty seat is what caused the 2026-07-01 no-director-all-night outage.
+           It shares the top-right corner with ⌕ the way ⟳ and DIRECTOR share the top-left: ⌕ is
+           director-only and this is follower-only, so they are never both on screen.
+           This reverses "a permanently visible become-director control is a split-brain generator".
+           That rule was leaning on obscurity, which was never what protected the role — #role-gate
+           is: tapping this opens the red "ESTO CAMBIA LA PÁGINA DE TODOS" wall and you must type
+           braulio. Visible button, same gate, no new authority. -->
+      <button class="become-director-pill" id="become-director-pill" type="button"
+              aria-label="Ser director del coro">
+        <span class="become-director-star" aria-hidden="true">&#9734;</span>
+        <span class="become-director-label">Ser Director</span>
+      </button>
+
       <button class="resync-fab" id="resync-fab" type="button" aria-label="Volver a sincronizar con el director">
         <span class="resync-icon" aria-hidden="true">⟳</span>
         <span class="resync-dots" aria-hidden="true"><span></span><span></span><span></span></span>
@@ -159,18 +174,12 @@
             <button class="numberpad-key" type="button" data-digit="7">7</button>
             <button class="numberpad-key" type="button" data-digit="8">8</button>
             <button class="numberpad-key" type="button" data-digit="9">9</button>
-            <!-- DIRIGIR LIVES IN THE KEYPAD'S EMPTY CELL (owner, 2026-08-17). That cell was dead
-                 space, and the card was tall enough on a 10.2" portrait iPad to push the primary
-                 action toward the fold. Bottom-left is also the furthest key from the thumb that
-                 reaches for a digit, which suits a rare, consequential control. -->
-            <!-- ENTER the role here; LEAVE it from the top bar. The keypad holds no ✕ and no
-                 DIRECTOR status (owner: "NO X/director button in numpad") — only the way in, in the
-                 cell that was dead space. Taking the role is a rare, deliberate act, so it sits
-                 behind a dialog you opened on purpose; stepping down is one tap from the reader. -->
-            <button class="song-jump-role numberpad-key-role" id="role-toggle" type="button">
-              <span class="song-jump-role-star" aria-hidden="true">&#9733;</span>
-              <span id="role-toggle-label">Ser Director</span>
-            </button>
+            <!-- EMPTY CELL, ON PURPOSE. "Ser Director" lived here from 2026-08-17 and moved to the
+                 top-right pill on 2026-08-18 (owner: "remove keypad director stuff") — Braulio has to
+                 FIND it, and a control buried in a modal named IR A CANTO is not findable by someone
+                 who forgets the procedure every week. It must stay a cell rather than be deleted: the
+                 grid is navigated by muscle memory, and removing it slides 0 and ⌫ left. -->
+            <span class="numberpad-key-blank" aria-hidden="true"></span>
             <button class="numberpad-key" type="button" data-digit="0">0</button>
             <button class="numberpad-key numberpad-key-back" id="backspace-button" type="button" aria-label="Borrar último dígito">⌫</button>
           </div>

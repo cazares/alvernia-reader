@@ -1289,6 +1289,10 @@ const renderDirectorModeBadge = () => {
   // Native shell only. On signovivo.com there is no mesh and no role to take, so the pill would be
   // describing a room the viewer is not in.
   const inShell = NATIVE_FILE_MODE || hasNativeBridge();
+  // Published for CSS so ★ Ser Director can be gated on it. Set on EVERY render rather than once at
+  // init: the function that used to hide the keypad's copy of that control ran exactly once and
+  // never again on a role change, so it never actually hid once you were directing.
+  document.documentElement.dataset.shell = inShell ? "native" : "web";
   if (!inShell) {
     directorModeBadge.classList.add("is-hidden");
     return;
@@ -3066,9 +3070,7 @@ const bindReaderEvents = () => {
   songJumpTrigger.addEventListener("click", () => { haptic(); openSongJump(); });
   // Tapping the song title is the discoverable, deliberate entry to jump-to-song / browse.
   songStatus.addEventListener("click", () => { haptic(); openSongJump(); });
-  // ── Role control (inside IR A CANTO) + the take-the-role gate ──────────────────
-  const roleToggle = document.getElementById("role-toggle");
-  const roleLabel = document.getElementById("role-toggle-label");
+  // ── The take-the-role gate (opened by ★ Ser Director, top-right) ──────────────
   const roleGate = document.getElementById("role-gate");
   const roleGateInput = document.getElementById("role-gate-input");
   const roleGateConfirm = document.getElementById("role-gate-confirm");
@@ -3079,26 +3081,6 @@ const bindReaderEvents = () => {
   // whose muscle memory is digits.
   const ROLE_GATE_WORD = "braulio";
 
-  const syncRoleToggle = () => {
-    if (!roleToggle || !roleLabel) return;
-    const directing = state.nativeSyncRole === "director";
-    // The key is ENTRY only, so it simply disappears once you hold the role — the top bar's
-    // ✕ · DIRECTOR shows the state and owns the exit. Nothing here ever relabels itself.
-    roleToggle.classList.toggle("is-hidden", directing);
-    roleLabel.textContent = "Ser Director";
-    // Native shell only — signovivo.com has no mesh and no role to take.
-    // VISIBILITY, NOT DISPLAY. This button now occupies a CELL in the numpad grid, so display:none
-    // removes the cell and the bottom row reflows — 0 and ⌫ slide left into a keypad people navigate
-    // by muscle memory. Hiding it in place keeps the grid identical on web and native; only native
-    // can actually take the role.
-    const inShell = NATIVE_FILE_MODE || hasNativeBridge();
-    const cell = document.getElementById("role-cell");
-    if (cell) {
-      cell.style.visibility = inShell ? "visible" : "hidden";
-      cell.style.pointerEvents = inShell ? "auto" : "none";
-    }
-  };
-  syncRoleToggle();
 
   const closeRoleGate = () => {
     if (!roleGate) return;
@@ -3141,12 +3123,11 @@ const bindReaderEvents = () => {
     if (roleGateConfirm) roleGateConfirm.disabled = true;
   };
 
-  if (roleToggle) roleToggle.addEventListener("click", () => {
-    haptic();
-    // ENTRY ONLY. Leaving the role is the DIRECTOR status pill in the top bar — this key never
-    // exits, so a mis-tap here cannot drop the choir's director.
-    openRoleGate();
-  });
+  // ★ Ser Director — the ONE way into the role, now visible in the top-right instead of buried in
+  // a modal named IR A CANTO. It OPENS THE GATE; it does not take the role. request-director still
+  // has exactly one call site (the gate's Confirmar), which e2e/directorButton.test.mjs pins.
+  const becomePill = document.getElementById("become-director-pill");
+  if (becomePill) becomePill.addEventListener("click", () => { haptic(); openRoleGate(); });
 
   const searchFab = document.getElementById("search-fab");
   if (searchFab) searchFab.addEventListener("click", () => { haptic(); navigationDrawer.classList.add("as-dropdown"); openDrawer(); activateTab("buscar"); });

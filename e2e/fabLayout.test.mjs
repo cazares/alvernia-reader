@@ -209,3 +209,41 @@ test("the sync pill is NOT inside a stacking context that outranks the fabs", ()
   assert.ok(/isolation:\s*isolate/.test(shellBody) || /contain:\s*(content|paint|strict)/.test(shellBody),
     "#viewer-shell no longer creates a stacking context — this guard may be obsolete; re-read it");
 });
+
+
+test("ADDITIVE: Ir a Canto stays top-RIGHT, and the new controls take empty corners", () => {
+  // THE PROPERTY THE OWNER CARES MOST ABOUT (2026-08-18): "this is to make all these changes
+  // additive not scramble shit up and confuse the fuck out of everyone". Six people already know
+  // where these buttons are. Ir a Canto spent 2026-08-17 in the top-LEFT cluster and moving it back
+  // is the whole point — a rearrangement costs more than any layout gains.
+  //
+  //   FOLLOWER : ⟳(L1) · ★ Ser Director(L2)              …            Ir a Canto (flush R)
+  //   DIRECTOR : DIRECTOR(L1)                     …      Ir a Canto(R2) · ⌕ (flush R)
+  //
+  // ⟳/DIRECTOR share left slot 1 and Ir a Canto/⌕ share the right corner: in each pair the two are
+  // never on screen together, so nothing had to move to make room for what was added.
+  const rule = (sel) => {
+    const i = CSS.indexOf(sel);
+    assert.ok(i > 0, `${sel} is gone`);
+    return CSS.slice(i, CSS.indexOf("}", i) + 1);
+  };
+  assert.match(rule(".song-jump-fab { "), /right:\s*max\(var\(--fab-gutter\)/,
+    "Ir a Canto left the top-right corner — that is a relearn for the whole choir, not an addition");
+  assert.match(rule('html[data-role="director"] .song-jump-fab'), /right:\s*calc\(/,
+    "the director's Ir a Canto no longer steps left of ⌕ — they will overlap in that corner");
+  assert.match(rule(".search-fab {"), /right:\s*max\(var\(--fab-gutter\)/, "⌕ is no longer flush right");
+  // The two ADDED controls both sit in the left cluster, which is where the empty space was.
+  assert.match(rule(".become-director-pill {"), /left:\s*calc\([^;]*--fab-slot2/,
+    "★ Ser Director is not in left slot 2 — it must sit one gap right of ⟳");
+  assert.match(rule('html[data-role="director"] .director-mode-badge'), /left:\s*max\(var\(--fab-gutter\)/,
+    "the DIRECTOR status left flush-left, where ⟳ is hidden and the corner is free");
+});
+
+test("the two role controls never share the screen", () => {
+  // ★ Ser Director is follower-only and the DIRECTOR status is director-only. If both could render,
+  // the left cluster would hold two role controls saying different things about the same role.
+  assert.match(CSS, /html\[data-shell="native"\]\[data-role="follower"\] \.become-director-pill \{ display: flex/,
+    "★ Ser Director is not gated to a follower in the native shell — it can show for a director, or on the public web");
+  assert.match(CSS, /html\[data-role="director"\] \.resync-fab \{ display: none/,
+    "⟳ shows for a director again — it would then collide with the DIRECTOR status in left slot 1");
+});

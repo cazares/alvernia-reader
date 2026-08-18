@@ -13,6 +13,7 @@
   --fab-size: 3.875rem;
   --fab-gap: 0.5rem;
   --fab-status-w: 6.2rem;
+  --fab-become-w: 7.6rem;   /* ★ Ser Director — longer word than DIRECTOR, own width so neither squeezes the other */
   /* slot 2 = one control + one gap from the edge; slot 3 = past the wider status pill. */
   --fab-slot2: calc(var(--fab-size) + var(--fab-gap));
   /* NO SLOT 3. The empty-seat state used to be a text pill sitting third in this row; it is now
@@ -2188,18 +2189,11 @@ button:disabled {
 
 /* ── Role control inside IR A CANTO ──────────────────────────────────────────
    Quieter than the primary action: this is a rare, deliberate act, not the thing people came for. */
-.song-jump-role {
-  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
-  width: 100%; margin-bottom: 0.6rem; padding: 0.7rem 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 12px;
-  background: rgba(26, 26, 46, 0.55); color: rgba(255, 255, 255, 0.92);
-  font-size: 1.05rem; font-weight: 600; cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.song-jump-role:active { background: rgba(26, 26, 46, 0.75); transform: scale(0.99); }
-.song-jump-role-star { font-size: 1.15rem; line-height: 1; }
+
+
+
 /* Directing = the destructive-to-others state is already entered; the exit is calm and amber. */
-.song-jump-role.is-directing { border-color: rgba(245, 158, 11, 0.5); color: #fbbf24; }
+
 
 /* ── Take-the-role gate ──────────────────────────────────────────────────────
    Red, blunt, and gated on a typed word so it cannot be tapped through by reflex. */
@@ -2328,10 +2322,15 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
    so no separate ✕ occupies the corner any more. */
 
 
-.song-jump-fab { left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + var(--fab-slot2)); }
-/* DIRECTOR occupies slot 1 (⟳ is hidden for a director), so Ir a Canto sits one gap past the
-   status pill's width — not past a square. */
-html[data-role="director"] .song-jump-fab { left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + var(--fab-status-w) + var(--fab-gap)); }
+/* IR A CANTO IS TOP-RIGHT, WHERE IT HAS ALWAYS BEEN (owner, 2026-08-18: "this is to make all these
+   changes additive not scramble shit up and confuse the fuck out of everyone"). It spent 2026-08-17
+   in the top-left cluster; six people already know where this button lives, and moving it costs more
+   than any arrangement gains. The new controls go in corners that were EMPTY instead.
+   FOLLOWER: ⌕ is hidden, so this sits flush in the corner. */
+.song-jump-fab { right: max(var(--fab-gutter), env(safe-area-inset-right, 0px)); left: auto; }
+/* DIRECTOR: ⌕ appears flush in the corner, so Ir a Canto steps one slot left of it — exactly the
+   relationship these two have always had. */
+html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), env(safe-area-inset-right, 0px)) + var(--fab-slot2)); left: auto; }
 /* 4.5rem left only 8 px between two 4rem fabs whose glyphs (3.85rem ⌕, 2.85rem ♪) nearly fill
    their boxes, so they read as one smudged control on a Pro iPad in portrait. 5.1rem gives a clear
    gap without pushing ♪ into the title. */
@@ -2611,31 +2610,13 @@ body.sv-drawer-open .search-fab { display: none !important; }
 /* The role key. Styled EXACTLY like a digit — the owner's rule is that it must not draw the eye,
    because the loud control in this card is "open the song". Two lines so "Ser Director" names the
    role in full rather than shrinking to fit. */
-.song-jump-card .numberpad-key-role {
-  height: 78px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 0.08rem;
-  width: 100%; margin: 0; padding: 0.3rem 0.2rem;
-  border: 0; border-radius: 12px;
-  /* A WASH OF iOS BLUE, not a blue button. #0A84FF is the same system blue as "Abrir Canto" below,
-     so the two read as the same family — but at 0.14 alpha it is a tint on the key rather than a
-     second loud control. This key is a rare, deliberate act; it should be findable, not shouted.
-     Text and star take the solid blue so the low-alpha fill never costs legibility. */
-  background: rgba(10, 132, 255, 0.14);
-  color: #0A5FCC;
-  font-size: 0.78rem; font-weight: 700; line-height: 1.05;
-  box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.14);
-  cursor: pointer;
-}
-.song-jump-card .numberpad-key-role:active {
-  background: rgba(10, 132, 255, 0.28);
-  transform: translateY(1px);
-}
+
+
 /* Hidden, not blanked: while directing there is no entry to offer, and the cell returns to the dead
    space it was before. The grid keeps its shape because the row is a 3-column grid either way. */
-.song-jump-card .numberpad-key-role.is-hidden { display: none; }
-.song-jump-card .numberpad-key-role .song-jump-role-star { font-size: 1rem; line-height: 1; color: #0A84FF; }
-.song-jump-card .numberpad-key-role .song-jump-role-star { font-size: 1.15rem; line-height: 1; }
+
+
+
 
 /* Action buttons */
 .song-jump-actions {
@@ -2862,3 +2843,58 @@ body.sv-drawer-open .search-fab { display: none !important; }
   cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
 .nodir-tip-braulio:active { color: rgba(255, 255, 255, 0.8); }
+
+
+/* ── ★ Ser Director — top-RIGHT, the only way into the role ───────────────────
+   Owner, 2026-08-18: Braulio "NEEDS a become director pill button on the top right with a star w/
+   outline and a super subtle blue hue/tint... same margins/padding as top left buttons/pills".
+
+   Deliberately a SIBLING OF THE DIRECTOR PILL, mirrored across the screen: same height, same gutter,
+   same 0.16 blue wash over the same navy, same OUTLINE star (☆ U+2606, not the filled ★). Entering
+   the role and holding it are one idea, so they look like one idea — the only difference is which
+   corner it sits in and which word it carries.
+
+   It shares the top-right with ⌕ the way ⟳ shares the top-left with DIRECTOR: ⌕ is director-only,
+   this is follower-only, so the corner never holds both. */
+.become-director-pill {
+  position: fixed;
+  top: max(var(--fab-gutter), env(safe-area-inset-top, 0px));
+  /* TOP-LEFT, ONE SLOT RIGHT OF ⟳ (owner: "top left: refresh then director to the right of it").
+     A follower's left cluster is ⟳(1) · Ser Director(2); a director's is the DIRECTOR status alone
+     in slot 1, because ⟳ is hidden for that role. Same corner, same ladder, either way — so the
+     role control is always in the same place and only its word changes. */
+  left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + var(--fab-slot2));
+  z-index: 46;
+  display: none;               /* shown only for a follower inside the native shell — see below */
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: var(--fab-become-w);
+  height: var(--fab-size);
+  box-sizing: border-box;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: 14px;
+  /* The same whisper of iOS blue the DIRECTOR pill wears, layered OVER the cluster navy rather than
+     replacing it — a control that stands out competes with the music it sits on top of. */
+  background:
+    linear-gradient(rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0.16)),
+    rgba(26, 26, 46, 0.72);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  color: #E4EEFF;
+  font: 700 0.82rem/1.1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.become-director-pill:active { background: rgba(26, 26, 46, 0.86); transform: scale(0.96); }
+.become-director-star { font-size: 0.9rem; line-height: 1; color: rgba(228, 238, 255, 0.85); }
+.become-director-label { white-space: nowrap; }
+/* FOLLOWER + NATIVE SHELL ONLY. Driven by attributes on <html> that renderDirectorModeBadge sets on
+   every render, rather than by a one-shot JS call: the function that used to hide the keypad's copy
+   of this ran exactly once at init and never again on a role change, so it never actually hid.
+   signovivo.com has no mesh and no role to take, hence the shell gate. */
+html[data-shell="native"][data-role="follower"] .become-director-pill { display: flex; }

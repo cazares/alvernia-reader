@@ -119,14 +119,17 @@ test("the role control names the role, and is not a bare verb", () => {
   // label "Tomar" failed because it was a bare verb ("take WHAT?"), and both paths to directing must
   // describe the same destination. The control is now #role-toggle inside the IR A CANTO modal.
   const HTML = fs.readFileSync("web/src/index.html", "utf8");
-  // ONE HOME PER DIRECTION. Entering is a rare, deliberate act, so it sits behind a dialog you
-  // opened on purpose (the keypad's ★ Ser Director) plus the red typed-word gate. Leaving is
-  // recoverable and must be reachable without hunting, so it is the ✕ in the top bar.
+  // ONE HOME PER DIRECTION, and as of 2026-08-18 entering is VISIBLE rather than buried.
+  // ★ Ser Director moved out of the IR A CANTO keypad and into a top-left pill, because Braulio
+  // forgets the procedure most weeks and a control hidden inside a modal named "IR A CANTO" is not
+  // findable by someone who has forgotten there is a procedure at all. The empty seat that causes
+  // is what produced the 2026-07-01 no-director-all-night outage.
   //
-  // The keypad must hold ONLY the entry — no ✕, no DIRECTOR status. Two ways out of the role was
-  // one too many, and a destructive control next to "0" is a mis-tap that drops the choir's
-  // director mid-Mass.
-  assert.match(HTML, /id="role-toggle"/, "the keypad entry to the role is gone");
+  // Visibility does NOT weaken the role: #role-gate is what protects it, not obscurity. Tapping this
+  // opens the red "ESTO CAMBIA LA PÁGINA DE TODOS" wall and you must type the word.
+  assert.match(HTML, /id="become-director-pill"/, "the entry to the role is gone entirely");
+  assert.doesNotMatch(HTML, /id="role-toggle"/,
+    "the keypad copy is back — two homes for one act is the redundancy that was just removed");
   // Leaving is the DIRECTOR status itself: it reads the role you hold, and tapping it asks whether
   // you meant to stop. A separate ✕ lived beside it briefly — two controls for one act, and the ✕
   // said nothing about which role you were in.
