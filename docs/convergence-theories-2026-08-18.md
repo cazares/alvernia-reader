@@ -10,14 +10,17 @@ instant. This is a one-time cost paid before Mass — unless a device drops and 
 |---|---|---|
 | A | 451 | director on 372, followers on 100/200/300. **One follower converged in 1–2s; the other two took 10–20s.** |
 | B | 452 | Same shape. iPads lag ~10s on first becoming director. |
+| C | 452 | **All devices off home wifi.** iPhone (has cellular) instant; both iPads (no network) ~10s. |
 | Baseline | ~441–445 | 8.6s median, 9.4s worst, 4/4 converged |
 
 Build 452 contains **zero native changes** vs 448/451 (no `.swift`/`.m`/`.h` differs since the 448
 release commit), so neither run measures new mesh code. The tail has now survived builds 439, 441,
 446 and 448.
 
-**The shape is the evidence.** One device fast, the rest slow, run after run. That is not a slow
-handshake — a slow handshake makes everyone slow. It is a race that one device wins.
+**The shape looked like the evidence** — one device fast, the rest slow, run after run — which reads
+as a race one device wins rather than a slow handshake. **Theory 0 below now questions that reading:
+the fast device may simply have internet and never touch the mesh at all.** Test Theory 0 first;
+Theories 1-5 were all reasoned from a shape that may be an artefact.
 
 ## The timing constants that actually exist
 
@@ -37,6 +40,37 @@ symptom alone cannot separate them:
 
 `inviteTimeout + followerRetryDelay` = **10s exactly**. So does `selfDirectedTimeoutSeconds`. Two
 different mechanisms predict the same number; only a trace separates them.
+
+---
+
+## Theory 0 — The fast device is on the RELAY, not the mesh
+
+**Added 2026-08-18 after a wifi-off run, and it may dissolve every theory below it.**
+
+Observed with all devices off home wifi: **the iPhone is instant; both iPads take ~10s.** The iPhone
+has cellular. The iPads have no network at all.
+
+This app syncs over the Cloudflare relay whenever it has internet and falls back to Multipeer when it
+does not. So the iPhone is very likely receiving the page over the network in ~1s and never waiting
+on the mesh, while the two iPads wait on Multipeer alone.
+
+If that is what is happening:
+
+- **No fast mesh convergence has ever been measured.** In BOTH runs, the one device that converged
+  instantly may simply have been the one with internet. The true mesh number could be a uniform ~10s
+  for every device, with no race at all.
+- **The bimodal shape — the entire basis for Theory 1 — is an artefact.** "One device wins a race"
+  becomes "one device is not in the race."
+- **It explains why turning wifi off changed nothing.** It never slowed the iPhone, which still had
+  cellular.
+
+**Test, ~30 seconds:** put the iPhone in airplane mode with Bluetooth back ON, then take the director
+role. If it drops to ~10s alongside the iPads, this is confirmed and the diagnosis becomes "mesh
+convergence is uniformly ~10s" rather than anything about invite races.
+
+Run this BEFORE the experiments below. Every theory that follows was reasoned from the bimodal shape,
+and if the shape is an artefact of one device having internet, that reasoning starts from a false
+premise.
 
 ---
 
