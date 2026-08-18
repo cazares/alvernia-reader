@@ -893,6 +893,19 @@ export default function App() {
     dbgLog("become:follower", { syncAvailable });
     roleRef.current = "follower";
     explicitTransmitterRef.current = false;
+    // DROP THE OLD DIRECTOR'S MEMORY (Miguel, 2026-08-18, third regression of the same class of
+    // bug — "still has cache issue aka shows previous song on new director", confirmed on
+    // FOLLOWERS, both fresh-launch and mid-session). lastDirectorSnapshotRef is a follower's
+    // memory of the PREVIOUS director's last page, read back by bridge-ready's follower-resync
+    // branch and by the ⟳ resync handler — and it was never cleared on a role transition. A
+    // follower that reloaded or tapped ⟳ in the window between an old director stepping down and
+    // a new one's first broadcast resynced to the STALE snapshot instead of waiting for the real
+    // one. Every path into becomeFollower (step-down, takeover-fallback, stranded recovery) is a
+    // genuine new following relationship — a leftover snapshot from whoever came before has no
+    // business surviving it. Does NOT affect the legitimate case this ref exists for (a WebView
+    // reload mid-Mass while STILL following the SAME director) — that path never calls
+    // becomeFollower, it only checks roleRef.current === "follower".
+    lastDirectorSnapshotRef.current = null;
     stopDirectorHeartbeat(); // a follower must never re-broadcast
     // C3: stop publishing on step-down. Publishes are coalesced, so an in-flight one can drain a
     // final straggler frame AFTER we have stepped down. That used to be caught by the relay (no
@@ -1250,21 +1263,14 @@ export default function App() {
               event: { type: "page", page: currentPageRef.current, book: currentBookRef.current },
             });
             broadcastPage(currentPageRef.current, currentBookRef.current);
-          } else if (roleRef.current === "follower" && lastDirectorSnapshotRef.current) {
-            // A RELOADED follower (we already have a director snapshot) must resync to the
-            // director's last-known page instead of showing the web's stale/default boot page.
-            // The null-guard above is critical: a FRESH-BOOT follower that has never received a
-            // director snapshot keeps the web's own boot page (geo/stored) — we do NOT override.
-            const { page, book } = lastDirectorSnapshotRef.current;
-            currentPageRef.current = page;
-            currentBookRef.current = book;
-            // ONE event only: the page sync-event carries `book` and the web handler switches +
-            // renders atomically. A separate set-book first made the web jump to the book DEFAULT
-            // page, then the page event raced it — followers could flash the default or wedge.
-            injectEvent({ type: "sync-event", event: { type: "page", page, book } });
-            // H1: the cached snapshot can be stale if the director moved during the reload window.
-            // Actively pull the director's CURRENT page (like the foreground path does) instead of
-            // waiting for the next 1s heartbeat. Best-effort.
+          } else if (roleRef.current === "follower") {
+            // SIMPLE AND STATELESS (Miguel, 2026-08-18: "we got rid of caching which should
+            // include remembered STATE like this... why even cache at all"). This used to apply
+            // lastDirectorSnapshotRef — a REMEMBERED page from whoever was directing when this
+            // ref was last written — immediately, before requesting a fresh one. That's the same
+            // class of bug as the solo-reader cache: a remembered value standing in for a
+            // confirmed one. Now a reloaded follower requests the CURRENT page live and waits
+            // (the boot-reveal gate/spinner already covers this) rather than showing a guess.
             if (syncAvailable) requestCurrentSnapshot().catch(() => {});
           }
           // SOLO-READER CACHE RESTORE — REMOVED (Miguel, 2026-08-18, after it regressed the
@@ -1421,15 +1427,10 @@ export default function App() {
               refreshNearbyDiscovery().catch(() => {});
               requestCurrentSnapshot().catch(() => {});
             }
-            if (lastDirectorSnapshotRef.current) {
-              const { page, book } = lastDirectorSnapshotRef.current;
-              currentPageRef.current = page;
-              // Keep the ref in sync, but DON'T inject a separate set-book: the single page
-              // sync-event below carries `book` and switches + renders atomically (no race / no
-              // momentary book-default flash from a two-script set-book→page interleave).
-              currentBookRef.current = book;
-              injectEvent({ type: "sync-event", event: { type: "page", page, book } });
-            }
+            // SIMPLE AND STATELESS (Miguel, 2026-08-18) — no longer pre-fills from
+            // lastDirectorSnapshotRef (a REMEMBERED page, possibly from a director who has since
+            // stepped down). ⟳ exists precisely because the page on screen is wrong; showing
+            // another guess defeats the button. The active pulls above are what actually fix it.
           }
           break;
         }
@@ -2405,18 +2406,11 @@ export default function App() {
       // invalidates properly and floors the churn at 2 s, but the duplicate had no reason to exist.
       if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
       if (roleRef.current === "follower") {
+        // SIMPLE AND STATELESS (Miguel, 2026-08-18) — no longer pre-fills from
+        // lastDirectorSnapshotRef on foreground. The fresh request below is what actually
+        // confirms the current page; a remembered one is just a guess wearing a live event's
+        // clothes.
         requestCurrentSnapshot().catch(() => {});
-        // Re-assert the director's last-known snapshot immediately so the view is correct on
-        // foreground while the fresh snapshot request round-trips over the mesh.
-        if (lastDirectorSnapshotRef.current) {
-          const { page, book } = lastDirectorSnapshotRef.current;
-          currentPageRef.current = page;
-          // Keep the ref in sync, but DON'T inject a separate set-book: the single page
-          // sync-event below carries `book` and switches + renders atomically (no two-script
-          // set-book→page race that could flash the book default on foreground).
-          if (book !== currentBookRef.current) currentBookRef.current = book;
-          injectEvent({ type: "sync-event", event: { type: "page", page, book } });
-        }
       } else if (roleRef.current === "director") {
         // SIMPLE DIRECTOR: on every foreground, re-arm the beat and re-assert the page. The
         // broadcast below was already here; the restart is new.
