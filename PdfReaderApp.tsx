@@ -378,10 +378,13 @@ export default function App() {
       .then((pairs) => {
         const map = Object.fromEntries(pairs);
         telemetryEnabledRef.current = map["sv.telemetry"] === "1";
-        // Distinguish "never saved" (undefined) from "saved as empty, meaning use the worker"
-        // ("") — only the former falls back to the default; an explicit empty save must stick.
+        // AsyncStorage.multiGet resolves a MISSING key to null, never undefined — checking for
+        // undefined here meant "never saved" was never true, so String(null) ran and the field
+        // showed the literal text "null" on every device that had not explicitly saved a sink.
+        // Distinguish "never saved" (null) from "saved as empty, meaning use the worker" ("") —
+        // only the former falls back to the default; an explicit empty save must still stick.
         const saved = map["sv.logSink"];
-        logSinkRef.current = (saved === undefined ? DEFAULT_LOG_SINK : String(saved)).replace(/\/+$/, "");
+        logSinkRef.current = (saved === null || saved === undefined ? DEFAULT_LOG_SINK : saved).replace(/\/+$/, "");
       })
       .catch(() => {});
   }, []);

@@ -177,3 +177,16 @@ test("the relay keepalive is a keepalive, not a poll", () => {
   assert.ok(ms / 1000 < liveS / 2,
     `a ${ms / 1000}s keepalive against a ${liveS}s liveness window leaves no margin for one lost publish`);
 });
+
+test("a never-saved sink resolves to the default, not the string \"null\"", () => {
+  // AsyncStorage.multiGet resolves a MISSING key to null, never undefined. A check for undefined
+  // is therefore never true on a fresh device, so the "never saved" branch never runs and
+  // String(null) executes instead — producing the literal text "null" in the sink field. Confirmed
+  // on device 2026-08-18.
+  const NATIVE_SRC = fs.readFileSync("PdfReaderApp.tsx", "utf8");
+  const line = NATIVE_SRC.slice(NATIVE_SRC.indexOf("logSinkRef.current = (saved"));
+  const stmt = line.slice(0, line.indexOf(";") + 1);
+  assert.match(stmt, /saved === null/, "the null case from AsyncStorage is not handled");
+  assert.doesNotMatch(stmt, /String\(saved\)/,
+    "String(saved) is back — on the null branch that produces the literal text \"null\"");
+});
