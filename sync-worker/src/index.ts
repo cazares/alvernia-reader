@@ -99,6 +99,10 @@ const EMPTY_SNAPSHOT: Snapshot = {
   ts: 0,
 };
 
+/** A single device's OTA-relevant state — deliberately narrower than the old FleetDevice.
+ *  No label, no role, no phone-adjacent field can ever reach this shape. */
+type OtaDevice = { deviceId: string; bookVersion?: string; bookStage?: string; ts: number };
+
 export class SyncRoom extends DurableObject<Env> {
   private snapshot: Snapshot = EMPTY_SNAPSHOT;
 
@@ -246,6 +250,40 @@ export class SyncRoom extends DurableObject<Env> {
     // not keep paying for storage to say so.
     if (rec.n <= cap + 100) await this.ctx.storage.put("budget", rec);
     return rec.n;
+  }
+
+  /** RPC: record a device's OTA-relevant state. NARROW ON PURPOSE.
+   *
+   *  This restores what the deleted fleet dashboard's /fleet/checkin used to carry for free
+   *  (2026-08-18: "kill the fleet dashboard" removed the ONLY delivery path a device had for
+   *  learning about a new songbook, because arming was piggybacked on that endpoint's response —
+   *  see decideBookUpdate's call site in the pre-removal history). Restored as its OWN endpoint,
+   *  its OWN Durable Object instance ("__ota__", never "__fleet__"), and its OWN storage shape —
+   *  deviceId, bookVersion, bookStage, ts, nothing else — so there is no path back to storing a
+   *  label, a role, or anything PII-adjacent under this name. If a caller sends more fields, they
+   *  are silently dropped, not stored. */
+  async otaCheckin(input: unknown, ip = ""): Promise<{ ok: true }> {
+    if (this.rateLimited(ip, 10, 1)) return { ok: true };
+    const o = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+    const deviceId = String(o.deviceId ?? "").slice(0, 64);
+    if (!deviceId) return { ok: true };
+    const devices = (await this.ctx.storage.get<Record<string, OtaDevice>>("ota_devices")) ?? {};
+    const entry: OtaDevice = { deviceId, ts: Math.floor(Date.now() / 1000) };
+    if (o.bookVersion != null) entry.bookVersion = String(o.bookVersion).slice(0, 32);
+    if (o.bookStage != null) entry.bookStage = String(o.bookStage).slice(0, 40);
+    devices[deviceId] = entry;
+    // Same ring-cap idiom as the old fleet store: bounded, newest-first.
+    const kept = Object.values(devices).sort((a, b) => b.ts - a.ts).slice(0, 300);
+    const pruned: Record<string, OtaDevice> = {};
+    for (const d of kept) pruned[d.deviceId] = d;
+    await this.ctx.storage.put("ota_devices", pruned);
+    return { ok: true };
+  }
+
+  /** RPC: every device's OTA state, for decideBookUpdate's fleet-wide throttle count. */
+  async getOtaDevices(): Promise<OtaDevice[]> {
+    const devices = (await this.ctx.storage.get<Record<string, OtaDevice>>("ota_devices")) ?? {};
+    return Object.values(devices);
   }
 
   async clearLog(): Promise<{ ok: true }> {
@@ -410,7 +448,7 @@ export default {
       //
       // The counter lives in a DO and is touched ONLY by non-essential paths, so metering the
       // faucet costs the product nothing.
-      const NON_ESSENTIAL = url.pathname === "/log";
+      const NON_ESSENTIAL = url.pathname === "/log" || url.pathname === "/ota/checkin";
       if (NON_ESSENTIAL) {
         const cap = Math.max(0, Number(env.NONESSENTIAL_DAILY_MAX ?? "10000") || 0);
         const day = new Date().toISOString().slice(0, 10);   // UTC, same boundary Cloudflare resets on
@@ -428,6 +466,39 @@ export default {
             { "Retry-After": "3600" },
           );
         }
+      }
+
+      // ── OTA arming pointer — restored 2026-08-18 ────────────────────────────────────────
+      //
+      // The ONLY delivery path a device has for learning about a new songbook. Deliberately its
+      // own route, its own DO instance ("__ota__"), its own narrow storage shape — see otaCheckin
+      // above for why. POST-only: a device reports {deviceId, bookVersion?, bookStage?} and gets
+      // back {bookUpdate} or nothing. Absent bookUpdate is not an error, it is the dormant default
+      // (see bookArming.js) — the client must not treat a network failure the same as an explicit
+      // "no update", so this fails soft: any error here still returns 200 with no bookUpdate field
+      // rather than surfacing a 500 the client would have no correct way to react to.
+      if (url.pathname === "/ota/checkin") {
+        if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+        if (Number(request.headers.get("content-length") || 0) > 4 * 1024) {
+          return json({ ok: false, error: "payload_too_large" }, 413, cors);
+        }
+        const ota = env.SYNC_ROOM.getByName("__ota__");
+        let body: unknown = null;
+        try { body = await request.json(); } catch { body = null; }
+        const ip = request.headers.get("CF-Connecting-IP") || "";
+        let bookUpdate: { bookVersion: string; base: string } | null = null;
+        try {
+          await ota.otaCheckin(body, ip);
+          const deviceId = String((body as Record<string, unknown>)?.deviceId ?? "").slice(0, 64);
+          if (deviceId && String(env.BOOK_UPDATE_VERSION || "").trim()) {
+            const devices = await ota.getOtaDevices();
+            const me = devices.find((d) => d.deviceId === deviceId) || { deviceId, ts: 0 };
+            bookUpdate = decideBookUpdate(env, me, devices, Math.floor(Date.now() / 1000));
+          }
+        } catch {
+          bookUpdate = null; // never let an arming-decision failure surface as a broken check-in
+        }
+        return json(bookUpdate ? { ok: true, bookUpdate } : { ok: true }, 200, cors);
       }
 
       if (url.pathname === "/log") {

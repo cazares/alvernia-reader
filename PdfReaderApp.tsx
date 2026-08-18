@@ -487,18 +487,51 @@ export default function App() {
     [dbgFlush, levelForEvent],
   );
   // ── Fleet readiness check-in (native → the SAME /fleet dashboard as signovivo.com) ──
-  // Reports this iPad's native build + role so the director sees who's ready before Mass. Reuses
-  // the stable sv_devid; sends a self-entered label but NEVER a phone number. Best-effort.
-  // ── Fleet readiness check-in — REMOVED (Miguel, 2026-08-18: "kill the fleet dashboard") ──
+  // ── OTA check-in — RESTORED, narrower (Miguel, 2026-08-18) ─────────────────────────────
   //
-  // It posted every 90 SECONDS from every device: 960/day each, ~3,840/day across the fleet — more
-  // than the director's relay keepalive, spent so a pre-Mass page could show green lights. It also
-  // stored a roster containing choir phone numbers, so deleting it is a privacy win as much as a
-  // quota one.
+  // The 90s FLEET DASHBOARD heartbeat (device label, role, readiness — human-facing, and it stored
+  // a roster with choir phone numbers) was correctly killed the same day for costing ~3,840 req/day
+  // across the fleet. But arming a songbook update was piggybacked on THAT SAME call's response —
+  // "no new endpoint, no new poll" — so deleting it silently also deleted the only way a device
+  // ever learns BOOK_UPDATE_VERSION exists, and the client-side signal (lastCheckinOkAt) that
+  // canApplyNow's safety gate depends on to know this device has recently proven it has internet.
   //
-  // Kept as a no-op rather than deleted at ~6 call sites: those sites are inside offline-download
-  // and cache-verification paths where an edit risks more than it saves, and this way the next
-  // reader sees WHY nothing happens instead of finding a mysterious absence.
+  // This restores JUST those two things, on their OWN endpoint (/ota/checkin), reporting ONLY
+  // {deviceId, bookVersion, bookStage} — no label, no role, nothing PII-adjacent — and at a far
+  // slower cadence (below) than the dashboard ever needed, since arming is a rare, deliberate,
+  // Miguel-supervised action, not something that needs 90s freshness.
+  const otaCheckin = useCallback(() => {
+    const deviceId = dbgDeviceRef.current;
+    if (!deviceId || deviceId === "?") return;
+    fetch(`${RELAY_BASE}/ota/checkin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceId,
+        ...(activeBookVersionRef.current ? { bookVersion: activeBookVersionRef.current } : {}),
+        ...(bookStageRef.current ? { bookStage: bookStageRef.current } : {}),
+      }),
+    })
+      .then(async (r) => {
+        if (!r.ok) return;
+        // A SUCCESSFUL check-in is the live-internet proof canApplyNow's safety gate depends on.
+        // Recorded here and nowhere else, so it can never be faked by a cached response.
+        const at = Date.now();
+        lastCheckinOkAtRef.current = at;
+        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
+        let body: unknown = null;
+        try {
+          body = await r.json();
+        } catch {
+          return;
+        }
+        onCheckinResponseRef.current?.(body);
+      })
+      .catch(() => {
+        /* offline / relay unreachable — inside the church this is the NORMAL case and must stay
+           completely silent: no error state, no UI. */
+      });
+  }, []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
     (async () => {
@@ -513,6 +546,7 @@ export default function App() {
         dbgDeviceRef.current = "?";
       }
       dbgLog("boot", { syncAvailable });
+      otaCheckin();
       // Fleet identity: report readiness under whatever label this device ALREADY has. The
       // one-time "¿Quién usa este iPad?" Alert.prompt is gone.
       //
@@ -530,10 +564,17 @@ export default function App() {
       // (sv_fleet_label was read here to name this device on the readiness dashboard; the dashboard
       // is gone, so the label has nowhere to go and the key is simply left in storage.)
     })();
-  }, [dbgLog, syncAvailable]);
-  // Re-report readiness every 90s while mounted — captures a follower who later becomes director
-  // without touching the liturgy-critical sync callbacks.
-  // (the 90s fleet check-in heartbeat was removed with the dashboard — see fleetCheckin above)
+  }, [dbgLog, syncAvailable, otaCheckin]);
+
+  // Re-check every 4 minutes while mounted — far below the old 90s dashboard cadence, which existed
+  // for HUMAN-readable freshness on a readiness page that no longer exists. Arming is deliberate and
+  // rare; a few minutes of latency on top of the boot + foreground checks (below) costs nothing and
+  // is never the bottleneck on a "prove it on ONE iPad" test Miguel is standing in front of.
+  useEffect(() => {
+    const OTA_CHECKIN_INTERVAL_MS = 4 * 60 * 1000;
+    const id = setInterval(otaCheckin, OTA_CHECKIN_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [otaCheckin]);
 
   // ── Native -> Web injection (queued until the web app signals bridge-ready) ──
   // Bound the pending-inject backlog: if the WebView never signals bridge-ready (broken/blank
@@ -1184,6 +1225,39 @@ export default function App() {
             // Actively pull the director's CURRENT page (like the foreground path does) instead of
             // waiting for the next 1s heartbeat. Best-effort.
             if (syncAvailable) requestCurrentSnapshot().catch(() => {});
+          } else {
+            // SOLO READER, restored (Miguel, 2026-08-18: "after OTA update the app goes back to the
+            // page it was on before").
+            //
+            // Neither branch above applies here: not a director/transmitter (that path re-asserts
+            // its OWN currentPageRef, which survives a WebView-only remount in native memory and
+            // needs no restore), and not a follower with a live director snapshot to resync to
+            // (that path already lands on the director's real page). What's left is a device that
+            // is simply reading on its own — nobody to be authoritative FOR it — and for that case
+            // the web's post-reload boot-default page was the only place it could land.
+            //
+            // performApplySwap saves the page under this exact key moments before triggering the
+            // remount that fires this handler ("Save the reader's place so nobody loses it across
+            // the swap") — but nothing ever read it back. Read it now, once, and only for a fresh
+            // reload with nothing else to go on; a genuinely brand-new install has no key to find
+            // and correctly falls through to the web's own default.
+            void (async () => {
+              try {
+                const raw = await AsyncStorage.getItem(
+                  `${STORAGE_KEYS.lastPagePrefix}${currentBookRef.current}`,
+                );
+                const page = Number(raw);
+                if (Number.isFinite(page) && page >= 1) {
+                  currentPageRef.current = page;
+                  injectEvent({
+                    type: "sync-event",
+                    event: { type: "page", page, book: currentBookRef.current },
+                  });
+                }
+              } catch {
+                /* no saved page — the web's own default stands, same as a fresh install */
+              }
+            })();
           }
           break;
         }
@@ -2231,6 +2305,7 @@ export default function App() {
       // was ever the problem: canApplyNow is down to two physical impossibilities, so a device that
       // does nothing now really is a device that had nothing to do.
       void autoApplyIfSafeRef.current?.();
+      otaCheckin();
       // ONE refresh, not two. This was duplicated, and each call scheduled another discovery timer
       // without invalidating the previous one (DirectorSyncModule.scheduleNextDiscoveryRefresh) —
       // so every foreground DOUBLED the live timer population. Measured on the owner's iPhone:
