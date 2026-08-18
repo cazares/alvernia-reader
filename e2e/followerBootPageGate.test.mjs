@@ -42,24 +42,6 @@ test("a CONFIRMED page sync-event resolves the gate", () => {
     "the page sync-event handler no longer resolves the boot gate — a follower could reveal on the wrong page forever");
 });
 
-test("a CACHED (remembered, not live) page does NOT resolve the gate", () => {
-  // 2026-08-18: a solo reader's remembered last page (src: "cache", PdfReaderApp.tsx) is a GUESS,
-  // not proof anyone is directing right now. Miguel, testing on hardware: "it initially shows on
-  // followers whatever song they WERE on, so off by one" — the cache satisfied the gate before a
-  // real mesh/BLE sync could correct it, so a follower whose real director was on a DIFFERENT song
-  // flashed the stale cached one first. isConfirmed must gate BOTH the reveal AND the "director is
-  // alive" pill signal — a replayed memory is neither.
-  const idx = APP.indexOf('event.type === "page" && Number.isFinite(event.page)');
-  const body = APP.slice(idx, idx + 2200);
-  assert.match(body, /event\.src !== "cache"/, "no isConfirmed / cache-source check — the gate resolves on any page, including a stale replay");
-  const isConfirmedIdx = body.indexOf("isConfirmed");
-  const resolveIdx = body.indexOf("resolveFirstNativePageSignal()");
-  const guardedResolve = body.slice(0, resolveIdx).lastIndexOf("if (isConfirmed");
-  assert.ok(guardedResolve > isConfirmedIdx, "resolveFirstNativePageSignal is not gated on isConfirmed");
-  const guardedBadge = body.slice(0, body.indexOf("renderDirectorModeBadge()")).lastIndexOf("if (isConfirmed)");
-  assert.ok(guardedBadge > isConfirmedIdx, "renderDirectorModeBadge/lastDirectorPageAt (the 'director is alive' signal) is not gated on isConfirmed — a cached replay would falsely claim a live director");
-});
-
 test("bridge-ready is requested BEFORE the reveal gate, not after", () => {
   // The bug: bridge-ready used to fire at the very END of initReader, so revealReader() had
   // already run by the time native's response (the only source of the real page) could arrive.
@@ -89,4 +71,13 @@ test("native awaits the gate before revealing; web-only keeps its own separate r
     "native no longer races firstNativePageSignal against the timeout before revealing");
   assert.match(gateSection, /relayPollOnce\(true\)/,
     "the web-only relay-poll-before-reveal path was removed — that's a separate, pre-existing gate");
+});
+
+test("the resolver is unconditional again — no cache-source carve-out survives in app.js", () => {
+  // The solo-reader cache mechanism this carve-out existed for was REMOVED entirely (2026-08-18,
+  // second regression of the headline director-page-race fix — see e2e/otaCheckinRestored.test.mjs
+  // for the full story). Leaving a conditional for a source that can never occur is exactly the
+  // kind of dead branch that confuses the next person reading this file.
+  assert.doesNotMatch(APP, /event\.src !== "cache"/, "a cache-source carve-out survives with nothing left to trigger it");
+  assert.doesNotMatch(APP, /const isConfirmed/, "isConfirmed survives as dead conditional logic");
 });

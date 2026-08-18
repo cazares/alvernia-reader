@@ -68,36 +68,23 @@ test("otaCheckin restores BOTH broken signals: lastCheckinOkAt and the staging p
   assert.doesNotMatch(fn, /label:|role:|deviceKind:/, "the client sends fleet-dashboard fields again");
 });
 
-test("a solo reader's page survives an OTA reload; a director or live follower is untouched", () => {
-  // The narrower finding: director and actively-following-a-live-director were ALREADY correct
-  // (currentPageRef lives in native memory and survives a WebView-only remount; a follower resyncs
-  // to the director's live snapshot). The gap was only the THIRD case — nobody to be authoritative
-  // for a solo reader — where the saved page was written and never read.
+test("the solo-reader cache restore is GONE — never nuked twice", () => {
+  // Miguel, testing on hardware, 2026-08-18: the cache restore (added earlier the same day to fix
+  // a page-restore-after-OTA-swap gap) regressed the ORIGINAL headline director-page-race fix a
+  // SECOND time. It wrote a REMEMBERED (possibly stale) page into currentPageRef unconditionally;
+  // tagging it src:"cache" stopped it from falsely satisfying the boot-reveal gate, but did NOT
+  // stop it from overwriting currentPageRef/state.currentPage — so a device that tapped "Ser
+  // Director" shortly after boot, before any real sync arrived, broadcast the STALE cached page
+  // to the whole choir. "why even cache at all????" — no good answer survived two regressions.
+  // Removed entirely: the read, both write sites, and the STORAGE_KEYS entry itself.
   const start = NATIVE.indexOf('case "bridge-ready"');
   const end = NATIVE.indexOf('case "page-changed"');
   const block = NATIVE.slice(start, end);
+  assert.doesNotMatch(block, /SOLO READER/, "the solo-reader cache-restore branch is back");
+  assert.doesNotMatch(NATIVE, /lastPagePrefix/, "a lastPagePrefix reference survives somewhere in the native shell");
 
-  const soloStart = block.indexOf("} else {", block.indexOf("SOLO READER") - 20);
-  assert.ok(block.includes("SOLO READER"), "the solo-reader restore is gone");
-  const solo = block.slice(block.indexOf("} else {", block.lastIndexOf("if (syncAvailable) requestCurrentSnapshot")));
-
-  assert.match(solo, /AsyncStorage\.getItem\(\s*`\$\{STORAGE_KEYS\.lastPagePrefix\}\$\{currentBookRef\.current\}`/,
-    "the solo-reader branch does not read the page performApplySwap saved");
-  assert.match(solo, /Number\.isFinite\(page\) && page >= 1/, "no validation on the restored page — a corrupt value would be trusted");
-  assert.match(solo, /type: "sync-event"/, "the restored page is never re-driven into the web");
-
-  // Must be the FALLTHROUGH else, not reachable from the two already-correct branches.
-  const isDirectorBranch = block.slice(block.indexOf("if (isDirectorAuthority)"), block.indexOf("} else if (roleRef.current === \"follower\""));
-  assert.doesNotMatch(isDirectorBranch, /lastPagePrefix/, "the director branch also reads the saved page — redundant and could race the live re-assert");
-});
-
-test("performApplySwap still saves the page this restore depends on", () => {
-  // The save half of this was never broken — confirms the fix wires into EXISTING behaviour rather
-  // than needing a second save site.
-  const fn = NATIVE.slice(NATIVE.indexOf("const performApplySwap = useCallback"));
-  const body = fn.slice(0, fn.indexOf("[breadcrumb, bookFs, setBookStage]"));
-  assert.match(body, /lastPagePrefix\}\$\{currentBookRef\.current\}`,\s*\n\s*String\(currentPageRef\.current\)/,
-    "performApplySwap no longer saves the reader's place before swapping");
+  const offlineBooks = fs.readFileSync("src/offlineBooks.ts", "utf8");
+  assert.doesNotMatch(offlineBooks, /lastPagePrefix/, "STORAGE_KEYS.lastPagePrefix still exists — the key should be gone, not just unused");
 });
 
 test("shell-too-old is already a wired refusal (MIN_SHELL_BUILD), and it's no longer silent", () => {
@@ -204,15 +191,3 @@ test("release.sh only moves LATEST_NATIVE_BUILD alongside a REAL native upload, 
   assert.match(body, /TF_UPLOADED" = "1"/, "not gated on a real TestFlight upload having happened");
 });
 
-test("the solo-reader cached-page restore is tagged src:\"cache\" — not confirmed live", () => {
-  // Miguel, testing on hardware, 2026-08-18: "it initially shows on followers whatever song they
-  // WERE on, so off by one cache problem" — the solo-reader restore (a REMEMBERED page from a
-  // previous session) was satisfying web/app.js's firstNativePageSignal gate the same as a real
-  // mesh/BLE sync, so a follower flashed its stale cached song before the real director's song
-  // corrected it. Without this tag, the web side has no way to tell "a memory" from "a live sync".
-  const start = NATIVE.indexOf('case "bridge-ready"');
-  const end = NATIVE.indexOf('case "page-changed"');
-  const block = NATIVE.slice(start, end);
-  const solo = block.slice(block.indexOf("} else {", block.lastIndexOf("if (syncAvailable) requestCurrentSnapshot")));
-  assert.match(solo, /src: "cache"/, "the solo-reader restore no longer tags its page as a cache replay");
-});
