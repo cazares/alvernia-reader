@@ -69,11 +69,26 @@
     // BOOK_UPDATE_CONCURRENCY is set high enough to never gate a fleet this size — the throttle
     // only gates NEW starts anyway (a device already downloading/ready is always honoured, see
     // bookArming.js), so a high number here just means "don't stagger," which is the ask.
-    "BOOK_UPDATE_VERSION": "bv_48fa2b4c4e3d8221",
+    "BOOK_UPDATE_VERSION": "bv_6f89c98226de517c",
     "BOOK_UPDATE_DEVICES": "*",
     "BOOK_UPDATE_ALLOW_FLEET": "yes",
     "BOOK_UPDATE_BASE": "https://signovivo.com",
-    "BOOK_UPDATE_CONCURRENCY": "20"
+    "BOOK_UPDATE_CONCURRENCY": "20",
+
+    // ── Native build freshness nudge (Miguel, 2026-08-18) ────────────────────────────────
+    //
+    // "force everyone to get on this version... with in-app code... backend" — TestFlight has no
+    // API to force-push an install onto someone else's device (Apple simply does not offer one),
+    // so this is the closest in-app equivalent: the backend names the LATEST shipped binary, and
+    // every device compares its own build against it on /ota/checkin, showing an update prompt
+    // (reusing the shell-too-old modal — an "Actualizar" button opening TestFlight) when behind.
+    // Purely informational for the SERVER — it never blocks or gates anything, unlike
+    // BOOK_UPDATE_*; a device on an older binary keeps working normally, just gets nudged.
+    //
+    // Kept in lockstep automatically: release.sh rewrites this to the just-shipped build number
+    // on every production release, the same way it rewrites BOOK_UPDATE_VERSION. Do not hand-edit
+    // between releases.
+    "LATEST_NATIVE_BUILD": "462"
   }
 
   // Later, to serve from sync.signovivo.com instead of *.workers.dev, add:

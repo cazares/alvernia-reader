@@ -148,3 +148,58 @@ test("the modal is gated on mesh-idle — never blocks a director's screen mid-M
   assert.ok(idleGateIdx > 0 && oneShotIdx > idleGateIdx,
     "the one-shot guard is set outside the mesh-idle branch — a busy device would never get the modal");
 });
+
+test("native build freshness: client reports its own build, server confirms only when current", () => {
+  // Miguel, 2026-08-18: "force everyone to get on this version... with in-app code... backend" —
+  // TestFlight has no API to force-push an install, so this is the in-app equivalent: the client
+  // reports its build, the server confirms it against LATEST_NATIVE_BUILD, and the client nudges
+  // (never blocks) when it can't be confirmed current.
+  assert.match(NATIVE, /nativeBuild: Number\(BUILD_VERSION\)/,
+    "the checkin body no longer reports the device's own native build");
+  assert.match(WORKER, /LATEST_NATIVE_BUILD\?: string/, "the Env type lost LATEST_NATIVE_BUILD");
+  assert.match(WORKER, /nativeBuildConfirmedLatest/, "the worker no longer computes the confirmation flag");
+});
+
+test("the confirmation flag fails toward NOT confirmed on any ambiguous input", () => {
+  // Old binaries (built before this feature existed) send no nativeBuild at all — Number(undefined)
+  // is NaN, so Number.isFinite(reported) is false and the flag is correctly omitted, never a false
+  // positive. Same for a malformed/missing LATEST_NATIVE_BUILD.
+  const idx = WORKER.indexOf("NATIVE BUILD FRESHNESS");
+  const body = WORKER.slice(idx, idx + 1000);
+  assert.match(body, /Number\.isFinite\(latest\)/, "no finiteness check on the configured latest build");
+  assert.match(body, /Number\.isFinite\(reported\)/, "no finiteness check on the device-reported build");
+  assert.match(body, /reported >= latest/, "the comparison direction is wrong or missing");
+});
+
+test("the nudge never blocks — it fires a toast unconditionally and a modal only when mesh is idle", () => {
+  const idx = NATIVE.indexOf("NATIVE BUILD FRESHNESS NUDGE");
+  assert.ok(idx > 0, "the native-build nudge block is missing");
+  const body = NATIVE.slice(idx, idx + 1800);
+  assert.match(body, /type: "toast"/, "no non-blocking toast — the only signal is the blocking modal");
+  assert.match(body, /meshPeerCountRef\.current === 0/,
+    "the modal is not gated on mesh being idle — it could interrupt an active Mass/rehearsal");
+  assert.match(body, /didNativeBuildNudgeRef\.current = true/, "no one-shot guard for the modal");
+});
+
+test("the nudge offers BOTH signovivo.com and TestFlight — never a dead end", () => {
+  // Miguel, 2026-08-18: "don't just lock them out... link out to both actually — you don't wanna
+  // just middle finger them." Both this nudge AND the pre-existing shell-too-old modal must offer
+  // a path forward that works right now (the web) alongside the actual fix (updating the binary).
+  const idx = NATIVE.indexOf("NATIVE BUILD FRESHNESS NUDGE");
+  const body = NATIVE.slice(idx, idx + 1800);
+  assert.match(body, /SIGNOVIVO_URL/, "no signovivo.com link in the native-build nudge");
+  assert.match(body, /TESTFLIGHT_APP_URL/, "no TestFlight link in the native-build nudge");
+
+  const shellTooOldIdx = NATIVE.indexOf('rec.error === "shell-too-old"');
+  const shellBody = NATIVE.slice(shellTooOldIdx, shellTooOldIdx + 1200);
+  assert.match(shellBody, /SIGNOVIVO_URL/, "shell-too-old still only offers TestFlight, not signovivo.com too");
+});
+
+test("release.sh only moves LATEST_NATIVE_BUILD alongside a REAL native upload, never on SKIP_NATIVE=1", () => {
+  const RELEASE = fs.readFileSync("scripts/release.sh", "utf8");
+  const idx = RELEASE.indexOf("LATEST_NATIVE_BUILD must NOT move");
+  assert.ok(idx > 0, "the SKIP_NATIVE guard comment/logic is missing");
+  const body = RELEASE.slice(idx, idx + 500);
+  assert.match(body, /SKIP_NATIVE:-0\}" != "1"/, "no SKIP_NATIVE guard before writing LATEST_NATIVE_BUILD");
+  assert.match(body, /TF_UPLOADED" = "1"/, "not gated on a real TestFlight upload having happened");
+});
