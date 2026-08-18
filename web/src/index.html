@@ -94,6 +94,13 @@
              about which role you were in. -->
       <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button">
         <span class="director-mode-badge-star" aria-hidden="true">&#9734;</span>
+        <!-- SALIR / DIRECTOR. Names the act rather than the state: the button is shown to nobody but
+             the director, so its presence already reports the role, and "Salir" is the same verb the
+             confirm uses ("¿Salir de director?"). -->
+        <span class="director-exit-label" aria-hidden="true">
+          <span class="director-exit-l1">Salir</span>
+          <span class="director-exit-l2">Director</span>
+        </span>
         <strong class="director-mode-badge-title" id="sync-pill-title">DIRECTOR</strong>
         <!-- EMPTY ON PURPOSE. Every SYNC_PILL state now sets action: "" — the pill REPORTS, it does
                not carry a verb. "Tomar" sat here as static markup that app.js overwrote on first

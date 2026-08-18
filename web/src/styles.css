@@ -12,14 +12,14 @@
      one var drove top, left AND right, so raising the row also pulled both clusters inward. Split so
      the vertical and horizontal positions can be tuned independently — every top: anchor reads this,
      every left:/right: anchor reads --fab-gutter. */
-  --fab-gutter-top: 1.27rem;   /* 1.58rem - 5px */
+  --fab-gutter-top: 0.96rem;   /* 1.58rem, then -5px twice */
   /* THE CLUSTER IS DERIVED, NOT HAND-COMPUTED. Every top control is --fab-size square (the DIRECTOR
      status is --fab-status-w wide), separated by exactly --fab-gap. The slot offsets below are
      calc()s off these three numbers, so the spacing is uniform BY CONSTRUCTION rather than by me
      getting the arithmetic right — which I did not, twice tonight: once leaving ⌕ and Ir a Canto
      0.1rem apart, once leaving the pill 0.15rem from ⟳. Change a size here and every position
      follows. */
-  --fab-size: 4.77rem;       /* 3.875 -> +15% -> +5px. Square, so one var still does both axes. */
+  --fab-size: 5.39rem;       /* 3.875 -> +15% -> +5px -> +10px. Square, so one var does both axes. */
   --fab-gap: 0.5rem;
   /* Vestigial: the DIRECTOR status content-hugs around a lone ☆ now, so nothing derives a position
      from this width any more. Kept only as the base .director-mode-badge width, which every real
@@ -2309,7 +2309,7 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
   /* 0.8625 of the 4.5rem box — the top-left ratio the owner liked, at the size he settled on
      (5rem, then 10% smaller). Keep these two numbers in step: changing the box without the glyph is
      what made these controls read as smaller than they are. */
-  font-size: 4.11rem;   /* 0.8625 of the 4.77rem box — the glyph:box ratio is held as the box grows */
+  font-size: 4.65rem;   /* 0.8625 of the 5.39rem box — the glyph:box ratio is held as the box grows */
   line-height: 1;
   display: flex;
   align-items: center;
@@ -2370,9 +2370,12 @@ html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), e
   line-height: 1.05;
   font-weight: 700;
   letter-spacing: 0.005em;
-  font-size: 0.84rem;
+  font-size: 1.03rem;   /* 0.84 x 1.08 (+8%), then scaled with the box */
 }
-.song-jump-fab-l1 { font-size: 0.86em; opacity: 0.82; }   /* "Ir a" — the quieter half */
+/* "Ir a" was 0.86em AND dimmed to 0.82 — small and faint at once, which read as too small at any
+   base size (owner, 2026-08-18: "way too small"). It is half the name of the button, not a
+   footnote, so it now sits just under "Canto" in size and barely under it in weight. */
+.song-jump-fab-l1 { font-size: 1.02em; opacity: 0.9; }
 .song-jump-fab-l2 { font-size: 1.18em; }                  /* "Canto" — the noun people look for */
 .resync-fab.is-spinning { flex-direction: column; justify-content: center; padding-bottom: 4px; }  /* ⟳ ~35% bigger */
 /* Fullscreen fab — bottom-right (override the base top); SVG icon sized to match the glyphs. */
@@ -2381,7 +2384,7 @@ html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), e
   bottom: max(var(--fab-gutter), env(safe-area-inset-bottom, 0px));
   right: max(var(--fab-gutter), env(safe-area-inset-right, 0px));
 }
-.fullscreen-fab svg { width: 2.46rem; height: 2.46rem; }   /* scaled with the boxes */
+.fullscreen-fab svg { width: 2.78rem; height: 2.78rem; }   /* scaled with the boxes */
 .song-jump-fab:active,
 .search-fab:active,
 .resync-fab:active,
@@ -2409,16 +2412,13 @@ html[data-role="director"] .search-fab { display: flex; }   /* shown for the dir
 html[data-role="director"] .director-mode-badge {
   left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
   cursor: pointer;
-  /* JUST THE STAR (owner, 2026-08-18). The word "DIRECTOR" is gone; the ☆ carries it, and it is the
-     same outline star that ★ Ser Director wears — so the symbol means "the director role" in both
-     corners, and the only question it answers is which side of it you are on. They are never on
-     screen together (one is director-only, the other follower-only), so the star cannot be
-     ambiguous in the moment.
-     Content-hug, not a fixed box: with no text there is nothing to reserve width for. Height stays
-     --fab-size so the top row still reads as one band. */
-  width: max-content;
-  padding: 0 0.72rem;
-  justify-content: center;
+  /* SALIR / DIRECTOR — it names the ACT, not the state (owner, 2026-08-18: "come up with text to
+     exit director mode that fits in a SQUARE button"). "Salir" is the same verb the confirm already
+     uses ("¿Salir de director?"), so the button and the dialog it opens speak with one word.
+     The button's mere presence is what reports the role — it is shown to nobody else — so nothing
+     is lost by labelling the exit instead of the status.
+     Common background, not the blue wash: it is an ordinary control in the row now, not a status
+     that had to look different. Sizing comes from the shared square block below. */
   /* A WHISPER OF THE SAME iOS BLUE as ★ Ser Director, so entering the role and holding it read as
      one idea. Layered as a 0.16 wash OVER the standard fab navy rather than a different colour, so
      the pill stays unmistakably part of the corner cluster — it is a status, and a status that
@@ -2432,13 +2432,9 @@ html[data-role="director"] .director-mode-badge .director-mode-badge-title { col
 /* OUTLINE star (☆ U+2606), not filled. Filled reads as "selected/favourite"; hollow reads as a
    mark on a status, which is what this is. Matches ★ Ser Director's glyph family without repeating
    its emphasis — that one is an action you take, this one is a state you are in. */
-html[data-role="director"] .director-mode-badge .director-mode-badge-star {
-  display: block;
-  /* Scaled to fill the button now that it is the only content — same job the glyph does in ⟳/⌕. */
-  font-size: 3.1rem;
-  line-height: 1;
-  color: rgba(228, 238, 255, 0.92);
-}
+html[data-role="director"] .director-mode-badge .director-mode-badge-star { display: none; }
+.director-exit-label { display: none; flex-direction: column; align-items: center; }
+html[data-role="director"] .director-mode-badge .director-exit-label { display: flex; }
 /* The word is retired from the GLASS but stays in SYNC_PILL for screen readers, and the pill's
    aria-label still says "Estás dirigiendo. Tocar para salir." */
 html[data-role="director"] .director-mode-badge .director-mode-badge-title { display: none; }
@@ -2895,15 +2891,7 @@ body.sv-drawer-open .search-fab { display: none !important; }
   display: none;               /* shown only for a follower inside the native shell — see below */
   align-items: center;
   justify-content: center;
-  /* CONTENT-FIT WIDTH, FIXED HEIGHT. Width is auto so the pill is only as wide as "Director" plus
-     its padding — it was 7.6rem of mostly air. Height stays --fab-size so the top row still reads as
-     one band; a control that is both narrower AND shorter than its neighbours reads as a different
-     class of thing. Safe to auto-size because this label never changes, so it can never shove a
-     neighbour the way a variable-width status would. */
-  width: max-content;
-  height: var(--fab-size);
   box-sizing: border-box;
-  padding: 0 0.62rem;
   border: 0;
   border-radius: 14px;
   background:
@@ -2936,3 +2924,26 @@ body.sv-drawer-open .search-fab { display: none !important; }
    of this ran exactly once at init and never again on a role change, so it never actually hid.
    signovivo.com has no mesh and no role to take, hence the shell gate. */
 html[data-shell="native"][data-role="follower"] .become-director-pill { display: flex; }
+
+/* SQUARE, WITH THE TYPE SCALED TO FIT (owner, 2026-08-18: "try hard to keep buttons square, scale
+   contents to get them square when necessary"). Both role buttons carry the word "Director", and
+   that word sets the floor: at Ir a Canto's size it overflows a --fab-size box, so the TYPE shrinks
+   instead of the box growing. Same two-line treatment as Ir a Canto otherwise, so the whole top row
+   reads as one family. */
+.become-director-pill,
+html[data-role="director"] .director-mode-badge {
+  width: var(--fab-size);
+  height: var(--fab-size);
+  aspect-ratio: 1 / 1;
+  padding: 0 0.22rem;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.05rem;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  font-size: 0.9rem;          /* below Ir a Canto's 1.03: "Director" is longer than "Canto" */
+}
+.become-director-l1, .director-exit-l1 { font-size: 1.02em; opacity: 0.9; }
+.become-director-l2, .director-exit-l2 { font-size: 1.18em; white-space: nowrap; }

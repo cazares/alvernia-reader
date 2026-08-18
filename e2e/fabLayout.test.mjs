@@ -243,12 +243,23 @@ test("ADDITIVE: Ir a Canto stays top-RIGHT, and the new controls take empty corn
   assert.match(rule('html[data-role="director"] .director-mode-badge'), /left:\s*max\(var\(--fab-gutter\)/,
     "the ☆ status left flush-left, where ⟳ is hidden and the corner is free");
 
-  // BOTH added controls CONTENT-HUG. Neither carries text that changes, so neither can shove a
-  // neighbour by resizing — which is the only reason auto width is safe in a hand-built ladder.
-  for (const sel of [".become-director-pill {", 'html[data-role="director"] .director-mode-badge']) {
-    assert.match(rule(sel), /width:\s*max-content/, `${sel} is no longer content-fit`);
-    assert.match(rule(sel), /padding:/, `${sel} content-hugs with no padding — the label touches the edge`);
-  }
+  // BOTH role buttons are SQUARE, like every other control in the row (owner, 2026-08-18: "try hard
+  // to keep buttons square, scale contents to get them square when necessary"). They briefly
+  // content-hugged; squareness won, and the TYPE shrinks to fit instead of the box growing — which
+  // is why their font-size sits below Ir a Canto's even though they share its treatment.
+  const shared = CSS.slice(CSS.indexOf(".become-director-pill,\nhtml[data-role=\"director\"] .director-mode-badge {"));
+  const body = shared.slice(0, shared.indexOf("}") + 1);
+  assert.ok(body.length > 20, "the shared role-button block is gone — the two can now drift apart");
+  assert.match(body, /width:\s*var\(--fab-size\)/, "the role buttons are no longer --fab-size wide");
+  assert.match(body, /height:\s*var\(--fab-size\)/, "the role buttons are no longer --fab-size tall");
+  assert.match(body, /aspect-ratio:\s*1\s*\/\s*1/, "nothing pins squareness independently of the two lengths");
+  // The word that sets the floor. If this ever exceeds Ir a Canto's size, "Director" overflows the
+  // square — the exact reason these carry their own, smaller size.
+  const roleSize = Number(body.match(/font-size:\s*([\d.]+)rem/)[1]);
+  const irBlock = CSS.slice(CSS.indexOf(".song-jump-fab {\n"));
+  const irSize = Number(irBlock.slice(0, irBlock.indexOf("}")).match(/font-size:\s*([\d.]+)rem/)[1]);
+  assert.ok(roleSize < irSize,
+    `role type ${roleSize}rem >= Ir a Canto's ${irSize}rem — "Director" is longer than "Canto" and will overflow`);
 });
 
 test("the two role controls never share the screen", () => {
