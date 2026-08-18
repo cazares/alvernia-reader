@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "bookVersion": "bv_cab58aa95092723d",
+  "bookVersion": "bv_a88683248c3a2273",
   "totalPages": 372,
-  "builtFromShellBuild": 452,
+  "builtFromShellBuild": 453,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-18T07:34:44.205Z",
+  "generatedAt": "2026-08-18T14:07:44.465Z",
   "sourcePdfSha256": "95c2c08a5d1dba4adb5cf291eec56ce140d3da1d47cbf8638f83cc95f5497220",
   "sourcePdfPages": 372,
   "songIndexDigest": "24ca86bdf9970c111d5930f71ebdba954d1ebaeff1294cb1028ef437f3dbb2cb",
@@ -1510,9 +1510,9 @@
   "files": [
     {
       "p": "app.js",
-      "n": 220139,
-      "h": "956c9851392314b72446532a97e8df73039eb41b3d32c99e3060f1cf79e9e43c",
-      "m": "dee7303f2cb2f8111210aae05eb0af63"
+      "n": 221921,
+      "h": "45016f526530b9ba1f50db22884b5c21b10ce86ef1f28281587667193ebad29f",
+      "m": "9322e7fe6ac1aaf410916d51a44e1eae"
     },
     {
       "p": "books.json",
@@ -3797,8 +3797,8 @@
     {
       "p": "index.html",
       "n": 32886,
-      "h": "65540553e5d840b6fbf1d22917a2af2b9923bae476825371c5ff746c549cf03a",
-      "m": "1502c0a0206102c8569a37eeb6f12875"
+      "h": "61bb353c1bee26df7fc3e86107792424a84f7801304cded77a3b96409c6aea49",
+      "m": "2ad62de3ab2911e42c65681f56b21913"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3815,8 +3815,8 @@
     {
       "p": "lib/svSelftest.js",
       "n": 8084,
-      "h": "45364845b8b36b013290cfdfc3d8bdb0e9bf8c6e4b69103e11b32c3c6336a993",
-      "m": "ad8b551029d9fb07f0e2419220d662d7"
+      "h": "9247f9e41bc571eae625d85a08c7d245bdb62fca6f1704813df177b997c5ea16",
+      "m": "0942b59469cada2329b9e6901cd25118"
     },
     {
       "p": "lib/svSyncDecision.js",
@@ -3832,15 +3832,15 @@
     },
     {
       "p": "styles.css",
-      "n": 102554,
-      "h": "c8445ae8390322fc700d99d8eded60208ba4c1f05e61d0c34586079e72b572d0",
-      "m": "8b34e6deee0e99c2560e6ede2b2fc29e"
+      "n": 105467,
+      "h": "8650f3ea86f6d4e3802d6ad6c0433a1c1a3eb5e9a17ca0aa968a30fa9c6e7edb",
+      "m": "0d8e3d4c15ed6101d3902d5b655154aa"
     },
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "1c72b2e423b7c30c77e51e5faa00622c8e0a6330b1179ad2579182ec928f28a8",
-      "m": "737a4cbec8247bd08e1e39c36f71ac8f"
+      "h": "290c801e17ce2662cdc015c844d4fc8dc64f06631f22668fc2283555d36302de",
+      "m": "6dd75fb4ca2cb8b603a604baa92af621"
     }
   ]
 }
