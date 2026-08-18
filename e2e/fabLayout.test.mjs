@@ -26,6 +26,7 @@ const rootVar = (name) => {
   return Number(m[1]);
 };
 const GUTTER = rootVar("fab-gutter");
+const GUTTER_TOP = rootVar("fab-gutter-top");
 const SIZE = rootVar("fab-size");
 const GAP = rootVar("fab-gap");
 // Vestigial since 2026-08-18: the DIRECTOR status content-hugs around a lone ☆, so no position is
@@ -257,4 +258,32 @@ test("the two role controls never share the screen", () => {
     "★ Ser Director is not gated to a follower in the native shell — it can show for a director, or on the public web");
   assert.match(CSS, /html\[data-role="director"\] \.resync-fab \{ display: none/,
     "⟳ shows for a director again — it would then collide with the DIRECTOR status in left slot 1");
+});
+
+
+test("the top edge and the side edges are independently tunable", () => {
+  // SPLIT ON 2026-08-18. One --fab-gutter drove top, left AND right, so "nudge the row up 5px" also
+  // pulled both clusters horizontally inward — a change to one axis silently moved the other. Every
+  // top: anchor reads --fab-gutter-top and every left:/right: anchor reads --fab-gutter.
+  assert.ok(GUTTER_TOP > 0 && GUTTER > 0, "a gutter went to zero — controls would touch the bezel");
+  assert.doesNotMatch(CSS, /top:\s*max\(var\(--fab-gutter\)/,
+    "a top: anchor is back on --fab-gutter — raising the row will drag the clusters sideways again");
+  // Every fixed top control must share ONE top edge, or the row stops reading as a band.
+  const tops = [...CSS.matchAll(/top:\s*max\(var\((--fab-gutter[a-z-]*)\)/g)].map((m) => m[1]);
+  assert.ok(tops.length >= 3, `only ${tops.length} top anchors found — the cluster shrank or a selector moved`);
+  assert.equal(new Set(tops).size, 1, `top anchors disagree: ${[...new Set(tops)].join(", ")}`);
+});
+
+test("★ Ser Director keeps the star on line 1, which is what makes it narrow", () => {
+  // Owner, 2026-08-18: the star rides beside "Ser" rather than standing left of the whole stack.
+  // Line 1 is the SHORT line, so the star fills width that was already empty instead of adding a
+  // column — the pill went 103px -> 82px on that change alone. A future tidy that pulls the star
+  // back out of .become-director-l1 silently pays that width back.
+  const HTML = fs.readFileSync("web/src/index.html", "utf8");
+  const l1 = HTML.slice(HTML.indexOf('class="become-director-l1"'));
+  assert.match(l1.slice(0, l1.indexOf("</span>") + 7), /become-director-star/,
+    "the star left line 1 — it now needs its own column and the pill gets wider again");
+  const rule = CSS.slice(CSS.indexOf(".become-director-l1 {"));
+  assert.match(rule.slice(0, rule.indexOf("}")), /display:\s*flex/,
+    "line 1 is not a flex row, so the star and Ser will not sit on one baseline");
 });

@@ -8,13 +8,18 @@
      gutter change, since left-anchored controls move left, right-anchored move right, and every
      control shares the top edge). One variable moves BOTH clusters in BOTH roles. */
   --fab-gutter: 1.58rem;
+  /* THE TOP EDGE IS ITS OWN VARIABLE (owner, 2026-08-18: "nudge all buttons up by 5px"). Until now
+     one var drove top, left AND right, so raising the row also pulled both clusters inward. Split so
+     the vertical and horizontal positions can be tuned independently — every top: anchor reads this,
+     every left:/right: anchor reads --fab-gutter. */
+  --fab-gutter-top: 1.27rem;   /* 1.58rem - 5px */
   /* THE CLUSTER IS DERIVED, NOT HAND-COMPUTED. Every top control is --fab-size square (the DIRECTOR
      status is --fab-status-w wide), separated by exactly --fab-gap. The slot offsets below are
      calc()s off these three numbers, so the spacing is uniform BY CONSTRUCTION rather than by me
      getting the arithmetic right — which I did not, twice tonight: once leaving ⌕ and Ir a Canto
      0.1rem apart, once leaving the pill 0.15rem from ⟳. Change a size here and every position
      follows. */
-  --fab-size: 4.456rem;      /* 3.875 x 1.15 (owner: 15% wider AND taller; square, so one var does both) */
+  --fab-size: 4.77rem;       /* 3.875 -> +15% -> +5px. Square, so one var still does both axes. */
   --fab-gap: 0.5rem;
   /* Vestigial: the DIRECTOR status content-hugs around a lone ☆ now, so nothing derives a position
      from this width any more. Kept only as the base .director-mode-badge width, which every real
@@ -205,7 +210,7 @@ button:disabled {
      how high it went. That is why the follower dot vanished after being moved onto the ⟳ button —
      it was rendering UNDERNEATH it. Same positioning scheme = comparable z-index. */
   position: fixed;
-  top: max(var(--fab-gutter), env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */
   left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
   z-index: 46;                 /* above the fabs so the exit tap always lands */
   display: flex;
@@ -2279,7 +2284,7 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
 .resync-fab,
 .fullscreen-fab {
   position: fixed;
-  top: max(var(--fab-gutter), env(safe-area-inset-top, 0px));
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
   z-index: 45;
   /* ONE SIZE FOR EVERY CORNER CONTROL (owner, 2026-08-17: "same size and same icon to button size
      ratio... I like the current ratio of top left, but I like the size of top right").
@@ -2304,7 +2309,7 @@ html[data-role="follower"] .director-mode-badge.is-following .director-mode-badg
   /* 0.8625 of the 4.5rem box — the top-left ratio the owner liked, at the size he settled on
      (5rem, then 10% smaller). Keep these two numbers in step: changing the box without the glyph is
      what made these controls read as smaller than they are. */
-  font-size: 3.84rem;   /* 0.8625 of the 4.456rem box — the glyph:box ratio is held as the box grows */
+  font-size: 4.11rem;   /* 0.8625 of the 4.77rem box — the glyph:box ratio is held as the box grows */
   line-height: 1;
   display: flex;
   align-items: center;
@@ -2376,7 +2381,7 @@ html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), e
   bottom: max(var(--fab-gutter), env(safe-area-inset-bottom, 0px));
   right: max(var(--fab-gutter), env(safe-area-inset-right, 0px));
 }
-.fullscreen-fab svg { width: 2.3rem; height: 2.3rem; }   /* 2 x 1.15, with the boxes */
+.fullscreen-fab svg { width: 2.46rem; height: 2.46rem; }   /* scaled with the boxes */
 .song-jump-fab:active,
 .search-fab:active,
 .resync-fab:active,
@@ -2430,7 +2435,7 @@ html[data-role="director"] .director-mode-badge .director-mode-badge-title { col
 html[data-role="director"] .director-mode-badge .director-mode-badge-star {
   display: block;
   /* Scaled to fill the button now that it is the only content — same job the glyph does in ⟳/⌕. */
-  font-size: 2.9rem;
+  font-size: 3.1rem;
   line-height: 1;
   color: rgba(228, 238, 255, 0.92);
 }
@@ -2881,7 +2886,7 @@ body.sv-drawer-open .search-fab { display: none !important; }
    this is follower-only, so the corner never holds both. */
 .become-director-pill {
   position: fixed;
-  top: max(var(--fab-gutter), env(safe-area-inset-top, 0px));
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
   /* TOP-RIGHT, ONE SLOT LEFT OF IR A CANTO (owner, 2026-08-18). Ir a Canto stays flush in the corner
      where the choir already looks for it; this is ADDED to its left, in space that was empty. For a
      follower ⌕ is hidden, so the right cluster is ★ Ser Director · Ir a Canto. */
@@ -2889,7 +2894,7 @@ body.sv-drawer-open .search-fab { display: none !important; }
   z-index: 46;
   display: none;               /* shown only for a follower inside the native shell — see below */
   align-items: center;
-  gap: 0.3rem;
+  justify-content: center;
   /* CONTENT-FIT WIDTH, FIXED HEIGHT. Width is auto so the pill is only as wide as "Director" plus
      its padding — it was 7.6rem of mostly air. Height stays --fab-size so the top row still reads as
      one band; a control that is both narrower AND shorter than its neighbours reads as a different
@@ -2914,12 +2919,17 @@ body.sv-drawer-open .search-fab { display: none !important; }
   -webkit-tap-highlight-color: transparent;
 }
 .become-director-pill:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
-/* ☆ sits to the LEFT of both lines, vertically centred against the stack (owner). */
-.become-director-star { flex: 0 0 auto; font-size: 1.04rem; line-height: 1; color: rgba(228, 238, 255, 0.85); }
+/* ☆ RIDES ON LINE 1, beside "Ser" (owner, 2026-08-18) rather than standing to the left of the whole
+   stack. Line 1 is the short line, so the star occupies width that was already empty instead of
+   adding its own column — the pill gets narrower for free. */
+.become-director-star { font-size: 0.98rem; line-height: 1; color: rgba(228, 238, 255, 0.85); }
 /* TWO LINES — "Ser" over "Director" (owner). Stacking is what lets the pill be narrow: on one line
    it is as wide as the whole phrase, and the phrase was most of that 7.6rem. */
 .become-director-label { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.06; }
-.become-director-l1 { font: 700 0.78rem/1.06 system-ui, -apple-system, sans-serif; opacity: 0.82; }
+.become-director-l1 {
+  display: flex; align-items: center; gap: 0.22rem;
+  font: 700 0.78rem/1.06 system-ui, -apple-system, sans-serif; opacity: 0.82;
+}
 .become-director-l2 { font: 700 0.95rem/1.06 system-ui, -apple-system, sans-serif; white-space: nowrap; }
 /* FOLLOWER + NATIVE SHELL ONLY. Driven by attributes on <html> that renderDirectorModeBadge sets on
    every render, rather than by a one-shot JS call: the function that used to hide the keypad's copy
