@@ -43,6 +43,17 @@ const ALLOWED_DRIFT = new Map([
   [".song-jump-fab:active, .search-fab:active, .resync-fab:active, .fullscreen-fab:active",
    "2026-08-17: matching :active alpha 0.55 -> 0.86, so the pressed state stays visibly darker " +
    "than the new resting 0.72. Same reason as above."],
+
+  // The corner cluster gained a ✕ exit fab, so the SHARED selector lists changed shape. These are
+  // NOT search/drawer rules — they are the block that sizes and places ⟳ / Ir a Canto / ⌕, which
+  // this 381 fixture happens to span. Recorded rather than regenerated: regenerating the fixture is
+  // what erases the pin, and this file exists because that already happened once.
+  [".song-jump-fab, .search-fab, .resync-fab, .sync-exit-fab, .fullscreen-fab",
+   "2026-08-17: ✕ (exit director) joined the shared corner-control block. The director's top row is " +
+   "now ✕ · DIRECTOR · Ir a Canto … ⌕, splitting a status from its action so a mis-tap cannot drop " +
+   "the director mid-Mass. Boxes also went 4rem -> 4.25rem with the glyph ratio held at 0.8625."],
+  [".song-jump-fab:active, .search-fab:active, .resync-fab:active, .sync-exit-fab:active, .fullscreen-fab:active",
+   "2026-08-17: same selector list, :active half. Same reason."],
 ]);
 
 const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -82,7 +93,12 @@ test("every search/drawer CSS rule is IDENTICAL to build 381, at rule granularit
 
   const problems = [];
   for (const [sel, body] of ref) {
-    if (!now.has(sel)) problems.push(`MISSING vs 381: ${sel}`);
+    // ALLOWED_DRIFT must cover all THREE axes, not two. It was consulted for a changed body and for
+    // a new selector, but not for a MISSING one — so a rule whose SELECTOR LIST legitimately changes
+    // shape (a control joining the shared corner-fab block) could never be allowlisted: recording
+    // the new form silenced "NEW" while the old form kept failing as "MISSING", with no way out
+    // except regenerating the fixture, which is precisely what this file exists to prevent.
+    if (!now.has(sel) && !ALLOWED_DRIFT.has(sel)) problems.push(`MISSING vs 381: ${sel}`);
     else if (now.get(sel) !== body && !ALLOWED_DRIFT.has(sel)) {
       problems.push(`CHANGED vs 381: ${sel}\n      381: ${body}\n      now: ${now.get(sel)}`);
     }

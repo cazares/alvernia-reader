@@ -30,6 +30,11 @@ const renderPill = (nativeFileMode, hasBridge, role, meshStatus = "", lastPageAg
         if (id === "sync-pill-title") return titleEl;
         if (id === "role-toggle") return { classList: { toggle() {} } };
         if (id === "role-toggle-label") return { textContent: "" };
+        // The directing state is now shown by a SEPARATE ✕ control and an inert DIRECTOR status,
+        // rather than by relabelling one button. Stub them so this file keeps testing the WORDING.
+        if (id === "role-exit-x" || id === "role-status-pill" || id === "sync-exit-fab") {
+          return { classList: { toggle() {}, remove() {}, add() {} }, dataset: {}, addEventListener() {} };
+        }
         return actionEl;
       } },
     { now: () => lastPageAgoMs });
@@ -110,10 +115,15 @@ test("the role control names the role, and is not a bare verb", () => {
   assert.match(HTML, /id="role-toggle"/, "the role control is gone");
   // Sentence case, not caps: all-caps is fine for a one-time alarm, distracting on a label you live
   // with. The two labels are set in app.js.
-  assert.match(APP, /"Salir de director"\s*:\s*"Dirigir"/,
-    "the role control must read Dirigir / Salir de director");
-  // Naming the ROLE is what "Tomar" lacked — both labels do.
-  for (const label of ["Dirigir", "Salir de director"]) {
+  // The control no longer relabels itself. While directing it is REPLACED by an inert DIRECTOR
+  // status plus a separate ✕ — one element wearing two meanings is what made "Salir de director"
+  // ambiguous on a control that also ENTERS the role, and what let a mis-tap drop the choir's
+  // director mid-Mass. So the key says one thing, always.
+  assert.match(APP, /roleLabel\.textContent = "Dirigir"/, "the role key must read Dirigir");
+  assert.match(HTML, /id="role-exit-x"/, "the separate exit control is gone");
+  assert.match(HTML, /id="role-status-pill"/, "the inert DIRECTOR status is gone");
+  // Naming the ROLE is what "Tomar" lacked. Both surfaces still do.
+  for (const label of ["Dirigir", "DIRECTOR"]) {
     assert.ok(/dirig|director/i.test(label), `${label} does not name the role`);
   }
 });

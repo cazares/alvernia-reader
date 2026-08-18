@@ -331,6 +331,13 @@ const setViewportCssVars = () => {
   const height = Math.max(1, Math.round((viewport?.height || window.innerHeight) * 100) / 100);
   document.documentElement.style.setProperty("--viewport-width", `${width}px`);
   document.documentElement.style.setProperty("--viewport-height", `${height}px`);
+  // The version stamp is pinned to where the PAGE was drawn, so it must be repositioned AFTER these
+  // vars change — they are what size the <img>. Called from here rather than from its own listener
+  // so the ordering is guaranteed and so it inherits this function's full event coverage: plain
+  // resize, orientationchange, AND visualViewport resize/scroll, which is how iOS actually reports a
+  // rotation. A separate listener got only two of the four and would have gone stale on device.
+  // Hoisted function declaration, so calling it from above its definition is fine.
+  positionBuildBadge();
 };
 const bindViewportMetrics = () => {
   setViewportCssVars();
@@ -1227,7 +1234,48 @@ const BUILD_BADGE_PAGE = 1;
 function syncBuildBadgeVisibility() {
   const el = document.getElementById("build-badge");
   if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE);
+  positionBuildBadge();
 }
+
+/**
+ * GLUE THE STAMP TO THE PAGE, not to the screen.
+ *
+ * It was fixed to the VIEWPORT's bottom-right at 8px / 38% black. On an iPad in portrait the page
+ * fills the width, so it landed on white paper and read fine. On an iPhone the page is letterboxed
+ * — object-fit: contain puts BLACK bars above and below — so the stamp landed on black, dark grey
+ * on black, and looked like it was missing entirely. It never was; it was invisible.
+ *
+ * The printed date stamp in the page's lower-LEFT is part of the image and therefore always sits on
+ * paper, at the paper's corner, in every orientation and on every device. This makes the version
+ * stamp behave the same way: compute where object-fit: contain actually drew the image and pin the
+ * badge to THAT rectangle's bottom-right corner.
+ *
+ * Cheap and idempotent, so it is safe to call from render, resize and orientation change.
+ */
+function positionBuildBadge() {
+  const el = document.getElementById("build-badge");
+  const img = document.getElementById("page-image");
+  if (!el || !img) return;
+  // Defensive: e2e tests execute syncBuildBadgeVisibility against stub elements that have no DOM
+  // geometry. Positioning is a nicety; the VISIBILITY rule above is the contract, and it must not
+  // be taken down by a missing method on a fake node.
+  if (typeof img.getBoundingClientRect !== "function") return;
+  const nW = img.naturalWidth, nH = img.naturalHeight;
+  const r = img.getBoundingClientRect();
+  if (!nW || !nH || !r.width || !r.height) return;   // nothing drawn yet; a later call will fix it
+  // object-fit: contain — the drawn box is the natural size scaled to fit, then centred.
+  const scale = Math.min(r.width / nW, r.height / nH);
+  const drawnW = nW * scale, drawnH = nH * scale;
+  const right = r.left + (r.width - drawnW) / 2 + drawnW;
+  const bottom = r.top + (r.height - drawnH) / 2 + drawnH;
+  // A hair inside the paper's edge, scaled with the page so it looks the same at any size.
+  const inset = Math.max(3, Math.round(drawnW * 0.008));
+  el.style.right = `${Math.max(0, Math.round(window.innerWidth - right + inset))}px`;
+  el.style.bottom = `${Math.max(0, Math.round(window.innerHeight - bottom + inset))}px`;
+}
+// No listeners here on purpose: setViewportCssVars owns every viewport event and calls this once
+// the CSS vars that size the <img> have been written. Two independent listeners racing to position
+// against the same element is how you get a stamp that is correct on resize but not on rotation.
 
 const renderDirectorModeBadge = () => {
   const isDirector = state.nativeSyncRole === "director";
@@ -1237,12 +1285,28 @@ const renderDirectorModeBadge = () => {
   const rl = document.getElementById("role-toggle-label");
   const rt = document.getElementById("role-toggle");
   if (rl && rt) {
-    rt.classList.toggle("is-directing", isDirector);
-    rl.textContent = isDirector ? "Salir de director" : "Dirigir";
+    // The cell shows either the "Dirigir" key OR (✕ + DIRECTOR status) — never one control wearing
+    // two meanings. See syncRoleToggle for the reasoning.
+    rl.textContent = "Dirigir";
+    const xBtn = document.getElementById("role-exit-x");
+    const status = document.getElementById("role-status-pill");
+    rt.classList.toggle("is-hidden", isDirector);
+    if (xBtn) xBtn.classList.toggle("is-hidden", !isDirector);
+    if (status) status.classList.toggle("is-hidden", !isDirector);
   }
   if (!directorModeBadge) return;
   // Native shell only. On signovivo.com there is no mesh and no role to take, so the pill would be
   // describing a room the viewer is not in.
+  const exitFab = document.getElementById("sync-exit-fab");
+  if (exitFab && !exitFab.dataset.wired) {
+    exitFab.dataset.wired = "1";
+    exitFab.addEventListener("click", () => {
+      haptic();
+      // Same plain confirm as the keypad's ✕ — stepping DOWN is recoverable, so it does not earn
+      // the red typed-word gate that TAKING the role from someone does.
+      if (window.confirm("¿Salir de director?")) postNativeBridge({ type: "exit-director" });
+    });
+  }
   const inShell = NATIVE_FILE_MODE || hasNativeBridge();
   if (!inShell) {
     directorModeBadge.classList.add("is-hidden");
@@ -1572,7 +1636,7 @@ const loadPageImage = async (pageNumber, retryToken = "") => {
   return { url, loadState };
 };
 
-const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = {}) => {
+const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, userInitiated = false } = {}) => {
   const nextPage = clampPage(pageNumber);
 
   // ALREADY ON THIS PAGE — do nothing. A director's mesh heartbeat arrives once per SECOND, and
@@ -1598,7 +1662,18 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0 } = 
   // re-driving us once a second; without this the retry rate is the heartbeat rate. Cleared on any
   // successful render and by an explicit human retry, so this only ever paces a page that is
   // genuinely not renderable right now.
-  if (svShouldPaceRender(state.lastRenderFailure, nextPage, Date.now())) return;
+  // PACING NEVER APPLIES TO A HUMAN. This guard exists to blunt the director's 1 Hz re-drive when a
+  // page genuinely cannot render, and it does that job. But it lives in renderPage, so it was also
+  // swallowing SWIPES: a page that failed once became unreachable by hand for five seconds, with no
+  // error and no feedback — the swipe simply did nothing.
+  //
+  // Reported 2026-08-17: "I was on song 3 or 4 and it wouldn't let me swipe to songs 4 or 5... going
+  // back and returning then retrying fixed the issue". That is this window expiring, not a fix.
+  //
+  // svRenderPace's own docstring already said retries are cleared "by an explicit human retry" —
+  // that intent was never wired to a caller. A person asking for a page is not a retry storm; they
+  // asked once, and they are entitled to the attempt and to the error overlay if it fails.
+  if (!userInitiated && svShouldPaceRender(state.lastRenderFailure, nextPage, Date.now())) return;
 
   const requestId = state.pageLoadRequest + 1;
   state.pageLoadRequest = requestId;
@@ -1771,7 +1846,7 @@ const goToDraftSong = () => {
     return;
   }
   const targetPage = findSongPage(songNumber);
-  renderPage(targetPage);
+  renderPage(targetPage, { userInitiated: true });                    // IR A CANTO keypad
   addToRecientes(songNumber);
   closeSongJump();
   // Jumping OFF the director's live page = intentional browsing: pause auto-follow and
@@ -1788,7 +1863,7 @@ const goToDraftSong = () => {
 const goBackInHistory = () => {
   if (state.pageHistory.length === 0) return;
   const prevPage = state.pageHistory.pop();
-  renderPage(prevPage, { pushToHistory: false });
+  renderPage(prevPage, { pushToHistory: false, userInitiated: true }); // back
 };
 
 // ── Search index loading ──────────────────────────────────────────────────────
@@ -2552,7 +2627,7 @@ const turnSong = (direction, { keepOverlay = false } = {}) => {
   const currentSongIndex = findSongIndexAtOrBeforePage(state.currentPage);
   if (currentSongIndex < 0) {
     if (direction > 0) {
-      renderPage(state.songIndex[0].page, { direction });
+      renderPage(state.songIndex[0].page, { direction, userInitiated: true });
       clearDraft();
       if (!keepOverlay) closeDrawer();
     }
@@ -2560,7 +2635,7 @@ const turnSong = (direction, { keepOverlay = false } = {}) => {
   }
   const nextIndex = clampSongIndex(currentSongIndex + direction);
   if (nextIndex === currentSongIndex) return;
-  renderPage(state.songIndex[nextIndex].page, { direction });
+  renderPage(state.songIndex[nextIndex].page, { direction, userInitiated: true });  // next/prev song
   clearDraft();
   if (!keepOverlay) closeDrawer();
 };
@@ -2568,7 +2643,7 @@ const turnSong = (direction, { keepOverlay = false } = {}) => {
 const turnPage = (direction) => {
   const nextPage = clampPage(state.currentPage + direction);
   if (nextPage === state.currentPage) return;
-  renderPage(nextPage, { direction });
+  renderPage(nextPage, { direction, userInitiated: true });          // swipe / arrow
 };
 
 // ── Fullscreen toggle ─────────────────────────────────────────────────────────
@@ -3008,10 +3083,27 @@ const bindReaderEvents = () => {
   const syncRoleToggle = () => {
     if (!roleToggle || !roleLabel) return;
     const directing = state.nativeSyncRole === "director";
-    roleToggle.classList.toggle("is-directing", directing);
-    roleLabel.textContent = directing ? "Salir de director" : "Dirigir";
+    // TWO MODES, NOT ONE RELABELLED CONTROL (owner, 2026-08-17). While directing, the cell shows a
+    // STATUS pill that cannot be tapped and a separate ✕ that can. One element that changes its own
+    // meaning is what made "Salir de director" ambiguous on a control that also ENTERS the role —
+    // and it is what made a mis-tap drop the choir's director mid-Mass.
+    const exitX = document.getElementById("role-exit-x");
+    const statusPill = document.getElementById("role-status-pill");
+    roleToggle.classList.toggle("is-hidden", directing);
+    if (exitX) exitX.classList.toggle("is-hidden", !directing);
+    if (statusPill) statusPill.classList.toggle("is-hidden", !directing);
+    roleLabel.textContent = "Dirigir";
     // Native shell only — signovivo.com has no mesh and no role to take.
-    roleToggle.style.display = (NATIVE_FILE_MODE || hasNativeBridge()) ? "flex" : "none";
+    // VISIBILITY, NOT DISPLAY. This button now occupies a CELL in the numpad grid, so display:none
+    // removes the cell and the bottom row reflows — 0 and ⌫ slide left into a keypad people navigate
+    // by muscle memory. Hiding it in place keeps the grid identical on web and native; only native
+    // can actually take the role.
+    const inShell = NATIVE_FILE_MODE || hasNativeBridge();
+    const cell = document.getElementById("role-cell");
+    if (cell) {
+      cell.style.visibility = inShell ? "visible" : "hidden";
+      cell.style.pointerEvents = inShell ? "auto" : "none";
+    }
   };
   syncRoleToggle();
 
@@ -3038,17 +3130,23 @@ const bindReaderEvents = () => {
     postNativeBridge({ type: "request-director" });
   });
 
+  // ✕ — the ONLY way out of the role now. Stepping DOWN is recoverable, so it keeps a plain
+  // confirm; only taking the role from someone earns the red typed-word gate. Asymmetric friction,
+  // matched to consequence.
+  const roleExitX = document.getElementById("role-exit-x");
+  if (roleExitX) roleExitX.addEventListener("click", () => {
+    haptic();
+    if (window.confirm("¿Salir de director?")) {
+      closeSongJump();
+      postNativeBridge({ type: "exit-director" });
+    }
+  });
+
   if (roleToggle) roleToggle.addEventListener("click", () => {
     haptic();
-    if (state.nativeSyncRole === "director") {
-      // Stepping DOWN is recoverable, so it gets a plain confirm. Asymmetric friction, matched to
-      // consequence: only the direction that changes everyone else's page earns the red gate.
-      if (window.confirm("¿Salir de director?")) {
-        closeSongJump();
-        postNativeBridge({ type: "exit-director" });
-      }
-      return;
-    }
+    // Never reachable while directing — the key is hidden then — but a guard costs nothing and the
+    // failure it prevents (a second director) is the one that breaks a Mass.
+    if (state.nativeSyncRole === "director") return;
     if (roleGate) {
       roleGate.classList.remove("is-hidden");
       if (roleGateInput) { roleGateInput.value = ""; roleGateInput.focus(); }
@@ -3242,7 +3340,7 @@ const bindReaderEvents = () => {
       haptic();
       const pageNum = Number.parseInt(item.dataset.page, 10);
       if (Number.isFinite(pageNum)) {
-        renderPage(pageNum);
+        renderPage(pageNum, { userInitiated: true });                  // song index tap
         // Find song for this page and track it
         const songForPage = state.songIndex.find((s) => s.page === pageNum);
         if (songForPage) addToRecientes(songForPage.song);
@@ -4230,16 +4328,20 @@ const slot = (v) => (v ? String(v) : "—");
 const buildLabel = [
   nativeBuild ? slot(nativeBuild) : "web",
   slot(webBuild),
-  slot(bookPages),
 ].join("-");
+// SONGS, NOT PAGES (owner, 2026-08-17). The third slot was a raw page count, which reads as "how
+// long is this document" — a fact nobody in a choir loft needs. Song n IS page n in this book, so
+// the number is identical and only the noun was wrong. Named rather than positional, because a
+// bare integer in a triple is exactly what made it ambiguous.
+const songCount = bookPages ? `${bookPages} cantos` : "";
 // Device kind stays OUTSIDE the parentheses — it is not a build number, and putting it in a
 // positional triple would make the triple mean different things on different devices.
 const kindSuffix = deviceKind ? ` ${deviceKind}` : "";
 
 if (appVersionLabel) {
   appVersionLabel.textContent = baseVersion
-    ? `Versión ${baseVersion} (${buildLabel})${kindSuffix}`
-    : `Versión ${buildLabel}${kindSuffix}`;
+    ? `Versión ${baseVersion} (${buildLabel})${kindSuffix}${songCount ? ` · ${songCount}` : ""}`
+    : `Versión ${buildLabel}${kindSuffix}${songCount ? ` · ${songCount}` : ""}`;
 }
 // Small always-visible badge — shown on BOTH web and native (rendered in the WebView, so it
 // respects env(safe-area-inset-bottom) via viewport-fit=cover and never tucks under the iPhone home
@@ -4249,8 +4351,8 @@ if (buildBadge) {
   // Same shape as the settings line, with the leading "v" — this is the string someone reads out
   // over the phone, so the two surfaces must never disagree about what they are showing.
   buildBadge.textContent = baseVersion
-    ? `v${baseVersion} (${buildLabel})${kindSuffix}`
-    : `${buildLabel}${kindSuffix}`;
+    ? `v${baseVersion} (${buildLabel})${kindSuffix}${songCount ? ` · ${songCount}` : ""}`
+    : `${buildLabel}${kindSuffix}${songCount ? ` · ${songCount}` : ""}`;
   syncBuildBadgeVisibility();
 
   // TAP THE BADGE TO READ THIS DEVICE'S CRUMB LOG. Native has captured up to 200 breadcrumbs across

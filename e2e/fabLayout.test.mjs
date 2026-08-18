@@ -20,7 +20,7 @@ const GUTTER = 0.55; // max(0.55rem, env(safe-area-inset-*)) — the safe-area t
 const rem = (s) => Number(s);
 
 const fabWidth = () => {
-  const block = CSS.slice(CSS.indexOf(".search-fab,"), CSS.indexOf(".resync-fab {"));
+  const block = CSS.slice(CSS.indexOf(".search-fab,"), CSS.indexOf(".search-fab {"));
   const m = block.match(/width:\s*([\d.]+)rem/);
   assert.ok(m, "could not read the shared fab width");
   return rem(m[1]);

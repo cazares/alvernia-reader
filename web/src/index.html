@@ -56,9 +56,13 @@
              directing / someone is / nobody is. It replaces a badge that only ever appeared for the
              director — which meant the one state worth shouting about, an EMPTY DIRECTOR SEAT,
              looked exactly like everything being fine. Text is filled in by renderSyncPill(). -->
+        <!-- SPLIT: the ✕ is a control, DIRECTOR is a status. Same rule as the keypad's role cell —
+             one element that changes its own meaning is how a mis-tap drops the choir's director
+             mid-Mass. Director reads left-to-right: ✕ · DIRECTOR · Ir a Canto … ⌕ -->
+        <button class="sync-exit-fab is-hidden" id="sync-exit-fab" type="button" aria-label="Salir de director">✕</button>
         <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button">
           <strong class="director-mode-badge-title" id="sync-pill-title">DIRECTOR</strong>
-          <span class="director-mode-badge-exit" id="sync-pill-action" aria-hidden="true">✕ Salir</span>
+          <span class="director-mode-badge-exit" id="sync-pill-action" aria-hidden="true">Tomar</span>
         </button>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
@@ -92,7 +96,7 @@
       </button>
 
       <!-- ♪ Jump-to-song (top-RIGHT, everyone) + ⌕ search (top-RIGHT, DIRECTOR only via data-role) -->
-      <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto">123<span class="song-jump-fab-arrow" aria-hidden="true">&#8594;</span></button>
+      <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto"><span class="song-jump-fab-l1" aria-hidden="true">Ir a</span><span class="song-jump-fab-l2" aria-hidden="true">Canto</span></button>
       <button class="search-fab" id="search-fab" type="button" aria-label="Buscar">⌕</button>
 
       <!-- ⛶ Fullscreen — bottom-RIGHT, same fab styling. Hidden where fullscreen isn't supported
@@ -137,7 +141,24 @@
             <button class="numberpad-key" type="button" data-digit="7">7</button>
             <button class="numberpad-key" type="button" data-digit="8">8</button>
             <button class="numberpad-key" type="button" data-digit="9">9</button>
-            <span class="numberpad-key-blank" aria-hidden="true"></span>
+            <!-- DIRIGIR LIVES IN THE KEYPAD'S EMPTY CELL (owner, 2026-08-17). That cell was dead
+                 space, and the card was tall enough on a 10.2" portrait iPad to push the primary
+                 action toward the fold. Bottom-left is also the furthest key from the thumb that
+                 reaches for a digit, which suits a rare, consequential control. -->
+            <div class="numberpad-key-role-cell" id="role-cell">
+              <!-- NOT DIRECTING: one plain key, styled exactly like a digit. -->
+              <button class="song-jump-role numberpad-key-role" id="role-toggle" type="button">
+                <span class="song-jump-role-star" aria-hidden="true">&#9733;</span>
+                <span id="role-toggle-label">Dirigir</span>
+              </button>
+              <!-- DIRECTING: a STATUS that is not a control, and a separate ✕ that is (owner,
+                   2026-08-17). One element that changes its own meaning is what made the old
+                   "Salir de director" ambiguous; splitting them means the label never lies and the
+                   action is never accidental. ✕ sits LEFT so the status reads last, and so the
+                   destructive tap is not where the thumb lands by habit. -->
+              <button class="role-exit-x is-hidden" id="role-exit-x" type="button" aria-label="Salir de director">&#10005;</button>
+              <span class="role-status-pill is-hidden" id="role-status-pill" aria-live="polite">DIRECTOR</span>
+            </div>
             <button class="numberpad-key" type="button" data-digit="0">0</button>
             <button class="numberpad-key numberpad-key-back" id="backspace-button" type="button" aria-label="Borrar último dígito">⌫</button>
           </div>
@@ -151,10 +172,6 @@
                  place owns the whole concept.
                  Placed ABOVE the primary action on purpose: an earlier attempt at a director control
                  in this card sat below the fold on a 10.2" portrait iPad. -->
-            <button class="song-jump-role" id="role-toggle" type="button">
-              <span class="song-jump-role-star" aria-hidden="true">&#9733;</span>
-              <span id="role-toggle-label">Dirigir</span>
-            </button>
             <!-- Cancelar + Abrir Canto share one row (owner, 2026-08-17). Cancel LEFT, primary
                  RIGHT — the platform convention, and it puts the destructive-ish option away from
                  the thumb that is reaching for the loud one. Dirigir keeps its own row above. -->
