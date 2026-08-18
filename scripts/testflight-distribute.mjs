@@ -64,10 +64,23 @@ const api = async (path, init = {}) => {
 const app = (await api(`/v1/apps?filter[bundleId]=${BUNDLE_ID}`)).data[0];
 if (!app) { console.error(`no app for bundleId ${BUNDLE_ID}`); process.exit(1); }
 
-const builds = (await api(`/v1/builds?filter[app]=${app.id}&sort=-version&limit=10`)).data;
+// WAIT FOR THE BUILD TO APPEAR, not just to finish processing. altool returns success the moment
+// the bytes land, but App Store Connect takes a little longer to register the build in its API —
+// so release.sh calling this immediately after upload asked for a build that did not exist yet and
+// aborted the release before the web deploy. Observed on 452, minutes after 451 worked, because the
+// upload was 10s faster. Polling for existence is the fix; failing fast here was never right.
 const want = arg("build");
-const build = want ? builds.find((b) => b.attributes.version === String(want)) : builds[0];
-if (!build) { console.error(`build ${want} not found. Recent: ${builds.map((b) => b.attributes.version).join(", ")}`); process.exit(1); }
+const findBuild = async () => {
+  const builds = (await api(`/v1/builds?filter[app]=${app.id}&sort=-version&limit=10`)).data;
+  return { builds, hit: want ? builds.find((b) => b.attributes.version === String(want)) : builds[0] };
+};
+let { builds, hit: build } = await findBuild();
+for (let i = 0; !build && !LIST_ONLY && want && i < 20; i++) {
+  if (i === 0) console.log(`  …build ${want} has not appeared in App Store Connect yet; waiting`);
+  await new Promise((r) => setTimeout(r, 15_000));
+  ({ builds, hit: build } = await findBuild());
+}
+if (!build) { console.error(`build ${want} never appeared. Recent: ${builds.map((b) => b.attributes.version).join(", ")}`); process.exit(1); }
 
 const groups = (await api(`/v1/betaGroups?filter[app]=${app.id}&limit=50`)).data;
 const only = arg("groups");
