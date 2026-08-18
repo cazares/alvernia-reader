@@ -1506,7 +1506,45 @@ const showDiagnostics = (payload) => {
     header.appendChild(close);
     const pre = document.createElement("pre");
     pre.className = "sv-diag-body";
+
+    // ── Debug settings, right where you are already looking ────────────────────────────────────
+    //
+    // sv.logSink and sv.telemetry live in AsyncStorage, which only the native shell can write, so
+    // until now they could only be set by rebuilding — absurd for two strings whose entire purpose
+    // is to be changed mid-session. This is the one screen a person opens when something is wrong,
+    // so it is where they belong.
+    //
+    // Pointing the sink at scripts/log-sink.mjs on Miguel's Mac makes telemetry cost Cloudflare
+    // NOTHING, which is what allows debug-level logging without competing with signovivo.com for
+    // the same 100,000/day quota.
+    const dbg = document.createElement("div");
+    dbg.className = "sv-diag-dbg";
+    const sinkInput = document.createElement("input");
+    sinkInput.type = "url";
+    sinkInput.placeholder = "http://192.168.x.x:8787  (vacío = Cloudflare)";
+    sinkInput.className = "sv-diag-sink";
+    sinkInput.autocapitalize = "none";
+    sinkInput.autocomplete = "off";
+    sinkInput.spellcheck = false;
+    const telLabel = document.createElement("label");
+    telLabel.className = "sv-diag-tel";
+    const telBox = document.createElement("input");
+    telBox.type = "checkbox";
+    telLabel.appendChild(telBox);
+    telLabel.appendChild(document.createTextNode(" Telemetría"));
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "sv-diag-save";
+    save.textContent = "Guardar";
+    save.addEventListener("click", () => {
+      postNativeBridge({ type: "set-debug-settings", logSink: sinkInput.value, telemetry: telBox.checked });
+    });
+    dbg.appendChild(sinkInput);
+    dbg.appendChild(telLabel);
+    dbg.appendChild(save);
+
     diagEl.appendChild(header);
+    diagEl.appendChild(dbg);
     diagEl.appendChild(pre);
     document.body.appendChild(diagEl);
   }
@@ -1522,6 +1560,12 @@ const showDiagnostics = (payload) => {
     ].join(" · ") + `\n${payload.book || "?"}`;
   diagEl.querySelector(".sv-diag-body").textContent =
     lines.length ? lines.join("\n") : "Sin eventos registrados todavía.";
+  // Native echoes the live values in the payload, so the fields show what IS set rather than
+  // whatever was typed last time — a settings box that lies is worse than no settings box.
+  const sinkEl = diagEl.querySelector(".sv-diag-sink");
+  const telEl = diagEl.querySelector(".sv-diag-tel input");
+  if (sinkEl && typeof payload.logSink === "string") sinkEl.value = payload.logSink;
+  if (telEl) telEl.checked = Boolean(payload.telemetry);
   diagEl.classList.add("is-on");
 };
 // True while the dump covers the screen. The rescue handlers closeSongJump() before posting, so

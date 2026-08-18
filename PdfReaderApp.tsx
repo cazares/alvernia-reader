@@ -1194,6 +1194,27 @@ export default function App() {
         case "request-director":
           onDirectorCode(DIRECTOR_CODE);
           break;
+        // ── Debug settings, editable from the diagnostics dump ──────────────────────────────────
+        //
+        // sv.telemetry ("1" | "") and sv.logSink (a LAN URL) live in AsyncStorage, which only the
+        // shell can write — so without this they could only be set by rebuilding, which is absurd
+        // for two strings whose whole purpose is to be changed during a debugging session.
+        //
+        // They take effect on the NEXT flush, no relaunch needed. Pointing sv.logSink at
+        // scripts/log-sink.mjs on Miguel's Mac also means telemetry costs Cloudflare nothing, so
+        // the debug level can be raised without competing with signovivo.com for the daily quota.
+        case "set-debug-settings": {
+          const sink = String((msg as Record<string, unknown>).logSink ?? "").trim().replace(/\/+$/, "");
+          const tel = (msg as Record<string, unknown>).telemetry ? "1" : "";
+          logSinkRef.current = sink;
+          telemetryEnabledRef.current = tel === "1";
+          AsyncStorage.multiSet([["sv.logSink", sink], ["sv.telemetry", tel]]).catch(() => {});
+          dbgLog("debug:settings", { sink: sink || "(worker)", telemetry: tel === "1" });
+          injectEvent({ type: "toast", text: tel === "1"
+            ? `Telemetría activada -> ${sink || "Cloudflare"}`
+            : "Telemetría desactivada." });
+          break;
+        }
         // ── The two panic switches, reachable without remembering a number ──────────────────────
         // These exist for the five minutes before Mass when something has already gone wrong: a
         // device holding a broken book, or one whose role is wedged. Requiring a memorised 9-digit
@@ -1229,6 +1250,10 @@ export default function App() {
             book: activeBookVersionRef.current || "(incluido en el app)",
             pages: totalPagesRef.current || 0,
             lines: breadcrumbsRef.current.slice(-BREADCRUMB_LIMIT),
+            // Echo the LIVE debug settings so the dump's fields show what is actually set rather
+            // than whatever was typed last time. A settings box that lies is worse than none.
+            logSink: logSinkRef.current,
+            telemetry: telemetryEnabledRef.current,
           });
           break;
         case "request-soft-reset":

@@ -2979,3 +2979,31 @@ html[data-role="director"] .director-mode-badge {
 }
 .become-director-l1, .director-exit-l1 { font-size: 1.02em; opacity: 0.9; }
 .become-director-l2, .director-exit-l2 { font-size: 1.18em; white-space: nowrap; }
+
+
+/* ── Diagnostics: debug settings row ─────────────────────────────────────────
+   sv.logSink + sv.telemetry, editable where a person already is when something is wrong. Compact
+   because the dump's job is the event list below it; this is a control strip, not a form. */
+.sv-diag-dbg {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+.sv-diag-sink {
+  flex: 1 1 auto; min-width: 0;
+  padding: 0.4rem 0.55rem; border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22); background: rgba(0, 0, 0, 0.35);
+  color: #fff; font: 500 0.82rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sv-diag-tel {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 0.3rem;
+  color: rgba(255, 255, 255, 0.85); font: 600 0.82rem/1 system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+}
+.sv-diag-save {
+  flex: 0 0 auto; padding: 0.42rem 0.7rem; border: 0; border-radius: 8px;
+  background: #0A84FF; color: #fff;
+  font: 700 0.82rem/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.sv-diag-save:active { background: #0968CC; transform: scale(0.97); }
