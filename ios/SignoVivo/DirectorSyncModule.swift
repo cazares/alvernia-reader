@@ -213,6 +213,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var lastKnownBookId = "standard"
   private var bleLastSeenSeq = -1
   private var bleAppliedSeq = -1
+  /// The advertising session bleAppliedSeq belongs to. WITHOUT THIS, BLE NEVER HELPED ANYONE.
+  /// bleSeq restarts at 0 on every director launch, so a follower holding bleAppliedSeq = 50 from a
+  /// previous director rejected seq 1, 2, 3 … from the next one and stayed silent for ~50 page turns
+  /// — indistinguishable from BLE being switched off, which is how it looked on the fleet.
+  /// BlePageBeacon already rebased on a new nonce internally (build 448); this second guard, one
+  /// layer up, never learned about nonces. The fix was half-landed for four builds.
+  private var bleAppliedNonce = ""
 
   // ── Telemetry batching state (build 436) ─────────────────────────────────────
   /// Serial queue guarding `logBuffer` + `logSuspended`. dbgLog is called from MCSession and
@@ -762,9 +769,23 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // is unrecoverable, so this no-ops until a mesh page has told us which book we are in.
       // (2) Monotonic: never apply an older seq than one already applied, so a stale advertisement
       // cannot drag a follower backwards.
-      self.bleBeacon.onPage = { [weak self] page, seq in
+      self.bleBeacon.onPage = { [weak self] page, seq, nonce in
         guard let self = self, self.currentRole == "follower" else { return }
         self.bleLastSeenSeq = seq
+        // A NEW ADVERTISER RESETS THIS GUARD TOO. seq is per-session and restarts at 0, so comparing
+        // it across directors is meaningless — the beacon rebases for exactly this reason and now
+        // says so out loud by handing us the nonce.
+        //
+        // Safe to trust a nonce change today in a way it was not when this guard was written:
+        // parse() rejects the legacy 2-field format outright, so pre-448 devices (the ones that
+        // never stopped advertising) cannot reach here at all, and 448 wired stopPublishing() into
+        // resetTransport() so a device that stops directing stops advertising. The stale-advertiser
+        // case that produced the 444 wrong-song flash is closed on both sides.
+        if nonce != self.bleAppliedNonce {
+          self.bleAppliedNonce = nonce
+          self.bleAppliedSeq = -1
+          self.dbgLog("ble:rebase", ["nonce": nonce, "page": page, "seq": seq])
+        }
         // Unreachable now that the book is pinned above, and kept deliberately: if a future
         // change ever blanks the id, refusing to render a page whose book is unknown is still the
         // right call. `ble:skip-no-book` appearing in telemetry would mean that regression.
@@ -2187,7 +2208,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.lastKnownTotalPages = max(0, totalPages)
         self.lastKnownMode = mode
         self.lastKnownBookId = bookId
-        self.bleAppliedSeq = self.bleLastSeenSeq   // mesh is authoritative; don't re-apply older BLE
+        // Mesh is authoritative; don't re-apply older BLE from the SAME advertiser. A different
+        // advertiser still rebases in onPage above — otherwise this line would re-arm the exact
+        // bug it sits next to.
+        self.bleAppliedSeq = self.bleLastSeenSeq
         self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId)
       }
     }

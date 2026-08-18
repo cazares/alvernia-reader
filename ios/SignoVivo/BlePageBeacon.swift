@@ -47,7 +47,13 @@ final class BlePageBeacon: NSObject {
   private static let namePrefix = "SV"
 
   /// Called with (page, seq) whenever a scan observes a NEWER reading than the last one.
-  var onPage: ((Int, Int) -> Void)?
+  /// (page, seq, nonce). THE NONCE IS PART OF THE CONTRACT, not a detail. seq is monotonic only
+  /// WITHIN one advertising session and restarts at 0 on every director launch, so any consumer that
+  /// compares seqs across sessions is wrong. This class rebases itself on a new nonce — but it used
+  /// to keep that knowledge private while the caller kept its OWN seq guard, which then rejected
+  /// every page from a new director whose seq had not yet climbed past the old one. Handing the
+  /// nonce out makes that mistake impossible to repeat silently.
+  var onPage: ((Int, Int, String) -> Void)?
   /// Telemetry sink — wired to DirectorSyncModule's dbgLog so this shares one log stream.
   var log: ((String, [String: Any]) -> Void)?
 
@@ -219,6 +225,6 @@ extension BlePageBeacon: CBCentralManagerDelegate {
       lastAppliedPage = parsed.page
       log?("ble:page-recv", ["page": parsed.page, "seq": parsed.seq, "rssi": RSSI.intValue])
     }
-    onPage?(parsed.page, parsed.seq)
+    onPage?(parsed.page, parsed.seq, parsed.nonce)
   }
 }

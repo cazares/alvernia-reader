@@ -355,8 +355,15 @@ test("the beacon stops advertising whenever the device stops directing", () => {
   const reset = swift.slice(swift.indexOf("private func resetTransport"));
   assert.match(reset.slice(0, reset.indexOf("\n  }")), /bleBeacon\.stopPublishing\(\)/,
     "resetTransport runs on every role change and MUST silence the beacon");
-  const follower = swift.slice(swift.indexOf("func startFollower("));
-  assert.match(follower.slice(0, 3000), /bleBeacon\.stopPublishing\(\)/,
+  // SLICE TO THE FUNCTION'S END, not to a fixed character count. This read the first 3000 chars of
+  // startFollower and broke on 2026-08-18 when a comment pushed the call to 3639 — a passing test
+  // turning red because an explanation got longer is a test measuring the wrong thing, and the
+  // tempting "fix" is to bump the number until it passes again, which just resets the fuse.
+  const fStart = swift.indexOf("func startFollower(");
+  assert.ok(fStart > 0, "startFollower is gone — re-derive this test");
+  const fEnd = swift.indexOf("\n  func ", fStart + 1);
+  const follower = swift.slice(fStart, fEnd > fStart ? fEnd : undefined);
+  assert.match(follower, /bleBeacon\.stopPublishing\(\)/,
     "a follower must never advertise a page");
 });
 
