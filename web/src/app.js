@@ -1947,7 +1947,11 @@ const goToDraftSong = () => {
     // WEB: the app is fully public and single-book — there is nothing to unlock, so a long code
     // is meaningless; flash an error and keep the numpad open.
     if (NATIVE_FILE_MODE || hasNativeBridge()) {
-      postNativeBridge({ type: "director-code", code });
+      // currentPage rides with the code the same way it already rides with request-director's tap
+      // (2026-08-18 fix, aa68c9e) — closes the SAME wrong-page-flash class of bug for the typed
+      // numpad path, which never got the fix originally because request-director was the only
+      // path anyone tested it through.
+      postNativeBridge({ type: "director-code", code, currentPage: state.currentPage });
       clearDraft();
       closeSongJump();
     } else {

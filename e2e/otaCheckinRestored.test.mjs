@@ -217,3 +217,20 @@ test("no page-value usage of lastDirectorSnapshotRef survives — simple and sta
   assert.equal(pageValueReads.length, 0,
     `${pageValueReads.length} remaining site(s) destructure a page/book out of the remembered ref`);
 });
+
+test("typing the director code threads the current page too, not just the pill tap", () => {
+  // Adversarial hunt (2026-08-18), after two prior regressions of the same bug class: the
+  // aa68c9e fix (thread state.currentPage through becomeDirector) was only ever wired for the
+  // "Ser Director" pill's request-director bridge message. Typing the code on the numpad went
+  // through case "director-code" with NO currentPage — becomeDirector's knownCurrentPage was
+  // undefined, and whatever currentPageRef already held (right or wrong) is what got broadcast.
+  const appJs = fs.readFileSync("web/src/app.js", "utf8");
+  assert.match(appJs, /postNativeBridge\(\{ type: "director-code", code, currentPage: state\.currentPage \}\)/,
+    "the web no longer sends currentPage with a typed director code");
+
+  const start = NATIVE.indexOf('case "director-code"');
+  const end = NATIVE.indexOf('case "request-director"');
+  const body = NATIVE.slice(start, end);
+  assert.match(body, /msg\.currentPage/, "the typed-code handler no longer reads currentPage from the bridge message");
+  assert.match(body, /onDirectorCode\(msg\.code, knownPage\)/, "the typed-code handler no longer threads knownPage into onDirectorCode");
+});

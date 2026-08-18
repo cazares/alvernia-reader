@@ -1311,9 +1311,17 @@ export default function App() {
           broadcastPage(page, currentBookRef.current);
           break;
         }
-        case "director-code":
-          onDirectorCode(msg.code);
+        case "director-code": {
+          // currentPage rides with the code, same as request-director's tap (2026-08-18, aa68c9e).
+          // This path (typing the code on the numpad, vs. tapping "Ser Director") never got that
+          // fix originally — an adversarial hunt found the asymmetry after two other regressions
+          // of the same bug class. Without this, becomeDirector's knownCurrentPage is undefined
+          // and whatever currentPageRef already held — right or wrong — is what gets broadcast.
+          const knownPage = typeof msg.currentPage === "number" && msg.currentPage > 0
+            ? msg.currentPage : undefined;
+          onDirectorCode(msg.code, knownPage);
           break;
+        }
         // The web UI asking for the role directly, with no code typed. Routed through the SAME
         // handler as a typed code — so it gets the same confirmation, the same live-director
         // takeover warning, and the same becomeDirector path. The web bundle never learns
