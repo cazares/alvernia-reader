@@ -3668,149 +3668,16 @@ const RELAY_ROOM = (function resolveRelayRoomSafely() {
 })();
 const RELAY_LIVE_MAX_AGE_S = 90; // a director counts as "live" if its last update is this recent
 
-// ── Fleet readiness check-in (signovivo.com PWA only — the native app reports itself) ─────────
-// A device self-reports its cache + home-screen state so the director's gated /fleet-dashboard
-// shows who's ready before Mass. A device sends ONLY a self-entered label — NEVER a phone number
-// (phones live server-side in the gated roster). Fire-and-forget; failures are swallowed so this
-// can never block or slow the reader.
-const FLEET_DEVICE_KEY = "svFleetDeviceId";
-
-const fleetDeviceId = () => {
-  try {
-    let id = localStorage.getItem(FLEET_DEVICE_KEY);
-    if (!id) {
-      id = window.crypto?.randomUUID?.()
-        || "d-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
-      localStorage.setItem(FLEET_DEVICE_KEY, id);
-    }
-    return id;
-  } catch {
-    return "anon-" + Math.random().toString(36).slice(2);
-  }
-};
-
-// ── Crash telemetry → /log (M2 Slice D) ──────────────────────────────────────
-// So a crash is a GLANCE on the dashboard, not a guess. The boot guard (top of file)
-// already catches window "error"/"unhandledrejection" and records __SV_LAST_ERROR; it
-// calls this reporter (via window.__svReportCrash) when present. Best-effort POST to the
-// OPEN /log endpoint (A2-rate-limited + 64 KB-capped; reads are gated by P6-LOG). NEVER
-// throws, debounced by signature, and session-capped so a crash LOOP can't hammer /log.
-// PII hygiene: only an opaque device id, build, error text, and location.pathname (no
-// query — a ?k= dashboard secret must never ride along).
-const CRASH_REPORT_MAX = 20;      // hard session cap (crash-loop backstop)
-const CRASH_DEDUP_MS = 30000;     // same signature within 30s → skip
-let crashReportCount = 0;
-const crashReportedAt = new Map();
-const reportCrash = (where, msg, stack) => {
-  try {
-    if (crashReportCount >= CRASH_REPORT_MAX) return;
-    const sig = String(where || "").slice(0, 60) + "|" + String(msg || "").slice(0, 80);
-    const now = Date.now();
-    if (now - (crashReportedAt.get(sig) || 0) < CRASH_DEDUP_MS) return;
-    crashReportedAt.set(sig, now);
-    crashReportCount += 1;
-    const build = (BUILD_NUMBER && BUILD_NUMBER[0] !== "_")
-      ? BUILD_NUMBER
-      : (window.__SIGNO_VINO_NATIVE_BUNDLE_VERSION || (CACHE_VERSION && CACHE_VERSION[0] !== "_" ? CACHE_VERSION : ""));
-    const payload = {
-      kind: "crash",
-      dev: fleetDeviceId(),
-      surface: NATIVE_FILE_MODE || hasNativeBridge() ? "native-web" : "web",
-      build: String(build || ""),
-      where: String(where || "").slice(0, 60),
-      msg: String(msg || "").slice(0, 300),
-      stack: String(stack || "").slice(0, 600),
-      // pathname ONLY — deliberately drops query/hash so a ?k= secret can't leak into /log.
-      url: (typeof location === "object" && location && location.pathname) || "",
-      t: now,
-    };
-    fetch(RELAY_BASE + "/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify([payload]),
-      keepalive: true,   // still sends if the crash is about to unload the page
-    }).catch(() => { /* best-effort telemetry — never affects the reader */ });
-  } catch (_) { /* reporting a crash must never itself crash */ }
-};
-// Register so the boot guard's error handlers can call us. Then flush any error the guard
-// already recorded BEFORE we registered (a boot-time crash) exactly once.
-try {
-  window.__svReportCrash = reportCrash;
-  const boot = window.__SV_LAST_ERROR;
-  if (boot && typeof boot === "object") reportCrash(boot.where || "boot", boot.msg || "", boot.stack || "");
-} catch (_) {}
-
-// Count of cached page images in the CURRENT book's cache ONLY. This feeds the pre-Mass
-// readiness dashboard's webCached claim, and that claim must mean "has THIS edition" — counting
-// the max across surviving previous-edition caches (as this once did, under an "immutable pages"
-// assumption) reported every device fully cached immediately after a book deploy, which is the
-// one moment the dashboard exists to catch stragglers in.
-const countCachedPageImages = async () => {
-  if (!("caches" in window)) return 0;
-  try {
-    // NON-CREATING on purpose: caches.open() would mint an empty current-book cache on every
-    // boot even when the precache never ran — and an empty cache that EXISTS is newest by
-    // insertion order, so the SW's activate keep-policy could later evict the full previous
-    // edition in favor of the husk. Only count what actually exists.
-    if (!(await caches.keys()).includes(PAGE_CACHE)) return 0;
-    const c = await caches.open(PAGE_CACHE);
-    const keys = await c.keys();
-    return keys.filter((r) => r.url.includes("/pages/")).length;
-  } catch {
-    return 0;
-  }
-};
-
-let fleetCheckinInFlight = false;
-const fleetCheckin = async (extra = {}) => {
-  if (NATIVE_FILE_MODE) return; // the native app does its own check-in
-  if (fleetCheckinInFlight) return;
-  fleetCheckinInFlight = true;
-  try {
-    const totalPages = Number(state.totalPages) || STANDARD_TOTAL_PAGES;
-    // A MEASUREMENT of the live caches, not the bare OFFLINE_READY_KEY flag this used to read.
-    // Keeping round 4's rule — no `|| pagesCached >= totalPages` fallback, because pages landing
-    // while the manifests failed is exactly the half-updated state the dashboard must surface —
-    // and closing the hole on the other side: the flag is written once per BOOK_VERSION and
-    // nothing ever clears it, so on its own it is a memory. iOS evicts CacheStorage under storage
-    // pressure while localStorage survives, and such an iPad kept reporting green with zero pages
-    // cached, the exact straggler this exists to catch, on the one morning it matters.
-    //
-    // isOfflineBundleReady is a strict SUPERSET of what the flag promises: it re-confirms the
-    // flag against the book metadata, every core asset (manifests included — see coreAssets)
-    // AND page completeness. It can only ever downgrade this claim, never invent one, so the
-    // residual error is a false NEGATIVE (an IndexedDB-less device reads as not-ready). That is
-    // the safe direction: a needless walk to the sacristy costs a minute, a false green costs
-    // the Mass. pagesCached still reports alongside for partial-progress display.
-    // The .catch is structural: Promise.all rejects if EITHER input rejects, and that would
-    // escape to the outer catch and skip the whole check-in — a device that silently vanishes
-    // from the dashboard is worse than one reported not-ready. This must degrade, never abort.
-    const [verifiedReady, pagesCached] = await Promise.all([
-      isOfflineBundleReady(totalPages).catch(() => false),
-      countCachedPageImages().catch(() => 0),
-    ]);
-    const payload = {
-      deviceId: fleetDeviceId(),
-      surface: "web",
-      webCached: verifiedReady,
-      pagesCached,
-      totalPages,
-      homeScreen: isStandaloneApp,
-      cacheVersion: String(CACHE_VERSION || ""),
-      ...extra,
-    };
-    await fetch(RELAY_BASE + "/fleet/checkin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    });
-  } catch {
-    /* offline / relay unreachable — presence just isn't reported; reader is unaffected */
-  } finally {
-    fleetCheckinInFlight = false;
-  }
-};
+// ── Fleet readiness check-in — REMOVED (Miguel, 2026-08-18: "kill the fleet dashboard") ──────
+//
+// Each device posted this on cache milestones and, in the native shell, every 90 SECONDS —
+// ~3,840 requests a day across the fleet, more than the director's relay keepalive, so that a
+// pre-Mass page could show green lights. The dashboard also held a roster of choir phone numbers.
+//
+// Left as a no-op rather than deleted at its call sites: those live inside the offline-download and
+// cache-verification paths, where an edit risks more than it saves, and a named no-op explains
+// itself where a missing call would not.
+const fleetCheckin = async () => {};
 
 // Report presence + cache state on load so the director's gated /fleet-dashboard shows which web
 // devices are cached and ready. Anonymous by device — the old one-time "¿Quién usa este iPad?"

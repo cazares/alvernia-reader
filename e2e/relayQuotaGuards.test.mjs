@@ -89,9 +89,21 @@ test("the worker RESERVES quota for signovivo.com, and never counts the product'
   for (const essential of ["/r/", "/health"]) {
     assert.ok(!set.includes(essential), `${essential} is counted as non-essential — the product would be refused`);
   }
-  for (const nonEssential of ["/log", "/fleet"]) {
-    assert.ok(set.includes(nonEssential), `${nonEssential} is not metered, so it can starve the site again`);
-  }
+  assert.ok(set.includes("/log"), "/log is not metered, so it can starve the site again");
+  // /fleet is not metered because it no longer EXISTS — the readiness dashboard was removed on
+  // 2026-08-18. It posted every 90s from every device (~3,840/day, more than the director's relay
+  // keepalive) so a pre-Mass page could show green lights, and it held a roster of choir phone
+  // numbers. Deleting a surface beats budgeting for it.
+  assert.doesNotMatch(WORKER, /url\.pathname === "\/fleet/,
+    "a /fleet route is back — it was removed for cost AND because it served phone numbers");
+  assert.doesNotMatch(WORKER, /renderFleetDashboard\(/, "the dashboard renderer is back");
+  const NATIVE_SRC = fs.readFileSync("PdfReaderApp.tsx", "utf8");
+  assert.doesNotMatch(NATIVE_SRC, /setInterval\(\(\) => fleetCheckin\(\), \d+\)/,
+    "the 90s fleet check-in heartbeat is back — that was ~3,840 requests a day for a status page");
+  assert.doesNotMatch(NATIVE_SRC, /fetch\(`\$\{RELAY_BASE\}\/fleet\/checkin`/,
+    "the native app posts fleet check-ins again");
+  assert.doesNotMatch(APP, /fetch\(RELAY_BASE \+ "\/fleet\/checkin"/,
+    "the web app posts fleet check-ins again");
 
   // The reservation has to leave the great majority for the product.
   const cap = Number(WCONF.match(/"NONESSENTIAL_DAILY_MAX": "(\d+)"/)[1]);

@@ -428,55 +428,17 @@ export default function App() {
   // ── Fleet readiness check-in (native → the SAME /fleet dashboard as signovivo.com) ──
   // Reports this iPad's native build + role so the director sees who's ready before Mass. Reuses
   // the stable sv_devid; sends a self-entered label but NEVER a phone number. Best-effort.
-  const fleetLabelRef = useRef<string>("");
-  const fleetCheckin = useCallback((extra?: Record<string, unknown>) => {
-    const deviceId = dbgDeviceRef.current;
-    if (!deviceId || deviceId === "?") return;
-    fetch(`${RELAY_BASE}/fleet/checkin`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        deviceId,
-        surface: "native",
-        nativeBuild: Number(BUILD_VERSION) || 0,
-        // "PAD" | "PHN". `surface` already separates native from web; this separates two NATIVE
-        // devices, which nothing could do before — an iPad on an old build read as the owner's
-        // iPhone for an hour on 2026-08-05 because the deviceId is an opaque 6-char random.
-        ...(DEVICE_KIND ? { deviceKind: DEVICE_KIND } : {}),
-        label: fleetLabelRef.current || "",
-        // Native only knows director/follower — report "Director" or leave role blank so the
-        // dashboard fills it from the seeded roster (never a wrong "Cantor" for a Bajo/Guitarrista).
-        role: roleRef.current === "director" ? "Director" : "",
-        ...(extra || {}),
-        // Which BOOK this device holds. nativeBuild is the SHELL's number and can read "current"
-        // over a songbook months old (D1), so without this the dashboard cannot answer the only
-        // question the rollout cares about: did the update actually arrive?
-        ...(activeBookVersionRef.current ? { bookVersion: activeBookVersionRef.current } : {}),
-        ...(activeBundleSourceRef.current ? { bundleSource: activeBundleSourceRef.current } : {}),
-        ...(bookStageRef.current ? { bookStage: bookStageRef.current } : {}),
-        ...(extra || {}),
-      }),
-    })
-      .then(async (r) => {
-        if (!r.ok) return;
-        // A SUCCESSFUL check-in is the live-internet proof the apply gate depends on. It is
-        // recorded here and nowhere else, so it can never be faked by a cached response.
-        const at = Date.now();
-        lastCheckinOkAtRef.current = at;
-        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
-        let body: unknown = null;
-        try {
-          body = await r.json();
-        } catch {
-          return;
-        }
-        onCheckinResponseRef.current?.(body);
-      })
-      .catch(() => {
-        /* offline / relay unreachable — presence just isn't reported. Inside the church this is
-           the NORMAL case and must stay completely silent: no error state, no UI. */
-      });
-  }, []);
+  // ── Fleet readiness check-in — REMOVED (Miguel, 2026-08-18: "kill the fleet dashboard") ──
+  //
+  // It posted every 90 SECONDS from every device: 960/day each, ~3,840/day across the fleet — more
+  // than the director's relay keepalive, spent so a pre-Mass page could show green lights. It also
+  // stored a roster containing choir phone numbers, so deleting it is a privacy win as much as a
+  // quota one.
+  //
+  // Kept as a no-op rather than deleted at ~6 call sites: those sites are inside offline-download
+  // and cache-verification paths where an edit risks more than it saves, and this way the next
+  // reader sees WHY nothing happens instead of finding a mysterious absence.
+  const fleetCheckin = useCallback((_extra?: Record<string, unknown>) => Promise.resolve(), []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
     (async () => {
@@ -505,20 +467,13 @@ export default function App() {
       // written); new devices report anonymously by sv_devid, matching the web PWA's
       // "anonymous by device" behaviour (web/src/app.js:2986). sv_fleet_skip is now dead — it
       // only ever existed to suppress this prompt.
-      try {
-        fleetLabelRef.current = (await AsyncStorage.getItem("sv_fleet_label")) || "";
-      } catch {
-        /* ignore */
-      }
-      fleetCheckin();
+      // (sv_fleet_label was read here to name this device on the readiness dashboard; the dashboard
+      // is gone, so the label has nowhere to go and the key is simply left in storage.)
     })();
   }, [dbgLog, syncAvailable, fleetCheckin]);
   // Re-report readiness every 90s while mounted — captures a follower who later becomes director
   // without touching the liturgy-critical sync callbacks.
-  useEffect(() => {
-    const t = setInterval(() => fleetCheckin(), 90000);
-    return () => clearInterval(t);
-  }, [fleetCheckin]);
+  // (the 90s fleet check-in heartbeat was removed with the dashboard — see fleetCheckin above)
 
   // ── Native -> Web injection (queued until the web app signals bridge-ready) ──
   // Bound the pending-inject backlog: if the WebView never signals bridge-ready (broken/blank
