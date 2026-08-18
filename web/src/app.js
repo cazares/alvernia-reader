@@ -854,7 +854,6 @@ const ensureOfflineBundle = async (totalPages, onProgress) => {
     totalPages,
     verifiedAt: new Date().toISOString(),
   });
-  fleetCheckin(); // tell the readiness dashboard this iPad is cached — verified, not asserted
 };
 
 // Defer the ~13 MB background pre-cache until AFTER the reader is revealed. On weak connections
@@ -884,7 +883,6 @@ const deferOfflinePrecache = (totalPages) => {
       console.warn("Pre-cache offline incompleto:", error);
       // Surface honest progress to the fleet dashboard even on failure — a device stuck
       // mid-migration should read as "recaching", not freeze at its boot-time snapshot.
-      fleetCheckin().catch(() => {});
     });
   };
   // Retry entry for the armed triggers: cooldown after a failure so a persistent problem (e.g.
@@ -1616,6 +1614,13 @@ const applyNativeSyncEvent = async (payload) => {
     }
 
     if (event.type === "page" && Number.isFinite(event.page)) {
+      // WHERE DID THIS PAGE COME FROM? Native tags every page with the channel that delivered it
+      // ("mesh" or "ble"); the relay path logs itself separately in applyRelaySnapshot. Without this
+      // a page simply APPEARS in front of the choir and the only honest answer to "why is it on song
+      // 2" is a guess — which is exactly where 2026-08-18 left us.
+      try {
+        console.info("[sv] page", event.page, "via", event.src || "mesh?", "(was", state.currentPage + ")");
+      } catch {}
       // A page arriving over the mesh is proof a director is alive right now — the only such proof
       // this layer gets, and enough to keep the pill honest without any new plumbing.
       lastDirectorPageAt = Date.now();
@@ -3668,23 +3673,17 @@ const RELAY_ROOM = (function resolveRelayRoomSafely() {
 })();
 const RELAY_LIVE_MAX_AGE_S = 90; // a director counts as "live" if its last update is this recent
 
-// ── Fleet readiness check-in — REMOVED (Miguel, 2026-08-18: "kill the fleet dashboard") ──────
-//
-// Each device posted this on cache milestones and, in the native shell, every 90 SECONDS —
-// ~3,840 requests a day across the fleet, more than the director's relay keepalive, so that a
-// pre-Mass page could show green lights. The dashboard also held a roster of choir phone numbers.
-//
-// Left as a no-op rather than deleted at its call sites: those live inside the offline-download and
-// cache-verification paths, where an edit risks more than it saves, and a named no-op explains
-// itself where a missing call would not.
-const fleetCheckin = async () => {};
+// (The fleet readiness check-in was removed entirely on 2026-08-18 — dashboard, routes, roster and
+//  all. It posted every 90s from every device so a pre-Mass page could show green lights, and held
+//  choir phone numbers. isOfflineBundleReady below was its only consumer and is now unused; it is
+//  kept because it encodes how to verify a cached bundle against the real caches, which is worth
+//  more than the lines it costs if readiness reporting ever returns.)
 
 // Report presence + cache state on load so the director's gated /fleet-dashboard shows which web
 // devices are cached and ready. Anonymous by device — the old one-time "¿Quién usa este iPad?"
 // self-ID prompt (name + role) was removed; it was more annoying than useful.
 const scheduleFleetCheckin = () => {
   if (NATIVE_FILE_MODE) return;
-  fleetCheckin();
 };
 
 const relay = {
@@ -3842,6 +3841,9 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
     relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
     relay.hasDirector = true; relay.livePage = snap.page;
     if (relay.browsing) { renderRelayPill(); revealReader(); return; }
+    try {
+      console.info("[sv] page", snap.page, "via relay (age", Math.round(ageS) + "s, seq", snap.seq + ")");
+    } catch {}
     relay.following = true; relay.appliedPage = snap.page;
     if (state.currentPage !== snap.page) renderPage(snap.page, { pushToHistory: false });
     renderRelayPill(); revealReader();

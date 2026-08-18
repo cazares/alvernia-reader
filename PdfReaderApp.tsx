@@ -438,7 +438,6 @@ export default function App() {
   // Kept as a no-op rather than deleted at ~6 call sites: those sites are inside offline-download
   // and cache-verification paths where an edit risks more than it saves, and this way the next
   // reader sees WHY nothing happens instead of finding a mysterious absence.
-  const fleetCheckin = useCallback((_extra?: Record<string, unknown>) => Promise.resolve(), []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
     (async () => {
@@ -470,7 +469,7 @@ export default function App() {
       // (sv_fleet_label was read here to name this device on the readiness dashboard; the dashboard
       // is gone, so the label has nowhere to go and the key is simply left in storage.)
     })();
-  }, [dbgLog, syncAvailable, fleetCheckin]);
+  }, [dbgLog, syncAvailable]);
   // Re-report readiness every 90s while mounted — captures a follower who later becomes director
   // without touching the liturgy-critical sync callbacks.
   // (the 90s fleet check-in heartbeat was removed with the dashboard — see fleetCheckin above)
@@ -1820,7 +1819,6 @@ export default function App() {
     manualRefreshRef.current = true;
     breadcrumb("manual-refresh:start");
     try {
-      await fleetCheckin();
       // A pointer seen on an earlier routine check-in was recorded but deliberately not acted on.
       // Honour it now, so ⟳ works even if this tap's check-in cannot reach the relay.
       if (!stagingInFlightRef.current && pendingPointerRef.current) {
@@ -1832,7 +1830,7 @@ export default function App() {
       manualRefreshRef.current = false;
       breadcrumb("manual-refresh:end");
     }
-  }, [breadcrumb, fleetCheckin]);
+  }, [breadcrumb]);
   refreshBookNowRef.current = refreshBookNow;
 
   /**
@@ -2133,7 +2131,6 @@ export default function App() {
       // This is safe to run unattended only because the GATING is gone, not because the automation
       // was ever the problem: canApplyNow is down to two physical impossibilities, so a device that
       // does nothing now really is a device that had nothing to do.
-      fleetCheckin();
       void autoApplyIfSafeRef.current?.();
       // ONE refresh, not two. This was duplicated, and each call scheduled another discovery timer
       // without invalidating the previous one (DirectorSyncModule.scheduleNextDiscoveryRefresh) —
@@ -2180,7 +2177,7 @@ export default function App() {
       }
     });
     return () => sub.remove();
-  }, [syncAvailable, broadcastPage, injectEvent, fleetCheckin, startDirectorHeartbeat]);
+  }, [syncAvailable, broadcastPage, injectEvent, startDirectorHeartbeat]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {

@@ -817,7 +817,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.bleAppliedSeq = seq
         self.dbgLog("ble:page-apply", ["page": page, "seq": seq])
         self.emitPage(page: max(1, page), totalPages: self.lastKnownTotalPages,
-                      mode: self.lastKnownMode, bookId: self.lastKnownBookId)
+                      mode: self.lastKnownMode, bookId: self.lastKnownBookId, src: "ble")
       }
       // A FOLLOWER MUST NEVER ADVERTISE. Belt-and-braces alongside resetTransport: whatever path
       // reached this role, stop publishing before we start listening.
@@ -1877,10 +1877,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     ] as [String: Any])
   }
 
-  private func emitPage(page: Int, totalPages: Int, mode: String, bookId: String) {
+  /// `src` NAMES WHICH CHANNEL DELIVERED THE PAGE — "mesh" or "ble".
+  ///
+  /// Both arrive at the web layer through this one event, so from JS they were indistinguishable.
+  /// That is why the 2026-08-18 "every device jumped to song 2, then reached 372 ten seconds later"
+  /// could not be attributed: nothing recorded whether song 2 came over BLE, the mesh, or the relay.
+  /// A page that appears in front of the choir with no record of where it came from is the hardest
+  /// class of bug to close, and it is one field to fix.
+  private func emitPage(page: Int, totalPages: Int, mode: String, bookId: String, src: String) {
     sendEvent(withName: Self.eventName, body: [
       "type": "page", "page": page, "totalPages": totalPages,
-      "mode": mode, "bookId": bookId, "sessionCode": currentSessionCode,
+      "mode": mode, "bookId": bookId, "sessionCode": currentSessionCode, "src": src,
     ] as [String: Any])
   }
 
@@ -2369,7 +2376,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         // advertiser still rebases in onPage above — otherwise this line would re-arm the exact
         // bug it sits next to.
         self.bleAppliedSeq = self.bleLastSeenSeq
-        self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId)
+        self.emitPage(page: max(1, page), totalPages: max(0, totalPages), mode: mode, bookId: bookId, src: "mesh")
       }
     }
   }
