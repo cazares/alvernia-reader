@@ -302,7 +302,31 @@ npx wrangler pages deploy web/dist --project-name alvernia-reader --branch "$DEP
 # stale HEAD again. Staging never touches it — prod is the only thing devices download.
 if [ "$STAGING" != "1" ]; then
   cp web/dist/bundle-manifest.json web/manifest-baseline.json
-  echo "         additive baseline refreshed -> $(node -e "process.stdout.write(require('./web/manifest-baseline.json').bookVersion)") (COMMIT THIS with the release)"
+  NEW_BOOK_VERSION=$(node -e "process.stdout.write(require('./web/manifest-baseline.json').bookVersion)")
+  echo "         additive baseline refreshed -> $NEW_BOOK_VERSION (COMMIT THIS with the release)"
+
+  # ── OTA arming — kept in lockstep, every release (Miguel, 2026-08-18) ──────────────────
+  #
+  # Standing policy: every device, always, all at once — see sync-worker/wrangler.jsonc's
+  # BOOK_UPDATE_* comment for the full reasoning. This is the ONLY writer of
+  # BOOK_UPDATE_VERSION; hand-editing it in wrangler.jsonc between releases is pointless, this
+  # overwrites it on the very next run. Fails soft: a broken worker deploy here must not abort
+  # a release that already reached TestFlight/prod — surface it loudly and keep going.
+  echo "==> 5b/6 Arm OTA fleet-wide for $NEW_BOOK_VERSION (sync-worker)"
+  if [ -d sync-worker ] && [ -f sync-worker/wrangler.jsonc ]; then
+    node -e '
+      const fs=require("fs");
+      const p="sync-worker/wrangler.jsonc";
+      const src=fs.readFileSync(p,"utf8");
+      const out=src.replace(/"BOOK_UPDATE_VERSION":\s*"[^"]*"/, `"BOOK_UPDATE_VERSION": "'"$NEW_BOOK_VERSION"'"`);
+      if (out === src) { console.error("  ✖ BOOK_UPDATE_VERSION pattern not found in " + p); process.exit(1); }
+      fs.writeFileSync(p, out);
+    ' && (cd sync-worker && npx wrangler deploy 2>&1 | tail -5) \
+      && echo "         ✅ OTA armed: $NEW_BOOK_VERSION, fleet-wide" \
+      || echo "         ⚠ OTA arm/deploy failed — songbook update will NOT reach devices until this is fixed and re-run"
+  else
+    echo "         ⚠ sync-worker/ not found — skipping OTA arm"
+  fi
 fi
 
 if [ "$STAGING" = "1" ]; then

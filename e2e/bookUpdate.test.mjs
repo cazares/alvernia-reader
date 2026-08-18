@@ -566,14 +566,13 @@ test("every shipped operator code is >= MIN_CODE_DISTANCE from every other", () 
   }
 });
 
-test("the downloader ships DORMANT and the kill switch is off-by-source", () => {
+test("the build-baked downloader kill switch exists and is off by source", () => {
+  // The DORMANT-by-default wrangler config this test used to also pin was Miguel's explicit
+  // reversal 2026-08-18: every device, always, all at once — see
+  // e2e/otaStandingFleetArm.test.mjs for the current contract on BOOK_UPDATE_*. This test now
+  // covers only the build-baked kill switch, which that policy change did not touch: it's a
+  // separate, always-available "stop the app from EVER downloading" escape hatch independent of
+  // whatever the worker is currently armed to.
   const src = fs.readFileSync(path.resolve(new URL("..", import.meta.url).pathname, "PdfReaderApp.tsx"), "utf8");
   assert.match(src, /const SV_BOOK_DL_KILL = false;/, "the build-baked kill switch must exist");
-  const wrangler = fs.readFileSync(
-    path.resolve(new URL("..", import.meta.url).pathname, "sync-worker/wrangler.jsonc"), "utf8",
-  );
-  // The shipped config must arm nobody. This is what lets M5 land without a rehearsal.
-  assert.match(wrangler, /"BOOK_UPDATE_VERSION":\s*""/, "BOOK_UPDATE_VERSION must ship empty");
-  assert.match(wrangler, /"BOOK_UPDATE_DEVICES":\s*""/, "BOOK_UPDATE_DEVICES must ship empty");
-  assert.match(wrangler, /"BOOK_UPDATE_ALLOW_FLEET":\s*""/, "fleet arming must ship disabled");
 });
