@@ -39,19 +39,22 @@ const DIST = path.join(ROOT, "web", "dist");
  */
 const MUTATIONS = [
   {
-    name: "unwire fleetCheckin (webCached back to the raw sticky flag)",
-    check: "verifies the offline bundle before claiming webCached",
-    // Verbatim the pre-fix expression, so this reproduces the real regression rather than
-    // some synthetic edit that happens to trip the regex.
+    // WHAT REPLACED THE THREE fleetCheckin MUTATIONS. They edited `webCached: verifiedReady,` inside
+    // the fleet readiness payload, which was deleted with the dashboard on 2026-08-18 — so all three
+    // silently stopped reproducing anything, which is the exact failure this whole file exists to
+    // catch. A mutation probe that cannot mutate is a green light for nothing.
+    //
+    // The invariant that survived the dashboard is the one that actually prevented the bug:
+    // OFFLINE_READY_KEY is read in EXACTLY ONE place, inside isOfflineBundleReady, where it is
+    // confirmed against the real caches. A second reader anywhere is something trusting a flag that
+    // nothing ever clears.
+    name: "add a second reader of the never-cleared offline-ready flag",
+    check: "the offline-ready flag is read in exactly one place, where it is verified",
     edits: [[
-      "webCached: verifiedReady,",
-      'webCached: localStorage.getItem(OFFLINE_READY_KEY) === "ready",',
+      "const isOfflineBundleReady = async (totalPages) => {",
+      'const svStickyReady = () => localStorage.getItem(OFFLINE_READY_KEY) === "ready";\n'
+      + "const isOfflineBundleReady = async (totalPages) => {",
     ]],
-  },
-  {
-    name: "delete the isOfflineBundleReady call site (the original rot)",
-    check: "verifies the offline bundle before claiming webCached",
-    edits: [["isOfflineBundleReady(totalPages).catch(() => false)", "Promise.resolve(false)"]],
   },
   {
     name: "revert both cache reads to the CREATING caches.open()",
@@ -79,16 +82,6 @@ const MUTATIONS = [
     edits: [[
       "if (!(await caches.keys()).includes(name)) return null;",
       "// (existence check removed)",
-    ]],
-  },
-  {
-    // The original bug re-introduced as an OR-fallback rather than a replacement: the
-    // verifier is still called, so a naive "is it referenced?" guard would pass.
-    name: "re-add the sticky flag as an OR-fallback beside the verifier",
-    check: "verifies the offline bundle before claiming webCached",
-    edits: [[
-      "webCached: verifiedReady,",
-      'webCached: verifiedReady || localStorage.getItem(OFFLINE_READY_KEY) === "ready",',
     ]],
   },
   {

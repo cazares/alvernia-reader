@@ -221,7 +221,27 @@ test("garbage falls back to the default and NEVER to 0 — silence must not be t
   }
 });
 
-test("the default is the measured 15 s, so a regression to the old per-event rate is visible", () => {
-  // 15 s = a 4.8x request cut with 100% of rows kept (scripts/telemetry-budget-sim.mjs).
-  assert.equal(DEFAULT_LOG_INTERVAL_MS, 15000);
+test("the default batches hard, so a regression to a chatty rate is visible", () => {
+  // 15s was measured as a 4.8x request cut with 100% of rows kept
+  // (scripts/telemetry-budget-sim.mjs); 60s takes another 4x for the same rows.
+  //
+  // Asserted as a FLOOR rather than an exact number. The exact value has now moved twice, and both
+  // times a test pinned to the old literal failed for no behavioural reason — which teaches people
+  // to update the number without thinking about it. What must not regress is the ORDER: the quota
+  // counts requests, not bytes, so a short window is the expensive mistake.
+  assert.ok(DEFAULT_LOG_INTERVAL_MS >= 30000,
+    `a ${DEFAULT_LOG_INTERVAL_MS}ms default flush is chatty — the daily quota counts REQUESTS, ` +
+    "so the window is the whole cost lever");
+  assert.equal(DEFAULT_LOG_INTERVAL_MS, 60000, "the current default moved without this test being re-read");
+});
+
+test("the default LEVEL is off, and a bad level goes quiet rather than loud", async () => {
+  // The other half of the same lesson: an unparseable INTERVAL falls back to the noisy default so a
+  // typo cannot silence the fleet, but an unparseable LEVEL falls back to OFF. The asymmetry is
+  // deliberate — a silent fleet loses a debugging session, a loud one lost signovivo.com twice.
+  const { logLevel, LOG_LEVELS, DEFAULT_LOG_LEVEL } = await import("../src/logBuffer.js");
+  assert.equal(DEFAULT_LOG_LEVEL, "off");
+  assert.equal(logLevel({}), LOG_LEVELS.off);
+  assert.equal(logLevel({ LOG_LEVEL: "nonsense" }), LOG_LEVELS.off);
+  assert.equal(logLevel({ LOG_LEVEL: "debug" }), LOG_LEVELS.debug);
 });
