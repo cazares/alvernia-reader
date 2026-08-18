@@ -150,7 +150,6 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// question every proposed rewrite depends on: how fast does a page reach a follower when there
   /// is no handshake to fail? Pair `ble:page-send` with `ble:page-recv` in stress-analyze.
   private let bleBeacon = BlePageBeacon()
-  private var bleSeq = 0
   /// Book context last seen from a MESH page. BLE carries only a page number, so it renders only
   /// once we know which book that number refers to.
   private var lastKnownTotalPages = 0
@@ -1090,9 +1089,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // BLE PROBE — published before the connected-peers guard on purpose. The mesh gives up here
       // when nobody is attached; a beacon does not care whether anyone is listening, which is
       // exactly the property being measured.
-      self.bleSeq += 1
+      // The beacon owns its own seq now. This used to pass bleSeq, which THIS function bumps once
+      // per second via the director heartbeat rather than once per page turn — an ever-growing
+      // number inside a fixed-size advertisement.
       self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
-      self.bleBeacon.publish(page: self.currentPageNumber ?? page.intValue, seq: self.bleSeq)
+      self.bleBeacon.publish(page: self.currentPageNumber ?? page.intValue)
       let connected = self.allConnectedPeers
       guard !connected.isEmpty else {
         self.emitState(status: "waiting-followers")

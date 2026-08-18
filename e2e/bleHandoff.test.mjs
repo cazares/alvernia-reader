@@ -14,8 +14,13 @@ const MODULE = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8")
 // new, so it is testing the behaviour rather than the presence of a line.
 
 // ── The two guards, transliterated ────────────────────────────────────────────
-const makeBeacon = () => ({ nonce: "", seq: -1 });          // BlePageBeacon (rebases since build 448)
-const beaconRecv = (b, adv) => {
+const CONTENTION_WINDOW = 4;
+const makeBeacon = () => ({ nonce: "", seq: -1, recent: new Map() });
+const beaconRecv = (b, adv, now = 0) => {
+  // Contention: two live advertisers => abstain entirely.
+  b.recent.set(adv.nonce, now);
+  for (const [n, t] of b.recent) if (now - t > CONTENTION_WINDOW) b.recent.delete(n);
+  if (b.recent.size > 1) return null;
   if (adv.nonce !== b.nonce) { b.nonce = adv.nonce; b.seq = -1; }   // new advertiser => rebase
   if (!(adv.seq > b.seq)) return null;                              // monotonic WITHIN a session
   b.seq = adv.seq;
@@ -36,12 +41,15 @@ const moduleRecv = (m, hit, rebases) => {
 const run = (rebases) => {
   const b = makeBeacon(), m = makeModule();
   const rendered = [];
+  let clock = 0;
   const advertise = (nonce, pages) => pages.forEach((page, i) => {
-    const out = moduleRecv(m, beaconRecv(b, { nonce, seq: i + 1, page }), rebases);
+    clock += 1;
+    const out = moduleRecv(m, beaconRecv(b, { nonce, seq: i + 1, page }, clock), rebases);
     if (out !== null) rendered.push(out);
   });
   advertise("aaaa", [10, 11, 12, 13, 14]);   // director A: seq 1..5
   const afterA = rendered.length;
+  clock += CONTENTION_WINDOW + 1;            // A goes quiet: no contention
   advertise("bbbb", [372]);                  // director B takes over: seq restarts at 1
   return { afterA, rendered, sawNewDirector: rendered.length > afterA };
 };
@@ -95,4 +103,54 @@ test("the safety rules that made BLE dangerous in 444 are still in place", () =>
     "legacy 2-field beacons are accepted again — those devices broadcast a frozen page forever");
   // And a device that stops directing must stop advertising.
   assert.match(MODULE, /bleBeacon\.stopPublishing\(\)/, "the beacon is never switched off");
+});
+
+
+test("TWO LIVE ADVERTISERS: render NEITHER, rather than flapping or trusting the wrong one", () => {
+  // The edge case the nonce rebase OPENED. Before it, the stale seq guard suppressed the second
+  // advertiser by accident; after it, alternating packets each rebase the floor and every one
+  // applies — the follower ping-pongs between two pages, several times a second.
+  //
+  // The tempting fix, preferring whichever advertiser was seen first, is WORSE: a backgrounded or
+  // crashed director keeps advertising, and stickiness would pin every follower to its dead page
+  // permanently. That is the 444 wrong-song flash turned into a wrong-song hold.
+  //
+  // BLE carries no authority — nothing in the packet proves the sender is the director — so the
+  // only safe answer under contention is silence. It costs a few seconds of acceleration and the
+  // mesh resolves the conflict by token anyway.
+  const b = makeBeacon(), m = makeModule();
+  const rendered = [];
+  let clock = 0;
+  for (let i = 1; i <= 6; i++) {           // A and B interleaved, both live
+    clock += 1;
+    for (const [nonce, page] of [["aaaa", 100], ["bbbb", 372]]) {
+      const out = moduleRecv(m, beaconRecv(b, { nonce, seq: i, page }, clock), true);
+      if (out !== null) rendered.push(out);
+    }
+  }
+  assert.deepEqual(rendered, [100],
+    `contested advertisers rendered ${JSON.stringify(rendered)} — expected at most the first, then silence`);
+
+  // And once the loser goes quiet, the survivor is adopted rather than being locked out forever.
+  clock += CONTENTION_WINDOW + 1;
+  const out = moduleRecv(m, beaconRecv(b, { nonce: "bbbb", seq: 7, page: 372 }, clock), true);
+  assert.equal(out, 372, "after contention clears, the remaining advertiser is still ignored");
+});
+
+test("the advertised seq is bounded by page turns, not by wall-clock seconds", () => {
+  // sendPageUpdate runs at 1 Hz from the director heartbeat. Passing ITS counter meant the number
+  // in a fixed-size BLE name grew all Mass — ~5400 after 90 minutes and never resetting — in a
+  // 31-byte advertisement already carrying a 128-bit service UUID.
+  assert.match(BEACON, /private var advertSeq = 0/, "the beacon does not own its seq");
+  assert.match(BEACON, /func publish\(page: Int\)/, "publish still takes a caller-supplied seq");
+  const pub = BEACON.slice(BEACON.indexOf("func publish(page: Int)"));
+  const body = pub.slice(0, pub.indexOf("\n  }"));
+  assert.ok(body.indexOf("guard page != lastPublishedPage") < body.indexOf("advertSeq += 1"),
+    "seq increments even when the page has not changed — that is the unbounded growth again");
+  assert.match(MODULE, /publish\(page: self\.currentPageNumber \?\? page\.intValue\)/,
+    "the module still passes its own seq");
+  assert.doesNotMatch(MODULE, /private var bleSeq/, "the module's per-second counter is back");
+  // A new session must restart the count, or a re-promoted director resumes a stale ladder.
+  const stop = BEACON.slice(BEACON.indexOf("func stopPublishing()"));
+  assert.match(stop.slice(0, stop.indexOf("\n  }")), /advertSeq = 0/, "stopPublishing does not reset the seq");
 });

@@ -74,12 +74,27 @@ final class BlePageBeacon: NSObject {
   private var lastAppliedPage = -1
   private var isScanning = false
 
+  /// The advertised seq, owned HERE and incremented once per real page change.
+  ///
+  /// It used to be the caller's counter, which the director's mesh heartbeat bumps ONCE PER SECOND
+  /// whether the page moved or not. Over a 90-minute Mass that reaches ~5400 and keeps climbing,
+  /// lengthening a name that already shares a 31-byte advertisement with a 128-bit service UUID.
+  /// A number that grows forever inside a fixed-size packet is a bug with a fuse on it. Bounded by
+  /// page turns instead, this stays in the low hundreds for any real session.
+  private var advertSeq = 0
+
+  /// Nonces heard recently, for contention detection. BLE carries no authority — nothing in an
+  /// advertisement proves the sender is the real director — so when two advertisers disagree the
+  /// only safe answer is to render NEITHER and let the mesh, which does have authority, decide.
+  private var recentNonces: [String: TimeInterval] = [:]
+  private static let contentionWindow: TimeInterval = 4.0
+
   // MARK: - Director side
 
   /// Publish a page. Safe to call before Bluetooth is powered on — the value is held and advertised
   /// as soon as the radio is ready, so a director that taps the pill and turns a page immediately
   /// does not lose the first update.
-  func publish(page: Int, seq: Int) {
+  func publish(page: Int) {
     // PUBLISH ONLY ON A REAL CHANGE. The director's mesh heartbeat calls sendPageUpdate once per
     // SECOND, not once per page turn — so the first cut of this bumped seq, restarted the
     // advertiser and emitted telemetry every second forever. Measured over a 33-minute run: 280
@@ -88,6 +103,8 @@ final class BlePageBeacon: NSObject {
     // An advertisement is STATE, not an event: if the page has not moved there is nothing to say.
     guard page != lastPublishedPage else { return }
     lastPublishedPage = page
+    advertSeq += 1
+    let seq = advertSeq
     let name = "\(Self.namePrefix)\(sessionNonce).\(seq).\(page)"
     pendingAdvert = name
     if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
@@ -124,6 +141,7 @@ final class BlePageBeacon: NSObject {
   func stopPublishing() {
     pendingAdvert = nil
     lastPublishedPage = -1
+    advertSeq = 0
     sessionNonce = Self.newNonce()
     peripheral?.stopAdvertising()
     log?("ble:stop-publishing", [:])
@@ -208,6 +226,21 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     // across sessions is meaningless. Without this, a follower holding "last seen 1743" would
     // silently ignore a brand-new director starting at 1, forever, and look exactly like the mesh
     // being broken.
+    // CONTENTION => ABSTAIN. Two advertisers means either a split brain or a stale beacon, and
+    // nothing in a BLE packet says which one is the real director. Rendering the newest packet
+    // ping-pongs the follower between two pages; preferring the incumbent pins it to a possibly
+    // dead one, which is the 444 wrong-song failure made permanent. Both are worse than showing
+    // nothing for a few seconds: BLE only ever buys time before the mesh arrives, and the mesh
+    // resolves director conflicts by token within seconds. So when it is ambiguous, say nothing.
+    let now = Date().timeIntervalSince1970
+    recentNonces[parsed.nonce] = now
+    recentNonces = recentNonces.filter { now - $0.value <= Self.contentionWindow }
+    if recentNonces.count > 1 {
+      if lastAppliedPage != -1 { log?("ble:contention", ["advertisers": recentNonces.count]) }
+      lastAppliedPage = -1        // so the next uncontested reading logs as a fresh apply
+      return
+    }
+
     if parsed.nonce != lastSeenNonce {
       lastSeenNonce = parsed.nonce
       lastSeenSeq = -1
