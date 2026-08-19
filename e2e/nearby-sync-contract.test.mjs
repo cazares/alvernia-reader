@@ -341,3 +341,22 @@ test("the JS bundleUpdated handler no longer auto-remounts the WebView", () => {
   assert.doesNotMatch(handler, /setBundleUri/, "bundleUpdated must not swap the bundle");
   assert.match(handler, /mesh-bundleUpdated-ignored/, "it should leave a breadcrumb that it was ignored");
 });
+
+test("BLE contention cooldown outlasts a single sliding-window gap, not just one packet", () => {
+  // Live hardware capture (2026-08-18), verified via Xcode Console on a real device mid-repro:
+  // nonce af9b/page 99 and nonce 5990/page 50 were BOTH broadcasting; the existing abstain logic
+  // correctly suppressed page-apply WHILE both were within the 4s contentionWindow, but the moment
+  // af9b's last-seen timestamp aged out of that window, page 50 (also wrong) was trusted and
+  // applied on the very next packet. Nothing had proven af9b actually stopped — only that it
+  // hadn't been re-heard recently enough. This pins the fix: a SUSTAINED cooldown after
+  // contention, not just the first uncontested packet.
+  const bleSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  assert.match(bleSource, /private var lastContentionAt: TimeInterval = 0/,
+    "lastContentionAt tracking is gone — the cooldown has nothing to measure from");
+  assert.match(bleSource, /private static let contentionCooldown: TimeInterval = 4\.0/,
+    "contentionCooldown constant is gone or changed unexpectedly");
+  assert.match(bleSource, /lastContentionAt = now/,
+    "contention detection no longer stamps lastContentionAt — the cooldown would never arm");
+  assert.match(bleSource, /now - lastContentionAt < Self\.contentionCooldown/,
+    "the cooldown check is gone — a rival can win the instant its sliding-window entry expires");
+});
