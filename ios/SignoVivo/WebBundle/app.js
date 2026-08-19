@@ -229,7 +229,7 @@ const { shouldPaceRender: svShouldPaceRender } = (typeof self !== "undefined" &&
   shouldPaceRender: () => false,
 };
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "c896886-20ba523c";
+const CACHE_VERSION = "ba1e0a7-20ba523c";
 // Content-address of the BOOK (source PDF + render knobs, hashed by build.mjs). Keys everything
 // page-image-related SEPARATELY from the shell's CACHE_VERSION: a shell deploy leaves the cached
 // book untouched (no 25MB re-download), while ANY book change — even a page revised in place under
@@ -238,7 +238,7 @@ const CACHE_VERSION = "c896886-20ba523c";
 const BOOK_VERSION = "2dc91b796f72";
 // Human-facing build number, baked from version.json at build time, shown as a small "v<NNN>" badge
 // so signovivo.com always reveals which build it's on. Native injects its own version + overlay.
-const BUILD_NUMBER = "472";
+const BUILD_NUMBER = "473";
 const STATIC_CACHE = `signo-vivo-static-${CACHE_VERSION}`;
 const PAGE_CACHE = `signo-vivo-pages-${BOOK_VERSION}`;
 // Book-keyed (not shell-keyed): "fully cached offline" is a claim about the BOOK, so a shell-only
