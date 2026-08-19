@@ -266,6 +266,8 @@ export default function App() {
   const lastDirectorSnapshotRef = useRef<{ page: number; book: BookId; at: number } | null>(null);
   // Throttles the lastDirectorAt write from the 1s heartbeat. 0 = never written this session.
   const lastDirectorAtWrittenRef = useRef<number>(0);
+  // Restored director page on cold-boot, for resume-director to use. Set in bootstrap, used by onDirectorCode.
+  const restoredDirectorPageRef = useRef<number | undefined>(undefined);
   // True from the moment becomeDirector is entered until it settles. roleRef is only assigned after
   // the mesh has started (which can sleep 2s and retry); anything that must not race a director
   // start in flight reads this, not roleRef.
@@ -1003,6 +1005,7 @@ export default function App() {
         await AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "director");
         lastDirectorAtWrittenRef.current = Date.now();
         AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(Date.now())).catch(() => {});
+        AsyncStorage.setItem(STORAGE_KEYS.lastDirectorPage, String(currentPageRef.current || 1)).catch(() => {});
         bumpDirectorSessions();
         if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = false; return; } // superseded while persisting
         injectEvent({ type: "role", role: "director" });
@@ -1154,7 +1157,7 @@ export default function App() {
         {
           text: liveDirector ? "Tomar el control" : "Sí, dirigir",
           style: liveDirector ? "destructive" : "default",
-          onPress: () => becomeDirector(code, knownCurrentPage),
+          onPress: () => becomeDirector(code, knownCurrentPage ?? restoredDirectorPageRef.current),
         },
       ]);
     },
@@ -2226,10 +2229,17 @@ export default function App() {
       // when the app died, they get one toast pointing at the pill, and the seat stays empty until a
       // hand takes it. An empty seat for the seconds it takes to tap is the choir sitting on the
       // last page — which it already is. Two directors is the choir split.
-      AsyncStorage.getItem(STORAGE_KEYS.lastSyncRole)
-        .then((prev) => {
-          lastKnownRoleRef.current = prev ? String(prev) : null;
+      AsyncStorage.multiGet([
+        STORAGE_KEYS.lastSyncRole,
+        STORAGE_KEYS.lastDirectorPage,
+      ])
+        .then((result) => {
+          const prev = result[0]?.[1] ? String(result[0][1]) : null;
+          const pageStr = result[1]?.[1] ? String(result[1][1]) : null;
+          lastKnownRoleRef.current = prev;
           if (prev === "director") {
+            // Restore the page the director was on before the crash, so resume-director has the right context.
+            restoredDirectorPageRef.current = pageStr ? Number(pageStr) : undefined;
             // Written back as follower so the toast fires once per crash, not on every boot forever.
             AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
             // NO INSTRUCTIONS — THE NOTICE CARRIES THE BUTTON (owner, 2026-08-18: "really shitty
