@@ -91,6 +91,25 @@ final class BlePageBeacon: NSObject {
   private var recentNonces: [String: TimeInterval] = [:]
   private static let contentionWindow: TimeInterval = 4.0
 
+  /// When contention was last observed — separate from recentNonces, which only tracks nonces seen
+  /// WITHIN contentionWindow. Hardened 2026-08-18 after a live capture on real hardware showed the
+  /// exact gap this closes: two devices (nonce af9b/page 99, nonce 5990/page 50 — a genuine
+  /// contention event) were both broadcasting, and the moment af9b's timestamp aged out of the
+  /// 4s sliding window, page 50 was trusted and applied on the very next packet — even though
+  /// nothing proved af9b had actually stopped, only that it hadn't been HEARD again recently
+  /// enough. A rival that's still alive but has a slightly slower beacon interval than
+  /// contentionWindow can "win" the instant its opponent's last-seen timestamp expires.
+  ///
+  /// This requires a SUSTAINED clean read after contention clears, not just the first uncontested
+  /// packet, before trusting BLE again — giving a genuinely-stopped ghost time to actually go
+  /// silent, while a still-live one keeps re-triggering contention and re-arming the cooldown.
+  private var lastContentionAt: TimeInterval = 0
+  /// How long to keep abstaining after contention was last seen, even once only one nonce remains
+  /// in the window. Same magnitude as contentionWindow on purpose — a rival needs to have missed
+  /// roughly a full window's worth of chances to be re-heard before it's trusted as gone, not just
+  /// one lucky gap.
+  private static let contentionCooldown: TimeInterval = 4.0
+
   /// Power both radios up BEFORE they are needed, so neither pays a cold start on the critical path.
   ///
   /// CBPeripheralManager was created lazily inside publish(), which put CoreBluetooth's power-on
@@ -298,6 +317,18 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     if recentNonces.count > 1 {
       if lastAppliedPage != -1 { log?("ble:contention", ["advertisers": recentNonces.count]) }
       lastAppliedPage = -1        // so the next uncontested reading logs as a fresh apply
+      lastContentionAt = now
+      return
+    }
+    // COOLDOWN AFTER CONTENTION (2026-08-18, hardened after a live capture — see
+    // lastContentionAt's own comment for the exact packet trace this closes). The window above
+    // only proves a rival hasn't been HEARD recently; it does not prove it has stopped. Keep
+    // abstaining for a full cooldown period after contention was last seen, even though only one
+    // nonce remains in the window — a still-live rival with a slower beacon interval than
+    // contentionWindow will simply re-trigger contention and re-arm this, while a genuinely-dead
+    // one goes quiet and the cooldown naturally expires.
+    if now - lastContentionAt < Self.contentionCooldown {
+      lastAppliedPage = -1
       return
     }
 
