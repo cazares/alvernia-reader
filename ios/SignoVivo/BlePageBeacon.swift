@@ -1,4 +1,5 @@
 import CoreBluetooth
+import CryptoKit
 import Foundation
 
 /// BlePageBeacon — a CONNECTIONLESS page channel over Bluetooth LE.
@@ -56,6 +57,20 @@ final class BlePageBeacon: NSObject {
   var onPage: ((Int, Int, String) -> Void)?
   /// Telemetry sink — wired to DirectorSyncModule's dbgLog so this shares one log stream.
   var log: ((String, [String: Any]) -> Void)?
+
+  /// The session/book code, set by DirectorSyncModule from the SAME `sessionCode` passed to
+  /// startDirector/startFollower — known to every device in the room before mesh ever connects.
+  ///
+  /// Used as an HMAC key so a scanner can verify a broadcast was minted by someone who knows this
+  /// session's code, WITHOUT any round trip: the check is a local hash comparison, so it costs
+  /// nothing on the sub-second path this beacon exists for. Hardened 2026-08-18 after repeated
+  /// live-hardware captures kept showing "ghost" pages (nonce+page pairs matching nothing any
+  /// device had actually navigated to) getting applied — a bare nonce proves nothing about WHO
+  /// sent it. This does not prove the sender is the CURRENT director (any device that has ever
+  /// known this session's code, including a stale one, can still mint a valid tag) — it proves the
+  /// sender is a SignoVivo device that was told this session's code, which rules out every other
+  /// class of broadcaster in the room and every other book's session.
+  var sessionCode: String = ""
 
   private var peripheral: CBPeripheralManager?
   private var central: CBCentralManager?
@@ -142,7 +157,8 @@ final class BlePageBeacon: NSObject {
     lastPublishedPage = page
     advertSeq += 1
     let seq = advertSeq
-    let name = "\(Self.namePrefix)\(sessionNonce).\(seq).\(page)"
+    let tag = Self.authTag(sessionCode: sessionCode, nonce: sessionNonce, seq: seq, page: page)
+    let name = "\(Self.namePrefix)\(sessionNonce).\(seq).\(page).\(tag)"
     pendingAdvert = name
     let cold = peripheral == nil
     if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }
@@ -264,20 +280,44 @@ final class BlePageBeacon: NSObject {
     central?.stopScan()
   }
 
-  /// "SVa3f9.1743.59" -> (nonce a3f9, seq 1743, page 59). Returns nil for anything that is not ours.
+  /// Truncated HMAC-SHA256(key: sessionCode, msg: nonce|seq|page). 4 hex chars (16 bits) is a
+  /// deliberate space/security tradeoff: this rides in a BLE local name with an already-tight
+  /// payload budget, and the threat model is "keep out devices that don't know the session code",
+  /// not "resist a targeted forger" — the session code itself is not a high-value secret (it is
+  /// shared with every device in the room). CryptoKit's HMAC is deterministic across processes,
+  /// unlike Swift's default Hashable (which is randomized per launch and would silently reject
+  /// every packet from any other process, including this one on a scan vs. advertise call from two
+  /// different launches).
+  private static func authTag(sessionCode: String, nonce: String, seq: Int, page: Int) -> String {
+    let key = SymmetricKey(data: Data(sessionCode.utf8))
+    let msg = "\(nonce)|\(seq)|\(page)"
+    let mac = HMAC<SHA256>.authenticationCode(for: Data(msg.utf8), using: key)
+    return mac.compactMap { String(format: "%02x", $0) }.joined().prefix(4).description
+  }
+
+  /// "SVa3f9.1743.59.ab12" -> (nonce a3f9, seq 1743, page 59). Returns nil for anything that is
+  /// not ours, INCLUDING a well-formed packet whose tag does not verify against our own
+  /// sessionCode — that covers unrelated Bluetooth devices, a different book's session running
+  /// nearby, and (structurally) anything that isn't a SignoVivo device that was told this session's
+  /// code.
   ///
-  /// The LEGACY two-field form ("SV1743.59") is deliberately REJECTED rather than accepted with a
-  /// synthetic nonce. Builds 433-445 shipped a beacon that is never switched off, so any device
-  /// still running one is broadcasting a page frozen at whatever it last directed — possibly hours
-  /// stale. Those are exactly the advertisements that produced the wrong-song flash, and during a
-  /// mixed-build window they will be in the air. Ignoring the old format is what makes it safe to
-  /// render from BLE at all.
+  /// The LEGACY two-field form ("SV1743.59") and the pre-tag three-field form ("SVa3f9.1743.59")
+  /// are both deliberately REJECTED rather than accepted with a synthetic tag. Builds 433-445
+  /// shipped a beacon that is never switched off, so any device still running one is broadcasting a
+  /// page frozen at whatever it last directed — possibly hours stale. Ignoring old formats is what
+  /// makes it safe to render from BLE at all.
   private func parse(_ name: String) -> (nonce: String, seq: Int, page: Int)? {
     guard name.hasPrefix(Self.namePrefix) else { return nil }
     let body = name.dropFirst(Self.namePrefix.count)
     let parts = body.split(separator: ".")
-    guard parts.count == 3, let seq = Int(parts[1]), let page = Int(parts[2]) else { return nil }
-    return (String(parts[0]), seq, page)
+    guard parts.count == 4, let seq = Int(parts[1]), let page = Int(parts[2]) else { return nil }
+    let nonce = String(parts[0])
+    let tag = String(parts[3])
+    guard tag == Self.authTag(sessionCode: sessionCode, nonce: nonce, seq: seq, page: page) else {
+      log?("ble:tag-mismatch", ["nonce": nonce, "page": page])
+      return nil
+    }
+    return (nonce, seq, page)
   }
 }
 

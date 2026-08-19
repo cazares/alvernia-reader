@@ -360,3 +360,28 @@ test("BLE contention cooldown outlasts a single sliding-window gap, not just one
   assert.match(bleSource, /now - lastContentionAt < Self\.contentionCooldown/,
     "the cooldown check is gone — a rival can win the instant its sliding-window entry expires");
 });
+
+test("BLE page broadcasts are HMAC-bound to the session code — a lone broadcaster must prove it knows the code", () => {
+  // Hardened 2026-08-18 after THREE live hardware captures (Xcode Console, real devices) each
+  // showed a "ghost" page (nonce+page matching no song any device had actually navigated to) get
+  // applied even after: the MCSession one-follower-per-session fix, the contention-cooldown fix,
+  // and an explicit force-quit of all 4 devices. A bare nonce proves nothing about WHO sent it —
+  // any broadcaster in range that can format "SV<nonce>.<seq>.<page>" was trusted. This closes that
+  // gap with zero added latency: the tag is a local HMAC comparison, not a round trip, so BLE keeps
+  // its sub-second reaction time while a scanner now refuses any packet whose tag doesn't verify
+  // against the session code it was itself given.
+  const bleSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
+  assert.match(bleSource, /var sessionCode: String = ""/,
+    "sessionCode is gone — there is nothing left to bind the tag to");
+  assert.match(bleSource, /HMAC<SHA256>\.authenticationCode/,
+    "the HMAC tag computation is gone — broadcasts are unauthenticated again");
+  assert.match(bleSource, /guard parts\.count == 4/,
+    "parse() no longer requires the tag field — untagged packets would be accepted");
+  assert.match(bleSource, /tag == Self\.authTag\(sessionCode: sessionCode,/,
+    "parse() no longer verifies the tag — any well-formed packet would be trusted again");
+
+  const nativeSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+  const setSites = (nativeSource.match(/self\.bleBeacon\.sessionCode = normalizedSessionCode/g) || []).length;
+  assert.strictEqual(setSites, 2,
+    "expected bleBeacon.sessionCode to be set from BOTH startDirector and startFollower — found " + setSites);
+});
