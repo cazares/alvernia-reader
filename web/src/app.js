@@ -74,6 +74,11 @@ if (pageImage) {
     const base = (pageImage.currentSrc || pageImage.src).split("?")[0];
     window.setTimeout(() => { pageImage.src = `${base}?retry=${pageImgRetries}`; }, 350 * pageImgRetries);
   });
+  // positionBuildBadge() no-ops until the image actually has drawn geometry (getBoundingClientRect
+  // width/height > 0), which on a cold load can be AFTER the visibility/position calls that ran at
+  // boot — leaving the badge un-positioned until some later resize (pinch/pan) recomputed it. Listen
+  // for "load" so the very first successful decode also triggers a position pass.
+  pageImage.addEventListener("load", () => { try { positionBuildBadge(); } catch (_) {} });
 }
 const offlineGate = document.getElementById("offline-gate");
 const offlineGateTitle = document.getElementById("offline-gate-title");

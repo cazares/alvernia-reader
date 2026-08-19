@@ -74,6 +74,11 @@ if (pageImage) {
     const base = (pageImage.currentSrc || pageImage.src).split("?")[0];
     window.setTimeout(() => { pageImage.src = `${base}?retry=${pageImgRetries}`; }, 350 * pageImgRetries);
   });
+  // positionBuildBadge() no-ops until the image actually has drawn geometry (getBoundingClientRect
+  // width/height > 0), which on a cold load can be AFTER the visibility/position calls that ran at
+  // boot — leaving the badge un-positioned until some later resize (pinch/pan) recomputed it. Listen
+  // for "load" so the very first successful decode also triggers a position pass.
+  pageImage.addEventListener("load", () => { try { positionBuildBadge(); } catch (_) {} });
 }
 const offlineGate = document.getElementById("offline-gate");
 const offlineGateTitle = document.getElementById("offline-gate-title");
@@ -229,7 +234,7 @@ const { shouldPaceRender: svShouldPaceRender } = (typeof self !== "undefined" &&
   shouldPaceRender: () => false,
 };
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "8e9e678-7149a2cf";
+const CACHE_VERSION = "546e288-a5d1984b";
 // Content-address of the BOOK (source PDF + render knobs, hashed by build.mjs). Keys everything
 // page-image-related SEPARATELY from the shell's CACHE_VERSION: a shell deploy leaves the cached
 // book untouched (no 25MB re-download), while ANY book change — even a page revised in place under

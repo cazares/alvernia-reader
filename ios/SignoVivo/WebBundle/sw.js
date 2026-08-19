@@ -1,4 +1,4 @@
-const CACHE_VERSION = "8e9e678-7149a2cf";
+const CACHE_VERSION = "546e288-a5d1984b";
 // Content-address of the BOOK (source PDF bytes + render knobs, hashed by build.mjs).
 // Distinct from CACHE_VERSION (the shell hash) ON PURPOSE:
 //   - shell-only deploy → bookVersion unchanged → PAGE_CACHE name unchanged → every cached
