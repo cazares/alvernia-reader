@@ -764,6 +764,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.currentRole = "director"
       self.currentSessionCode = normalizedSessionCode
       self.currentDirectorToken = Self.randomToken()
+      self.bleBeacon.sessionCode = normalizedSessionCode
       self.bleBeacon.primeRadios()   // belt-and-braces: a director that never passed through startFollower
       self.configureTransport()
       self.startBleHealthTimer()
@@ -796,6 +797,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.resetTransport(emitState: false)
       self.currentRole = "follower"
       self.currentSessionCode = normalizedSessionCode
+      self.bleBeacon.sessionCode = normalizedSessionCode
       // BLE PROBE — scan while following. Observes and logs only; the page is NOT applied to the
       // UI, so a bad reading cannot move anybody off the director's page.
       self.bleBeacon.log = { [weak self] ev, data in self?.dbgLog(ev, data) }
