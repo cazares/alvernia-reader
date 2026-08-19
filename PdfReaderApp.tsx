@@ -1952,6 +1952,26 @@ export default function App() {
           await AsyncStorage.setItem(STORAGE_KEYS.bookStaged, JSON.stringify(rec)).catch(() => {});
           setBookStage(rec.ready ? "ready" : `error:${rec.error}`);
           breadcrumb(rec.ready ? `staged-ready:${rec.bookVersion}` : `stage-failed:${rec.error}`);
+          // COUNT TOWARD QUARANTINE, don't just fail this one attempt. "cannot-outrank-baked-shell"
+          // is deterministic — this exact bookVersion will fail the SAME manifest check on every
+          // future check-in for as long as this shell build is running, so leaving it un-quarantined
+          // means a cheap-but-real manifest fetch (stageBook's step 2b, before any of the 27 MB
+          // downloads) repeats every check-in cycle (~4 min) forever. Reuses the EXISTING quarantine
+          // list/threshold (isQuarantined, 3 failures) rather than a new mechanism — same "counter,
+          // not a tombstone" philosophy, so a future genuinely-newer book (a new bookVersion hash)
+          // is never affected, and this settles within ~3 check-ins instead of never.
+          if (rec.error === "cannot-outrank-baked-shell" && rec.bookVersion) {
+            try {
+              const raw = await AsyncStorage.getItem(STORAGE_KEYS.bookQuarantine);
+              const list = raw ? JSON.parse(raw) : [];
+              await AsyncStorage.setItem(
+                STORAGE_KEYS.bookQuarantine,
+                JSON.stringify(recordBundleFailure(Array.isArray(list) ? list : [], rec.bookVersion, Date.now())),
+              );
+            } catch {
+              /* best-effort: a bookkeeping failure must not block the rest of this handler */
+            }
+          }
           // A binary too old to run this book was, until now, refused SILENTLY — MIN_SHELL_BUILD
           // (web/build.mjs) already protects against ever applying something that would break, but
           // nothing told the person holding the device why nothing is happening. Miguel, 2026-08-18:

@@ -400,7 +400,13 @@ const serverBundle = (pages = 2) => {
   const body = { "index.html": "x".repeat(500) };
   for (let i = 1; i <= pages; i += 1) body[`books/standard/pages/page-${String(i).padStart(3, "0")}.webp`] = `page${i}-bytes`;
   const manifest = {
-    bookVersion: BV, totalPages: pages, pagePadWidth: 3, minShellBuild: 1,
+    // 999: every test in this file that calls serverBundle() passes shellBuild: 384. Real manifests
+    // always carry builtFromShellBuild (web/build.mjs writes it unconditionally); a fixture that
+    // omits it does not represent a real server response, and stageBook's "cannot-outrank-baked-
+    // shell" gate (src/bookUpdate.js, mirrors bookResolve.js rule 7) correctly refuses an
+    // unparseable/absent one rather than guessing. 999 keeps these download/verify/disk tests
+    // exercising what they actually test, not this gate.
+    bookVersion: BV, totalPages: pages, pagePadWidth: 3, minShellBuild: 1, builtFromShellBuild: 999,
     files: Object.entries(body).map(([p, v]) => ({ p, n: v.length, h: "sha", m: md5(v) })),
   };
   return { body, manifest };
@@ -464,6 +470,40 @@ test("stageBook REFUSES when the CDN hands back a different edition", async () =
   });
   assert.equal(rec.ready, false);
   assert.equal(rec.error, "version-mismatch");
+});
+
+test("stageBook refuses a candidate the boot-resolver can never actually pick", async () => {
+  // Reproduces the 2026-08-19 fleet incident: a candidate whose builtFromShellBuild TIES or LOSES
+  // to this shell's own build. bookResolve.js's decideBundle rule 7 will always choose the baked
+  // bundle over a Documents copy in this exact situation (deliberately — see that file), so staging
+  // and applying it anyway is pure churn: apply "succeeds", the very next resolveBundleUri call
+  // undoes it by picking baked, and the next check-in stages the identical candidate again. Forever
+  // — a WebView remount every check-in cycle with nothing ever landing. Refusing BEFORE the 27 MB
+  // download starts is what stops that loop from ever beginning.
+  const { body, manifest } = serverBundle(2);
+  manifest.builtFromShellBuild = 384; // == shellBuild below — a tie, which rule 7 gives to baked
+  fsRef = fakeFs();
+  const rec = await stageBook({
+    base: "https://signovivo.com", bookVersion: BV, fs: fsRef,
+    net: fakeNet({ manifest, body }), shellBuild: 384,
+  });
+  assert.equal(rec.ready, false);
+  assert.equal(rec.error, "cannot-outrank-baked-shell");
+  // Zero bytes moved — the refusal fires at the manifest step, before step 4 even writes the
+  // resume stamp, let alone any of the 27 MB of actual page files.
+  assert.equal(fsRef.files.size, 0);
+});
+
+test("stageBook still accepts a candidate that genuinely outranks the baked shell", async () => {
+  const { body, manifest } = serverBundle(2);
+  manifest.builtFromShellBuild = 385; // > shellBuild below — a real newer release, must proceed
+  fsRef = fakeFs();
+  const rec = await stageBook({
+    base: "https://signovivo.com", bookVersion: BV, fs: fsRef,
+    net: fakeNet({ manifest, body }), shellBuild: 384, activeTotalPages: 2,
+  });
+  assert.equal(rec.ready, true);
+  assert.equal(rec.error, null);
 });
 
 test("stageBook is a silent NO-OP when offline — never an error state, never UI", async () => {
