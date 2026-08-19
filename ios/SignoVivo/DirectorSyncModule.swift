@@ -152,6 +152,20 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var discoveredFollowerInfo: [MCPeerID: [String: String]] = [:]
   private var pendingInvitePeer: MCPeerID?
   private var pendingInviteTimestamp: TimeInterval = 0
+  /// Consecutive failed-connect count per candidate director, so a STALE entry in
+  /// discoveredDirectors can be evicted instead of re-targeted forever.
+  ///
+  /// Confirmed on real 4-device hardware (2026-08-19): a device that demoted itself from director
+  /// back to follower stayed in every OTHER follower's discoveredDirectors (only lostPeer clears
+  /// that dict, and the demoted device never left range) — and its token, being the most recent, kept
+  /// SORTING FIRST. Two followers spent 90+ seconds firing invite:send at it every 300-700ms, each
+  /// invite rejected in didReceiveInvitationFromPeer (why=not-a-director) and immediately retried,
+  /// while the REAL, live, foregrounded director sat undiscovered nearby the entire time. The
+  /// rejection round-trip is far faster than a genuine timeout, so the normal retry-after-timeout
+  /// backoff never engaged — this is a distinct failure mode from a slow/dead peer, not the same
+  /// bug the backoff already covers.
+  private var invalidDirectorStreak: [MCPeerID: Int] = [:]
+  private static let invalidDirectorEvictThreshold = 2
   private var connectedDirectorPeer: MCPeerID?
   private var discoveryRefreshTimer: Timer?
   private var earlyRefreshCyclesRemaining: Int = 0
@@ -2289,6 +2303,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             return
           }
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
+          self.invalidDirectorStreak.removeValue(forKey: peerID)
           self.followerHuntingSince = 0   // connected: stop the wedged-session countdown
           self.cancelSelfDirectedTimer()
           self.pauseDiscoveryRefreshWhileConnected()
@@ -2333,6 +2348,21 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           }
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
           self.stopFollowerHelloTimer()
+          // EVICT A REPEATEDLY-FAILING TARGET (see invalidDirectorStreak's own comment for the
+          // hardware trace this closes). Without this, reconsiderFollowerTarget's highest-token
+          // sort just re-selects the exact same stale entry every cycle — a peer that keeps
+          // rejecting us is exactly as persistent in discoveredDirectors as one that keeps
+          // accepting us, and nothing here previously told them apart.
+          let streak = (self.invalidDirectorStreak[peerID] ?? 0) + 1
+          if streak >= Self.invalidDirectorEvictThreshold {
+            self.dbgLog("director:evict-stale", ["peer": peerID.displayName, "streak": streak])
+            self.discoveredDirectors.removeValue(forKey: peerID)
+            self.discoveredDirectorInfo.removeValue(forKey: peerID)
+            self.discoveredDirectorSeenAt.removeValue(forKey: peerID)
+            self.invalidDirectorStreak.removeValue(forKey: peerID)
+          } else {
+            self.invalidDirectorStreak[peerID] = streak
+          }
           // HUNTING RESUMES HERE, so the hunting pulse must too. This stopped the watchdog — the
           // 0.5 Hz retry, the BLE scan self-heal and the wedged-session escalation all went with
           // it — leaving reconnection to one retry at followerRetryDelay and then the 5-12s

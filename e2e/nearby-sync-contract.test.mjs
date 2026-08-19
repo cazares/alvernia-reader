@@ -412,3 +412,25 @@ test("a follower never accepts a mesh invite from another follower", () => {
   assert.doesNotMatch(nativeSource, /guard session\.connectedPeers\.isEmpty else \{ emitState\(status: "connected"\); return \}/,
     "the old, wedge-prone connectedPeers.isEmpty guard is back");
 });
+
+test("a stale ex-director is evicted after repeated rejected invites, not retargeted forever", () => {
+  // Confirmed on real 4-device hardware (2026-08-19): a device that demoted itself from director
+  // back to follower stayed in every OTHER follower's discoveredDirectors (only lostPeer clears
+  // it, and the demoted device never left range) — and its stale token, being the most recent,
+  // kept sorting first. Two followers spent 90+ seconds firing invite:send at it every 300-700ms,
+  // each rejected (why=not-a-director) and immediately retried, while the REAL, live director sat
+  // undiscovered nearby the whole time. The rejection round-trip is far faster than a genuine
+  // timeout, so the normal retry-after-timeout backoff never engaged.
+  const nativeSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+
+  assert.match(nativeSource, /private var invalidDirectorStreak: \[MCPeerID: Int\] = \[:\]/,
+    "the per-peer failure streak tracker is gone — a stale director can be retargeted forever again");
+  assert.match(nativeSource, /private static let invalidDirectorEvictThreshold = 2/,
+    "the eviction threshold constant is gone or changed unexpectedly");
+  assert.match(nativeSource, /if streak >= Self\.invalidDirectorEvictThreshold \{/,
+    "the eviction check on repeated connect failure is gone");
+  assert.match(nativeSource, /self\.discoveredDirectors\.removeValue\(forKey: peerID\)\s*\n\s*self\.discoveredDirectorInfo\.removeValue\(forKey: peerID\)\s*\n\s*self\.discoveredDirectorSeenAt\.removeValue\(forKey: peerID\)/,
+    "eviction no longer clears all three discoveredDirector* dicts for the stale peer");
+  assert.match(nativeSource, /self\.invalidDirectorStreak\.removeValue\(forKey: peerID\)\s*\n\s*self\.followerHuntingSince = 0/,
+    "a successful connect no longer clears the failure streak — a peer that briefly failed once could get wrongly evicted later");
+});
