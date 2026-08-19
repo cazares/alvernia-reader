@@ -229,7 +229,7 @@ const { shouldPaceRender: svShouldPaceRender } = (typeof self !== "undefined" &&
   shouldPaceRender: () => false,
 };
 const SW_RELOAD_FLAG = "sv-sw-reload-pending";
-const CACHE_VERSION = "ba1e0a7-20ba523c";
+const CACHE_VERSION = "8e9e678-7149a2cf";
 // Content-address of the BOOK (source PDF + render knobs, hashed by build.mjs). Keys everything
 // page-image-related SEPARATELY from the shell's CACHE_VERSION: a shell deploy leaves the cached
 // book untouched (no 25MB re-download), while ANY book change — even a page revised in place under
@@ -1257,7 +1257,7 @@ const syncPillState = () => {
 const BUILD_BADGE_PAGE = 1;
 function syncBuildBadgeVisibility() {
   const el = document.getElementById("build-badge");
-  if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE);
+  if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE || state.currentPage === DEFAULT_START_PAGE);
   positionBuildBadge();
 }
 

@@ -1257,7 +1257,7 @@ const syncPillState = () => {
 const BUILD_BADGE_PAGE = 1;
 function syncBuildBadgeVisibility() {
   const el = document.getElementById("build-badge");
-  if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE);
+  if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE || state.currentPage === DEFAULT_START_PAGE);
   positionBuildBadge();
 }
 
