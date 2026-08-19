@@ -323,7 +323,28 @@ final class BlePageBeacon: NSObject {
 
 extension BlePageBeacon: CBPeripheralManagerDelegate {
   func peripheralManagerDidUpdateState(_ p: CBPeripheralManager) {
-    if p.state == .poweredOn { startAdvertisingIfReady() } else { log?("ble:peripheral-state", ["state": p.state.rawValue]) }
+    guard p.state == .poweredOn else {
+      log?("ble:peripheral-state", ["state": p.state.rawValue])
+      return
+    }
+    if pendingAdvert != nil {
+      startAdvertisingIfReady()
+      return
+    }
+    // ACTIVELY CANCEL A STALE ADVERTISEMENT FROM A PRIOR PROCESS. Found on hardware 2026-08-19:
+    // a follower rendered a validly-HMAC-tagged page from a nonce that NEITHER of the 4 test
+    // devices ever logged sending in that session. resetTransport() already calls
+    // stopPublishing() defensively at boot (before any role is chosen), but `peripheral` is still
+    // nil at that exact call — created lazily, only inside publish()/primeRadios() — so
+    // `peripheral?.stopAdvertising()` was a silent no-op that never reached CoreBluetooth at all.
+    // A device that was FORCE-QUIT while directing (rather than cleanly demoted) never runs
+    // stopPublishing() with a live peripheral either, so bluetoothd can be left holding an
+    // advertisement set tied to this app's identity with no in-process owner left to cancel it.
+    // This handler now fires on every power-on (primeRadios runs at the top of both
+    // startDirector and startFollower) and, whenever we do NOT intend to be advertising, tells
+    // CoreBluetooth so explicitly — closing the one path that could survive an unclean exit.
+    p.stopAdvertising()
+    log?("ble:boot-stop-stale", [:])
   }
 }
 
