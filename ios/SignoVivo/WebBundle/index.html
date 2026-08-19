@@ -37,7 +37,7 @@
     <link rel="dns-prefetch" href="https://signovivo-sync.4j4982y8jp.workers.dev" />
     <link rel="stylesheet" href="styles.css" />
     <script id="books-data" type="application/json">{"default":"standard","books":{"standard":{"label":"Manual Alvernia","totalPages":372}}}</script>
-  <script id="pages-data" type="application/json">{"totalPages":372,"bookVersion":"bv_93ebf749a52cced2"}</script>
+  <script id="pages-data" type="application/json">{"totalPages":372,"bookVersion":"bv_d36ce5357a9f0a7d"}</script>
 </head>
   <body>
     <!-- Full-page loading screen: covers the reader for the brief moment before the first page
@@ -49,11 +49,14 @@
         <p class="geo-gate-text" id="geo-gate-text">Cargando Signo Vivo…</p>
       </div>
     </div>
-    <!-- Always-visible build badge (web only; populated by app.js, hidden until then). -->
-    <div class="build-badge" id="build-badge" aria-hidden="true"></div>
     <main class="app-shell">
       <section class="viewer-shell" id="viewer-shell">
-        <img id="page-image" src="books/standard/pages/page-001.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
+        <div class="page-frame" id="page-frame">
+          <img id="page-image" src="books/standard/pages/page-001.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
+          <!-- Pinned with plain CSS to the PAGE's own box (see .page-frame) — same reliability as
+               the printed page-1 date stamp, no JS geometry math, no load-event race. -->
+          <div class="build-badge" id="build-badge" aria-hidden="true"></div>
+        </div>
         <div class="loading" id="loading">Cargando...</div>
         <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
           <div class="offline-gate-card">

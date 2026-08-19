@@ -303,12 +303,38 @@ button:disabled {
   font-weight: 700;
 }
 
+/* Sized to the BOOK's fixed page geometry (see web/build.mjs PDF_RENDER output — every page
+   renders at the same ratio) rather than filling the grid cell and letterboxing the <img> content
+   internally via object-fit. That distinction is the whole point: when object-fit does the
+   letterboxing INSIDE an element that fills its cell, the element's own box and its visually-drawn
+   content box differ, and anything pinned to "the page's corner" needs JS (getBoundingClientRect +
+   naturalWidth/Height) to find that content box — which is exactly what raced and went invisible
+   until a resize (see .build-badge). Sizing THIS element itself to the page ratio makes its box
+   ALREADY the letterboxed box, so a child positioned with plain CSS lands on the page corner with
+   no JS at all — same reliability as the printed page-1 date stamp, which is just pixels.
+   FROZEN ratio, matching PAGE_PAD_WIDTH's precedent — every rendered page shares it by construction
+   (same PDF, same DPI), so this is a physical constant of the book, not a per-page guess. */
+.page-frame {
+  position: relative;
+  /* width/height MUST stay auto — aspect-ratio only fills in a dimension left auto. An explicit
+     100%/100% here (the first version of this fix) sized both axes independently and made
+     aspect-ratio a no-op, silently reproducing the exact letterboxing gap this rule exists to
+     remove. max-width/max-height are the only caps; the browser resolves the largest box
+     satisfying the ratio within both, which is the "contain" behavior this replaces object-fit
+     for at the ELEMENT level. */
+  width: auto;
+  height: auto;
+  max-width: calc(var(--viewport-width) - var(--safe-left) - var(--safe-right));
+  max-height: calc(var(--viewport-height) - var(--safe-top) - var(--safe-bottom));
+  aspect-ratio: 1227 / 1636;
+  justify-self: center;
+  align-self: center;
+}
+
 #page-image {
   display: block;
   width: 100%;
   height: 100%;
-  max-width: calc(var(--viewport-width) - var(--safe-left) - var(--safe-right));
-  max-height: calc(var(--viewport-height) - var(--safe-top) - var(--safe-bottom));
   object-fit: contain;
   object-position: center center;
   background: #000;
@@ -2183,15 +2209,23 @@ button:disabled {
   text-align: center;
   letter-spacing: 0.03em;
 }
-/* Always-visible build badge (web). Fixed bottom-right with a dark backing so "v354" stays legible
-   over white book pages; sits above the geo-gate loader (z 150) so the version shows even mid-load.
-   pointer-events:none so it never blocks a tap. Hidden until app.js populates + adds .is-shown. */
+/* Always-visible build badge (web). Sits above the geo-gate loader (z 150) so the version shows
+   even mid-load. pointer-events:none so it never blocks a tap. Hidden until app.js populates +
+   adds .is-shown.
+   POSITIONED LIKE THE PRINTED PAGE-1 DATE STAMP, ON PURPOSE. This used to be position:fixed with
+   its right/bottom pixel offsets computed in JS every render (positionBuildBadge(): read the
+   image's naturalWidth/Height + getBoundingClientRect(), do the object-fit:contain math, write
+   style.right/bottom) — because a position:fixed element is anchored to the VIEWPORT, not to the
+   letterboxed page drawn inside #page-image, and those differ on every non-page-ratio screen. That
+   JS only runs after SOME render/resize/load event has fired with real geometry available, so on a
+   cold boot the badge could sit at its CSS placeholder position (or nowhere sensible) until a
+   pinch/pan forced a recompute — invisible on first launch, the exact bug this replaced.
+   Now .page-frame (the ancestor) is sized to the BOOK's fixed aspect-ratio via pure CSS, so its box
+   IS the letterboxed page — position:absolute + right/bottom below lands on the page's corner with
+   zero JS, on the very first paint, with the same reliability as pixels printed on the page. */
 .build-badge {
-  position: fixed;
-  /* Placeholder only — positionBuildBadge() in app.js overwrites right/bottom every render so the
-     stamp sits on the PAGE's corner rather than the screen's. On a letterboxed device (any iPhone)
-     the screen corner is black, and 38% black on black is why this looked missing. */
-  bottom: max(6px, env(safe-area-inset-bottom, 0px));
+  position: absolute;
+  bottom: 6px;
   right: 8px;
   z-index: 200;
   display: none;

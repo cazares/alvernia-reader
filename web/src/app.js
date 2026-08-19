@@ -74,11 +74,6 @@ if (pageImage) {
     const base = (pageImage.currentSrc || pageImage.src).split("?")[0];
     window.setTimeout(() => { pageImage.src = `${base}?retry=${pageImgRetries}`; }, 350 * pageImgRetries);
   });
-  // positionBuildBadge() no-ops until the image actually has drawn geometry (getBoundingClientRect
-  // width/height > 0), which on a cold load can be AFTER the visibility/position calls that ran at
-  // boot — leaving the badge un-positioned until some later resize (pinch/pan) recomputed it. Listen
-  // for "load" so the very first successful decode also triggers a position pass.
-  pageImage.addEventListener("load", () => { try { positionBuildBadge(); } catch (_) {} });
 }
 const offlineGate = document.getElementById("offline-gate");
 const offlineGateTitle = document.getElementById("offline-gate-title");
@@ -336,13 +331,6 @@ const setViewportCssVars = () => {
   const height = Math.max(1, Math.round((viewport?.height || window.innerHeight) * 100) / 100);
   document.documentElement.style.setProperty("--viewport-width", `${width}px`);
   document.documentElement.style.setProperty("--viewport-height", `${height}px`);
-  // The version stamp is pinned to where the PAGE was drawn, so it must be repositioned AFTER these
-  // vars change — they are what size the <img>. Called from here rather than from its own listener
-  // so the ordering is guaranteed and so it inherits this function's full event coverage: plain
-  // resize, orientationchange, AND visualViewport resize/scroll, which is how iOS actually reports a
-  // rotation. A separate listener got only two of the four and would have gone stale on device.
-  // Hoisted function declaration, so calling it from above its definition is fine.
-  positionBuildBadge();
 };
 const bindViewportMetrics = () => {
   setViewportCssVars();
@@ -1262,49 +1250,12 @@ const syncPillState = () => {
 const BUILD_BADGE_PAGE = 1;
 function syncBuildBadgeVisibility() {
   const el = document.getElementById("build-badge");
-  if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE || state.currentPage === DEFAULT_START_PAGE);
-  positionBuildBadge();
+  if (el) el.classList.toggle("is-shown", state.currentPage === BUILD_BADGE_PAGE);
 }
-
-/**
- * GLUE THE STAMP TO THE PAGE, not to the screen.
- *
- * It was fixed to the VIEWPORT's bottom-right at 8px / 38% black. On an iPad in portrait the page
- * fills the width, so it landed on white paper and read fine. On an iPhone the page is letterboxed
- * — object-fit: contain puts BLACK bars above and below — so the stamp landed on black, dark grey
- * on black, and looked like it was missing entirely. It never was; it was invisible.
- *
- * The printed date stamp in the page's lower-LEFT is part of the image and therefore always sits on
- * paper, at the paper's corner, in every orientation and on every device. This makes the version
- * stamp behave the same way: compute where object-fit: contain actually drew the image and pin the
- * badge to THAT rectangle's bottom-right corner.
- *
- * Cheap and idempotent, so it is safe to call from render, resize and orientation change.
- */
-function positionBuildBadge() {
-  const el = document.getElementById("build-badge");
-  const img = document.getElementById("page-image");
-  if (!el || !img) return;
-  // Defensive: e2e tests execute syncBuildBadgeVisibility against stub elements that have no DOM
-  // geometry. Positioning is a nicety; the VISIBILITY rule above is the contract, and it must not
-  // be taken down by a missing method on a fake node.
-  if (typeof img.getBoundingClientRect !== "function") return;
-  const nW = img.naturalWidth, nH = img.naturalHeight;
-  const r = img.getBoundingClientRect();
-  if (!nW || !nH || !r.width || !r.height) return;   // nothing drawn yet; a later call will fix it
-  // object-fit: contain — the drawn box is the natural size scaled to fit, then centred.
-  const scale = Math.min(r.width / nW, r.height / nH);
-  const drawnW = nW * scale, drawnH = nH * scale;
-  const right = r.left + (r.width - drawnW) / 2 + drawnW;
-  const bottom = r.top + (r.height - drawnH) / 2 + drawnH;
-  // A hair inside the paper's edge, scaled with the page so it looks the same at any size.
-  const inset = Math.max(3, Math.round(drawnW * 0.008));
-  el.style.right = `${Math.max(0, Math.round(window.innerWidth - right + inset))}px`;
-  el.style.bottom = `${Math.max(0, Math.round(window.innerHeight - bottom + inset))}px`;
-}
-// No listeners here on purpose: setViewportCssVars owns every viewport event and calls this once
-// the CSS vars that size the <img> have been written. Two independent listeners racing to position
-// against the same element is how you get a stamp that is correct on resize but not on rotation.
+// Positioning is plain CSS now (see .page-frame / .build-badge in styles.css) — the badge's ancestor
+// is sized to the book's fixed page ratio, so `position: absolute; right; bottom` on the badge lands
+// on the page's own corner with no JS geometry math and no load/resize race. Only VISIBILITY (which
+// page shows it) is still a runtime decision, so that's all this function does.
 
 const renderDirectorModeBadge = () => {
   const isDirector = state.nativeSyncRole === "director";
