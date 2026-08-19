@@ -385,3 +385,30 @@ test("BLE page broadcasts are HMAC-bound to the session code — a lone broadcas
   assert.strictEqual(setSites, 2,
     "expected bleBeacon.sessionCode to be set from BOTH startDirector and startFollower — found " + setSites);
 });
+
+test("a follower never accepts a mesh invite from another follower", () => {
+  // Confirmed on real hardware 2026-08-18: a follower's MCSession connected to a FELLOW FOLLOWER
+  // (tagged session:peer-not-director), which then silently wedged reconnection to the real
+  // director for 40+ seconds — reconsiderFollowerTarget's old guard treated "anything connected"
+  // as "connected to the director" and never retried. Root cause: didReceiveInvitationFromPeer's
+  // follower branch accepted ANY invite unconditionally, with no check on who was asking.
+  const nativeSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+
+  // 1) accept-time: the follower branch must verify the inviter before accepting.
+  assert.match(nativeSource, /A FOLLOWER MUST NEVER ACCEPT AN INVITE FROM ANOTHER FOLLOWER/,
+    "the accept-time verification comment/guard is gone — followers may accept invites from anyone again");
+  assert.match(nativeSource, /guard peerIsKnownDirector else \{\s*\n\s*self\.dbgLog\("invite:reject", \["from": peerID\.displayName, "why": "not-a-director"\]\)/,
+    "the follower-side invite accept no longer verifies the inviter is a known director");
+
+  // 2) connect-time cleanup: a non-director peer that lands in the session must be dropped, not just logged.
+  assert.match(nativeSource, /self\.dbgLog\("session:peer-not-director", \["peer": peerID\.displayName\]\)\s*\n\s*\/\/ ACTIVELY DROP IT/,
+    "session:peer-not-director no longer disconnects the bogus peer — it can wedge reconnection again");
+  assert.match(nativeSource, /session\.cancelConnectPeer\(peerID\)/,
+    "cancelConnectPeer call is gone — a rejected peer will linger in session.connectedPeers");
+
+  // 3) retry guard: must check the actual director connection, not just "is anything connected".
+  assert.match(nativeSource, /guard connectedDirectorPeer == nil else \{ emitState\(status: "connected"\); return \}/,
+    "reconsiderFollowerTarget reverted to the connectedPeers.isEmpty guard — a stray peer can wedge retry again");
+  assert.doesNotMatch(nativeSource, /guard session\.connectedPeers\.isEmpty else \{ emitState\(status: "connected"\); return \}/,
+    "the old, wedge-prone connectedPeers.isEmpty guard is back");
+});
