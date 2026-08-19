@@ -37,7 +37,7 @@
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = SignoVivo/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "SignoVivo-Bridging-Header.h"; path = "SignoVivo/SignoVivo-Bridging-Header.h"; sourceTree = "<group>"; };
 		F5BA1DE0523234ABF80A7618 /* Pods-SignoVivo.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SignoVivo.debug.xcconfig"; path = "Target Support Files/Pods-SignoVivo/Pods-SignoVivo.debug.xcconfig"; sourceTree = "<group>"; };
-		WEBB0004000000000000001A /* WebBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebBundle; path = SignoVivo/WebBundle; sourceTree = "<group>"; };
+		WEBB0004000000000000001A /* WebBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebBundle; path = WebBundle; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
