@@ -19,6 +19,8 @@ export const STORAGE_KEYS = {
   lastSyncRole: "sv.sync.lastRole",
   // timestamp (ms) of last time this device was director
   lastDirectorAt: "sv.sync.lastDirectorAt",
+  // last page number a director was on (for cold-boot restore)
+  lastDirectorPage: "sv.sync.lastDirectorPage",
   // bounded ring buffer of recent breadcrumbs — the ONLY record of what a device did at Mass,
   // where there is no internet for the /log telemetry to reach and no MDM to ask afterwards
   breadcrumbs: "sv.diag.breadcrumbs",

@@ -391,6 +391,29 @@ export const stageBook = async (opts) => {
   // 2. A book that needs native code this shell lacks is never downloaded at all.
   if (Number(manifest.minShellBuild || 1) > Number(shellBuild)) return fail("shell-too-old");
 
+  // 2b. A candidate this shell can never actually BOOT is never downloaded either.
+  //
+  // Mirrors src/bookResolve.js decideBundle rule 7 EXACTLY (same `>=` direction, same tie
+  // handling) — that resolver refuses a Documents copy whose `builtFromShellBuild` is <= the
+  // BAKED bundle's, deliberately, so a human-installed binary always wins a tie or an older
+  // OTA candidate. The baked bundle for THIS shell was built at this exact `shellBuild` (release.sh
+  // runs web/build.mjs and bump-build.mjs against the same version.json), so `shellBuild` here IS
+  // the baked comparison value — no separate manifest read needed.
+  //
+  // Without this, staging accepts what boot-resolve will always reject: apply "succeeds" (writes
+  // sv_book_active, clears sv_book_staged, remounts), resolveBundleUri immediately re-picks baked,
+  // and the next check-in — reading the REAL active version off that same resolver, not the
+  // record apply just wrote — sees no match and stages the identical candidate again. Forever,
+  // once every check-in, each cycle a needless WebView remount. This is the SAME "never settles"
+  // failure the BUNDLE_MANIFEST_NAME write below was added for (measured on builds 391-393) —
+  // same structural gap, a different specific cause.
+  if (Number(shellBuild) >= Number(manifest.builtFromShellBuild || 0)) {
+    return fail("cannot-outrank-baked-shell", {
+      builtFromShellBuild: manifest.builtFromShellBuild ?? null,
+      shellBuild,
+    });
+  }
+
   // 3. Disk. There is no free-space check anywhere else in this pipeline today.
   const needed = manifest.files.reduce((s, f) => s + Number(f.n || 0), 0);
   if (freeDiskBytes != null && freeDiskBytes < needed * 2 + 50 * 1024 * 1024) {
