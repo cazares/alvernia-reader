@@ -69,7 +69,7 @@
     // BOOK_UPDATE_CONCURRENCY is set high enough to never gate a fleet this size — the throttle
     // only gates NEW starts anyway (a device already downloading/ready is always honoured, see
     // bookArming.js), so a high number here just means "don't stagger," which is the ask.
-    "BOOK_UPDATE_VERSION": "bv_b49a5fa66828302b",
+    "BOOK_UPDATE_VERSION": "bv_681e4fe55f907e7c",
     "BOOK_UPDATE_DEVICES": "*",
     "BOOK_UPDATE_ALLOW_FLEET": "yes",
     "BOOK_UPDATE_BASE": "https://signovivo.com",
@@ -88,7 +88,7 @@
     // Kept in lockstep automatically: release.sh rewrites this to the just-shipped build number
     // on every production release, the same way it rewrites BOOK_UPDATE_VERSION. Do not hand-edit
     // between releases.
-    "LATEST_NATIVE_BUILD": "469"
+    "LATEST_NATIVE_BUILD": "470"
   }
 
   // Later, to serve from sync.signovivo.com instead of *.workers.dev, add:
