@@ -1,0 +1,3846 @@
+{
+  "schema": 1,
+  "bookVersion": "bv_d5fce34847a4f1b0",
+  "totalPages": 372,
+  "builtFromShellBuild": 472,
+  "minShellBuild": 400,
+  "generatedAt": "2026-08-19T11:54:36.070Z",
+  "sourcePdfSha256": "415d8e23f6937aa86d73e4538ebf0b6cd53907d085a63cd39dce3e0e8335761e",
+  "sourcePdfPages": 372,
+  "songIndexDigest": "0003e0ed142f06496a007200b16e270761e17709662739fde192bbcf4ada092f",
+  "firstSong": 1,
+  "lastSong": 372,
+  "songPages": [
+    [
+      1,
+      1
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      4
+    ],
+    [
+      5,
+      5
+    ],
+    [
+      6,
+      6
+    ],
+    [
+      7,
+      7
+    ],
+    [
+      8,
+      8
+    ],
+    [
+      9,
+      9
+    ],
+    [
+      10,
+      10
+    ],
+    [
+      11,
+      11
+    ],
+    [
+      12,
+      12
+    ],
+    [
+      13,
+      13
+    ],
+    [
+      14,
+      14
+    ],
+    [
+      15,
+      15
+    ],
+    [
+      16,
+      16
+    ],
+    [
+      17,
+      17
+    ],
+    [
+      18,
+      18
+    ],
+    [
+      19,
+      19
+    ],
+    [
+      20,
+      20
+    ],
+    [
+      21,
+      21
+    ],
+    [
+      22,
+      22
+    ],
+    [
+      23,
+      23
+    ],
+    [
+      24,
+      24
+    ],
+    [
+      25,
+      25
+    ],
+    [
+      26,
+      26
+    ],
+    [
+      27,
+      27
+    ],
+    [
+      28,
+      28
+    ],
+    [
+      29,
+      29
+    ],
+    [
+      30,
+      30
+    ],
+    [
+      31,
+      31
+    ],
+    [
+      32,
+      32
+    ],
+    [
+      33,
+      33
+    ],
+    [
+      34,
+      34
+    ],
+    [
+      35,
+      35
+    ],
+    [
+      36,
+      36
+    ],
+    [
+      37,
+      37
+    ],
+    [
+      38,
+      38
+    ],
+    [
+      39,
+      39
+    ],
+    [
+      40,
+      40
+    ],
+    [
+      41,
+      41
+    ],
+    [
+      42,
+      42
+    ],
+    [
+      43,
+      43
+    ],
+    [
+      44,
+      44
+    ],
+    [
+      45,
+      45
+    ],
+    [
+      46,
+      46
+    ],
+    [
+      47,
+      47
+    ],
+    [
+      48,
+      48
+    ],
+    [
+      49,
+      49
+    ],
+    [
+      50,
+      50
+    ],
+    [
+      51,
+      51
+    ],
+    [
+      52,
+      52
+    ],
+    [
+      53,
+      53
+    ],
+    [
+      54,
+      54
+    ],
+    [
+      55,
+      55
+    ],
+    [
+      56,
+      56
+    ],
+    [
+      57,
+      57
+    ],
+    [
+      58,
+      58
+    ],
+    [
+      59,
+      59
+    ],
+    [
+      60,
+      60
+    ],
+    [
+      61,
+      61
+    ],
+    [
+      62,
+      62
+    ],
+    [
+      63,
+      63
+    ],
+    [
+      64,
+      64
+    ],
+    [
+      65,
+      65
+    ],
+    [
+      66,
+      66
+    ],
+    [
+      67,
+      67
+    ],
+    [
+      68,
+      68
+    ],
+    [
+      69,
+      69
+    ],
+    [
+      70,
+      70
+    ],
+    [
+      71,
+      71
+    ],
+    [
+      72,
+      72
+    ],
+    [
+      73,
+      73
+    ],
+    [
+      74,
+      74
+    ],
+    [
+      75,
+      75
+    ],
+    [
+      76,
+      76
+    ],
+    [
+      77,
+      77
+    ],
+    [
+      78,
+      78
+    ],
+    [
+      79,
+      79
+    ],
+    [
+      80,
+      80
+    ],
+    [
+      81,
+      81
+    ],
+    [
+      82,
+      82
+    ],
+    [
+      83,
+      83
+    ],
+    [
+      84,
+      84
+    ],
+    [
+      85,
+      85
+    ],
+    [
+      86,
+      86
+    ],
+    [
+      87,
+      87
+    ],
+    [
+      88,
+      88
+    ],
+    [
+      89,
+      89
+    ],
+    [
+      90,
+      90
+    ],
+    [
+      91,
+      91
+    ],
+    [
+      92,
+      92
+    ],
+    [
+      93,
+      93
+    ],
+    [
+      94,
+      94
+    ],
+    [
+      95,
+      95
+    ],
+    [
+      96,
+      96
+    ],
+    [
+      97,
+      97
+    ],
+    [
+      98,
+      98
+    ],
+    [
+      99,
+      99
+    ],
+    [
+      100,
+      100
+    ],
+    [
+      101,
+      101
+    ],
+    [
+      102,
+      102
+    ],
+    [
+      103,
+      103
+    ],
+    [
+      104,
+      104
+    ],
+    [
+      105,
+      105
+    ],
+    [
+      106,
+      106
+    ],
+    [
+      107,
+      107
+    ],
+    [
+      108,
+      108
+    ],
+    [
+      109,
+      109
+    ],
+    [
+      110,
+      110
+    ],
+    [
+      111,
+      111
+    ],
+    [
+      112,
+      112
+    ],
+    [
+      113,
+      113
+    ],
+    [
+      114,
+      114
+    ],
+    [
+      115,
+      115
+    ],
+    [
+      116,
+      116
+    ],
+    [
+      117,
+      117
+    ],
+    [
+      118,
+      118
+    ],
+    [
+      119,
+      119
+    ],
+    [
+      120,
+      120
+    ],
+    [
+      121,
+      121
+    ],
+    [
+      122,
+      122
+    ],
+    [
+      123,
+      123
+    ],
+    [
+      124,
+      124
+    ],
+    [
+      125,
+      125
+    ],
+    [
+      126,
+      126
+    ],
+    [
+      127,
+      127
+    ],
+    [
+      128,
+      128
+    ],
+    [
+      129,
+      129
+    ],
+    [
+      130,
+      130
+    ],
+    [
+      131,
+      131
+    ],
+    [
+      132,
+      132
+    ],
+    [
+      133,
+      133
+    ],
+    [
+      134,
+      134
+    ],
+    [
+      135,
+      135
+    ],
+    [
+      136,
+      136
+    ],
+    [
+      137,
+      137
+    ],
+    [
+      138,
+      138
+    ],
+    [
+      139,
+      139
+    ],
+    [
+      140,
+      140
+    ],
+    [
+      141,
+      141
+    ],
+    [
+      142,
+      142
+    ],
+    [
+      143,
+      143
+    ],
+    [
+      144,
+      144
+    ],
+    [
+      145,
+      145
+    ],
+    [
+      146,
+      146
+    ],
+    [
+      147,
+      147
+    ],
+    [
+      148,
+      148
+    ],
+    [
+      149,
+      149
+    ],
+    [
+      150,
+      150
+    ],
+    [
+      151,
+      151
+    ],
+    [
+      152,
+      152
+    ],
+    [
+      153,
+      153
+    ],
+    [
+      154,
+      154
+    ],
+    [
+      155,
+      155
+    ],
+    [
+      156,
+      156
+    ],
+    [
+      157,
+      157
+    ],
+    [
+      158,
+      158
+    ],
+    [
+      159,
+      159
+    ],
+    [
+      160,
+      160
+    ],
+    [
+      161,
+      161
+    ],
+    [
+      162,
+      162
+    ],
+    [
+      163,
+      163
+    ],
+    [
+      164,
+      164
+    ],
+    [
+      165,
+      165
+    ],
+    [
+      166,
+      166
+    ],
+    [
+      167,
+      167
+    ],
+    [
+      168,
+      168
+    ],
+    [
+      169,
+      169
+    ],
+    [
+      170,
+      170
+    ],
+    [
+      171,
+      171
+    ],
+    [
+      172,
+      172
+    ],
+    [
+      173,
+      173
+    ],
+    [
+      174,
+      174
+    ],
+    [
+      175,
+      175
+    ],
+    [
+      176,
+      176
+    ],
+    [
+      177,
+      177
+    ],
+    [
+      178,
+      178
+    ],
+    [
+      179,
+      179
+    ],
+    [
+      180,
+      180
+    ],
+    [
+      181,
+      181
+    ],
+    [
+      182,
+      182
+    ],
+    [
+      183,
+      183
+    ],
+    [
+      184,
+      184
+    ],
+    [
+      185,
+      185
+    ],
+    [
+      186,
+      186
+    ],
+    [
+      187,
+      187
+    ],
+    [
+      188,
+      188
+    ],
+    [
+      189,
+      189
+    ],
+    [
+      190,
+      190
+    ],
+    [
+      191,
+      191
+    ],
+    [
+      192,
+      192
+    ],
+    [
+      193,
+      193
+    ],
+    [
+      194,
+      194
+    ],
+    [
+      195,
+      195
+    ],
+    [
+      196,
+      196
+    ],
+    [
+      197,
+      197
+    ],
+    [
+      198,
+      198
+    ],
+    [
+      199,
+      199
+    ],
+    [
+      200,
+      200
+    ],
+    [
+      201,
+      201
+    ],
+    [
+      202,
+      202
+    ],
+    [
+      203,
+      203
+    ],
+    [
+      204,
+      204
+    ],
+    [
+      205,
+      205
+    ],
+    [
+      206,
+      206
+    ],
+    [
+      207,
+      207
+    ],
+    [
+      208,
+      208
+    ],
+    [
+      209,
+      209
+    ],
+    [
+      210,
+      210
+    ],
+    [
+      211,
+      211
+    ],
+    [
+      212,
+      212
+    ],
+    [
+      213,
+      213
+    ],
+    [
+      214,
+      214
+    ],
+    [
+      215,
+      215
+    ],
+    [
+      216,
+      216
+    ],
+    [
+      217,
+      217
+    ],
+    [
+      218,
+      218
+    ],
+    [
+      219,
+      219
+    ],
+    [
+      220,
+      220
+    ],
+    [
+      221,
+      221
+    ],
+    [
+      222,
+      222
+    ],
+    [
+      223,
+      223
+    ],
+    [
+      224,
+      224
+    ],
+    [
+      225,
+      225
+    ],
+    [
+      226,
+      226
+    ],
+    [
+      227,
+      227
+    ],
+    [
+      228,
+      228
+    ],
+    [
+      229,
+      229
+    ],
+    [
+      230,
+      230
+    ],
+    [
+      231,
+      231
+    ],
+    [
+      232,
+      232
+    ],
+    [
+      233,
+      233
+    ],
+    [
+      234,
+      234
+    ],
+    [
+      235,
+      235
+    ],
+    [
+      236,
+      236
+    ],
+    [
+      237,
+      237
+    ],
+    [
+      238,
+      238
+    ],
+    [
+      239,
+      239
+    ],
+    [
+      240,
+      240
+    ],
+    [
+      241,
+      241
+    ],
+    [
+      242,
+      242
+    ],
+    [
+      243,
+      243
+    ],
+    [
+      244,
+      244
+    ],
+    [
+      245,
+      245
+    ],
+    [
+      246,
+      246
+    ],
+    [
+      247,
+      247
+    ],
+    [
+      248,
+      248
+    ],
+    [
+      249,
+      249
+    ],
+    [
+      250,
+      250
+    ],
+    [
+      251,
+      251
+    ],
+    [
+      252,
+      252
+    ],
+    [
+      253,
+      253
+    ],
+    [
+      254,
+      254
+    ],
+    [
+      255,
+      255
+    ],
+    [
+      256,
+      256
+    ],
+    [
+      257,
+      257
+    ],
+    [
+      258,
+      258
+    ],
+    [
+      259,
+      259
+    ],
+    [
+      260,
+      260
+    ],
+    [
+      261,
+      261
+    ],
+    [
+      262,
+      262
+    ],
+    [
+      263,
+      263
+    ],
+    [
+      264,
+      264
+    ],
+    [
+      265,
+      265
+    ],
+    [
+      266,
+      266
+    ],
+    [
+      267,
+      267
+    ],
+    [
+      268,
+      268
+    ],
+    [
+      269,
+      269
+    ],
+    [
+      270,
+      270
+    ],
+    [
+      271,
+      271
+    ],
+    [
+      272,
+      272
+    ],
+    [
+      273,
+      273
+    ],
+    [
+      274,
+      274
+    ],
+    [
+      275,
+      275
+    ],
+    [
+      276,
+      276
+    ],
+    [
+      277,
+      277
+    ],
+    [
+      278,
+      278
+    ],
+    [
+      279,
+      279
+    ],
+    [
+      280,
+      280
+    ],
+    [
+      281,
+      281
+    ],
+    [
+      282,
+      282
+    ],
+    [
+      283,
+      283
+    ],
+    [
+      284,
+      284
+    ],
+    [
+      285,
+      285
+    ],
+    [
+      286,
+      286
+    ],
+    [
+      287,
+      287
+    ],
+    [
+      288,
+      288
+    ],
+    [
+      289,
+      289
+    ],
+    [
+      290,
+      290
+    ],
+    [
+      291,
+      291
+    ],
+    [
+      292,
+      292
+    ],
+    [
+      293,
+      293
+    ],
+    [
+      294,
+      294
+    ],
+    [
+      295,
+      295
+    ],
+    [
+      296,
+      296
+    ],
+    [
+      297,
+      297
+    ],
+    [
+      298,
+      298
+    ],
+    [
+      299,
+      299
+    ],
+    [
+      300,
+      300
+    ],
+    [
+      301,
+      301
+    ],
+    [
+      302,
+      302
+    ],
+    [
+      303,
+      303
+    ],
+    [
+      304,
+      304
+    ],
+    [
+      305,
+      305
+    ],
+    [
+      306,
+      306
+    ],
+    [
+      307,
+      307
+    ],
+    [
+      308,
+      308
+    ],
+    [
+      309,
+      309
+    ],
+    [
+      310,
+      310
+    ],
+    [
+      311,
+      311
+    ],
+    [
+      312,
+      312
+    ],
+    [
+      313,
+      313
+    ],
+    [
+      314,
+      314
+    ],
+    [
+      315,
+      315
+    ],
+    [
+      316,
+      316
+    ],
+    [
+      317,
+      317
+    ],
+    [
+      318,
+      318
+    ],
+    [
+      319,
+      319
+    ],
+    [
+      320,
+      320
+    ],
+    [
+      321,
+      321
+    ],
+    [
+      322,
+      322
+    ],
+    [
+      323,
+      323
+    ],
+    [
+      324,
+      324
+    ],
+    [
+      325,
+      325
+    ],
+    [
+      326,
+      326
+    ],
+    [
+      327,
+      327
+    ],
+    [
+      328,
+      328
+    ],
+    [
+      329,
+      329
+    ],
+    [
+      330,
+      330
+    ],
+    [
+      331,
+      331
+    ],
+    [
+      332,
+      332
+    ],
+    [
+      333,
+      333
+    ],
+    [
+      334,
+      334
+    ],
+    [
+      335,
+      335
+    ],
+    [
+      336,
+      336
+    ],
+    [
+      337,
+      337
+    ],
+    [
+      338,
+      338
+    ],
+    [
+      339,
+      339
+    ],
+    [
+      340,
+      340
+    ],
+    [
+      341,
+      341
+    ],
+    [
+      342,
+      342
+    ],
+    [
+      343,
+      343
+    ],
+    [
+      344,
+      344
+    ],
+    [
+      345,
+      345
+    ],
+    [
+      346,
+      346
+    ],
+    [
+      347,
+      347
+    ],
+    [
+      348,
+      348
+    ],
+    [
+      349,
+      349
+    ],
+    [
+      350,
+      350
+    ],
+    [
+      351,
+      351
+    ],
+    [
+      352,
+      352
+    ],
+    [
+      353,
+      353
+    ],
+    [
+      354,
+      354
+    ],
+    [
+      355,
+      355
+    ],
+    [
+      356,
+      356
+    ],
+    [
+      357,
+      357
+    ],
+    [
+      358,
+      358
+    ],
+    [
+      359,
+      359
+    ],
+    [
+      360,
+      360
+    ],
+    [
+      361,
+      361
+    ],
+    [
+      362,
+      362
+    ],
+    [
+      363,
+      363
+    ],
+    [
+      364,
+      364
+    ],
+    [
+      365,
+      365
+    ],
+    [
+      366,
+      366
+    ],
+    [
+      367,
+      367
+    ],
+    [
+      368,
+      368
+    ],
+    [
+      369,
+      369
+    ],
+    [
+      370,
+      370
+    ],
+    [
+      371,
+      371
+    ],
+    [
+      372,
+      372
+    ]
+  ],
+  "pagePadWidth": 3,
+  "renderer": {
+    "dpi": 115,
+    "webpQuality": 60,
+    "pdftoppm": "pdftoppm version 26.04.0",
+    "cwebp": "1.6.0"
+  },
+  "files": [
+    {
+      "p": "app.js",
+      "n": 226235,
+      "h": "391d2063d69c1455e86afc16d387b22551c0d920660d410169d171c1ff6f45c1",
+      "m": "03e1139e5c007bcf9db1652d719617b9"
+    },
+    {
+      "p": "books.json",
+      "n": 88,
+      "h": "1f2508be6467b502ebca85b2c6761e09cf8624933336fab5321a68f8643ae638",
+      "m": "6a32cbf701f69bf7fc68a82c62c9393d"
+    },
+    {
+      "p": "books/standard/pages.json",
+      "n": 213467,
+      "h": "3db93dda809a0ba1503287075983c02e16529f02ce0f0142f299cf5ff0063082",
+      "m": "0e8093c9e12ec56df3bbf4f9168415fb"
+    },
+    {
+      "p": "books/standard/pages/page-001.webp",
+      "n": 10364,
+      "h": "98238b8fe597d847688180f5a913860cd3aff2cd7bd879b7f97459a82542e5de",
+      "m": "8b5b37be5b167dc060eaa94a5cb45aa1"
+    },
+    {
+      "p": "books/standard/pages/page-002.webp",
+      "n": 61162,
+      "h": "bac34b44410f35ba44a9da9a5bec9e9a2d737e5cc65e003b76e3c8e7b0c8a166",
+      "m": "f42cc66ae50022cd3c0d174768fb90b4"
+    },
+    {
+      "p": "books/standard/pages/page-003.webp",
+      "n": 73678,
+      "h": "8aeea445efddada93d286612036bd4a9dbccf25e04265a8cb1812ea93ac2302b",
+      "m": "735a7b94081852fa7472d0c034858e38"
+    },
+    {
+      "p": "books/standard/pages/page-004.webp",
+      "n": 89632,
+      "h": "d80e4f13e98a14606da984bf4b6509cc01705086a79ad460a1f902ba582a295c",
+      "m": "045fe092719da51c67894f4188609570"
+    },
+    {
+      "p": "books/standard/pages/page-005.webp",
+      "n": 97944,
+      "h": "23e291d4b260d996754e3169cab00e0038004460d24ca6b3fdf876c82438009f",
+      "m": "16f69900b27122e42d9211db53904f51"
+    },
+    {
+      "p": "books/standard/pages/page-006.webp",
+      "n": 80862,
+      "h": "b3bebbf396c593528b132c01e5511ea38cc9e68adba7494ea37ca2353571350c",
+      "m": "798879ee7a63019839e6c1f4081ae8e8"
+    },
+    {
+      "p": "books/standard/pages/page-007.webp",
+      "n": 79724,
+      "h": "6833a6dcb82beeb3e2d0542f115e42730da49166f8ac98886791eaa819b3569a",
+      "m": "bd2fdee70e91d5c4f0a37a27402314c6"
+    },
+    {
+      "p": "books/standard/pages/page-008.webp",
+      "n": 91826,
+      "h": "422fd261a4a0f7a1cb324c79282c89eff907469008b1cf7cb6e83b4f844cd431",
+      "m": "aed4312fc7c378681c4e9de4657cb1fe"
+    },
+    {
+      "p": "books/standard/pages/page-009.webp",
+      "n": 71952,
+      "h": "5730d8eaada54443c7964aa891b2365267be020b0d4da3ac91e0de1ef5682d92",
+      "m": "692c8689188ea2a896530282febe9420"
+    },
+    {
+      "p": "books/standard/pages/page-010.webp",
+      "n": 55538,
+      "h": "bd1009201b615c3cdd34daec7c1a78a2f3f30c412709a633bf5a1f8e37c3aac5",
+      "m": "621c456e0626927a0cdc6861a2813ee6"
+    },
+    {
+      "p": "books/standard/pages/page-011.webp",
+      "n": 73606,
+      "h": "4f707330f575a8ac0f69e8450d184e989b282fcb2d553b387f6cf85f12aa0396",
+      "m": "d22f0deb4c1959103a1de6b654aa0f9a"
+    },
+    {
+      "p": "books/standard/pages/page-012.webp",
+      "n": 71964,
+      "h": "a9e5148d373755adc891a120f4f2a60f37544714be7b66ff20cefbb0b5045c9b",
+      "m": "457340efc299df4f6f65334432d65756"
+    },
+    {
+      "p": "books/standard/pages/page-013.webp",
+      "n": 65582,
+      "h": "06354729c2f7dd79a763f1ce8f50596b5ae51f8a6dc19ad0588fc9f4cf175118",
+      "m": "5a6024a44d4861d553bb5540ddd9f2c6"
+    },
+    {
+      "p": "books/standard/pages/page-014.webp",
+      "n": 112692,
+      "h": "e46417d7ea6c11380ff3706623d1530a058200666b74ba750a5d8a20246982b7",
+      "m": "19844d1ecb9b5daf41147782a1466992"
+    },
+    {
+      "p": "books/standard/pages/page-015.webp",
+      "n": 103386,
+      "h": "b69855d958c94342d78983352527fdbf15702fbe68f4dc9d66da5e879aafd9b2",
+      "m": "d02353adfeff4a1a50276e929e5ad86e"
+    },
+    {
+      "p": "books/standard/pages/page-016.webp",
+      "n": 106618,
+      "h": "65c7e651df75857d87d9dace37a4434b6a4e57fc30ef5f1a958634c214dd9482",
+      "m": "3e373d6df8a3126d6236d1f7124e405e"
+    },
+    {
+      "p": "books/standard/pages/page-017.webp",
+      "n": 75976,
+      "h": "53be3edfaf99d44751d170fd58a1f7a2af44849dfac1a5764ba4aa062c5ad945",
+      "m": "7f82efeea0a009cde3accf93a0df821b"
+    },
+    {
+      "p": "books/standard/pages/page-018.webp",
+      "n": 69010,
+      "h": "6c606581da8ec0237e49f23b3e764af3fd3605da9dafe7b76f44f60c62b7f7b7",
+      "m": "4cf5a5ac2f6b8fa42a4abedee518f01d"
+    },
+    {
+      "p": "books/standard/pages/page-019.webp",
+      "n": 59466,
+      "h": "994d00b4f05a3de9929757bca0849e5c7ca6958c9eaa2357d1720790a53d2014",
+      "m": "e12f244d3e08c2da9d3bc5871934c60e"
+    },
+    {
+      "p": "books/standard/pages/page-020.webp",
+      "n": 60150,
+      "h": "826719ff21d4ca46cd0fac0d45ce7c19bc9dba6f6da10b9bdaa622000daa20cf",
+      "m": "30cf1bfff660d06697ede73f6bec105a"
+    },
+    {
+      "p": "books/standard/pages/page-021.webp",
+      "n": 91754,
+      "h": "7b9d3e94739c3b33c27f00bdfee9f350e17fcf540ae7d4b8b70256d439d22c21",
+      "m": "15723a9495681eb45343d534c8c76510"
+    },
+    {
+      "p": "books/standard/pages/page-022.webp",
+      "n": 80128,
+      "h": "1a71a6a883bf03f39a6ba82be2d7e106a1c79fa172cb5b016a91b7b9538f0e46",
+      "m": "dc672679217d89858c090c8fa93fa621"
+    },
+    {
+      "p": "books/standard/pages/page-023.webp",
+      "n": 83692,
+      "h": "f3d8c201260b342449428424efbe77b0c5602ba6692398d17cbc2638ac9834a2",
+      "m": "8666c8d814949a4e4aaca10399e87240"
+    },
+    {
+      "p": "books/standard/pages/page-024.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-025.webp",
+      "n": 64398,
+      "h": "b421b8b03b8eaba7365ebb7980f23fad9941ad35d565e3465856089561c836b8",
+      "m": "f23c0e9ac4220b488b6079cc2fda71e8"
+    },
+    {
+      "p": "books/standard/pages/page-026.webp",
+      "n": 97414,
+      "h": "9c4058a22ff49e433f2c0c1bbada3e2e82ae1a76626e4ea1c5e4438286174920",
+      "m": "91148e092bbb8da8b0b9f5575ce671ed"
+    },
+    {
+      "p": "books/standard/pages/page-027.webp",
+      "n": 36662,
+      "h": "f77c5d32b23d26104f072a36c4bb4d70c3cbe5f6931f664a7c02f538b0232a63",
+      "m": "732e75da2dce837da8442b5e9ea1c029"
+    },
+    {
+      "p": "books/standard/pages/page-028.webp",
+      "n": 64818,
+      "h": "a1792711dc745cc49360d2b840b38cf6c88932317f79302f168df544d25e0f65",
+      "m": "c0a08671410335ecbf1bb23225573b49"
+    },
+    {
+      "p": "books/standard/pages/page-029.webp",
+      "n": 58418,
+      "h": "c504fb646a81f73e62961df26bcd3a286f983ba626c1c2b247c85d10143632ce",
+      "m": "7dce261e98943f89ebf7aed3efa82e46"
+    },
+    {
+      "p": "books/standard/pages/page-030.webp",
+      "n": 54122,
+      "h": "6f29ff7356cdb6b828b62f30239e929cb176f6d400f168f3504e1700d49deda6",
+      "m": "c8a32248559cf9bac84b9a2c90861c94"
+    },
+    {
+      "p": "books/standard/pages/page-031.webp",
+      "n": 76820,
+      "h": "6bb4667844f1a6e94bdc5a2e76e17e1bbd7aaabf213528fba51f51838083c892",
+      "m": "a3ba03bebcbbf90c1f6ea7549598fcfa"
+    },
+    {
+      "p": "books/standard/pages/page-032.webp",
+      "n": 87506,
+      "h": "5c2b693a44d979690f0917179ce1c36f8840fc5717ad72ff5870aaa7f0f21090",
+      "m": "13efea723c4a1c41e5945bc7c0be20b1"
+    },
+    {
+      "p": "books/standard/pages/page-033.webp",
+      "n": 86302,
+      "h": "8795a67b457758a4ad98663fdd42df18d150c8339c7ecaf3231684b95e5082f4",
+      "m": "4d0d47dca9c2dc2b719dda4a596d7388"
+    },
+    {
+      "p": "books/standard/pages/page-034.webp",
+      "n": 38532,
+      "h": "48983a9eca93ea0b69c006c2e1952afe5014c88eddeb74ebb37b479dab61e43c",
+      "m": "7474bb3cc4da77b11da11b47dc631b5a"
+    },
+    {
+      "p": "books/standard/pages/page-035.webp",
+      "n": 26566,
+      "h": "bfe8a5b31fc6e61dceb1cdd2861aac8e17aa6ea80d7bacba9df772f194a922f5",
+      "m": "56864b0096ab45aea1353ca86bf61b44"
+    },
+    {
+      "p": "books/standard/pages/page-036.webp",
+      "n": 64248,
+      "h": "aba4e318f3764009d26d77cd520749bbcfb15f9b1be1ce3135d47a1837053566",
+      "m": "631700d06c8f0af1cc94bdcd5de53d96"
+    },
+    {
+      "p": "books/standard/pages/page-037.webp",
+      "n": 92252,
+      "h": "b565a190ea7d450f562a31867a07914734620349ac1deb214e0021e29dcf3805",
+      "m": "ab003ce45f35494dc4db8ae05829d6bc"
+    },
+    {
+      "p": "books/standard/pages/page-038.webp",
+      "n": 51928,
+      "h": "410def8422c448ebf7246f9624b14e15d30f4d73d9433cc8bf695c32a40e61a5",
+      "m": "1eb17e095f98a8611100a0d3fae0bfcd"
+    },
+    {
+      "p": "books/standard/pages/page-039.webp",
+      "n": 50466,
+      "h": "05ba282bbd7c99aac6f2842822a9ddcc0f46b2659c9fe5c2b2978533a1f07966",
+      "m": "8b9b2e8fe23ab09538b3343d3c336fbc"
+    },
+    {
+      "p": "books/standard/pages/page-040.webp",
+      "n": 58296,
+      "h": "6c2592feafab3d9d42fc033128e2de855f430c94d03a96b578f74ed3f1523edd",
+      "m": "d85d2a3a0d35eb937bcfdd0abf1026f3"
+    },
+    {
+      "p": "books/standard/pages/page-041.webp",
+      "n": 72934,
+      "h": "a20570018241de6a623e800f52926a6f2d4eb0d0f31bb63c54d0f16cb14162d1",
+      "m": "ab003e36a08323417294905f8fab732b"
+    },
+    {
+      "p": "books/standard/pages/page-042.webp",
+      "n": 58998,
+      "h": "7a82c48cd64f5781841327b194069344208bc5f2d9f76ecced0662057da2e70c",
+      "m": "9c59b84c8bb1d91df8e48bf8c35a31d5"
+    },
+    {
+      "p": "books/standard/pages/page-043.webp",
+      "n": 44356,
+      "h": "4d5446ee3caeb30845a5bbe1eac5ac61d1493f4afe581fa13c19f9859410951d",
+      "m": "0a1b4da07f98915f1f52931682aefe4c"
+    },
+    {
+      "p": "books/standard/pages/page-044.webp",
+      "n": 43416,
+      "h": "cebd22b2a84fadcae6ac8a46eed2145279f84d5ad3e301369368e32c59c53b96",
+      "m": "c671d1c856db07e70ef83362ccb7c80b"
+    },
+    {
+      "p": "books/standard/pages/page-045.webp",
+      "n": 56290,
+      "h": "960eafd7f11698637c352c27a611890b38608bacff1e67dab27a3fdf7bf4b63f",
+      "m": "cb03c90a84d9a483b2439cbd14c16507"
+    },
+    {
+      "p": "books/standard/pages/page-046.webp",
+      "n": 41508,
+      "h": "caf742a7094e133a2bc37d49b684e101a652c58dff2296f64ed79f032483217f",
+      "m": "267abf7efbc2a1659c586c467dfe74df"
+    },
+    {
+      "p": "books/standard/pages/page-047.webp",
+      "n": 48098,
+      "h": "16a3ca858e4eafa0ca856107fca5297327858543ee525bbf74cfef5ee15c6fa0",
+      "m": "2919135e768effb1f742a99a848c5fc2"
+    },
+    {
+      "p": "books/standard/pages/page-048.webp",
+      "n": 78818,
+      "h": "ca97bfb45594bc9f01fd885d4bf723e2b61e130b24f6442a614089ec5cb61fc3",
+      "m": "b72f571e1c419b776c455ac67c739839"
+    },
+    {
+      "p": "books/standard/pages/page-049.webp",
+      "n": 45896,
+      "h": "644f9690f93862ddf7090dbaae357f713c8e2eca5dbc7372f839d463aaca0ebd",
+      "m": "79c120dfb66c29f8cf1405606fb818e6"
+    },
+    {
+      "p": "books/standard/pages/page-050.webp",
+      "n": 107850,
+      "h": "1b18a4b2f5995c928970f4b24f3a2fb2eba492ea36421bb2027731421c81e2d9",
+      "m": "790f1d31d660844f08fec8b092743500"
+    },
+    {
+      "p": "books/standard/pages/page-051.webp",
+      "n": 83868,
+      "h": "c86249e33863f45acf0709d4d7eca925603be43129c310e2533334c793e6d911",
+      "m": "e91b6f3815cb59f1bc91f288660f5bce"
+    },
+    {
+      "p": "books/standard/pages/page-052.webp",
+      "n": 41136,
+      "h": "4a9f1a7062d51317e0069ae4670b72127a82d5661615171aaf65bba4e6dd5697",
+      "m": "d2bbe9df734890bf5a4686912a2f2ad5"
+    },
+    {
+      "p": "books/standard/pages/page-053.webp",
+      "n": 41102,
+      "h": "be57105e034c6e94f0bdb61ffdc641f7a38c840e6dad3959c84d901de3ffc8e2",
+      "m": "efc146e07e509f745d61eeb1d79ee033"
+    },
+    {
+      "p": "books/standard/pages/page-054.webp",
+      "n": 78480,
+      "h": "ad86e2938ce6eb78bbf865602e5bb94478aa57d69d0020f0a50ae814ad0730f8",
+      "m": "8acc107f5bd4b632f9722cd7033402ad"
+    },
+    {
+      "p": "books/standard/pages/page-055.webp",
+      "n": 59144,
+      "h": "0d7885f35f01be986d016c45a6363825928c36a3a42b3058699c24521ba42a38",
+      "m": "c80aa26c22d03ced62108761809e407c"
+    },
+    {
+      "p": "books/standard/pages/page-056.webp",
+      "n": 60518,
+      "h": "4d23726dc690d64492a138e6f5ff736c32754d328332c23420c3f1b6951102d4",
+      "m": "b652ecb78b29751e5006e41f17b14892"
+    },
+    {
+      "p": "books/standard/pages/page-057.webp",
+      "n": 94848,
+      "h": "4ff1231517efad012388c960e0efee834cf4d50b8609b1687e56351f14e35e77",
+      "m": "e22a8cf0037b0778c8d1507e2795d62b"
+    },
+    {
+      "p": "books/standard/pages/page-058.webp",
+      "n": 80682,
+      "h": "cb1ccc6a46e65c1040cadd51848bcb6675e5a4a5c90474b637c431b5d1eb35d5",
+      "m": "e948618726c179d04fced79ab220ff28"
+    },
+    {
+      "p": "books/standard/pages/page-059.webp",
+      "n": 44878,
+      "h": "da1668d2ad2efb9e5aaa1d7c2305ab8f053f31efb17532ffeec1b52e3b584158",
+      "m": "c12efaef551664e73efd9a15f61e290b"
+    },
+    {
+      "p": "books/standard/pages/page-060.webp",
+      "n": 31586,
+      "h": "bb601d20cdf2342ac1b137a0fab799a9c2966b30f90c4b11df24e57958e90682",
+      "m": "15a74e077e8a984d68cb3a7edd48b823"
+    },
+    {
+      "p": "books/standard/pages/page-061.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-062.webp",
+      "n": 84006,
+      "h": "2406c89d3c4d365bdbc5448a4c36a27c6aa7e76e566ce013fc89cea09d9e5865",
+      "m": "fd30746dab786e6f78f24838a0804403"
+    },
+    {
+      "p": "books/standard/pages/page-063.webp",
+      "n": 66228,
+      "h": "8505360031174fb41b2c705620805ed72a142734b7664e60aa95c11f2a81174b",
+      "m": "bfc57f02b1b47d3216acfeb370eaf2fa"
+    },
+    {
+      "p": "books/standard/pages/page-064.webp",
+      "n": 91728,
+      "h": "8c5eeba1d9758d80ff122584762e7b6e64dd647d30c8e097c3e1082f729825ad",
+      "m": "4e1797afb11cd4f6ce13e9e3969d982c"
+    },
+    {
+      "p": "books/standard/pages/page-065.webp",
+      "n": 51378,
+      "h": "f1c2212ec1cd791fd907b3d638c0b0dcf083699861e3e470d1e9671aaa41b2a0",
+      "m": "0209f8d5a6f187e1110e1587ee4ca04d"
+    },
+    {
+      "p": "books/standard/pages/page-066.webp",
+      "n": 84926,
+      "h": "a1e3efa505a25ab033f8d3a8c47f89c5852d4515fbf4b391339eb31ba2654bb1",
+      "m": "bfe6b6b6aaecc419898ca899fb33ef01"
+    },
+    {
+      "p": "books/standard/pages/page-067.webp",
+      "n": 88054,
+      "h": "ef8bb1b6cc50df2ddb0e3f22603316d4bf79794edfafc7ae6428bf169a3877c5",
+      "m": "54006a682d68d7f4219d3ee3af70f1d5"
+    },
+    {
+      "p": "books/standard/pages/page-068.webp",
+      "n": 66550,
+      "h": "ebd95fae71645b139fc3f178d5c785efaa98169f88b53041d3fefabdabf747ef",
+      "m": "7f13c97f4dcb1752367789ecea11ecc0"
+    },
+    {
+      "p": "books/standard/pages/page-069.webp",
+      "n": 50060,
+      "h": "621d67d3a6a1b76f5b7ccbc4559c911b5c24f0bb16b8dac3e44763d9320e4123",
+      "m": "ca66d3b34e62a00c37f6c92ea70a7f68"
+    },
+    {
+      "p": "books/standard/pages/page-070.webp",
+      "n": 81898,
+      "h": "da53ed94a6a38809ded22fc50992f76ed705170988e8493c361183c2f54c60ea",
+      "m": "7fcb1ca15b6724427ded4d955d615822"
+    },
+    {
+      "p": "books/standard/pages/page-071.webp",
+      "n": 117716,
+      "h": "24ab2124999b5c65935ec91751d04c813dd1d9062b5d789cfd449ff6229353e8",
+      "m": "1a40a09bf13cd4ce9ca922b213924f33"
+    },
+    {
+      "p": "books/standard/pages/page-072.webp",
+      "n": 60222,
+      "h": "8cab4b980711e26e18977d5275c07f127e4f4ce1aa4906ac227ee6311416aef7",
+      "m": "5a0919292a20fd315a1385cee17442fb"
+    },
+    {
+      "p": "books/standard/pages/page-073.webp",
+      "n": 67504,
+      "h": "1ad3460ee32c96c0eb60f0de657afefe3503e9e79862c74b9ab6ded7acc7e533",
+      "m": "aa774468deaa795613e9ecdda911681d"
+    },
+    {
+      "p": "books/standard/pages/page-074.webp",
+      "n": 73626,
+      "h": "76134e231dcfd2b2c4a40e3504f19cd22dab33b2b76232747b7ae24efa7af30d",
+      "m": "02cff1900ed3c9eb6ac7633d42e9dcca"
+    },
+    {
+      "p": "books/standard/pages/page-075.webp",
+      "n": 63812,
+      "h": "903d6d1fe7edd4a970e803a01b4b84f37d9baef61a95198c01fb35604a299444",
+      "m": "ae1a198117ad6f1b8c6a8180cc79e67a"
+    },
+    {
+      "p": "books/standard/pages/page-076.webp",
+      "n": 67592,
+      "h": "29ffc41064b6499a2cec0bed5e44a64e9f8f68c70697f031a5f16838451ca5ee",
+      "m": "19a6579656083c73d371673f87b549f9"
+    },
+    {
+      "p": "books/standard/pages/page-077.webp",
+      "n": 60340,
+      "h": "108f997ef15e25359e6a6ba77ce23cea6c2ae27a79ae2b4afcfafaf77f09f593",
+      "m": "a9fa3082b993c3d35e35fbc60206589f"
+    },
+    {
+      "p": "books/standard/pages/page-078.webp",
+      "n": 47720,
+      "h": "41f1bd55bc14bdf0d5ff613f4524e2b1b190425e55e353607dc690fb9914c68a",
+      "m": "a511397b9e6845c6084c018d35b3360f"
+    },
+    {
+      "p": "books/standard/pages/page-079.webp",
+      "n": 102366,
+      "h": "d4571982007df43a1675b2fae28863a5a570e138aa6b7a8acddcf359ab77d101",
+      "m": "152eb5ce673c74868ae33cfc597aee70"
+    },
+    {
+      "p": "books/standard/pages/page-080.webp",
+      "n": 57204,
+      "h": "bbe9e5b52cce110e36316cfb27fc7466ee1c14b48d044e011a7a356351a154bc",
+      "m": "60218f864c378c7d96f49c492f1b985c"
+    },
+    {
+      "p": "books/standard/pages/page-081.webp",
+      "n": 76584,
+      "h": "d6e455ab9615ac9807010e719369b3a5b6d9aa02994c380eac38566f8c612d1d",
+      "m": "127ca360f60d6f8083e758d380471925"
+    },
+    {
+      "p": "books/standard/pages/page-082.webp",
+      "n": 79578,
+      "h": "fbac0c06d1d1601af157912546b0acba9ca6eeb978b2afbca62f76529893c755",
+      "m": "487d62faebb030c922885fa1cb05c6e2"
+    },
+    {
+      "p": "books/standard/pages/page-083.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-084.webp",
+      "n": 92954,
+      "h": "7833cdd96bcd650ed4154aa2d59b14c2b970ec6e86c0f5b593cb8e75741ee726",
+      "m": "6aa04e1c3056346f967a196dbde31184"
+    },
+    {
+      "p": "books/standard/pages/page-085.webp",
+      "n": 101402,
+      "h": "d890580f880ee7900ac60a9c6a6e5b6c863b6f8a4acde1e93f7c182b12bea9f0",
+      "m": "db4b9c8e83c03201fc93482de8223184"
+    },
+    {
+      "p": "books/standard/pages/page-086.webp",
+      "n": 66836,
+      "h": "1c104df0876a7e02c338782539e2db29457555ff54c145ac83cd48953ed92932",
+      "m": "2b3d5e203b0bad9635feeb6d1e69cdda"
+    },
+    {
+      "p": "books/standard/pages/page-087.webp",
+      "n": 102738,
+      "h": "9298d8c67f2e530809bfdae5837505deb67a85ee91ceef7617a0a983b54e05e8",
+      "m": "f68ccefb049d711a183fa025877f4e58"
+    },
+    {
+      "p": "books/standard/pages/page-088.webp",
+      "n": 68386,
+      "h": "470ecdee202131d9d58f39526cb0757fb5ccf8af7d5f4323fd187b20fbbbaa18",
+      "m": "651dd5bd1c9d69c9d668dfa8e0b5ef84"
+    },
+    {
+      "p": "books/standard/pages/page-089.webp",
+      "n": 97560,
+      "h": "18adbbf5a7b9875f8e8622b703680fa733572aa7f288a0af4495ea393c598779",
+      "m": "95064152566864be8ad7d154f16d70a2"
+    },
+    {
+      "p": "books/standard/pages/page-090.webp",
+      "n": 45774,
+      "h": "167bf837fe9433ef8eb40d68b76cae01a23095dff2536aac3ba453bff67ff31d",
+      "m": "7069f9317e9a670d3554a55d4c3b39db"
+    },
+    {
+      "p": "books/standard/pages/page-091.webp",
+      "n": 66124,
+      "h": "250f94fec8230d392c75ae976135ab0c0dad03e62d18bf184f0219c0810cdf73",
+      "m": "b35483b981db6d79ae97e5d306dfd831"
+    },
+    {
+      "p": "books/standard/pages/page-092.webp",
+      "n": 61818,
+      "h": "49b9758df0b0bfba73ee12b77e4d62e0055e4fa1210c81262f04f2d093568675",
+      "m": "7f8659798c7120e0462bef0159bcd5d8"
+    },
+    {
+      "p": "books/standard/pages/page-093.webp",
+      "n": 106522,
+      "h": "87e75677531deec0601c2eca77934898a8489cb85132ee70dbb559b985822e6a",
+      "m": "12c6a4b164487ea32671f697067b0134"
+    },
+    {
+      "p": "books/standard/pages/page-094.webp",
+      "n": 51524,
+      "h": "c1c18d5e3ea8992adb10b310609c269486e041a2c81bfe1dd6bbb0727a984bc7",
+      "m": "fc4d2519ee7219a17b74259dfa0dc4a6"
+    },
+    {
+      "p": "books/standard/pages/page-095.webp",
+      "n": 82648,
+      "h": "655175b4e095be4ee4360cc3adb8a790e78e3596ce2eeaa64facd6cc08637967",
+      "m": "f294eccc9998da81539b674a58dc8aff"
+    },
+    {
+      "p": "books/standard/pages/page-096.webp",
+      "n": 73502,
+      "h": "f2af5c59c5fb7ccf94c14b1c662c7169d293afc55261300bc7262f8a04c87ba3",
+      "m": "4a1bc679d1b2f5293645403ea9576c69"
+    },
+    {
+      "p": "books/standard/pages/page-097.webp",
+      "n": 48492,
+      "h": "101dd9f700bb63d2097d6b522d6369d4e1dd01d0389d74c28b7fa84f38d247b4",
+      "m": "5b769906d7d5c185995dee63eff22d5a"
+    },
+    {
+      "p": "books/standard/pages/page-098.webp",
+      "n": 57554,
+      "h": "fb7473c87901ee8415594f5876ea9d64eb0e95dbb2907dd258a131809320e69e",
+      "m": "a8aaa96ec4b3b06c4b2764af89020476"
+    },
+    {
+      "p": "books/standard/pages/page-099.webp",
+      "n": 75256,
+      "h": "c2b47067e3f140e540dbea34302eb4688b4f267f6afed6f0de14419f8daefff8",
+      "m": "f05eb39645d13764887d00acd13e0885"
+    },
+    {
+      "p": "books/standard/pages/page-100.webp",
+      "n": 61056,
+      "h": "67700c6475fa4d6f183f9a709d20aff916ad3b826ee06c26e6a226b9ac61bdeb",
+      "m": "0b6e251cfde4540d3540ba554b2f1cc5"
+    },
+    {
+      "p": "books/standard/pages/page-101.webp",
+      "n": 54282,
+      "h": "78d838cfa802abee6db037b185c271d451b7a55a596d72e39deb9935dad90a50",
+      "m": "08b00e8300c2d2e61b77a942442ec008"
+    },
+    {
+      "p": "books/standard/pages/page-102.webp",
+      "n": 82860,
+      "h": "c7be7d718518b5ac3122cf0a9bc0bb015f4320e3f8b817c1203174df123603a7",
+      "m": "f32e555df0e1c75b18d9e1b000f90732"
+    },
+    {
+      "p": "books/standard/pages/page-103.webp",
+      "n": 82352,
+      "h": "cf7b2f84c7e7cfbfad487b600799f8e751f993a070d72edb268e49762dc95672",
+      "m": "b1110db2fd60f19d03f15b333725ff9e"
+    },
+    {
+      "p": "books/standard/pages/page-104.webp",
+      "n": 117614,
+      "h": "1cb672d45b620fcfbde45ed4dd9ddbbde90c4a89264b8dc63ca24d1c8a0e55bf",
+      "m": "5172b7988b9e13ddd9bea96e697ab6a6"
+    },
+    {
+      "p": "books/standard/pages/page-105.webp",
+      "n": 82648,
+      "h": "9a2fd54751e0f1c6d2e3067a94b0fcf044c3226cc1962eacedfcb294b6f26098",
+      "m": "e69fbb7c60f9c6bfd37ed438dea9edcf"
+    },
+    {
+      "p": "books/standard/pages/page-106.webp",
+      "n": 72606,
+      "h": "19fb1520929c2b2831400d39c2761f515c415741f6d1b08c4481bd4d972ef79a",
+      "m": "438fb23ef7f9ac1ef9954c1e413bb15a"
+    },
+    {
+      "p": "books/standard/pages/page-107.webp",
+      "n": 76210,
+      "h": "f7e81e5b9809d32ca509f3cfc71758e98edf02b31cfdd5099f1031cce811b898",
+      "m": "ab2837e97dc0b59153cc4e03936c2a83"
+    },
+    {
+      "p": "books/standard/pages/page-108.webp",
+      "n": 117766,
+      "h": "5e815b52c1d66a4130c9dd8bd83502dd86caf0e632735f85e1876cc8d3d4e1a3",
+      "m": "a957b882de8d24359695e4762d288eb0"
+    },
+    {
+      "p": "books/standard/pages/page-109.webp",
+      "n": 94160,
+      "h": "6a7061f6d0d16f77f68536070b98bea119c7c3a36519ea767a71066699497cda",
+      "m": "5cd6781aad6b508e9eb5dc3802bda389"
+    },
+    {
+      "p": "books/standard/pages/page-110.webp",
+      "n": 103636,
+      "h": "338d9f26541df6dd4034fe8966dd90826df6afe3d937d139b32fa2160ee8ec3a",
+      "m": "c3304bd0b5e0731e12904198aa5bdc6a"
+    },
+    {
+      "p": "books/standard/pages/page-111.webp",
+      "n": 101314,
+      "h": "a38fc37a017e59945cac183dea9b741768f2ed22f502aa50e75ba1e18c4e8bed",
+      "m": "8aeec32b38e8cedd084411afd373ff97"
+    },
+    {
+      "p": "books/standard/pages/page-112.webp",
+      "n": 77610,
+      "h": "7483e699c92835c930fca450d0b05a3d5b5e24c8b8648d5e721c69929c0881fb",
+      "m": "03d9534684ce953d05f365b23fe3f262"
+    },
+    {
+      "p": "books/standard/pages/page-113.webp",
+      "n": 30752,
+      "h": "2f2591d76cd84de6ed8764c1cce7a31efba6901f2e5c92bfd273ff1d29fd4f30",
+      "m": "5382fe3bfc95d10c0e9a97c2adb5a2d1"
+    },
+    {
+      "p": "books/standard/pages/page-114.webp",
+      "n": 67008,
+      "h": "ff19ecf3be6a8e973063a6d6346db5f07c6e9460bcba27c97e2ab7a556861a44",
+      "m": "78478d8c20ff02ecba65e6c8d8d1e5ac"
+    },
+    {
+      "p": "books/standard/pages/page-115.webp",
+      "n": 100026,
+      "h": "ea21db53b17f42c0122bd3565b1dad60b8e34951773ab17110f4e99a8a88dd07",
+      "m": "f892acaed6388dfb38c56ce485255519"
+    },
+    {
+      "p": "books/standard/pages/page-116.webp",
+      "n": 69924,
+      "h": "273f4baf4decccd352f02b5f69816a2441b966820051ca32b8719fe58d6f76f1",
+      "m": "ce9d297962191429ab274c2c89b8f01b"
+    },
+    {
+      "p": "books/standard/pages/page-117.webp",
+      "n": 102948,
+      "h": "38048edadf84326bc33e2a7d1ac3ca7f503951849d57a738b80f37f68962834b",
+      "m": "5bb4609dce7e21e1dde5c32227d2d3b7"
+    },
+    {
+      "p": "books/standard/pages/page-118.webp",
+      "n": 94896,
+      "h": "3e9492d56b89409971ced9b31cd8baa6d07f7fc804c61c16a63421b9a088d838",
+      "m": "bdb9962fe4d50f9a6d9a9be44861ac2b"
+    },
+    {
+      "p": "books/standard/pages/page-119.webp",
+      "n": 67270,
+      "h": "a076c8d8fb9d0bf2e86ad53ee6fa1cffe71b64d93920187b41bffa9d4a47bebb",
+      "m": "d4467863950154618cbe4c4a3160064e"
+    },
+    {
+      "p": "books/standard/pages/page-120.webp",
+      "n": 88846,
+      "h": "84f8e7f8fa1743744d91d7c261aa45e2a269c00b6bca4c250cc485f207bdbeab",
+      "m": "9db3385eb0f9192f6a4f5e2555967732"
+    },
+    {
+      "p": "books/standard/pages/page-121.webp",
+      "n": 42366,
+      "h": "d649911a898535f8efef43f60e87606396679d3fc84416c2fef7da6d39f78b78",
+      "m": "6bc43c65564d2ac6ef9eafa2167fa227"
+    },
+    {
+      "p": "books/standard/pages/page-122.webp",
+      "n": 51838,
+      "h": "9a7f46e22d280193a1f0e7afa3b7a82153eaebf6dd2a797c6bf1329963b096c3",
+      "m": "2323de165c2fde2d12475486138745d7"
+    },
+    {
+      "p": "books/standard/pages/page-123.webp",
+      "n": 66530,
+      "h": "392a55ede416829bf0d701b1596fb08480cd83569c87d5a12ea88adc36df28ba",
+      "m": "e3cc712637497056df30b0830fc42702"
+    },
+    {
+      "p": "books/standard/pages/page-124.webp",
+      "n": 45402,
+      "h": "07f7b2f48b9b9f637df48aff119a0a213e3c13753fa5f2395d3a9a52bf1de15a",
+      "m": "18160bba2be74b6e54779f96c67eb433"
+    },
+    {
+      "p": "books/standard/pages/page-125.webp",
+      "n": 60438,
+      "h": "856558bcefe1b98aecc09ee91255d21b026ce0ef39dbcde01f981a230d6a2596",
+      "m": "5f4f5b076cb35533940394afc9bfec31"
+    },
+    {
+      "p": "books/standard/pages/page-126.webp",
+      "n": 81902,
+      "h": "6dbc168c1fb55253753f77d25cb62307855d81f49e2f25e7e747ae23e8f776b1",
+      "m": "54ff4ed6d9572cec5b4b13067a804d0e"
+    },
+    {
+      "p": "books/standard/pages/page-127.webp",
+      "n": 70140,
+      "h": "60e5b28b449291f29dd15899a9eecc677c4c6805172a9393e487099af5543e3e",
+      "m": "b0a0f8d0274f1eb9a137b8add9884f33"
+    },
+    {
+      "p": "books/standard/pages/page-128.webp",
+      "n": 95926,
+      "h": "bc2e25d052d762734fb12dc8de996a3be30d741b01bb4c4868b6301818952fd3",
+      "m": "e75d32ab23140dd0f4e9cca85f3bf598"
+    },
+    {
+      "p": "books/standard/pages/page-129.webp",
+      "n": 64648,
+      "h": "bc7611e07ef60797be66843471073f6a408a45972b61e1cd2c3d44d6396c08ed",
+      "m": "f35227a7e5b2584dd1339fcac6b267b1"
+    },
+    {
+      "p": "books/standard/pages/page-130.webp",
+      "n": 39202,
+      "h": "abca331e02e5836a36a6794ffaa201f3503df82e0883b2b3691f1ad2e0ab9ef2",
+      "m": "5c5a4b42f9e2dc239c29e2ee0235da7c"
+    },
+    {
+      "p": "books/standard/pages/page-131.webp",
+      "n": 79742,
+      "h": "c298754fc593b26f5a767e9413abcac45a43c7934bc577698989967bba1f63fe",
+      "m": "6ef1c629f78a66ad46d0c2eee6a5ba3b"
+    },
+    {
+      "p": "books/standard/pages/page-132.webp",
+      "n": 44926,
+      "h": "b3fad702423d045301192ba7748e98dba36d563a5b8a5db234c35383a13d84a1",
+      "m": "63540291766226db914cddb5c58eb08d"
+    },
+    {
+      "p": "books/standard/pages/page-133.webp",
+      "n": 45260,
+      "h": "902d0b2e5287a7118d187e87058ca9b611dcfca25eff68016341c7871020108d",
+      "m": "2ac6ebf6aa07d6dbe4d70382c4b69a59"
+    },
+    {
+      "p": "books/standard/pages/page-134.webp",
+      "n": 79052,
+      "h": "d7afa1433b19c1e2882914e7334a57cad7baa9f9119a47cd5fd8f2a6ab22fc08",
+      "m": "266b8eb9c41a24aa39705c0fb20f90c0"
+    },
+    {
+      "p": "books/standard/pages/page-135.webp",
+      "n": 62946,
+      "h": "d4debdb938bf95f648b889a1c9a25188a4a1ca20b454b276e3fdcf9c41156841",
+      "m": "35b9d9d9d4f60fe077b8c932946a16da"
+    },
+    {
+      "p": "books/standard/pages/page-136.webp",
+      "n": 49474,
+      "h": "6365681ec3140352d57bc184089e66119973dc369030a1618e7ac1a91da33a4f",
+      "m": "a3503147aff80c260b11e6ad3ccacaea"
+    },
+    {
+      "p": "books/standard/pages/page-137.webp",
+      "n": 92010,
+      "h": "d05ea10ed44f186e6925b5df15a72ce098828a3cbc819dee706e328a4f08c60d",
+      "m": "dbbc7d8700c133882996097af2c6f5ef"
+    },
+    {
+      "p": "books/standard/pages/page-138.webp",
+      "n": 66034,
+      "h": "e20029b621ffe4611b85c69153947b7a9ad11485be2d2017098dead32e5d0a7e",
+      "m": "b59628f662065399ddf679e0d818d6df"
+    },
+    {
+      "p": "books/standard/pages/page-139.webp",
+      "n": 59534,
+      "h": "1e90e830916cbf11d97b0d8e73d906efc9e7e76a04cee1f2592ed8e4d22aa7eb",
+      "m": "a7e69c7e9caf0892e4fb51417218771f"
+    },
+    {
+      "p": "books/standard/pages/page-140.webp",
+      "n": 90056,
+      "h": "0ecc2f37ffe3cf0f036239a5ab413700cf9368de94d6934de899af9c08d183df",
+      "m": "d5179ab30de5b6d02a1e0fa14d2c2342"
+    },
+    {
+      "p": "books/standard/pages/page-141.webp",
+      "n": 116972,
+      "h": "ae468032b0e0c7f199ba12baeaf75e40c10423e9622100f10b6382e26929906d",
+      "m": "ecdd3f4327f49a2b01a9c4703dc54d9a"
+    },
+    {
+      "p": "books/standard/pages/page-142.webp",
+      "n": 113052,
+      "h": "ad24ce51e3138c9f334fdf1771ce22f6413d406449d67fe9d9d1c37e18092fa8",
+      "m": "243cc2d2c7ff38e9c4b38486318db16f"
+    },
+    {
+      "p": "books/standard/pages/page-143.webp",
+      "n": 111900,
+      "h": "8f273ff7d05a4689c592e03c8aec046d49406d86764d1d6daa53a00ff16f9944",
+      "m": "8cd6e5bba4173a616bb5ee489808db36"
+    },
+    {
+      "p": "books/standard/pages/page-144.webp",
+      "n": 91026,
+      "h": "225655deec6280f2a935d38d3c9d66f3e6f369e0a14b8a0a318afd56fdca3ac5",
+      "m": "e817489d06039171f420cbedda7935a3"
+    },
+    {
+      "p": "books/standard/pages/page-145.webp",
+      "n": 47812,
+      "h": "e85203556afb1487e5f0e4e35ceb53493c390566f0abb362b6565cb073779f36",
+      "m": "12b17472fbc65ef65d0e8cb055ff71e0"
+    },
+    {
+      "p": "books/standard/pages/page-146.webp",
+      "n": 68268,
+      "h": "240b58bc3e67afb54ffcf453019ccaeb4faedca22f19c923f6f7a61b05a5a552",
+      "m": "dc2109539aaacf94e71aa838f813a07c"
+    },
+    {
+      "p": "books/standard/pages/page-147.webp",
+      "n": 62004,
+      "h": "dc8b995f8e4568c966f1f2ba6927f165345a17cfcaba4420fe3558d83e924347",
+      "m": "0cd0ca46ca369f7ab958bd19854d4699"
+    },
+    {
+      "p": "books/standard/pages/page-148.webp",
+      "n": 58448,
+      "h": "b4066f1b7afe764b87351e6060cf921e73fc0a95bb04d67725a722c511650250",
+      "m": "59a394af9d25377b974a0f25667ddedb"
+    },
+    {
+      "p": "books/standard/pages/page-149.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-150.webp",
+      "n": 111588,
+      "h": "ab4ff55c6e608e4718f0d603322ff15f6e727f137494d313b81035f1d932172a",
+      "m": "eaffff9ad2708e2f1ae581814edb45d6"
+    },
+    {
+      "p": "books/standard/pages/page-151.webp",
+      "n": 87018,
+      "h": "27402d90b3e41d9fabddbed2b13afe7a3fb893d0d40eaa55fe6cd9625dc008ea",
+      "m": "fc674b2296d078e235ca45d70b1f5dae"
+    },
+    {
+      "p": "books/standard/pages/page-152.webp",
+      "n": 66036,
+      "h": "800dc34a4c2c5072113469648d155761df61a2ed452065f0de1516719a8a7dbb",
+      "m": "937bd9394a1a841f47ebf558802eafad"
+    },
+    {
+      "p": "books/standard/pages/page-153.webp",
+      "n": 75546,
+      "h": "cfa21d1acd11a190213b4e6e98b013dee2af5893c14abdbf266a681dc9968c5a",
+      "m": "4f91efb3d455340599115112206c4508"
+    },
+    {
+      "p": "books/standard/pages/page-154.webp",
+      "n": 70306,
+      "h": "adc58db1399b7792432f0b7225b67aabe7535154bd1204d6ef28583a47bb7ece",
+      "m": "534de4a61edd0d0892a0de56fe8b4ee2"
+    },
+    {
+      "p": "books/standard/pages/page-155.webp",
+      "n": 37846,
+      "h": "0996b2fb514c803acbb209b16e78d6c442d30b57ca27658edebda97458712d93",
+      "m": "dab78ba1f1705c5c1074f9edc55a86be"
+    },
+    {
+      "p": "books/standard/pages/page-156.webp",
+      "n": 71368,
+      "h": "acb2fc83c2cb05a1f081972728cfc3467fb7c651a61b54a6214a7ad68f1ff05a",
+      "m": "c4e926ff322d56a15f56345febc04e32"
+    },
+    {
+      "p": "books/standard/pages/page-157.webp",
+      "n": 96978,
+      "h": "fc343ec167238b9183302518266a845b8b21ad9f9fdfa72fc06f635cb0f099e3",
+      "m": "2b15499efd26ecb1899f5433b0dd4ee9"
+    },
+    {
+      "p": "books/standard/pages/page-158.webp",
+      "n": 80162,
+      "h": "5a88089afbd076e8b602e518c4be478b4e2b412720fc62bde3fd6f87287843b3",
+      "m": "eefefab54e5af70ec8a1f3aa70202985"
+    },
+    {
+      "p": "books/standard/pages/page-159.webp",
+      "n": 104184,
+      "h": "8db4c1c4dfe37303683d0a6a325040358093c679b281032331f5ae18fdb0ecee",
+      "m": "b0a7d0ae3ba18c2b916daee72eebfc6f"
+    },
+    {
+      "p": "books/standard/pages/page-160.webp",
+      "n": 63586,
+      "h": "75f67053489bf58b99108918b535e639227c2be8c329542ec103db98b49799fc",
+      "m": "0cb4dfff47ccd9d721bda413d25616ac"
+    },
+    {
+      "p": "books/standard/pages/page-161.webp",
+      "n": 114566,
+      "h": "5e7c19b97708f982e6bac87355e74b8ce550a167b63a2e106f2661470bd98ce5",
+      "m": "d485983f0a0b34f63f97d406727b5160"
+    },
+    {
+      "p": "books/standard/pages/page-162.webp",
+      "n": 54862,
+      "h": "ebbb9ec0d0ef4627198c245b3dfa6f3576d4088149105ea4d0557337024412e1",
+      "m": "a3d3bd3ff89224220fcb865e12e123eb"
+    },
+    {
+      "p": "books/standard/pages/page-163.webp",
+      "n": 61270,
+      "h": "63ebd6a9db47c42e6a7f003ecc5849132e01b4322bb39fb3c678e1ac0716cd79",
+      "m": "a5877a9893deaaa6c04f60d940c0e43b"
+    },
+    {
+      "p": "books/standard/pages/page-164.webp",
+      "n": 79748,
+      "h": "c35da5172ae9a0dfba1223fa18378d4506491c2844b7cebc6aba5c7559c55afb",
+      "m": "3fd3e546cdd939af61537897a08dec06"
+    },
+    {
+      "p": "books/standard/pages/page-165.webp",
+      "n": 66066,
+      "h": "08a7b8d226b8afd7bd34dcd3a21b0761a82652c74769800b8c451f56ae1ceba7",
+      "m": "e20dd6beb35f14a77bbf4132448312f1"
+    },
+    {
+      "p": "books/standard/pages/page-166.webp",
+      "n": 18678,
+      "h": "f4f07766d6b826ddf00b4783fad7c8a9bb4b06e0f5ad92636299523b9864f717",
+      "m": "5c3553b852fc5a6e6e75a04ef91cc343"
+    },
+    {
+      "p": "books/standard/pages/page-167.webp",
+      "n": 73902,
+      "h": "f243b5ebcb2289636b03e22b1ea3cda884f2c779ba85505d5f53964ad77c7501",
+      "m": "50c28381981615b4dbfbfe5397defc12"
+    },
+    {
+      "p": "books/standard/pages/page-168.webp",
+      "n": 88508,
+      "h": "1d06eddac5f4030dd4f0b39526a2ad4433e1c5f326dbc152a96da4f0c98e03a1",
+      "m": "266d4f2a59d27cbfe790648679bd502c"
+    },
+    {
+      "p": "books/standard/pages/page-169.webp",
+      "n": 58604,
+      "h": "04fa37d8f385e8ff0fd8685919d5d86d94238670410e80f578f93d4e5d8264f6",
+      "m": "ea6a69698a874269a6815e1111d26b7c"
+    },
+    {
+      "p": "books/standard/pages/page-170.webp",
+      "n": 55650,
+      "h": "1f165d75aaff341416a2bb1dcf5505f921327299fd707730ef12449d79b8b063",
+      "m": "885c160fd60cc93e43ace05c5316b331"
+    },
+    {
+      "p": "books/standard/pages/page-171.webp",
+      "n": 99656,
+      "h": "248110fe14bf4ccedb31b8bb36a43ff9bdad8aa7a24b46cd03e52ff2d90e265e",
+      "m": "e28ce5909e81f9ed03a1c4c01b04a9ca"
+    },
+    {
+      "p": "books/standard/pages/page-172.webp",
+      "n": 52190,
+      "h": "63026541ed6626f06ffb3756e0fcce5b0d3b1eb652defb8456e53528efef34d3",
+      "m": "034641898a0e5c49bfc175805d09fa72"
+    },
+    {
+      "p": "books/standard/pages/page-173.webp",
+      "n": 24146,
+      "h": "aca97fda3b2857bfdc8bb9f58ce283bcc7f222988c9f261bf8a4d268250b8801",
+      "m": "8eef974973aae1b48deccf0a7e595431"
+    },
+    {
+      "p": "books/standard/pages/page-174.webp",
+      "n": 105002,
+      "h": "ce7f80577f46ae491253ccafc04ca7b22e64ca815a725d1f276bf072a807dd51",
+      "m": "50e0dc783c09b7667c7552d80b9daa4d"
+    },
+    {
+      "p": "books/standard/pages/page-175.webp",
+      "n": 89980,
+      "h": "a17b72a39c1f4d4d3dadaee7b6ff7dc9bc5d80029b3802bc36a1e74f37bed123",
+      "m": "b2c6053dc76922ca77ee1d23fcd0b29a"
+    },
+    {
+      "p": "books/standard/pages/page-176.webp",
+      "n": 89768,
+      "h": "5a18aff6b2f7056a7a385fcc4b459c4e20d376b08c1f2a541f498470bd26fa1f",
+      "m": "2a4775816e412f1855a27a93e3708996"
+    },
+    {
+      "p": "books/standard/pages/page-177.webp",
+      "n": 84730,
+      "h": "5796095cc7d3a8764d78ed5bf0a133c973ce42c45ce17f9be61eb51c92530e25",
+      "m": "0053324762e7d75305bc4d623e0f130c"
+    },
+    {
+      "p": "books/standard/pages/page-178.webp",
+      "n": 68524,
+      "h": "06fcd6133fe8f613c98f453df00591a05bd4d93ce4fcc58947fb5c502fc10c73",
+      "m": "6c6e2d6e15f01c14c566a3d95065592c"
+    },
+    {
+      "p": "books/standard/pages/page-179.webp",
+      "n": 61844,
+      "h": "0817469a8f2400fd45bf4558c67ebab1db2629aaa638d71e1a2a5cbf0e075933",
+      "m": "eb2348efc6615456d25391286fdbb93c"
+    },
+    {
+      "p": "books/standard/pages/page-180.webp",
+      "n": 84628,
+      "h": "b175b91ba417bbe190fcd36ecc2f73c8fad40e2279834b018a61df28039aad0a",
+      "m": "7f8eb3ed0141d8a3cf289339b19a3bda"
+    },
+    {
+      "p": "books/standard/pages/page-181.webp",
+      "n": 88448,
+      "h": "d9c5941239c1de5e44a39a2532dbeb7805281a1e3afb1c2d5213687f44b28951",
+      "m": "a177a00d30a360eb32abc7900ac70904"
+    },
+    {
+      "p": "books/standard/pages/page-182.webp",
+      "n": 90628,
+      "h": "ae2084312e7e200ac9aca72c8872e8fe6ebb26891d72d58c46c16cab7a3a3c22",
+      "m": "3dadb8e5e13d7fd9172c61ba92d4bbdb"
+    },
+    {
+      "p": "books/standard/pages/page-183.webp",
+      "n": 79566,
+      "h": "a87a9c3e1699ee2b3e707cd0c2b997600b183f053276e5a83617872b5bd8c721",
+      "m": "78075fbe89401fbdb6aaff27fec3ea42"
+    },
+    {
+      "p": "books/standard/pages/page-184.webp",
+      "n": 81084,
+      "h": "a4c5fb325e407e3077659fe15afe65d26a1648529271ea1f76de39327bfea6af",
+      "m": "66e188c8a456df0c5c4f3738f069e001"
+    },
+    {
+      "p": "books/standard/pages/page-185.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-186.webp",
+      "n": 123614,
+      "h": "7633fcaae9c56a9219eed2e2d4883d5a5fb7c62300712de01f642a9df745788d",
+      "m": "a8958d4ed18bb0320846fcc3954b1254"
+    },
+    {
+      "p": "books/standard/pages/page-187.webp",
+      "n": 109858,
+      "h": "6dcdcac14e60b7af70cd988665962b2e0fe47895b44d4edd4830b413b2cc6885",
+      "m": "80553ee4159bf36195d967ecf81a4265"
+    },
+    {
+      "p": "books/standard/pages/page-188.webp",
+      "n": 54416,
+      "h": "f44a2e2c68203a516395853b7460ea8fd1ccd333985f5300a6808148aae341e3",
+      "m": "6aa4b95653cbbe8ee07219e0e4536b05"
+    },
+    {
+      "p": "books/standard/pages/page-189.webp",
+      "n": 69392,
+      "h": "89aa33fa5522d873bedc897d8baccd1863b0c2ed9f32c26c6044e7dd37c89c91",
+      "m": "d6fea171f71283b22be2f26ce85bc906"
+    },
+    {
+      "p": "books/standard/pages/page-190.webp",
+      "n": 102228,
+      "h": "10d801e79e922ce2aad62a32d0aa015e5de1d53b91b5dfa178785ac47018f4e5",
+      "m": "0bf2239d6b5f31f677fef33818ed94ed"
+    },
+    {
+      "p": "books/standard/pages/page-191.webp",
+      "n": 53846,
+      "h": "25725bf293444cfdf21a1dbcd4934d712c1cd6cd35c79b58e9c9ce5429ebbeef",
+      "m": "0c43381fd2465d7a260f0e58d47d4e93"
+    },
+    {
+      "p": "books/standard/pages/page-192.webp",
+      "n": 87556,
+      "h": "fe9870a78b210e7c24e6e65060e309eeb0055061ef30cfe364f706079f8de3e8",
+      "m": "a05d095fb0c5a55914ca73665c6c6d29"
+    },
+    {
+      "p": "books/standard/pages/page-193.webp",
+      "n": 58592,
+      "h": "53d34d65a4b2ffc400ad294e5f76c9314fcc84fc52c3af7310f54b340e604faa",
+      "m": "4fd05b105ddef0053ae5698648bd6126"
+    },
+    {
+      "p": "books/standard/pages/page-194.webp",
+      "n": 102650,
+      "h": "87aaa1f616a3f86903c8adbc84d553bf3ba946ee2fc3a7fb41580cd60c1dc7d0",
+      "m": "7515e15f21434cc9cad05e31c3c77cda"
+    },
+    {
+      "p": "books/standard/pages/page-195.webp",
+      "n": 108208,
+      "h": "54bf7394da2fd2efa209505a6f20939c1883a7c4e4c17cea4e2a0adfd46fc52a",
+      "m": "b64855741b2c4535e0f4242535acd37e"
+    },
+    {
+      "p": "books/standard/pages/page-196.webp",
+      "n": 94962,
+      "h": "6dd941283016b60c1f9a0cde4e72588c818ec391784ef8f2f156fd614721f733",
+      "m": "1661799f74e9964a36d5593066a48662"
+    },
+    {
+      "p": "books/standard/pages/page-197.webp",
+      "n": 114280,
+      "h": "8bd0c2d1381250bb368327d3438ea2401a49fd745a67c4f1eafca9be0ba57544",
+      "m": "4b271dcc6bf334440c4691089a359af9"
+    },
+    {
+      "p": "books/standard/pages/page-198.webp",
+      "n": 50302,
+      "h": "9bdfe65bf020377c964c39b3eb2357af0ac7c2d7518f134a315342085222e742",
+      "m": "932bce80d0038ed6a3a7eac887962fab"
+    },
+    {
+      "p": "books/standard/pages/page-199.webp",
+      "n": 67714,
+      "h": "56833245e4f5549220a0276e4b0d575d223fe829e8b3d024a8983300d1be5520",
+      "m": "e0be49868d7bd9d0b452c249f55365da"
+    },
+    {
+      "p": "books/standard/pages/page-200.webp",
+      "n": 70772,
+      "h": "bac52adb51b872699f7d9d4cc4bb8e9ac52859b8cc7e7028858ab8a46a6b1d2f",
+      "m": "15b1c490cc3390460610e14cb9de906a"
+    },
+    {
+      "p": "books/standard/pages/page-201.webp",
+      "n": 59348,
+      "h": "fe066edc19c40325d4454e56f9b724a8ad8beca203cd80f36f08ec30517a9d17",
+      "m": "a367c898a37adefb73ada4b9bf170691"
+    },
+    {
+      "p": "books/standard/pages/page-202.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-203.webp",
+      "n": 80920,
+      "h": "b6bd4c26b5ad2505deac003d0d3d8570c80bd7ef55264bbe676c31d8acf9fcd9",
+      "m": "1a9391267d0e4d1294b2d373701ada36"
+    },
+    {
+      "p": "books/standard/pages/page-204.webp",
+      "n": 53542,
+      "h": "db96a9bdd80b6cdc387814bb0975a27974b9b456ac62be62a099a6e2fe9f78d0",
+      "m": "b3dac139bf83c80e3213d29c767e7764"
+    },
+    {
+      "p": "books/standard/pages/page-205.webp",
+      "n": 66846,
+      "h": "5866d9fbad2bf8bf77e2bb7d947d657723957bc6ad57babf5b2dfc642962a4b4",
+      "m": "648f7d2dc8dbc9239e9d741eb2db94a3"
+    },
+    {
+      "p": "books/standard/pages/page-206.webp",
+      "n": 55932,
+      "h": "84a032648e72598f72509959c84d1fa37bfce597000a6e837964272e4dd275e9",
+      "m": "34d7d055a067a6eaaec7b5fd50c546d3"
+    },
+    {
+      "p": "books/standard/pages/page-207.webp",
+      "n": 97818,
+      "h": "7a3fc685911e786c81bbfe4977690cfc0c808e4f34408ad6a646bcaaa4889da6",
+      "m": "c16b008184d7d11db175e5faf1a5a8ef"
+    },
+    {
+      "p": "books/standard/pages/page-208.webp",
+      "n": 88134,
+      "h": "dfe8c18a14a14cc3a74e7337f8340be49461a2d163469873e815e26bced52548",
+      "m": "ce121974b4f03a3dc7398f8259fb5c32"
+    },
+    {
+      "p": "books/standard/pages/page-209.webp",
+      "n": 85360,
+      "h": "a4c15306866296224a9c39dd2289a5ef8bddfaf55c29fdf2148c4be70e472cba",
+      "m": "3a1b2dbe6c109de2a0a327b29cc9bd02"
+    },
+    {
+      "p": "books/standard/pages/page-210.webp",
+      "n": 89468,
+      "h": "801b3fb1c3d7f65b54b4faa9117f5faa09703f0db9a407b96fa0fcf50cde3b85",
+      "m": "2515793a80c1ceb78f195181e04620c5"
+    },
+    {
+      "p": "books/standard/pages/page-211.webp",
+      "n": 68468,
+      "h": "24111f8760a9443b3c57b7e1383e177e74701a833b213cd64b0058cbb9e2eb8f",
+      "m": "e854d3b42ed8cfd77b5b43da9b6e4b67"
+    },
+    {
+      "p": "books/standard/pages/page-212.webp",
+      "n": 82600,
+      "h": "cbb83a0a6d27ded68e48b11d3e28819519b1a11d81b0dcebe67d4bae8ea43ad9",
+      "m": "ad5b718299f7ddb40e58b15c2e09b874"
+    },
+    {
+      "p": "books/standard/pages/page-213.webp",
+      "n": 69400,
+      "h": "5077c38a37fa4310e5c27682800327494ecbd84ba801819735507ff2f9ec7ed7",
+      "m": "2cb05ba253c6198aeb25df8aca43b4c8"
+    },
+    {
+      "p": "books/standard/pages/page-214.webp",
+      "n": 120094,
+      "h": "dc8438e4c6d79cdca66c7a8497168fae6282d99ffe55e0ce40d71dd21e257197",
+      "m": "85aa48893d123b86c45c41e54d700870"
+    },
+    {
+      "p": "books/standard/pages/page-215.webp",
+      "n": 74924,
+      "h": "b59ff8ce0860d400a86ed3929478c44994656ee3f1de2f61afc48cac06549c79",
+      "m": "57b093899404bd46ade87792995e4c09"
+    },
+    {
+      "p": "books/standard/pages/page-216.webp",
+      "n": 84640,
+      "h": "dc175c9c6e721bc2e23163ed41d71ddb85d3de88e86273c2bbb794cf7983b4c8",
+      "m": "e404ef6573f912a45efaf34fc733ba68"
+    },
+    {
+      "p": "books/standard/pages/page-217.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-218.webp",
+      "n": 61926,
+      "h": "d19fe79c15e2ecde6d9ca19bfc978a526c84ec55faa8700c4d0873b4106c59ae",
+      "m": "0b47ce8ea8c06538e2b739e0e47ccbab"
+    },
+    {
+      "p": "books/standard/pages/page-219.webp",
+      "n": 76910,
+      "h": "bc55f03bb622c9f157d592d879c58f371224160f0023a9b5a24b07e1b67cab6d",
+      "m": "299c9d435f6cc5c876c40508857600d1"
+    },
+    {
+      "p": "books/standard/pages/page-220.webp",
+      "n": 87652,
+      "h": "60a0c906a1884a51ec1827cfe522fa1b5c0f336395d8c1dfc713c359246a4cc6",
+      "m": "a406a56af4491eddc75870d19207edd1"
+    },
+    {
+      "p": "books/standard/pages/page-221.webp",
+      "n": 88002,
+      "h": "4b9cae6d42023233fc4077d2e507306ca961a08f6b644b1de1fb4e8db1c44bf6",
+      "m": "bfadd6533033cfb2c23680e5f2903537"
+    },
+    {
+      "p": "books/standard/pages/page-222.webp",
+      "n": 72146,
+      "h": "d8cc6404c12a810f39b4e8f44e6b334ac4fbafec385a327b3aca45679041820a",
+      "m": "5486f52f1b34cab214367f8e41f28df0"
+    },
+    {
+      "p": "books/standard/pages/page-223.webp",
+      "n": 89680,
+      "h": "8c642aa4e0d078365e3daf37ee20c77b99fc800ad437d2889099e8989530c458",
+      "m": "d010340a091bb6404dd3b7e97289c4d9"
+    },
+    {
+      "p": "books/standard/pages/page-224.webp",
+      "n": 101754,
+      "h": "b5a2c617c5c5be859423d8235be72d99e83621c170ce97d2dfb19068ae60f0bd",
+      "m": "83b0a719956abc62d28f061ab38ca384"
+    },
+    {
+      "p": "books/standard/pages/page-225.webp",
+      "n": 76068,
+      "h": "1d4d25be80c7990288be7f2083a029a702eaa16f7c9bc47fe9f793d720582b9e",
+      "m": "fc6c63de40879ae9fa963f367b2f2310"
+    },
+    {
+      "p": "books/standard/pages/page-226.webp",
+      "n": 102494,
+      "h": "2fa32fb7a78c8cfb62ff4bd8c1eb91ab114f39e8fbe8073572bceed6f73d8c0c",
+      "m": "c9d73f05713e43db73e29f32a90df50d"
+    },
+    {
+      "p": "books/standard/pages/page-227.webp",
+      "n": 47226,
+      "h": "5ff14d63d9cda6dc36e700da81eb72024565a42124e8d17280a9235ada2ef754",
+      "m": "a53f6003c6a4eaaf79e8a20a4fd0fb27"
+    },
+    {
+      "p": "books/standard/pages/page-228.webp",
+      "n": 86422,
+      "h": "490f5b864a092c965923fdc13aa61153750a0298ebaeddf4b6a858f95f16712f",
+      "m": "d4e8d05a5ffde9d3a3d29eb4441179b0"
+    },
+    {
+      "p": "books/standard/pages/page-229.webp",
+      "n": 55146,
+      "h": "15ba08d4bf7abfc0101020bc433e79eb56a51f7795e10acda898e6181bba157b",
+      "m": "d2b216fc99177af0a7523f26e10d747a"
+    },
+    {
+      "p": "books/standard/pages/page-230.webp",
+      "n": 111710,
+      "h": "78522af710457bc568301d7da99b76064b92159d32ba210c352c6fa14c356508",
+      "m": "535c3a51e0ecee2607576d40d6b22bd8"
+    },
+    {
+      "p": "books/standard/pages/page-231.webp",
+      "n": 87238,
+      "h": "d949d5d3bc736638250c01849b931b12e029979e30aebcc74fee3d453e7c233d",
+      "m": "da2d36094a9caa42be1f0872e882f10b"
+    },
+    {
+      "p": "books/standard/pages/page-232.webp",
+      "n": 58492,
+      "h": "434c847b003fc847468261f47e347bf113568a93df7c3be2e541b89c3d91c6a4",
+      "m": "0db6ca1709da53b20112d3795d9a8514"
+    },
+    {
+      "p": "books/standard/pages/page-233.webp",
+      "n": 38006,
+      "h": "50f602283ba1d136751120bbb268bd535e2cfb090ab053a1f2a6930dfa7352a9",
+      "m": "042cf3e547c88facac910e3b111d962c"
+    },
+    {
+      "p": "books/standard/pages/page-234.webp",
+      "n": 58168,
+      "h": "7561eb027bd75190ab157136d1c581553d3c5f14af85e4e3eadab84a45bc633b",
+      "m": "493065e14b7c039cda450211353254b9"
+    },
+    {
+      "p": "books/standard/pages/page-235.webp",
+      "n": 78144,
+      "h": "cd3e23c421c19865aaea89e1c01d191e1787211dc643e8e4c505e61f562dfe0d",
+      "m": "ddc4933913f44ff5943fe0f4eb5e5681"
+    },
+    {
+      "p": "books/standard/pages/page-236.webp",
+      "n": 74076,
+      "h": "76b3395546bdb80a19b0043385d1090caeed4ff7c1363febce1e874389ee606e",
+      "m": "d8a2195d256c2f90a223d7eb849d1730"
+    },
+    {
+      "p": "books/standard/pages/page-237.webp",
+      "n": 72200,
+      "h": "18eedb38c847e58c66d5c2afef7b95900d51521ec1ecf963c997826ebb97e4f5",
+      "m": "1544f5d45a194b91ae83adee3d243507"
+    },
+    {
+      "p": "books/standard/pages/page-238.webp",
+      "n": 61394,
+      "h": "e98b934c9821af40b177f65cf34f95b5d5140c7fd94c1c1eecfc10afc4b3d61e",
+      "m": "a744c922038eefdc78a2e43f5556a006"
+    },
+    {
+      "p": "books/standard/pages/page-239.webp",
+      "n": 95904,
+      "h": "6c5d93d25f789351fb51f7ebd3a5c0a67885df0bd579554f01af39725c4c7763",
+      "m": "590bc2dc5582b21c354f28fbbdcdc13a"
+    },
+    {
+      "p": "books/standard/pages/page-240.webp",
+      "n": 57160,
+      "h": "32c903e08447dd5af15991d85d314f26dc6a22f7030ec483dbd94df314b71d05",
+      "m": "48b92edf62e264bb0b738fe145c7add8"
+    },
+    {
+      "p": "books/standard/pages/page-241.webp",
+      "n": 85200,
+      "h": "3ffceede98300e185e2c233159e68c32ffbf96b252a73c21bbde6b5137b605a8",
+      "m": "684eb388676d718d6e6a99dac99074df"
+    },
+    {
+      "p": "books/standard/pages/page-242.webp",
+      "n": 50344,
+      "h": "04ff8fa0e7b7568a3c19fe5a2febd7d780df63ed98aa166a8f34ec791d2abca8",
+      "m": "ff6d086285fde998b80f00b51394f940"
+    },
+    {
+      "p": "books/standard/pages/page-243.webp",
+      "n": 87902,
+      "h": "3b009f84b7bba6122bd252c8c41c471ca13b41a189f7ca49379fbff44400c903",
+      "m": "c6417a9c91eaf2e592d09c8408cb67a7"
+    },
+    {
+      "p": "books/standard/pages/page-244.webp",
+      "n": 61544,
+      "h": "cdb07001e5c1bf8fba29149056e2073b24f21982d0a676581752a6abe8b7fde2",
+      "m": "d276d556c4199cbe1ca97393cfd39783"
+    },
+    {
+      "p": "books/standard/pages/page-245.webp",
+      "n": 110386,
+      "h": "90d93310eb49e6df6cb8ad0d915712670ca2169f52c8bb32f0be1a1a172148b1",
+      "m": "c11fadf0f34a16af345ee3eecff02bf5"
+    },
+    {
+      "p": "books/standard/pages/page-246.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-247.webp",
+      "n": 52588,
+      "h": "8e98fa053176557bbecf5885038117a82da719fd04029caa57b522eb127ea565",
+      "m": "a3b57cfe6324f64bbf111edec59873af"
+    },
+    {
+      "p": "books/standard/pages/page-248.webp",
+      "n": 89034,
+      "h": "a96b5395cbffa246035515d8d4ecb25bbf2ce0f5415f4689df0df893e5def0c7",
+      "m": "9ed9220a42c3133237ca6fd13ff9ee7d"
+    },
+    {
+      "p": "books/standard/pages/page-249.webp",
+      "n": 57332,
+      "h": "9d97feac2bbe98786398ce4ec35ebb29b99b0598cc6ce62e336deaef5db839f6",
+      "m": "5ec89290f0ed6fe8b34f698690558d7e"
+    },
+    {
+      "p": "books/standard/pages/page-250.webp",
+      "n": 33460,
+      "h": "a71ea5108fbe2b52e95691192293dc5e729290b385a688969257c998225689d0",
+      "m": "1387ede55c39e65e6ed47278622a404a"
+    },
+    {
+      "p": "books/standard/pages/page-251.webp",
+      "n": 35636,
+      "h": "fa65c607492281c3e4007f611002a02f0d5cb23bd06c1fac63d745ee6573277e",
+      "m": "e6c8c594456eea4cccec2618dad954c1"
+    },
+    {
+      "p": "books/standard/pages/page-252.webp",
+      "n": 64208,
+      "h": "2808b9eefa517321cf6c3abeda49bb283816df41678914ec9d5f20d288691258",
+      "m": "3bff7a16c71c6b77b44f518240e33ff5"
+    },
+    {
+      "p": "books/standard/pages/page-253.webp",
+      "n": 90464,
+      "h": "1368de8899314f6fb178046c7f58d9504097cf39f94d283ab2b0f6c2dad1bf60",
+      "m": "5df97e08de7580bc374ccb99f5213b5e"
+    },
+    {
+      "p": "books/standard/pages/page-254.webp",
+      "n": 59498,
+      "h": "f079301f5330c1f0127ebedffb38dd84de6c1c9b7519b50f6ad15c96e34f9842",
+      "m": "4b0558f94eeb6163f84f35c1198e32d9"
+    },
+    {
+      "p": "books/standard/pages/page-255.webp",
+      "n": 95330,
+      "h": "d492da1d4d5b6e2c555f8195f25df93ad7cb1b3c400e689a1354ece3de7e13fc",
+      "m": "f0ccbba149553d776a55ad5cccff0c61"
+    },
+    {
+      "p": "books/standard/pages/page-256.webp",
+      "n": 41754,
+      "h": "9930502a1fa7233f9a3796485047f55b9986238c8a3834620b7bdc6defc4d704",
+      "m": "2e297d65b03c0291d7f9f3b00abcc35c"
+    },
+    {
+      "p": "books/standard/pages/page-257.webp",
+      "n": 46774,
+      "h": "80510e89f42a2a609e868f3a94b7d1049845e49aa75868a2f99c76a2391b5e57",
+      "m": "986d4b4bf31f2db562b15721db63d5e8"
+    },
+    {
+      "p": "books/standard/pages/page-258.webp",
+      "n": 39388,
+      "h": "d1cbe4ccc2fbf8a50357f325dda6c5a131489e6f926d45068b16e007a42c4a24",
+      "m": "b8b630fcda37514ef24f7dd9a340c160"
+    },
+    {
+      "p": "books/standard/pages/page-259.webp",
+      "n": 59704,
+      "h": "1bfe569d7d148d95484f3843fc30b12aa12072d1211239170b5a852f7449ff42",
+      "m": "692240b971182413fd2d67ae13e3c60c"
+    },
+    {
+      "p": "books/standard/pages/page-260.webp",
+      "n": 48992,
+      "h": "9de0057387e6d30fd2d8aad7b45c8e0861f89024320a28f173ca6f3fb049a634",
+      "m": "1c199ae4d23b118c15565fbbfb00944c"
+    },
+    {
+      "p": "books/standard/pages/page-261.webp",
+      "n": 74920,
+      "h": "b05fb426c81e646dd348a1cdbbb793595cab320e1b022d1f48a22d11ebfea86c",
+      "m": "4990244dc8c081e914f1220ba00eebb4"
+    },
+    {
+      "p": "books/standard/pages/page-262.webp",
+      "n": 59022,
+      "h": "e4bcafe66a0cd8c90372f3078d050a15b5a174072213102ff39f58079733a6a1",
+      "m": "ed68ea06a1d3e1140adc63d37954a815"
+    },
+    {
+      "p": "books/standard/pages/page-263.webp",
+      "n": 75130,
+      "h": "16190a12276746e4e341b47539b970225d1a655b75e312b6e06fdc842af678d9",
+      "m": "d3addf45c73b8f4cba0e5288a62cdb49"
+    },
+    {
+      "p": "books/standard/pages/page-264.webp",
+      "n": 75122,
+      "h": "4c6ce2b34566db0cee61f1d9244f696b811a412e293deecb04320acb81580538",
+      "m": "508185f9b343fe7149031100af7fd577"
+    },
+    {
+      "p": "books/standard/pages/page-265.webp",
+      "n": 35674,
+      "h": "3386dcf7539f4475fd630c620e0d46a1717207325a44132d6c2c608031c934fd",
+      "m": "8e004e0f7ced04af353b3ca28a1fc992"
+    },
+    {
+      "p": "books/standard/pages/page-266.webp",
+      "n": 114648,
+      "h": "4f3c5354053e8a1d69c3887c36078ce0c50031cad7ec2302a513706366a81567",
+      "m": "77b2eedc6cecaffaa0b94ba22a60a422"
+    },
+    {
+      "p": "books/standard/pages/page-267.webp",
+      "n": 51834,
+      "h": "cb1ac5ca97b47e9fd3dcb50b74542d8dcd51bd66159eb6b73f3193854be0c136",
+      "m": "c6483973664151a74ea25542dfe4d7d2"
+    },
+    {
+      "p": "books/standard/pages/page-268.webp",
+      "n": 44184,
+      "h": "b7675288bb4ec3d10b4148a656eea38ee3fee0269590aa50b40bbc67c9f16ef3",
+      "m": "48d446b86d3ca6231af474ccf66a2dcb"
+    },
+    {
+      "p": "books/standard/pages/page-269.webp",
+      "n": 50098,
+      "h": "efc9ded9431e1b56365a0e91b292b8dbc79de54b37f4476e2b88e875881ac2ba",
+      "m": "074ba988aa18cad108b0959b4a2cedd9"
+    },
+    {
+      "p": "books/standard/pages/page-270.webp",
+      "n": 67244,
+      "h": "212c7125edf923599ba785f015b31da533cea87a082c409b7c42fd727dc7142c",
+      "m": "a47ee379ed601d28b2a06314f293d998"
+    },
+    {
+      "p": "books/standard/pages/page-271.webp",
+      "n": 89036,
+      "h": "5b8ebcb7191f2bcb64de671f6d03b49121c5800c10d73f6b403cabc3704242ea",
+      "m": "bfc6c332d6b52aabe7ef5b1dba1272d5"
+    },
+    {
+      "p": "books/standard/pages/page-272.webp",
+      "n": 95718,
+      "h": "7f2efa4750ff96360dabe7d3f7c5fad508eea1509f59bc5f298ebdaf95304526",
+      "m": "9863b923050828445bb0457698531f26"
+    },
+    {
+      "p": "books/standard/pages/page-273.webp",
+      "n": 53758,
+      "h": "1caa51c66009e432b624b152d2e898c998dfc1a032defcbf323fc8f7d85832e0",
+      "m": "64cd9012dc35add0a938374d65e895e4"
+    },
+    {
+      "p": "books/standard/pages/page-274.webp",
+      "n": 21600,
+      "h": "9d92be631513f43f52543bc81496ff929f015b551015ff9bbdc66e809b642aa5",
+      "m": "00517614867de1826f5114142a5a9445"
+    },
+    {
+      "p": "books/standard/pages/page-275.webp",
+      "n": 63710,
+      "h": "0113fd5ccaad455af9c7785ec98f132e1e36ffc025ce0b839f8df16eea58ec8a",
+      "m": "d3005b1da10b8c0ecaea28354c441c94"
+    },
+    {
+      "p": "books/standard/pages/page-276.webp",
+      "n": 66454,
+      "h": "8b6c71032c5a937e66d9592a7c39df9503e660d0f33ac80ad22871bb7ace9db2",
+      "m": "11dc8faa8877504a48111e79baecf9aa"
+    },
+    {
+      "p": "books/standard/pages/page-277.webp",
+      "n": 68446,
+      "h": "4ab28579c3433411c21eb0df0429a3db318bd7f116a41b5f6d27d4dc66f28d80",
+      "m": "5348da52016384ec703cbe23de7810a6"
+    },
+    {
+      "p": "books/standard/pages/page-278.webp",
+      "n": 46380,
+      "h": "d7fddd5ae61041a0571325f0335f3f5de22260f315d59fa34ecd0a5a40377ff4",
+      "m": "208967cc7fefa067cfcedf5bcbbeb372"
+    },
+    {
+      "p": "books/standard/pages/page-279.webp",
+      "n": 69544,
+      "h": "b835dedb5a690823ab2907709e4d8b73c7eec25c34d925fa8ab3ddc2d782d899",
+      "m": "20944eae470e291ee5347f672527518b"
+    },
+    {
+      "p": "books/standard/pages/page-280.webp",
+      "n": 44630,
+      "h": "b0ac70e35eb7da2d3bdc2ed7e864b6870bdcc7a475b12a4485249c69de652fd1",
+      "m": "c82a2e6105d316254f6339831b50fff8"
+    },
+    {
+      "p": "books/standard/pages/page-281.webp",
+      "n": 70412,
+      "h": "04b58c59bf21b1cadef8495d801eec917e59649437b4e0894f987a0bd65d70b5",
+      "m": "5c26c9d2924ed921084cb4df3d0fab4b"
+    },
+    {
+      "p": "books/standard/pages/page-282.webp",
+      "n": 79734,
+      "h": "3a04c45dc3d2428bfeff59f0f709d2d7f28350e2f4574b9fb619849f2ed7c815",
+      "m": "78261d88fd98baada16dbc2b73074f60"
+    },
+    {
+      "p": "books/standard/pages/page-283.webp",
+      "n": 31482,
+      "h": "621aab5c1a296c22508af02127e22940f9ff7561b292fc66c0e946e9209113bb",
+      "m": "b5bd194aa02ed6f69117336b2f83ff9c"
+    },
+    {
+      "p": "books/standard/pages/page-284.webp",
+      "n": 55600,
+      "h": "d414d7a873b59c1c48969b87d1b69900027cd33e1df523a1f858f8c8bdad791b",
+      "m": "0534c1cb2486a74b6f6bb5479622c780"
+    },
+    {
+      "p": "books/standard/pages/page-285.webp",
+      "n": 91166,
+      "h": "03693f17c8eec13a2594e695745867b13c6e7a351b18705d029d2af1c2dd4495",
+      "m": "1d3c5c6db941efd6ea42fcb18c17f4f1"
+    },
+    {
+      "p": "books/standard/pages/page-286.webp",
+      "n": 67792,
+      "h": "eca1c3c7e6ae03e23dd6c951ae4b81b5d74ee193a8cd7437b443c82fc3051b4c",
+      "m": "99d099e5ce69fc4c4e3cac78b7b7275e"
+    },
+    {
+      "p": "books/standard/pages/page-287.webp",
+      "n": 47222,
+      "h": "f6ec2ec649bb2d527d12be25888cf81b072b637c35dab822b8cb7f4e12d468b4",
+      "m": "9697cb63c59dae6fa91455e8fd368b71"
+    },
+    {
+      "p": "books/standard/pages/page-288.webp",
+      "n": 78232,
+      "h": "d62c2b79497ae4d4da16befa34485ffb37b106925c8832d3287a270648b6e1bd",
+      "m": "96874040f0355891cf7219be63239ca6"
+    },
+    {
+      "p": "books/standard/pages/page-289.webp",
+      "n": 37342,
+      "h": "b2de5b150aa78c8d95f9ae49a2c2b93d530ec8d6373191ab661a9989759a7e56",
+      "m": "c51d09baea00c705db2fea0569f73a5d"
+    },
+    {
+      "p": "books/standard/pages/page-290.webp",
+      "n": 71816,
+      "h": "f96817492825961d0e9d7f40d759e4f58f218dd058aa8ac33c66ead072ce534b",
+      "m": "65f5b8dfbbcc8115c09fe6cb2d705050"
+    },
+    {
+      "p": "books/standard/pages/page-291.webp",
+      "n": 28222,
+      "h": "da72ca43f74750f31d6c6b5a98fd4a38bea99b2cce4f88696a7879ff7a2aebed",
+      "m": "8d486d3461e5d41d7cd5d6bfc0892e9a"
+    },
+    {
+      "p": "books/standard/pages/page-292.webp",
+      "n": 28530,
+      "h": "e5f5fd0881aae4eb1116e8156c1bed6cf89ab8e65ffa440ff03d453a4a1feca9",
+      "m": "a5692863721801aa383b99009e90e8e3"
+    },
+    {
+      "p": "books/standard/pages/page-293.webp",
+      "n": 53198,
+      "h": "1279393f1d236c35df888ad7aa312be2657c550a21e68d8c9e703a8fa2eee054",
+      "m": "7747ea76eb79d0d2a2e7ae8b8aee6d1b"
+    },
+    {
+      "p": "books/standard/pages/page-294.webp",
+      "n": 90494,
+      "h": "8ba7d8960d2d26c10824322f98d0639ff174952ac236544404f67b5edcda3632",
+      "m": "abf8489c818ace4b886d789e636ca1c5"
+    },
+    {
+      "p": "books/standard/pages/page-295.webp",
+      "n": 110850,
+      "h": "2e7fb35530c27326f7a86d73286cf087478426a379ab16df3e0cfc7e4dd38dd9",
+      "m": "bb6e3ab83fc819e1575c6edc912b835c"
+    },
+    {
+      "p": "books/standard/pages/page-296.webp",
+      "n": 63488,
+      "h": "9251c4747b95bd1a82756a729d9507a438bfafc9b9a9870c6d44d8dbb813c896",
+      "m": "7bbace5505a7640f9efd3bb22737de2a"
+    },
+    {
+      "p": "books/standard/pages/page-297.webp",
+      "n": 66002,
+      "h": "d369b1a87af45f2a061dc57d54b9b84158885aff7b3425c8248d331e939e16a7",
+      "m": "f81638f1656865af803aec5e3ce17af3"
+    },
+    {
+      "p": "books/standard/pages/page-298.webp",
+      "n": 92638,
+      "h": "c2ca244681abb1851dfe005c0777519ebb4dc521e5634d3f33c2b02e55a9e17d",
+      "m": "64a4d8082cb037b49fe6453fec65157b"
+    },
+    {
+      "p": "books/standard/pages/page-299.webp",
+      "n": 39870,
+      "h": "fdc9f5c12a5cb8aa8294e2a08873f85dd62fc7cd9c07ee1edd63d7d1b0e5bcfb",
+      "m": "fba04adbdc8e26913b3f603a7100ed53"
+    },
+    {
+      "p": "books/standard/pages/page-300.webp",
+      "n": 60232,
+      "h": "72dd33415674a55953e51d1b51d68792d9bbe88347ab3d1bf804db3a4bf2f9e8",
+      "m": "ccb3507f99f09f7dc5a547125ce4cc0e"
+    },
+    {
+      "p": "books/standard/pages/page-301.webp",
+      "n": 70774,
+      "h": "fa4cd5381a820ff0032ab47924f3d6f1b989fbef075897fcf914dd12719bced1",
+      "m": "300c7f593178221a41ad48ac5a8c4704"
+    },
+    {
+      "p": "books/standard/pages/page-302.webp",
+      "n": 61924,
+      "h": "448c4f10f7f482dfca31fda04b00a1c6ee48995038d7c9481f2febef821030d1",
+      "m": "c9f0b87db4385483252789dc3e59621a"
+    },
+    {
+      "p": "books/standard/pages/page-303.webp",
+      "n": 79610,
+      "h": "1cb17c7acb91625339056ef41ca59f25dc576bac5ba861114a82a910448d29c8",
+      "m": "ee9b869c0e65f02141e02c4de3fd02cd"
+    },
+    {
+      "p": "books/standard/pages/page-304.webp",
+      "n": 74848,
+      "h": "b0d07a031fedb8c50a1bbb045e7a53454e8baceae573b64d66707e721d26ec54",
+      "m": "2f1f84b3b4272ee76474b5e1e9451e6e"
+    },
+    {
+      "p": "books/standard/pages/page-305.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-306.webp",
+      "n": 96272,
+      "h": "a6dbc6a5cd28cdc9cfe05e52b20fe07e46b0e37d64ed74feca1486c4c22a645e",
+      "m": "6cff08504c5117fa9b564eacfad6c6a2"
+    },
+    {
+      "p": "books/standard/pages/page-307.webp",
+      "n": 54560,
+      "h": "4a1c62aa0cfc842265930485e910075fabb438ef9ece8899ff0becc5b5a165ec",
+      "m": "26ef574928d73413db65be1da415d3d1"
+    },
+    {
+      "p": "books/standard/pages/page-308.webp",
+      "n": 56702,
+      "h": "75a5496912594908db114c5871963048cb498657ae10dc37e0848ed3ed8c1b2b",
+      "m": "3eff4359a365801c2553c6be87f43527"
+    },
+    {
+      "p": "books/standard/pages/page-309.webp",
+      "n": 52968,
+      "h": "b63ad31b6099b80157c6118a994ec6d985808f0a719e94df06c40e6a7b960768",
+      "m": "9b8e1d9fd797c8d240c305fc3d850bc1"
+    },
+    {
+      "p": "books/standard/pages/page-310.webp",
+      "n": 77472,
+      "h": "735081a8d432cd2a2e5dd1d960e4c738e475fe89aeb10866c9bdc150524938cb",
+      "m": "7f5119e945d57431b04209a5ccc90631"
+    },
+    {
+      "p": "books/standard/pages/page-311.webp",
+      "n": 46932,
+      "h": "44b633bb8a2bf4307113d68292ea198ef7a407ce4bd20d7fcfa4ce7116fa8250",
+      "m": "b0909de3e9691803916ae8dce225fa21"
+    },
+    {
+      "p": "books/standard/pages/page-312.webp",
+      "n": 85188,
+      "h": "ea98ae66a53d31ff7e02f749fc57d1ee21d3e855bf8705d124b00a8c859fb52c",
+      "m": "a0ac32fa13437e1b6b58e911ca0fd783"
+    },
+    {
+      "p": "books/standard/pages/page-313.webp",
+      "n": 94454,
+      "h": "31744cc5f0107f821ec1b70f9695d8307086d3655218ef1aed19cbbe35593423",
+      "m": "30c58416a19988426e309716a56b567f"
+    },
+    {
+      "p": "books/standard/pages/page-314.webp",
+      "n": 45604,
+      "h": "f22566376d4e380fd023fb3c643f531175a5dd622e93732d5ca5353c95ecf0ac",
+      "m": "6581571b52a7555342d6d7af6df64ceb"
+    },
+    {
+      "p": "books/standard/pages/page-315.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-316.webp",
+      "n": 54824,
+      "h": "38036b5f3161a6680a7c7997ed577ce1a0d60915ba9af738e89b881073d40b51",
+      "m": "20cdf305abdb7265dc56bed575210495"
+    },
+    {
+      "p": "books/standard/pages/page-317.webp",
+      "n": 66944,
+      "h": "57736ddbfab3e7bdafa43d68c3a061c4b34ae09dc5dbeada6c01f14cfb86f650",
+      "m": "60368682ae9cb9030e1c45c1e612d2b0"
+    },
+    {
+      "p": "books/standard/pages/page-318.webp",
+      "n": 92870,
+      "h": "a85cb894eb97f9029792823febafbfd270665a13e733ee336a8190eaabee8f45",
+      "m": "c917225f0194e3749effd551ccc60521"
+    },
+    {
+      "p": "books/standard/pages/page-319.webp",
+      "n": 84104,
+      "h": "2c49da59d2ff8ca42d7d2b42044519daa3f403ecc02e20bf54657a3b9c6531d0",
+      "m": "6fccf6150fb76da5cbb6ae9bb8174761"
+    },
+    {
+      "p": "books/standard/pages/page-320.webp",
+      "n": 53142,
+      "h": "393d499de959e3f3bd62d6e540e6145bcfe09adbcfd9f77fed242b09b01cdc54",
+      "m": "515f74811cff119adcc0813e16d40003"
+    },
+    {
+      "p": "books/standard/pages/page-321.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-322.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-323.webp",
+      "n": 73014,
+      "h": "a5cdb2a08ed6a4682d85332d9ddf36e9f91fde849fc927b0de375d2bf62d4758",
+      "m": "1b4b51f52442e4107bf2bb30d9873346"
+    },
+    {
+      "p": "books/standard/pages/page-324.webp",
+      "n": 111556,
+      "h": "1704f2107d13cc5effcf10064ebdabe6c1377df03c1a7f797b441b94f43eb753",
+      "m": "c4767f6077851b67cca858980b5ac213"
+    },
+    {
+      "p": "books/standard/pages/page-325.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-326.webp",
+      "n": 47248,
+      "h": "0ebca78a560733aa5a411147d0af5faacf4c99a8f2c546baede21710e25f8d03",
+      "m": "9516509ab7d053ba142d7722fdd4b62f"
+    },
+    {
+      "p": "books/standard/pages/page-327.webp",
+      "n": 55852,
+      "h": "c7fb71492ce5ba76c7aa6c08029f08738973472909fbde003b3e52f809de9c70",
+      "m": "162cf7a830d2dc83c6ba820057a5a208"
+    },
+    {
+      "p": "books/standard/pages/page-328.webp",
+      "n": 58666,
+      "h": "cd4b4263142b4109bceed3f0a529382ef347fb329144b7b14deaa46b5666661a",
+      "m": "6f73f4c8cfedc7bfacb7d2e95f956c2f"
+    },
+    {
+      "p": "books/standard/pages/page-329.webp",
+      "n": 68520,
+      "h": "9d0357e66ca207803ee09df2bbd39f18e8cc610b6b6e6212f8c2b8e9a0589008",
+      "m": "e003ed74cb561a0d2cb64aaa7594f48e"
+    },
+    {
+      "p": "books/standard/pages/page-330.webp",
+      "n": 66192,
+      "h": "062f0e9950c6f4143cf86a4bcdbe2a4e22808ed9fb7719d2e2e434f36a7f4e9f",
+      "m": "6e7f1a2837d3a1f9b02de1c47685fa30"
+    },
+    {
+      "p": "books/standard/pages/page-331.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-332.webp",
+      "n": 27970,
+      "h": "d8450b6b86908d710306d8eaf25500e370edeaecba6bf6ccc65c6050d9f6cd1a",
+      "m": "ef2d8fcff947377d02baaa07f39de873"
+    },
+    {
+      "p": "books/standard/pages/page-333.webp",
+      "n": 61348,
+      "h": "33299cbb0afefbc6e383615a1bca5ae702c4845f6d14697860ef887dfbdb55c3",
+      "m": "ef3c6a7f248276905feac63fd4f29989"
+    },
+    {
+      "p": "books/standard/pages/page-334.webp",
+      "n": 33034,
+      "h": "354be49db866fac4b01a47ce30bf670f37a26a79014f98a5897e128b10380d4a",
+      "m": "38000de1a38afec336346eb57a2cb191"
+    },
+    {
+      "p": "books/standard/pages/page-335.webp",
+      "n": 74670,
+      "h": "15bd63ecf677adda76f66b5d8a259079e0ed8f892364e42d95a725cd398c93e7",
+      "m": "c28f5bc30d362555ae420118f9588410"
+    },
+    {
+      "p": "books/standard/pages/page-336.webp",
+      "n": 82292,
+      "h": "24c55dd80d2487904c54e1319a4e58e25d6d3a2b426b86461c90b7fd35e8673d",
+      "m": "90de83414343e0dcd035c7cb0ac3a75a"
+    },
+    {
+      "p": "books/standard/pages/page-337.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-338.webp",
+      "n": 69594,
+      "h": "ce9395286402f7d2060a0c5c0a5b295e4fd860fa248c647c6ed10de528a376c4",
+      "m": "cb4244906bec4de78c94b6e5bd6cea3e"
+    },
+    {
+      "p": "books/standard/pages/page-339.webp",
+      "n": 58192,
+      "h": "1a78d1ab912b1f72d8c9804a400c295da1e1d3b4a2044baabee64abc8af93178",
+      "m": "1a2cda9e756171a4ab3cee4f36a354cf"
+    },
+    {
+      "p": "books/standard/pages/page-340.webp",
+      "n": 72032,
+      "h": "eedf8a684a23ba89d71c7581f9eb3d19319b5492bebf97fb917b473a3081f6ac",
+      "m": "03bb90d78033784d19fe7be495c82043"
+    },
+    {
+      "p": "books/standard/pages/page-341.webp",
+      "n": 27314,
+      "h": "ac8cc70d26bae04e5cfb623c903b6473ed252d9dfe21bd74eb745fb5fdc2c735",
+      "m": "988b92f34dd5e62e43c14fe2e6260700"
+    },
+    {
+      "p": "books/standard/pages/page-342.webp",
+      "n": 54340,
+      "h": "37811dc8aea1842a4da810f7ee3a3acd3db1fe4a2deb49678e2687fbb88b2ce6",
+      "m": "900543959c48d98d0bc8a9dd8fd9219a"
+    },
+    {
+      "p": "books/standard/pages/page-343.webp",
+      "n": 26452,
+      "h": "ad313920c8213e94cd83e1b4676c9521b1c6d0c9af4a98206e967d4664fd4401",
+      "m": "b28da5f678e9478c65c1395b2b8c5c60"
+    },
+    {
+      "p": "books/standard/pages/page-344.webp",
+      "n": 77314,
+      "h": "6b09046acebe5bb6d8e6ec9cdf11d64c13604eadc8fb81541efb0ec494ce2c99",
+      "m": "c3bd6224d7f0e4ba953647ac3f5cf7cf"
+    },
+    {
+      "p": "books/standard/pages/page-345.webp",
+      "n": 29992,
+      "h": "2e85b6c4e684e8c23629af8cd824d1b1647e9cc6ce40039c3e68745696c1eff2",
+      "m": "9be4f249bfb51639104d51ca72f2ea63"
+    },
+    {
+      "p": "books/standard/pages/page-346.webp",
+      "n": 55846,
+      "h": "92896e2556106e9f8dac29a94a832c4369e825dcbd44a8f187c325f54ab681a2",
+      "m": "43878fdf1dd6c82a4b446b9a8cd020d1"
+    },
+    {
+      "p": "books/standard/pages/page-347.webp",
+      "n": 23572,
+      "h": "63d8fb1924f5087ed72fe58f1be495af84aab39ea7e04ea43e9f9bc67b2a704a",
+      "m": "4790a8e7cce599e4a320b271d930cf65"
+    },
+    {
+      "p": "books/standard/pages/page-348.webp",
+      "n": 74042,
+      "h": "cd049d610a94413edf33569fbeac9be9d59d0bf7e0acda5c6eefea113140b5d8",
+      "m": "ce383eaf90bdb9f5fd58b247936ae70b"
+    },
+    {
+      "p": "books/standard/pages/page-349.webp",
+      "n": 100116,
+      "h": "061c91dc676f1e1ca314a07636779d7ad79ea4b25022db38323a334438546626",
+      "m": "87faf01b1afec912a360810a592bbc56"
+    },
+    {
+      "p": "books/standard/pages/page-350.webp",
+      "n": 98104,
+      "h": "03915c1a834a78ded24877b262ffaee0f29ac1919810567e159430a3282a86af",
+      "m": "cfaa7134ef8bef5b4a7173e41ac0e177"
+    },
+    {
+      "p": "books/standard/pages/page-351.webp",
+      "n": 96012,
+      "h": "571564b57a1059ba3f6b61d5706c5fcfcec58032968ef100ec2be8c4d2abae7c",
+      "m": "da7f53e0f81e7a317442082e64de4d4b"
+    },
+    {
+      "p": "books/standard/pages/page-352.webp",
+      "n": 62844,
+      "h": "8f9a11a2c6428743112846a5beb4cbba417fccad781797681d112221ce670353",
+      "m": "1095a0792c6a81bf80dbedaf0c95dcb1"
+    },
+    {
+      "p": "books/standard/pages/page-353.webp",
+      "n": 70726,
+      "h": "7ff18fcb131dcde808942d4c6cad64d824817fc75c8ad9618362a8047debf985",
+      "m": "c2cd08477cb500a3f7e834988f0a75e2"
+    },
+    {
+      "p": "books/standard/pages/page-354.webp",
+      "n": 70946,
+      "h": "87e0f0cb889da27d21a8e0779aa6b0d864c8df7e0acece6c0f566766f2898665",
+      "m": "270279ca808be2cd95b7dcaaf715b067"
+    },
+    {
+      "p": "books/standard/pages/page-355.webp",
+      "n": 76960,
+      "h": "e2203e19f52805d82482c2404d468496a0ea67a6530f3a62b5590d6b1a16c3f6",
+      "m": "7f4ad2cac3a81eb604194f723c91ff06"
+    },
+    {
+      "p": "books/standard/pages/page-356.webp",
+      "n": 45776,
+      "h": "11af37e1f9c2987efd8cbb73c7668538c6c8cc0e1dc9372521d877a2447fa892",
+      "m": "5f108915c7866926d77a54879f6da402"
+    },
+    {
+      "p": "books/standard/pages/page-357.webp",
+      "n": 61078,
+      "h": "b3c26fb19476a3ee89d58caacee77d3a2330afc3f37807ea2f25459920708b06",
+      "m": "2a1f0897bdbb1fe1c480c7486d01ffd0"
+    },
+    {
+      "p": "books/standard/pages/page-358.webp",
+      "n": 82152,
+      "h": "38c8d8b516406f1f2967e05021b5e0c186ebb98611a3e20fec7bef62067bf1c0",
+      "m": "2d9090a4cd14b5ee241aa0efba85d585"
+    },
+    {
+      "p": "books/standard/pages/page-359.webp",
+      "n": 73844,
+      "h": "011be17e303f8fcca6a428319d7776def0df027ac575cba41f1129abd57ff6f1",
+      "m": "6235fae9cbc0b75fbba04eabb8885972"
+    },
+    {
+      "p": "books/standard/pages/page-360.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-361.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-362.webp",
+      "n": 76030,
+      "h": "3e55836cb8a633c1804406978d967c898b07262c996bfbb9d70f49c0a6454381",
+      "m": "d175bc18984ae402fcec5c9afcec41f2"
+    },
+    {
+      "p": "books/standard/pages/page-363.webp",
+      "n": 114598,
+      "h": "f63f0032cf5b61dcaa8facca7ba4a5a25a9bd7228dc3cf42959ce99f3d5cc090",
+      "m": "be9d644a37e3c885f3839e16f2eaa962"
+    },
+    {
+      "p": "books/standard/pages/page-364.webp",
+      "n": 64312,
+      "h": "31d37a80ea6eb2cd69bdffa1fe19dc435cfe262992ed0085cadc51127e5ad861",
+      "m": "632fe95b8a5582b0c2099d55f9e87670"
+    },
+    {
+      "p": "books/standard/pages/page-365.webp",
+      "n": 32578,
+      "h": "2fe4e7362954c9a34e72bbdb6a59e864edbded4226ef34d61ac1e02d561c4da2",
+      "m": "fe168a222dd986dced2b4d4c14f9efe4"
+    },
+    {
+      "p": "books/standard/pages/page-366.webp",
+      "n": 3672,
+      "h": "da41d13908d08e0a9d8477f6b46f9128cbab4c1d830fff789afa95776b140ca2",
+      "m": "511516817b0fd6ff8ed2b2fdbbef42d8"
+    },
+    {
+      "p": "books/standard/pages/page-367.webp",
+      "n": 56606,
+      "h": "801e686bd0771e81f1decd0f426fa5ccaaeb64ba99e4e205a89c43cb8cd7447d",
+      "m": "9dab3cb9a18f5ee997c2636b59a6c780"
+    },
+    {
+      "p": "books/standard/pages/page-368.webp",
+      "n": 57206,
+      "h": "2e733df3c9252672bac06ed48eaf0d7ec7aa80cc221be6fa953343e22cf98f93",
+      "m": "73e8919913661c12a4cc59545782d73c"
+    },
+    {
+      "p": "books/standard/pages/page-369.webp",
+      "n": 99546,
+      "h": "054bf64f20151f996a6e9f45e781b2979fc6d6c71d7f13a05e7b6d1d3dc84870",
+      "m": "80993ab03d13333177d2565d980203eb"
+    },
+    {
+      "p": "books/standard/pages/page-370.webp",
+      "n": 92524,
+      "h": "022ee6cfc503c926ee5774b26e25af98f06faa609f58d5655336fd03c1687cbf",
+      "m": "b11fff358cf81baf557dca7eb2598be3"
+    },
+    {
+      "p": "books/standard/pages/page-371.webp",
+      "n": 59996,
+      "h": "970701cbe92d2b9e246b7d5e7f6468de85626ec7d6fbe6b58b663c6ce8fde1d5",
+      "m": "45ef3042e1b6eb80840d07eedabac108"
+    },
+    {
+      "p": "books/standard/pages/page-372.webp",
+      "n": 42308,
+      "h": "54b1fba1d63be8c140f78534d6b340984887ea50854af208c44f6f78ac38b016",
+      "m": "14588f10e7285b9aa32451587014a185"
+    },
+    {
+      "p": "books/standard/search-index.json",
+      "n": 142866,
+      "h": "01b2439ede10ed45029c0a8712c1745b532fdef7275140dd56c232e10fb09f3a",
+      "m": "41c003c452ca1a0d98a36b4ca3cc346f"
+    },
+    {
+      "p": "books/standard/song-search-index.json",
+      "n": 546459,
+      "h": "5292dc5bbe35d41b37ef5bab06554a3382dc5a34baaf3d7a4cc499b70d94f11b",
+      "m": "bd23fa34b8f4567effe886ea0791e1e5"
+    },
+    {
+      "p": "books/standard/song-titles.json",
+      "n": 9327,
+      "h": "babeb6123b174c9b3d27ac280f9e6e19e3af4cf6dd78ad17afa112beff6bd1fb",
+      "m": "7814ebde4a9a46138a7d24a7b5118d11"
+    },
+    {
+      "p": "icon-192.png",
+      "n": 18365,
+      "h": "a91b2795b4b7dc609db8a9db29b625c8575553699e4cc5218da54149e535af1d",
+      "m": "341e47ab8e977b45685324ed92fedf2f"
+    },
+    {
+      "p": "icon-512.png",
+      "n": 120074,
+      "h": "6eb653d3c55df9eebcf99d1aa0b1b7f510423fb3eb7f9dc40c707079ce56d14a",
+      "m": "765c5bf4251243ab4ef01a5d1c225a69"
+    },
+    {
+      "p": "icon.png",
+      "n": 451515,
+      "h": "b28a58224ab7fe19c48685b929937333a1e9c8031760d8df17789b3bed783005",
+      "m": "2e473344f30c0e09b0618f77dc0db991"
+    },
+    {
+      "p": "index.html",
+      "n": 32886,
+      "h": "f0efc5445d50385270659f44dd064d340503a11e2beafcd9f6b3a2bde04d4e3c",
+      "m": "9432f93c72fa1f7bacd1e0e5a51bbda1"
+    },
+    {
+      "p": "lib/svRelayRoom.js",
+      "n": 2037,
+      "h": "e5d43669499170c24fbca01542307f72679c8412a23b283425d6ec99dc1ad64e",
+      "m": "9976340ff57add80d88c920f9d369df8"
+    },
+    {
+      "p": "lib/svRenderPace.js",
+      "n": 3276,
+      "h": "0da3349e5a04ada4d63f11edaf7defacc7cf9361446f86cd178e767671cf51da",
+      "m": "1ab1d4fbd5cbae8ebac87688814004d8"
+    },
+    {
+      "p": "lib/svSelftest.js",
+      "n": 8084,
+      "h": "9247f9e41bc571eae625d85a08c7d245bdb62fca6f1704813df177b997c5ea16",
+      "m": "0942b59469cada2329b9e6901cd25118"
+    },
+    {
+      "p": "lib/svSyncDecision.js",
+      "n": 8871,
+      "h": "26f85be5d5a85ed6531108ba0eafaafbc0273fffd2d513619b5f82184893bfeb",
+      "m": "d489d586829e7729f5eb16bb476866bf"
+    },
+    {
+      "p": "manifest.webmanifest",
+      "n": 772,
+      "h": "4d7568071f86cb5c36ec6d0de76f19638bccace02f7025305f8bd0b50dce7c99",
+      "m": "62eff8fdc7bda29b216e05d9a4cfa204"
+    },
+    {
+      "p": "styles.css",
+      "n": 107455,
+      "h": "6ffd9cafae12d761e6893a5a93a912eab636ddfcdc51f2338004e7ece949d35a",
+      "m": "df3f8cb355ce39bd30e8390a45d601c5"
+    },
+    {
+      "p": "sw.js",
+      "n": 29815,
+      "h": "249ebdf25b55e646b16bcd15e31e3a33eb1facc4bf3d860293e9fa6cca039912",
+      "m": "01448ac1776d06cd7f6766bd2d41f228"
+    }
+  ]
+}

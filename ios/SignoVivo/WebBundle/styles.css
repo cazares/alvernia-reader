@@ -1,0 +1,3029 @@
+:root {
+  /* BREATHING ROOM FROM THE EDGE (owner, 2026-08-17). Was 0.55rem (~9px) — the controls sat almost
+     flush against the bezel, and against the page's own edge, which reads as crowded and puts a tap
+     target where a palm rests. One variable so the four corners can never drift apart again; the
+     max() keeps the notch/home-indicator insets winning wherever they are larger. */
+  /* 0.95 -> 1.89 -> 1.58rem. First +15px inward on every edge, then 5px back out (owner: "5px up,
+     5px left" for the top-left and "5px up, 5px right" for the top-right — which is one uniform
+     gutter change, since left-anchored controls move left, right-anchored move right, and every
+     control shares the top edge). One variable moves BOTH clusters in BOTH roles. */
+  --fab-gutter: 0.8rem;      /* out another 2.5px per side; the top edge keeps its own 0.96rem */
+  /* THE TOP EDGE IS ITS OWN VARIABLE (owner, 2026-08-18: "nudge all buttons up by 5px"). Until now
+     one var drove top, left AND right, so raising the row also pulled both clusters inward. Split so
+     the vertical and horizontal positions can be tuned independently — every top: anchor reads this,
+     every left:/right: anchor reads --fab-gutter. */
+  --fab-gutter-top: 0.96rem;   /* 1.58rem, then -5px twice */
+  /* REVERTED 2026-08-18, SAME DAY. This briefly capped how far env(safe-area-inset-top) could push
+     the row down, on the theory that the cross-OS placement difference was the inset "winning by an
+     unbounded amount". It was wrong, and it shipped a real regression: on mPad running build 453 in
+     TestFlight (status bar + TestFlight banner visible, inset well over the 0.5rem cap), the capped
+     row sat UNDER the system chrome — Salir Director rendered clipped, its text cut off at the top
+     of the screen, confirmed on device.
+     A safe-area inset exists so content clears exactly this case. Capping it does not fix
+     inconsistent placement, it reintroduces the overlap the inset was already preventing — trading a
+     real, confirmed bug (a clipped, half-hidden EXIT control) for a cosmetic one (two devices sit at
+     slightly different heights, which is often correct: a notched device SHOULD sit lower than one
+     without a status bar showing). max() is restored below, uncapped. */
+  /* THE CLUSTER IS DERIVED, NOT HAND-COMPUTED. Every top control is --fab-size square (the DIRECTOR
+     status is --fab-status-w wide), separated by exactly --fab-gap. The slot offsets below are
+     calc()s off these three numbers, so the spacing is uniform BY CONSTRUCTION rather than by me
+     getting the arithmetic right — which I did not, twice tonight: once leaving ⌕ and Ir a Canto
+     0.1rem apart, once leaving the pill 0.15rem from ⟳. Change a size here and every position
+     follows. */
+  --fab-size: 5.39rem;       /* 3.875 -> +15% -> +5px -> +10px. Square, so one var does both axes. */
+  --fab-gap: 0.5rem;
+  /* Vestigial: the DIRECTOR status content-hugs around a lone ☆ now, so nothing derives a position
+     from this width any more. Kept only as the base .director-mode-badge width, which every real
+     state overrides. Safe to auto-size because that pill no longer holds text that can change. */
+  --fab-status-w: 7.13rem;
+  /* ★ Ser Director has NO width var any more — it content-fits (owner: "as small as possible" +
+     "content-fit ... with reasonable margins/padding"). It is the one control whose text never
+     changes, so it cannot shove a neighbour by resizing, which is what fixed widths guard against. */
+  /* slot 2 = one control + one gap from the edge; slot 3 = past the wider status pill. */
+  --fab-slot2: calc(var(--fab-size) + var(--fab-gap));
+  /* NO SLOT 3. The empty-seat state used to be a text pill sitting third in this row; it is now
+     the ⟳ button itself, crossed out (see html[data-mesh="nobody"] below). One indicator, one
+     place, in every state — which also retires the class of bug where slot 3 kept measuring a
+     control that had moved out of the row. The follower row is exactly two controls. */
+  color-scheme: dark;
+  --text: #ffffff;
+  --text-secondary: #d8dff0;
+  --muted: #a8b4cc;
+  --blue: #93e4ff;
+  --blue-strong: #3a8ef2;
+  --blue-dim: rgba(147, 228, 255, 0.18);
+  --blue-glow: rgba(147, 228, 255, 0.32);
+  --border: rgba(255, 255, 255, 0.26);
+  --border-strong: rgba(255, 255, 255, 0.40);
+  --panel-border: rgba(255, 255, 255, 0.32);
+  --ice-top: rgba(210, 238, 255, 0.22);
+  --ice-mid: rgba(130, 200, 255, 0.26);
+  --ice-bottom: rgba(18, 50, 100, 0.32);
+  --ice-border: rgba(170, 222, 255, 0.55);
+  --shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+  --shadow-soft: 0 10px 32px rgba(0, 0, 0, 0.38);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --viewport-width: 100vw;
+  --viewport-height: 100dvh;
+  --ui-font: "Avenir Next", "SF Pro Display", "Segoe UI", "Helvetica Neue", sans-serif;
+  --drawer-width: clamp(310px, 64vw, 530px);
+  --key-radius: 18px;
+  --key-height: 72px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+  background: #000;
+  color: var(--text);
+  font-family: var(--ui-font);
+  overscroll-behavior: none;
+  overflow: hidden;
+}
+
+body {
+  min-height: var(--viewport-height);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.35;
+}
+
+/* Full-page loading screen / gate over the whole reader until the book is resolved (no
+   wrong-manual flash). Visible by default; app.js's revealReader() adds .is-hidden to fade it
+   out — ONLY once the correct book's image decodes, so the reveal timing is unchanged: a fast
+   load still shows clean white briefly, a slow one shows a proper centered loader. */
+#geo-gate {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  z-index: 150;
+  transition: opacity 160ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#geo-gate.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.geo-gate-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  /* The whole loader stays invisible for the first ~500ms (delayed fade) so a fast load shows
+     clean white, never a loader flash — but a slow/cold first load reads as "loading". */
+  opacity: 0;
+  animation: geo-gate-fade 240ms ease 500ms forwards;
+}
+/* Loading spinner on the gate. */
+.geo-gate-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid rgba(20, 30, 60, 0.14);
+  border-top-color: rgba(20, 30, 60, 0.55);
+  animation: geo-gate-spin 0.8s linear infinite;
+}
+/* Subtle branding / loading caption under the spinner. */
+.geo-gate-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(20, 30, 60, 0.55);
+  text-align: center;
+}
+/* First-ever-visit-offline state: the geo relay is unreachable so we can't resolve the book.
+   We HOLD the gate (never flash a wrong/broken book) and surface a quiet retrying caption. */
+#geo-gate.is-offline .geo-gate-text {
+  color: rgba(120, 30, 30, 0.62);
+}
+@keyframes geo-gate-spin { to { transform: rotate(360deg); } }
+@keyframes geo-gate-fade { to { opacity: 1; } }
+
+.app-shell {
+  position: relative;
+  width: var(--viewport-width);
+  min-height: var(--viewport-height);
+  height: var(--viewport-height);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% -8%, rgba(60, 130, 255, 0.22), transparent 30%),
+    radial-gradient(circle at 15% 20%, rgba(255, 200, 100, 0.10), transparent 22%),
+    radial-gradient(circle at 88% 22%, rgba(90, 170, 255, 0.10), transparent 22%),
+    linear-gradient(180deg, #0d1322 0%, #060910 50%, #000 100%);
+}
+
+.viewer-shell {
+  position: relative;
+  display: grid;
+  width: var(--viewport-width);
+  min-height: var(--viewport-height);
+  height: var(--viewport-height);
+  padding:
+    var(--safe-top)
+    var(--safe-right)
+    var(--safe-bottom)
+    var(--safe-left);
+  place-items: center;
+  user-select: none;
+  overflow: hidden;
+  contain: layout paint style;
+  isolation: isolate;
+}
+
+/* Director badge — tappable EXIT button. Top-LEFT so it never sits behind the top-right ♪/⌕
+   cluster (⟳ is hidden for directors, so the left corner is free). Shows only in director mode. */
+/* State tints. Following is deliberately the quietest thing on screen — it is the normal case and
+   must not compete with the music. Nobody-directing is the only one that raises its voice, because
+   it is the only one that needs a human to act. */
+.director-mode-badge.is-following { background: rgba(26, 26, 46, 0.22); }
+.director-mode-badge.is-nobody {
+  background: rgba(180, 83, 9, 0.82);   /* amber — attention, not alarm; red is for real failures */
+  animation: sv-pill-in 220ms ease-out;
+}
+@keyframes sv-pill-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.director-mode-badge.is-nobody .director-mode-badge-title { color: #fff; }
+.director-mode-badge.is-nobody .director-mode-badge-exit { color: rgba(255, 255, 255, 0.92); }
+/* The following state DOES carry its action ("Tomar") — dimmed, not hidden. Hiding it made the pill
+   look inert, so nobody would learn the seat can be taken without being told out loud, and the
+   moment that matters is exactly the one where the person who knows is not in the room. Dimming
+   keeps it from competing with the music; the confirm dialog, not the label's shyness, is what
+   stops a mis-tap. */
+.director-mode-badge.is-following .director-mode-badge-exit { opacity: 0.62; }
+
+.director-mode-badge {
+  /* FIXED, not absolute. The fabs are position:fixed (root stacking context); this was absolute
+     inside .viewer-shell, so its z-index was scoped to that ancestor and lost to the fab no matter
+     how high it went. That is why the follower dot vanished after being moved onto the ⟳ button —
+     it was rendering UNDERNEATH it. Same positioning scheme = comparable z-index. */
+  position: fixed;
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));   /* match the ♪/⌕ fabs' top */
+  left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
+  z-index: 46;                 /* above the fabs so the exit tap always lands */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;     /* center DIRECTOR + ✕ Salir within the fixed height */
+  gap: 0.15rem;
+  margin: 0;
+  /* A 5rem SQUARE, exactly like every other top control (owner: "match styling of top right
+     buttons"). Fixed size is what makes the slot ladder work — a content-width pill would move
+     whatever sits beside it every time its text changed. */
+  /* WIDER THAN TALL (owner, 2026-08-17). A square forced DIRECTOR down to an unreadable 0.58rem
+     and it still overflowed onto its neighbour. Fixed width, not content-width: the slot ladder
+     beside it must not shift every time the word changes. Same height as the buttons so the row
+     reads as one band. */
+  width: var(--fab-status-w);
+  height: var(--fab-size);
+  box-sizing: border-box;
+  padding: 0.3rem 0.5rem;
+  align-items: center;
+  text-align: center;
+  /* Styled to MATCH the ♪/⌕ fabs (upper-right): translucent navy + blur, low opacity so it
+     blends in instead of standing out as a bold box. */
+  border-radius: 14px;
+  border: 0;
+  /* PORTRAIT PUTS THESE ON TOP OF THE PAGE ITSELF. In landscape the book is letterboxed and the
+     fabs sit on black margins, so 0.38 alpha read fine. In portrait — which is how every device in
+     the loft is actually used — the page fills the width and these land on a WHITE song sheet,
+     where a 38%-navy wash is nearly invisible. 0.72 is legible over white without becoming a heavy
+     black box over the music. */
+  background: rgba(26, 26, 46, 0.61);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.director-mode-badge:active { background: rgba(26, 26, 46, 0.55); transform: scale(0.96); }
+.director-mode-badge-exit {
+  margin-top: 0.2rem;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.director-mode-badge-eyebrow {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* MUST FIT THE SQUARE. At the previous size this overflowed its box and bled over the control
+   beside it. The box is fixed, so the type has to yield: sized to the box's own width rather than a
+   guessed constant, and clipped rather than allowed to escape. */
+/* MUST FIT THE PILL. This carried TWO font-size and TWO letter-spacing declarations for a while —
+   an earlier edit inserted new ones above the originals instead of replacing them, so the old 0.96rem
+   silently won and DIRECTOR rendered as "DIREC…". Measured: 84px pill, 16px padding, 68px for text;
+   at 0.96rem it needed 88px. One declaration each now, sized to fit with room to spare. */
+.director-mode-badge-title {
+  max-width: 100%;
+  font-size: 0.785rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.director-mode-badge-code {
+  color: rgba(255, 231, 182, 0.82);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+#page-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: calc(var(--viewport-width) - var(--safe-left) - var(--safe-right));
+  max-height: calc(var(--viewport-height) - var(--safe-top) - var(--safe-bottom));
+  object-fit: contain;
+  object-position: center center;
+  background: #000;
+  transition: opacity 160ms ease;
+  overflow: clip;
+}
+
+#page-image.is-loading {
+  opacity: 0.65;
+}
+
+.loading {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0.9rem 1.4rem;
+  border-radius: 999px;
+  background: rgba(6, 10, 22, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  font-weight: 700;
+  box-shadow: var(--shadow-soft);
+  z-index: 30;
+}
+
+.loading.is-hidden,
+.is-hidden {
+  display: none !important;
+}
+
+.offline-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 14, 0.86);
+  backdrop-filter: blur(18px);
+}
+
+.offline-gate-card {
+  width: min(560px, 92vw);
+  padding: 28px 24px;
+  border-radius: 28px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.offline-gate-eyebrow {
+  margin: 0 0 10px;
+  color: #666;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.offline-gate-title {
+  margin: 0 0 10px;
+  color: #1a1a1a;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  line-height: 1.05;
+}
+
+.offline-gate-body {
+  margin: 0 0 18px;
+  color: #444;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.offline-progress {
+  overflow: hidden;
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.10);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.offline-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7fe3ff 0%, #7fb1ff 48%, #ffe2a8 100%);
+  box-shadow: 0 0 28px rgba(127, 177, 255, 0.4);
+  transition: width 180ms ease;
+}
+
+.offline-progress-value {
+  margin: 12px 0 0;
+  color: #222;
+  font-weight: 700;
+}
+
+.offline-admin-note {
+  margin: 16px 0 0;
+  color: #ffe2a8;
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+
+.offline-ready-note {
+  margin: 16px 0 0;
+  color: #1a7a3a;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.offline-meta-note {
+  margin: 10px 0 0;
+  color: #666;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.offline-test-button,
+.offline-continue-button,
+.offline-retry-button {
+  margin-top: 18px;
+  min-width: 220px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  color: #07111f;
+  background: linear-gradient(135deg, #9fe9ff, #ffe2a8);
+  font-weight: 800;
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.26);
+}
+
+.offline-continue-button {
+  background: linear-gradient(135deg, #c8ffcf, #9fe9ff);
+}
+
+.offline-test-button {
+  background: linear-gradient(135deg, #ffe2a8, #ffd28c);
+}
+
+/* ── Overlay shell ───────────────────────────────────────────────────────────── */
+.overlay-controls {
+  position: fixed;
+  inset: 0;
+  width: var(--viewport-width);
+  height: var(--viewport-height);
+  z-index: 4;
+  pointer-events: none;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+/* ── Drawer handle: left-edge pull-tab ───────────────────────────────────────── */
+.drawer-handle {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 24px;
+  height: 64px;
+  padding: 0;
+  border: none;
+  border-radius: 0 12px 12px 0;
+  background: rgba(20, 28, 60, 0.92);
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
+  box-shadow: none;
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 150ms ease, background 120ms;
+}
+
+.drawer-handle:active {
+  width: 28px;
+  background: rgba(40, 60, 110, 0.95);
+}
+
+/* Arrow chevron inside the tab */
+.drawer-handle-lines {
+  display: block;
+  font-style: normal;
+  font-size: 14px;
+  line-height: 1;
+  color: rgba(147, 228, 255, 0.80);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Hide tab while drawer is open */
+.overlay-controls.drawer-open ~ .drawer-handle,
+.app-shell.drawer-open .drawer-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Backdrop ───────────────────────────────────────────────────────────────── */
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background 260ms ease;
+  pointer-events: none;
+  border: 0;
+}
+
+.overlay-controls.drawer-open .drawer-backdrop {
+  background: rgba(0, 0, 0, 0.52);
+  pointer-events: auto;
+}
+
+/* ── Navigation drawer (left side) ──────────────────────────────────────────── */
+.navigation-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--drawer-width);
+  padding-top: calc(var(--safe-top) + 4px);
+  background: #07091a;
+  border-right: 0;
+  display: flex;
+  flex-direction: column;
+  /* Two-pane handles its own scroll; drawer clips overflow */
+  overflow: hidden;
+  transform: translateX(-100%);
+  transition: transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  pointer-events: none;
+  box-shadow: none;
+}
+
+.overlay-controls.drawer-open .navigation-drawer {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.navigation-drawer.is-dragging {
+  transition: none;
+}
+
+/* ── Drawer top bar + close button ─────────────────────────────────────────── */
+.drawer-top-bar {
+  flex-shrink: 0;
+}
+.drawer-close-btn {
+  width: 100%;
+  padding: 0.82rem 1.1rem;
+  background: #0d1030;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 1.08rem;
+  font-weight: 700;
+  text-align: left;
+  letter-spacing: 0.01em;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 130ms, color 130ms;
+}
+
+.drawer-close-btn:hover,
+.drawer-close-btn:active {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
+/* ── Drawer nav row: ← Canción Anterior | Song info | Siguiente Canción → ────── */
+.drawer-nav-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 88px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.drawer-nav-btn {
+  flex-shrink: 0;
+  width: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.22rem;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 130ms;
+}
+
+.drawer-nav-btn:hover,
+.drawer-nav-btn:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.drawer-nav-btn:disabled {
+  opacity: 0.28;
+}
+
+.drawer-nav-arrow {
+  font-size: 2.6rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.nav-label {
+  display: block;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.25;
+  text-align: center;
+}
+
+.drawer-nav-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.6rem 0.4rem;
+  min-width: 0;
+}
+
+.numberpad-status {
+  margin: 0;
+  text-align: center;
+  font-size: 1.15rem;
+  color: #ffffff;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  letter-spacing: 0.01em;
+}
+
+.numberpad-intro {
+  margin: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--blue);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  padding: 0 0.3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.drawer-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.32rem 0.72rem;
+  border-radius: 20px;
+  border: 1px solid rgba(147, 228, 255, 0.45);
+  background: rgba(147, 228, 255, 0.12);
+  color: var(--blue);
+  font-size: 0.85rem;
+  font-weight: 700;
+  touch-action: manipulation;
+  pointer-events: auto;
+  transition: background 130ms, border-color 130ms;
+  white-space: nowrap;
+}
+
+.drawer-back-btn:hover {
+  background: rgba(147, 228, 255, 0.22);
+  border-color: rgba(147, 228, 255, 0.6);
+}
+
+/* ── Numpad section ──────────────────────────────────────────────────────────── */
+.numpad-section {
+  flex-shrink: 0;
+  padding: 0.85rem 0.95rem 0.7rem;
+}
+
+/* search-focused kept for compat but numpad is hidden by mode switching now */
+.navigation-drawer.search-focused .numpad-section {
+  display: none;
+}
+
+/* Song number display — styled div, NOT a text input */
+.numberpad-display-wrap {
+  position: relative;
+  margin: 0 0 0.75rem;
+}
+
+.numberpad-display {
+  width: 100%;
+  min-height: 4.2rem;
+  padding: 0.95rem 3.2rem 0.95rem 1.2rem;
+  border-radius: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+  font-size: clamp(1.7rem, 4.5vw, 2.3rem);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Placeholder when no digits entered */
+.numberpad-display:empty::before {
+  content: "No. de canción";
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 0.52em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.display-clear-btn {
+  position: absolute;
+  right: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.95rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  touch-action: manipulation;
+  padding: 0;
+  transition: background 130ms;
+}
+
+.display-clear-btn:hover,
+.display-clear-btn:active {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Numpad grid ─────────────────────────────────────────────────────────────── */
+.numberpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+/* Base key style — used by numpad AND util row */
+.numberpad-key {
+  min-height: var(--key-height);
+  border-radius: var(--key-radius);
+  border: 1px solid var(--border);
+  color: var(--text);
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: transform 110ms ease, background 150ms ease, border-color 150ms ease;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.09));
+  font-size: 1.2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Digit keys — bright blue-glass */
+.numberpad-key[data-digit] {
+  background:
+    linear-gradient(
+      180deg,
+      var(--ice-top) 0%,
+      var(--ice-mid) 30%,
+      var(--ice-bottom) 100%
+    );
+  border-color: var(--ice-border);
+  color: #ffffff;
+  font-size: 2.1rem;
+  font-weight: 800;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25),
+    0 0 20px rgba(147, 228, 255, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 28px var(--blue-glow),
+    var(--shadow-soft);
+}
+
+/* Muted keys — Borrar, ↩, ? */
+.numberpad-key-muted {
+  font-size: 1.08rem;
+  font-weight: 700;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.05));
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* Util row: bump icons/text 25% bigger than base muted key */
+.numpad-util-row .numberpad-key-muted {
+  font-size: 1.35rem;
+}
+
+/* Help key — blue tint */
+.help-key {
+  color: var(--blue);
+  font-size: 1.875rem;
+  font-weight: 900;
+  border-color: rgba(147, 228, 255, 0.32);
+  background: linear-gradient(180deg, rgba(147, 228, 255, 0.10), rgba(147, 228, 255, 0.05));
+}
+
+/* Go button — ↵ Ir */
+.go-button {
+  background: linear-gradient(180deg, rgba(147, 228, 255, 0.30), rgba(58, 142, 242, 0.35));
+  border-color: rgba(147, 228, 255, 0.55);
+  color: var(--blue);
+  font-size: 1.45rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 0 22px rgba(58, 142, 242, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.go-button:hover {
+  box-shadow: 0 0 34px rgba(58, 142, 242, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Expand / fullscreen button */
+.expand-button {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.07));
+}
+
+.expand-icon {
+  width: 1.94rem;
+  height: 1.94rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Press feedback */
+.numberpad-key:active {
+  transform: translateY(2px) scale(0.97);
+  transition-duration: 60ms;
+}
+
+.numberpad-key:hover {
+  border-color: rgba(255, 255, 255, 0.36);
+}
+
+.numberpad-key[data-digit]:hover {
+  border-color: rgba(200, 238, 255, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    0 0 36px var(--blue-glow),
+    var(--shadow-soft);
+}
+
+/* ── Util row: same grid layout as numpad bottom row ────────────────────────── */
+.numpad-util-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* 2 useful buttons: ← Volver + ? */
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+/* ── Numpad tip ──────────────────────────────────────────────────────────────── */
+.numpad-tip-wrap {
+  position: relative;
+  margin: 0 0.95rem 0.3rem;
+  padding: 0.75rem 2.6rem 0.75rem 0.9rem; /* right padding for dismiss button */
+  background: rgba(147, 228, 255, 0.06);
+  border: 1px solid rgba(147, 228, 255, 0.18);
+  border-radius: 14px;
+  flex-shrink: 0;
+}
+
+.numpad-tip {
+  margin: 0;
+  padding: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.numpad-tip strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+}
+
+/* Inline × dismiss button on the tip banner itself */
+.numpad-tip-dismiss {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.55rem;
+  width: 1.8rem;
+  height: 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.9rem;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 120ms, color 120ms;
+}
+.numpad-tip-dismiss:hover { background: rgba(255,255,255,0.18); color: #fff; }
+
+/* Hide tip when dismissed */
+.numpad-tip-wrap.is-hidden { display: none; }
+
+/* ── Mode switcher: 🔢 Teclado ↔ 📚 Explorar ─────────────────────────────────── */
+.drawer-mode-switch {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.drawer-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.58rem 0.5rem;
+  border-radius: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.10);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.40);
+  font-size: 0.86rem;
+  font-weight: 700;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 160ms, border-color 160ms, color 160ms;
+  white-space: nowrap;
+}
+.mode-icon { font-size: 1.05rem; line-height: 1; }
+.mode-label { font-size: 0.84rem; font-weight: 800; }
+
+.drawer-mode-btn.is-active {
+  background: rgba(147, 228, 255, 0.13);
+  border-color: rgba(147, 228, 255, 0.45);
+  color: var(--blue);
+}
+.drawer-mode-btn:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+/* ── Drawer panels ─────────────────────────────────────────────────────────────
+   Each panel fills all remaining drawer height. Only one visible at a time.  */
+.drawer-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Numpad panel: single column */
+.drawer-numpad-panel {
+  flex-direction: column;
+}
+
+/* Browse panel: two-pane row (rail + content) */
+.drawer-browse-panel {
+  flex-direction: row;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Mode visibility — default is numpad */
+.drawer-browse-panel { display: none; }
+.navigation-drawer.mode-browse .drawer-numpad-panel { display: none; }
+.navigation-drawer.mode-browse .drawer-browse-panel { display: flex; }
+
+/* ── Two-pane (inside browse panel) ────────────────────────────────────────── */
+
+/* Left tab rail */
+.drawer-tab-rail {
+  width: 76px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0;
+  background: rgba(0, 0, 0, 0.18);
+}
+.drawer-tab-rail::-webkit-scrollbar { display: none; }
+
+.rail-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.22rem;
+  padding: 0.72rem 0.25rem;
+  width: 100%;
+  border: 0;
+  border-right: 3px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.42);
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 130ms, border-color 130ms, color 130ms;
+  text-align: center;
+  cursor: pointer;
+}
+.rail-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.rail-label {
+  font-size: 0.60rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  color: inherit;
+}
+.rail-tab:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+}
+.rail-tab.is-active {
+  background: rgba(58, 142, 242, 0.12);
+  border-right-color: var(--blue-strong);
+  color: var(--blue-strong);
+}
+
+/* Right content pane — this is the only scrollable element */
+.drawer-pane-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: 0.75rem 0.8rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Full-screen search mode ────────────────────────────────────────────────────
+   When Buscar tab is active, the rail slides away and search owns the full
+   drawer width. The pane-content fills edge-to-edge.                        */
+.navigation-drawer.search-fullscreen .drawer-tab-rail {
+  /* Animate out left */
+  width: 0;
+  padding: 0;
+  border-right: none;
+  overflow: hidden;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              padding 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.navigation-drawer.search-fullscreen .drawer-pane-content {
+  padding: 0.85rem 1rem 1rem;
+}
+
+/* ── ⌕ opens search as a COMPACT DROPDOWN anchored under the fab, top-right (reuses the
+   search-fullscreen drawer mode + all its existing search logic). Scoped to .as-dropdown so it
+   applies ONLY when launched from the ⌕ fab — the left-edge browse drawer's Buscar tab is
+   unaffected.
+
+   THIS IS THE CLASSIC GEOMETRY, restored (build 350 / 13ff88b). Between builds 362-365 it was
+   inflated in four steps — full-width (f94b1ae), slide-down keyframe (fd71988), full-height
+   (119efeb), then a 28px exit ring (e7fd289) — until it was a 97%x95% modal that covered the page
+   the director was reading. A director searches WHILE looking at the music; a panel that hides the
+   book defeats the point. Small, anchored, and the page stays visible beside it.
+
+   The wide margin that e7fd289 added existed only so some backdrop remained tappable; at 380px the
+   whole rest of the screen is backdrop, so that reason retires with the geometry. The ⇅ Mejor/No/A-Z
+   sort toggle (07a00c6) is orthogonal and stays. ── */
+/* ── RESTORED VERBATIM FROM BUILD 381 (d507509, 2026-07-08) — the last known-good prod geometry,
+   at the owner's direction 2026-08-06.
+   A near-full panel with a 1.75rem tappable ring on every side. The ring is load-bearing, not
+   padding: #drawer-backdrop shows through it, and tapping it closes search. An earlier attempt
+   today used 0.55rem, which would have left that exit border too thin to hit reliably on a device
+   somebody is holding one-handed.
+   The compact 380px dropdown that lived here before is in this file's history, along with the
+   argument for it — a director searching WHILE watching the music. On the parish iPads the results
+   list is what matters, and 380px was squeezing it. ── */
+.navigation-drawer.as-dropdown.search-fullscreen {
+  /* !important + pinned height: the base drawer's full-height flex layout otherwise collapses
+     the auto-height dropdown to nothing, and a cascade rule overrides plain width/max-height. */
+  /* Minimal-but-tappable margins on every side: the #drawer-backdrop shows through this ring, and
+     tapping it closes search (drawerBackdrop → closeDrawer). Big panel, small exit border. */
+  top: max(1.75rem, calc(env(safe-area-inset-top, 0px) + 0.75rem)) !important;
+  bottom: max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem)) !important;
+  left: max(1.75rem, calc(env(safe-area-inset-left, 0px) + 0.75rem)) !important;
+  right: max(1.75rem, calc(env(safe-area-inset-right, 0px) + 0.75rem)) !important;
+  width: auto !important; /* left + right pinned → spans the width minus the tappable margin */
+  height: auto !important; /* top + bottom pinned → spans the height minus the tappable margin */
+  min-height: 0 !important;
+  max-height: none !important;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
+  /* Rest at translateY(0) (specificity beats the base drawer's translateX(-100%) slide), and put
+     ONLY opacity on the transition so the transform can't animate that left-slide diagonally. The
+     open SLIDE-DOWN is a keyframe animation (below): a keyframe plays from its own values regardless
+     of the base transform, so it drops straight down from the top — no left-sweep — every time. */
+  transform: translateY(0);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.overlay-controls.drawer-open .navigation-drawer.as-dropdown.search-fullscreen {
+  transform: translateY(0);
+  opacity: 1;
+  animation: sv-search-drop 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Slide down + fade in from just above — reads as a dropdown unfurling from the top. */
+@keyframes sv-search-drop {
+  from { transform: translateY(-22px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+/* Hide the full-drawer chrome — the dropdown shows only the search row + results */
+.navigation-drawer.as-dropdown.search-fullscreen .drawer-top-bar,
+.navigation-drawer.as-dropdown.search-fullscreen .drawer-nav-row,
+.navigation-drawer.as-dropdown.search-fullscreen .drawer-mode-switch { display: none; }
+.navigation-drawer.as-dropdown.search-fullscreen .drawer-pane-content {
+  /* Fill the near-full panel; results scroll WITHIN it. This is the 381 rule, byte for byte.
+     The `min(60vh, 540px)` cap that sat here through v426 was the compact-dropdown era's, and
+     the "restored verbatim" pass above missed it — so the panel was 381's size while the list
+     inside it stopped at ~540px, leaving the bottom half of the panel empty on an iPad. Found by
+     diffing every search/drawer rule against d507509 (2026-08-15): this was the ONLY one. */
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── Back button: shown inside search fullscreen ────────────────────────────── */
+.search-back-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.85rem;
+  height: 2.6rem;
+  border-radius: 22px;
+  border: 1.5px solid rgba(147, 228, 255, 0.35);
+  background: rgba(147, 228, 255, 0.10);
+  color: var(--blue);
+  font-size: 0.88rem;
+  font-weight: 800;
+  pointer-events: auto;
+  touch-action: manipulation;
+  white-space: nowrap;
+  transition: background 130ms, border-color 130ms;
+}
+.search-back-btn:hover,
+.search-back-btn:active {
+  background: rgba(147, 228, 255, 0.20);
+  border-color: rgba(147, 228, 255, 0.6);
+}
+.search-back-arrow { font-size: 1rem; line-height: 1; }
+.search-back-label { font-size: 0.86rem; font-weight: 800; }
+
+/* Also rail: smooth re-entry when leaving search */
+.drawer-tab-rail {
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              padding 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Search row (inside pane, only shown in Buscar tab) */
+.search-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-shrink: 0;
+  margin-bottom: 0.55rem;
+}
+.search-row.is-hidden { display: none; }
+
+.search-input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 0.6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  touch-action: manipulation;
+  padding: 0;
+  transition: background 130ms;
+}
+
+.search-clear-btn:hover,
+.search-clear-btn:active {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.95rem 3rem 0.95rem 1.05rem;
+  border-radius: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 1.12rem;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 150ms;
+}
+
+.search-input:focus {
+  border-color: rgba(147, 228, 255, 0.55);
+}
+
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 400;
+}
+
+.search-col-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem 0.8rem 0;
+  flex-shrink: 0;
+}
+
+.search-col-no {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.40);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  min-width: 2.4rem;
+}
+
+.search-col-title {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.40);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.search-sort-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.search-sort-toggle:active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.search-index-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.4rem;
+  padding: 0;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 2.1rem;
+  line-height: 1;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 140ms, border-color 140ms, color 140ms;
+}
+
+.search-index-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.search-index-btn.is-active {
+  background: rgba(147, 228, 255, 0.2);
+  border-color: rgba(147, 228, 255, 0.52);
+  color: var(--blue);
+}
+
+/* ── Search cancel button — appears when search is focused ─────────────────── */
+.search-cancel-btn {
+  flex-shrink: 0;
+  padding: 0.52rem 0.8rem;
+  border-radius: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  font-size: 0.98rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: color 120ms, background 120ms;
+}
+
+.search-cancel-btn:hover,
+.search-cancel-btn:active {
+  background: rgba(147, 228, 255, 0.12);
+}
+
+/* Show cancel button when search is focused */
+.navigation-drawer.search-focused .search-cancel-btn {
+  display: flex !important;
+}
+
+/* ── Search tab bar ──────────────────────────────────────────────────────────── */
+/* search-tabs / search-tab styles removed — replaced by .rail-tab in drawer-tab-rail */
+
+/* ── Browse group headers (used in Misa, Temporada, Tono tabs) ──────────────── */
+/* ── Group color palette: gc-0 … gc-7 ────────────────────────────────────────
+   Each group gets one color. The SAME color tints the header AND the number
+   badge so the visual grouping is instant without reading text.           */
+:root {
+  --gc0: #93e4ff;   /* sky blue    */
+  --gc1: #7ef5c2;   /* mint        */
+  --gc2: #ffd66a;   /* amber gold  */
+  --gc3: #ff9e7a;   /* coral       */
+  --gc4: #c5adff;   /* lavender    */
+  --gc5: #60e8f5;   /* teal        */
+  --gc6: #ffbc72;   /* warm orange */
+  --gc7: #f5a8d4;   /* blush pink  */
+}
+
+/* ── Section group headers ──────────────────────────────────────────────────── */
+.browse-group-header {
+  margin: 1.1rem 0 0.45rem;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  border-radius: 10px;
+  border-left: 4px solid;
+  flex-shrink: 0;
+  /* default (ungrouped/fallback = sky blue) */
+  color: var(--gc0);
+  border-left-color: var(--gc0);
+  background: color-mix(in srgb, var(--gc0) 11%, transparent);
+}
+.browse-group-header:first-child { margin-top: 0.1rem; }
+
+/* Color overrides per group */
+.browse-group-header.gc-0 { color: var(--gc0); border-left-color: var(--gc0); background: color-mix(in srgb, var(--gc0) 11%, transparent); }
+.browse-group-header.gc-1 { color: var(--gc1); border-left-color: var(--gc1); background: color-mix(in srgb, var(--gc1) 11%, transparent); }
+.browse-group-header.gc-2 { color: var(--gc2); border-left-color: var(--gc2); background: color-mix(in srgb, var(--gc2) 11%, transparent); }
+.browse-group-header.gc-3 { color: var(--gc3); border-left-color: var(--gc3); background: color-mix(in srgb, var(--gc3) 11%, transparent); }
+.browse-group-header.gc-4 { color: var(--gc4); border-left-color: var(--gc4); background: color-mix(in srgb, var(--gc4) 11%, transparent); }
+.browse-group-header.gc-5 { color: var(--gc5); border-left-color: var(--gc5); background: color-mix(in srgb, var(--gc5) 11%, transparent); }
+.browse-group-header.gc-6 { color: var(--gc6); border-left-color: var(--gc6); background: color-mix(in srgb, var(--gc6) 11%, transparent); }
+.browse-group-header.gc-7 { color: var(--gc7); border-left-color: var(--gc7); background: color-mix(in srgb, var(--gc7) 11%, transparent); }
+
+/* Number badge: inherits group color from .search-result-item.gc-N */
+.search-result-item.gc-0 .search-result-num { background: var(--gc0); }
+.search-result-item.gc-1 .search-result-num { background: var(--gc1); }
+.search-result-item.gc-2 .search-result-num { background: var(--gc2); }
+.search-result-item.gc-3 .search-result-num { background: var(--gc3); }
+.search-result-item.gc-4 .search-result-num { background: var(--gc4); }
+.search-result-item.gc-5 .search-result-num { background: var(--gc5); }
+.search-result-item.gc-6 .search-result-num { background: var(--gc6); }
+.search-result-item.gc-7 .search-result-num { background: var(--gc7); }
+
+/* ── A-Z letter divider (Todas tab) — plain rule, not a group header ─────────── */
+.browse-letter-header {
+  /* Reset group-header look entirely */
+  background: none;
+  border-left: none;
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.30);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  padding: 0 0.15rem 0.2rem;
+  margin: 0.9rem 0 0.3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+/* Empty-state message inside browse tabs */
+.browse-empty {
+  padding: 1.2rem 0.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* ── Search results ──────────────────────────────────────────────────────────── */
+.search-results {
+  display: block;
+  /* Content flows naturally; parent .navigation-drawer is the scroll container */
+}
+
+.navigation-drawer.index-visible .search-results {
+  gap: 0;
+  padding-bottom: 0;
+}
+
+.search-theme-header {
+  margin: 0 0 0.2rem;
+  padding: 0 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--blue);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  flex-shrink: 0;
+}
+
+.search-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  /* Quieter card so the coloured group headers truly stand out */
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.055);
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 130ms ease, border-color 130ms ease;
+  flex-shrink: 0;
+  margin-bottom: 0.32rem;
+}
+
+.search-result-item:hover,
+.search-result-item:focus,
+.search-result-item:active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.24);
+  outline: none;
+}
+
+.search-result-header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.search-result-num {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 900;
+  /* Very dark text on the bright badge for max contrast */
+  color: #03060e;
+  background: var(--gc0); /* fallback; overridden by .gc-N on parent */
+  border-radius: 7px;
+  padding: 0.1rem 0.46rem;
+  letter-spacing: 0.01em;
+  line-height: 1.55;
+  min-width: 2ch;
+  text-align: center;
+}
+
+.search-result-title {
+  font-size: 0.97rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+  min-width: 0;
+  flex: 1;
+}
+
+.search-result-key {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  padding: 0.06rem 0.36rem;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  margin-left: auto;
+}
+
+.search-result-snippet {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.60);
+  line-height: 1.38;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  padding-left: calc(0.85rem + 0.55rem);
+}
+
+.search-result-snippet mark {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 800;
+}
+
+.search-no-results {
+  margin: 0;
+  padding: 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+/* ── Index panel ─────────────────────────────────────────────────────────────── */
+.index-layout {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
+.index-sidebar {
+  flex-shrink: 0;
+  width: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding-right: 0.28rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.index-sidebar::-webkit-scrollbar {
+  display: none;
+}
+
+.index-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+  padding-bottom: 0.75rem;
+}
+
+.index-tab-btn {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.24rem;
+  width: 100%;
+  padding: 0.6rem 0.2rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.index-tab-btn.is-active {
+  background: rgba(147, 228, 255, 0.18);
+  border-color: rgba(147, 228, 255, 0.42);
+  color: var(--blue);
+}
+
+.index-tab-emoji {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.index-tab-label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+/* Sort tabs */
+.index-sort-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  flex-shrink: 0;
+}
+
+.index-sort-tab {
+  flex: 1 0 calc(50% - 0.25rem);
+  min-width: 0;
+  padding: 0.52rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.index-sort-tab.is-active {
+  background: rgba(147, 228, 255, 0.2);
+  border-color: rgba(147, 228, 255, 0.48);
+  color: var(--blue);
+}
+
+.index-sort-tab:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+/* Group headers */
+.index-group-header {
+  margin: 0.55rem 0 0.2rem;
+  padding: 0 0.1rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.50);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  flex-shrink: 0;
+}
+
+.index-group-header:first-child {
+  margin-top: 0;
+}
+
+.index-group-header--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 0.42rem 0.45rem;
+  background: rgba(7, 9, 26, 0.98);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.60);
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+}
+
+/* Themes */
+.index-themes-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.34rem;
+}
+
+.index-theme-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.76rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  text-align: left;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 130ms, border-color 130ms;
+}
+
+.index-theme-chip:hover,
+.index-theme-chip:active {
+  background: rgba(147, 228, 255, 0.14);
+  border-color: rgba(147, 228, 255, 0.40);
+}
+
+.index-chip-emoji {
+  font-size: 1.38rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.index-chip-label {
+  flex: 1;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #ffffff;
+  overflow: hidden;
+  min-width: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.index-chip-months {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--blue);
+  opacity: 0.85;
+  line-height: 1;
+}
+
+.index-chip-badge {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 900;
+  color: rgba(5, 10, 22, 0.95);
+  background: var(--blue);
+  border-radius: 4px;
+  padding: 0.06rem 0.34rem;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+
+.index-chip-count {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 900;
+  color: rgba(5, 10, 22, 0.95);
+  background: var(--blue);
+  border-radius: 5px;
+  padding: 0.06rem 0.38rem;
+  line-height: 1.5;
+}
+
+/* Keywords */
+.index-keywords-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.index-keyword-chip {
+  padding: 0.46rem 0.88rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.96rem;
+  font-weight: 600;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.index-keyword-chip:hover,
+.index-keyword-chip:active {
+  background: rgba(147, 228, 255, 0.16);
+  border-color: rgba(147, 228, 255, 0.38);
+  color: var(--blue);
+}
+
+/* ── Help panel ──────────────────────────────────────────────────────────────── */
+.help-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: #07091a;
+  overflow-y: auto;
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.help-close-btn {
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition: background 130ms;
+}
+
+.help-close-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.help-title {
+  margin: 0 2.8rem 0.2rem 0;
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 0.02em;
+}
+
+.help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.help-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.help-item-icon {
+  flex-shrink: 0;
+  width: 2.8rem;
+  height: 2.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(147, 228, 255, 0.12);
+  border: 1px solid rgba(147, 228, 255, 0.25);
+  font-size: 0.92rem;
+  font-weight: 900;
+  color: var(--blue);
+  text-align: center;
+  line-height: 1;
+}
+
+.help-item strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 0.14rem;
+}
+
+.help-item p {
+  margin: 0;
+  font-size: 0.84rem;
+  color: rgba(255, 255, 255, 0.58);
+  line-height: 1.38;
+}
+
+/* ── Help: settings section ─────────────────────────────────────────────────── */
+.help-settings-label {
+  margin: 0.4rem 0 0.1rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.help-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.4rem 0;
+}
+
+.help-setting-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.help-setting-body strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 0.1rem;
+}
+
+.help-setting-body p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.35;
+}
+
+/* iOS-style toggle switch */
+.haptic-toggle {
+  flex-shrink: 0;
+  width: 52px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+  pointer-events: auto;
+}
+
+.haptic-toggle-track {
+  display: block;
+  width: 52px;
+  height: 30px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  position: relative;
+  transition: background 200ms, border-color 200ms;
+}
+
+.haptic-toggle[aria-pressed="true"] .haptic-toggle-track {
+  background: #34c759;
+  border-color: #34c759;
+}
+
+.haptic-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.haptic-toggle[aria-pressed="true"] .haptic-toggle-thumb {
+  transform: translateX(22px);
+}
+
+.director-sync-panel {
+  margin-top: 0.6rem;
+  padding: 0.95rem;
+  border-radius: 18px;
+  background: rgba(147, 228, 255, 0.08);
+  border: 1px solid rgba(147, 228, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.director-sync-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+}
+
+.director-sync-eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(147, 228, 255, 0.72);
+}
+
+.director-sync-title {
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.director-sync-copy,
+.director-sync-status,
+.director-sync-error {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.director-sync-copy,
+.director-sync-status {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.director-sync-error {
+  color: #ffb4ba;
+}
+
+.director-sync-label {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.director-sync-input {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  padding: 0.82rem 0.95rem;
+  font-size: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.director-sync-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+.director-sync-button {
+  min-height: 48px;
+  border-radius: 14px;
+  padding: 0.8rem 0.95rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.director-sync-button-primary {
+  background: linear-gradient(180deg, rgba(77, 176, 255, 0.34), rgba(34, 96, 180, 0.66));
+  border-color: rgba(147, 228, 255, 0.28);
+}
+
+.director-sync-button-muted {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* ── Page slide transition ───────────────────────────────────────────────────── */
+@keyframes slide-from-right {
+  from { transform: translateX(8%); opacity: 0.55; }
+  to   { transform: translateX(0);  opacity: 1; }
+}
+
+@keyframes slide-from-left {
+  from { transform: translateX(-8%); opacity: 0.55; }
+  to   { transform: translateX(0);   opacity: 1; }
+}
+
+#page-image.slide-from-right {
+  animation: slide-from-right 200ms ease-out forwards;
+}
+
+#page-image.slide-from-left {
+  animation: slide-from-left 200ms ease-out forwards;
+}
+
+/* ── Small screens ───────────────────────────────────────────────────────────── */
+@media (max-width: 400px) {
+  :root {
+    --key-height: 62px;
+  }
+
+  #page-image {
+    object-position: top center;
+  }
+
+  .numberpad-display {
+    font-size: 1.4rem;
+    padding: 0.78rem 2.8rem 0.78rem 1rem;
+  }
+
+  .numberpad-key[data-digit] {
+    font-size: 1.75rem;
+  }
+
+  .numberpad-key-muted {
+    font-size: 0.92rem;
+  }
+
+  .numberpad-grid {
+    gap: 0.45rem;
+  }
+
+  .numpad-util-row {
+    gap: 0.45rem;
+  }
+
+  .drawer-nav-btn {
+    width: 72px;
+  }
+
+  .drawer-nav-arrow {
+    font-size: 2.1rem;
+  }
+}
+
+@media (orientation: landscape) {
+  :root {
+    --drawer-width: clamp(280px, 36vw, 440px);
+  }
+
+  .viewer-shell {
+    align-items: center;
+    justify-items: center;
+  }
+
+  #page-image {
+    max-width: min(
+      calc(var(--viewport-width) - var(--safe-left) - var(--safe-right)),
+      calc((var(--viewport-height) - var(--safe-top) - var(--safe-bottom)) * 1.7)
+    );
+  }
+}
+
+.app-version-label {
+  margin-top: 20px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+  text-align: center;
+  letter-spacing: 0.03em;
+}
+/* Always-visible build badge (web). Fixed bottom-right with a dark backing so "v354" stays legible
+   over white book pages; sits above the geo-gate loader (z 150) so the version shows even mid-load.
+   pointer-events:none so it never blocks a tap. Hidden until app.js populates + adds .is-shown. */
+.build-badge {
+  position: fixed;
+  /* Placeholder only — positionBuildBadge() in app.js overwrites right/bottom every render so the
+     stamp sits on the PAGE's corner rather than the screen's. On a letterboxed device (any iPhone)
+     the screen corner is black, and 38% black on black is why this looked missing. */
+  bottom: max(6px, env(safe-area-inset-bottom, 0px));
+  right: 8px;
+  z-index: 200;
+  display: none;
+  /* NO CHIP. A dark pill floating over the page read as a UI element competing with the music;
+     the page-1 date stamp is the house style for "this is a note about the document, not a
+     control". Same treatment, one step smaller. */
+  padding: 0;
+  background: none;
+  /* 8px / 38% was unreadable at arm's length — which is WHY it read as missing on the iPhone, not
+     just because it sat on the black letterbox. 10px / 52% is still a document note rather than a
+     control (the printed date stamp opposite it is the house style), but it can actually be read
+     out over the phone, which is the one thing it exists for. */
+  color: rgba(0, 0, 0, 0.52);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.build-badge.is-shown { display: block; }
+
+/* ── Role control inside IR A CANTO ──────────────────────────────────────────
+   Quieter than the primary action: this is a rare, deliberate act, not the thing people came for. */
+
+
+
+/* Directing = the destructive-to-others state is already entered; the exit is calm and amber. */
+
+
+/* ── Take-the-role gate ──────────────────────────────────────────────────────
+   Red, blunt, and gated on a typed word so it cannot be tapped through by reflex. */
+.role-gate { position: fixed; inset: 0; z-index: 260; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.role-gate.is-hidden { display: none; }
+.role-gate-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.72); }
+.role-gate-card {
+  position: relative; z-index: 1; width: min(30rem, 100%);
+  background: #1a1020; border: 2px solid #b91c1c; border-radius: 16px;
+  padding: 1.4rem 1.3rem; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.role-gate-title { margin: 0 0 0.7rem; color: #f87171; font-size: 1.15rem; line-height: 1.25; letter-spacing: 0.01em; text-align: center; }
+.role-gate-body { margin: 0 0 1rem; color: rgba(255, 255, 255, 0.9); font-size: 1rem; line-height: 1.45; text-align: center; }
+.role-gate-body strong { color: #fca5a5; }
+.role-gate-label { display: block; margin-bottom: 0.4rem; color: rgba(255, 255, 255, 0.75); font-size: 0.92rem; }
+.role-gate-label strong { color: #fff; }
+.role-gate-input {
+  width: 100%; box-sizing: border-box; padding: 0.65rem 0.8rem; margin-bottom: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35); color: #fff; font-size: 1.1rem;
+}
+.role-gate-actions { display: flex; flex-direction: column; gap: 0.5rem; }
+.role-gate-confirm {
+  padding: 0.75rem 1rem; border: 0; border-radius: 12px;
+  background: #b91c1c; color: #fff; font-size: 1.05rem; font-weight: 700; cursor: pointer;
+}
+.role-gate-confirm:disabled { background: rgba(185, 28, 28, 0.32); color: rgba(255, 255, 255, 0.45); cursor: not-allowed; }
+.role-gate-cancel {
+  padding: 0.7rem 1rem; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 12px;
+  background: transparent; color: rgba(255, 255, 255, 0.85); font-size: 1rem; cursor: pointer;
+}
+
+/* ── Follower pill collapses to a DOT ────────────────────────────────────────
+   The word SIGUIENDO was a CLAIM, and it lied: a device stranded on the wrong song still read
+   SIGUIENDO all morning on 2026-08-17. A dot is just a light. The one state that still earns words
+   is "nobody is driving" — that is the moment a singer must notice, and amber + text is louder than
+   a word they have learned to ignore. Directing shows no dot at all: a director is the SOURCE, not
+   a receiver, so there is nothing to indicate. */
+html[data-role="follower"] .director-mode-badge.is-following {
+  /* 0.75 -> 0.6rem (20%, not the 30% first tried). It is a status light, not a control — but it is
+     read across a choir loft, and 0.525rem (8.4px) is below what carries at that distance. 0.6rem
+     still reads as a badge on the ⟳ button rather than a second control. */
+  width: 0.6rem; height: 0.6rem; min-width: 0; padding: 0; gap: 0;
+  border-radius: 50%; background: #22c55e; overflow: hidden;
+  /* ON the ⟳ fab, not beside it (owner, 2026-08-17). The dot belongs TO the resync button — it says
+     "this button's link is alive" — so it now sits in that button's upper-left corner like a badge
+     instead of floating in its own slot 5.15rem to the right.
+     The overlap is DELIBERATE, and e2e/fabLayout.test.mjs pins it as such. That test guards the
+     is-nobody PILL, which carries text and must still clear the fab; it reads the max offset across
+     matching rules, so the 5.15rem rule below keeps satisfying it. z-index 46 vs the fab's 45 keeps
+     the dot on top.
+     margin-top, NOT a top: calc() — that test derives horizontal offsets from calc() in this
+     selector's rules, so a vertical calc() here would read as a LEFT offset. */
+  /* 0.42 -> 0.58rem (owner, 2026-08-18: ~2.5px further right and down). Both axes share one value so
+     the dot stays on the button's corner diagonal as --fab-size changes. Measured, not guessed:
+     0.42rem put it 6.7px off each edge of an 86px button. */
+  left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + 0.58rem);
+  margin-top: 0.58rem;
+  animation: sv-follow-breathe 2.4s ease-in-out infinite;
+}
+html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-title,
+html[data-role="follower"] .director-mode-badge.is-following .director-mode-badge-exit { display: none; }
+/* Floor raised 0.35 -> 0.6. At 0.35 a 0.525rem dot on a dark fab read as a smudge for half of every
+   cycle, which is how it looked "lost". It still breathes — the point is that it is alive — but it
+   is never ambiguous about being there. */
+@keyframes sv-follow-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Jump-to-song modal — mirrors the iOS "IR A CANTO" modal exactly (no more).
+   Contains only: heading, display, numpad (1-9 / blank / 0 / ⌫),
+   "♪ Abrir Canto ♪", "Cancelar". The drawer Teclado tab is retired.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Floating fabs — native-style translucent-navy rounded squares */
+.song-jump-fab,
+.search-fab,
+.resync-fab,
+.fullscreen-fab {
+  position: fixed;
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
+  z-index: 45;
+  /* ONE SIZE FOR EVERY CORNER CONTROL (owner, 2026-08-17: "same size and same icon to button size
+     ratio... I like the current ratio of top left, but I like the size of top right").
+     Top-right was 5rem, top-left's glyph-to-box ratio was 3.45/4 = 0.8625. So: 5rem boxes, and
+     every glyph at 5 x 0.8625 = 4.31rem. Both halves of the request, and now they match. */
+  width: var(--fab-size);
+  height: var(--fab-size);
+  /* SQUARE, GUARANTEED (owner, 2026-08-17). width/height alone are not enough: any padding or
+     border added later inflates one axis under the default content-box, and a fab in a flex context
+     can be stretched. border-box + aspect-ratio + no flex growth pin it to a true square whatever
+     else changes. */
+  box-sizing: border-box;
+  padding: 0;
+  aspect-ratio: 1 / 1;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  border: 0;
+  background: rgba(26, 26, 46, 0.61);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  color: #fff;
+  /* 0.8625 of the 4.5rem box — the top-left ratio the owner liked, at the size he settled on
+     (5rem, then 10% smaller). Keep these two numbers in step: changing the box without the glyph is
+     what made these controls read as smaller than they are. */
+  font-size: 4.65rem;   /* 0.8625 of the 5.39rem box — the glyph:box ratio is held as the box grows */
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.search-fab { right: max(var(--fab-gutter), env(safe-area-inset-right, 0px)); }  /* inherits the shared 4.31rem glyph */
+/* FOLLOWER (⌕ hidden): ♪ sits flush in the top-right corner. Only when the director's ⌕ is
+   actually showing does ♪ shift 4.5rem left to make room for it. */
+/* ── The top-left slot ladder ────────────────────────────────────────────────
+   Position is an index, not a hand-computed number. Slot 1 = gutter; each later slot is one
+   --fab-gap past the WIDTH OF WHAT ACTUALLY PRECEDES IT — which is the part that kept breaking,
+   because the two roles do not put the same-width control in the same slot.
+
+     FOLLOWER  : ⟳ (--fab-size)      · Ir a Canto (--fab-size)  · "Nadie dirige" (slot 3)
+     DIRECTOR  : DIRECTOR status (--fab-status-w, wider — it holds a WORD and a word should not be
+                 shrunk to fit a square) · Ir a Canto        …        ⌕ alone top-RIGHT
+
+   ⟳ and the DIRECTOR status share slot 1: ⟳ is for followers, the status for the director, and
+   they are never both on screen. The status is also the way OUT of the role — tapping it asks —
+   so no separate ✕ occupies the corner any more. */
+
+
+/* IR A CANTO IS TOP-RIGHT, WHERE IT HAS ALWAYS BEEN (owner, 2026-08-18: "this is to make all these
+   changes additive not scramble shit up and confuse the fuck out of everyone"). It spent 2026-08-17
+   in the top-left cluster; six people already know where this button lives, and moving it costs more
+   than any arrangement gains. The new controls go in corners that were EMPTY instead.
+   FOLLOWER: ⌕ is hidden, so this sits flush in the corner. */
+.song-jump-fab { right: max(var(--fab-gutter), env(safe-area-inset-right, 0px)); left: auto; }
+/* DIRECTOR: ⌕ appears flush in the corner, so Ir a Canto steps one slot left of it — exactly the
+   relationship these two have always had. */
+html[data-role="director"] .song-jump-fab { right: calc(max(var(--fab-gutter), env(safe-area-inset-right, 0px)) + var(--fab-slot2)); left: auto; }
+/* 4.5rem left only 8 px between two 4rem fabs whose glyphs (3.85rem ⌕, 2.85rem ♪) nearly fill
+   their boxes, so they read as one smudged control on a Pro iPad in portrait. 5.1rem gives a clear
+   gap without pushing ♪ into the title. */
+/* No director-specific offset any more: Ir a Canto is always slot 2 on the LEFT, and ⌕ has the
+   whole top-right to itself. */
+/* SAME PLACEMENT RULE AS THE TOP-RIGHT FAB (owner: "placement and sizing of sync button should
+   follow this") — identical gutter, identical box, identical glyph ratio, mirrored.
+   +2.5px (owner, 2026-08-18): its own rule, not --fab-gutter, so the nudge is just ⟳ — every other
+   control anchored on --fab-gutter (the role pill, Ir a Canto, ⌕) stays exactly where it was. */
+.resync-fab { left: calc(max(var(--fab-gutter), env(safe-area-inset-left, 0px)) + 2.5px); }
+/* ── 123→ song-index fab ─────────────────────────────────────────────────────
+   ♪ was ambiguous: it says "audio" in an app that plays none, while the button opens a NUMBERED
+   index. Digits say what kind of thing; the arrow makes it a verb, not a label. Straight arrow —
+   curved ones read as rotate/undo in most UI vocabularies.
+   MUST sit after the shared .song-jump-fab/.search-fab/... block: same specificity, so source order
+   decides, and the shared 2.85rem was winning and overflowing the 4rem box by 27 px. */
+.song-jump-fab {
+  /* "Ir a Canto", not "123→" (owner, 2026-08-17: "123 is vague as fuck"). Digits say "numbers",
+     not "songs", and an arrow does not rescue that. This button opens a modal titled IR A CANTO,
+     so naming it the same thing means there is no vocabulary to learn — the strongest affordance
+     available to a non-technical choir. Two lines so it fills the square without shrinking. */
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  font-size: 1.03rem;   /* 0.84 x 1.08 (+8%), then scaled with the box */
+}
+/* "Ir a" was 0.86em AND dimmed to 0.82 — small and faint at once, which read as too small at any
+   base size (owner, 2026-08-18: "way too small"). It is half the name of the button, not a
+   footnote, so it now sits just under "Canto" in size and barely under it in weight. */
+.song-jump-fab-l1 { font-size: 1.02em; opacity: 0.9; }
+.song-jump-fab-l2 { font-size: 1.18em; }                  /* "Canto" — the noun people look for */
+.resync-fab.is-spinning { flex-direction: column; justify-content: center; padding-bottom: 4px; }  /* ⟳ ~35% bigger */
+/* Fullscreen fab — bottom-right (override the base top); SVG icon sized to match the glyphs. */
+.fullscreen-fab {
+  top: auto;
+  bottom: max(var(--fab-gutter), env(safe-area-inset-bottom, 0px));
+  right: max(var(--fab-gutter), env(safe-area-inset-right, 0px));
+}
+.fullscreen-fab svg { width: 2.78rem; height: 2.78rem; }   /* scaled with the boxes */
+.song-jump-fab:active,
+.search-fab:active,
+.resync-fab:active,
+.fullscreen-fab:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
+/* ⟳ icon pulses opacity while reconnecting — soft breath, plus staggered dots below */
+/* ⟳ CARRIES ITS OWN SIZE (owner, 2026-08-18: +5px). It used to inherit the shared 4.65rem, so any
+   change here silently moved ⌕ with it. */
+.resync-fab { font-size: 4.96rem; }   /* 4.65rem + 5px */
+/* OPTICALLY CENTRED, AND THE NUMBER IS MEASURED RATHER THAN EYEBALLED. Flex centring centres the
+   glyph's LINE BOX, not its ink, and those are not the same thing: measured in-browser at 79.36px,
+   the baseline sits 64.5px into a 79.4px box while ⟳'s ink spans -37.5..-3.1 from that baseline, so
+   its ink centre landed 6.1px BELOW the button's centre — clearly low to the eye, which is what the
+   owner saw. 6.1 / 79.36 = 0.0769em of correction from the previous +0.02em, hence -0.057em.
+   It is in em so it survives any further size change, and it moves only the glyph: padding would
+   have shifted the box and re-broken the horizontal centring, which measurement confirms is already
+   exact (ink centre 26.97px == advance 53.94 / 2). */
+/* +2.5px horizontal (owner, 2026-08-18): the GLYPH, not the button — the button itself got its own
+   independent +2.5px earlier the same night (.resync-fab's own left:). Two separate nudges, two
+   separate elements; this one moves the character within its box without touching where the box
+   sits on the page. */
+.resync-icon { display: inline-block; line-height: 1; transform: translateY(-0.057em) translateX(2.5px); }
+.resync-fab.is-spinning .resync-icon { animation: sv-resync-pulse 1.5s ease-in-out infinite; }
+@keyframes sv-resync-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+/* Reconnect loading dots — three small circles that appear only while is-spinning */
+.resync-dots { display: none; justify-content: center; gap: 4px; margin-top: 4px; }
+.resync-fab.is-spinning .resync-dots { display: flex; }
+.resync-dots span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.3; animation: sv-dot-pulse 1.2s ease-in-out infinite; }
+.resync-dots span:nth-child(2) { animation-delay: 0.2s; }
+.resync-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes sv-dot-pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+/* ── Role-based controls ──────────────────────────────────────────────────────
+   FOLLOWER (default — all of signovivo.com + any non-director native device):
+     ⟳ resync (top-LEFT) + ♪ (top-RIGHT). No ⌕ search.
+   DIRECTOR (native iPad after a director code → html[data-role="director"]):
+     ♪ + ⌕ (top-RIGHT). No ⟳ (a director is the source; nothing to resync to). */
+.search-fab { display: none; }                              /* hidden for followers */
+html[data-role="director"] .search-fab { display: flex; }   /* shown for the director, top-RIGHT */
+/* Slot 2, and inert: the ✕ beside it owns the action, so this must neither invite a tap nor eat one. */
+html[data-role="director"] .director-mode-badge {
+  left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
+  cursor: pointer;
+  /* SALIR / DIRECTOR — it names the ACT, not the state (owner, 2026-08-18: "come up with text to
+     exit director mode that fits in a SQUARE button"). "Salir" is the same verb the confirm already
+     uses ("¿Salir de director?"), so the button and the dialog it opens speak with one word.
+     The button's mere presence is what reports the role — it is shown to nobody else — so nothing
+     is lost by labelling the exit instead of the status.
+     NO background override (owner, 2026-08-18: "style it just like Ir a Canto... meaning
+     background color... and opacity"). A blue wash used to sit here, layered over the standard
+     fab navy — it read as a status that had to look different, which is exactly what this
+     control should NOT do: it is an ordinary control in the row now. Falls through to the base
+     .director-mode-badge background below, rgba(26, 26, 46, 0.61) — byte-identical to
+     .song-jump-fab/.search-fab's own background, so the two pills are indistinguishable but for
+     their glyphs. Sizing comes from the shared square block below. */
+}
+/* PRESSED state too (owner, 2026-08-18: "opacities matched too"). Without this override it fell
+   through to the base .director-mode-badge:active (0.55) below — a DIFFERENT opacity than every
+   other corner control's pressed state (0.73, .song-jump-fab/.search-fab/.resync-fab/
+   .fullscreen-fab/.become-director-pill:active), so tapping Salir Director looked subtly lighter
+   than tapping anything else in the row. */
+html[data-role="director"] .director-mode-badge:active { background: rgba(26, 26, 46, 0.73); }
+/* Plain white (owner, 2026-08-18: "scope includes text color too") — matching
+   .song-jump-fab/.search-fab exactly rather than the blue-tinted #E4EEFF used before. */
+html[data-role="director"] .director-mode-badge .director-mode-badge-title { color: #fff; }
+/* OUTLINE star (☆ U+2606), not filled. Filled reads as "selected/favourite"; hollow reads as a
+   mark on a status, which is what this is. Matches ★ Ser Director's glyph family without repeating
+   its emphasis — that one is an action you take, this one is a state you are in. */
+html[data-role="director"] .director-mode-badge .director-mode-badge-star { display: none; }
+/* Buttons don't inherit body's white text color by default in every engine — unlike
+   .director-mode-badge-title (which sets #E4EEFF explicitly), these two lines had no color rule
+   at all and fell back to the browser's default button text, unreadable on the dark navy badge. */
+.director-exit-label { display: none; flex-direction: column; align-items: center; color: #fff; }
+html[data-role="director"] .director-mode-badge .director-exit-label { display: flex; }
+/* The word is retired from the GLASS but stays in SYNC_PILL for screen readers, and the pill's
+   aria-label still says "Estás dirigiendo. Tocar para salir." */
+html[data-role="director"] .director-mode-badge .director-mode-badge-title { display: none; }
+.director-mode-badge-star { display: none; }
+html[data-role="director"] .director-mode-badge .director-mode-badge-exit { display: none; }
+html[data-role="director"] .resync-fab { display: none; }   /* hidden for the director */
+
+/* CLEAR THE ⟳ FAB. The pill and the resync fab both sit at top-left with the same offset, and until
+   the pill existed they could never be on screen together: the old badge showed only for the
+   DIRECTOR, and the ⟳ fab is hidden for exactly that role. Making the pill visible to followers put
+   its text underneath the fab.
+   Shift by the fab's own width plus the same var(--fab-gutter), and only while the fab is
+   actually shown — the director keeps the flush-left position it always had. */
+/* ── Nobody directing: the ⟳ button is CROSSED OUT ──────────────────────────
+   Owner, 2026-08-18: "why even show nadie dirige if the green dot can turn red or orange"; then
+   "an X drawn from top left to bottom right and from bottom left to top right".
+
+   Why an X beats a colour: it is the only version of this that does not depend on colour at all.
+   Red/green is the commonest colour blindness, the loft is a distance read, and a 10px dot is a
+   poor alarm. A 62px cross survives all three. It is also literally TRUE — with no director there
+   is nothing to resync to, so the button it crosses out is the button that cannot help.
+
+   The word "Nadie dirige" stays in SYNC_PILL for screen readers and for the non-native web; what
+   is retired is the 99px pill that used to migrate into this row and shove its neighbours around.
+   Tapping the crossed ⟳ opens #nodir-info, because a struck-through button reads as "my iPad is
+   broken" to a non-technical singer, and it is not broken. */
+html[data-mesh="nobody"] .resync-fab {
+  /* A wash over the navy, not a repaint — same treatment as the DIRECTOR pill's blue, so the
+     cluster still reads as one family rather than one alarming stranger. */
+  background: linear-gradient(rgba(239, 68, 68, 0.18), rgba(239, 68, 68, 0.18)), rgba(26, 26, 46, 0.61);
+}
+html[data-mesh="nobody"] .resync-icon { opacity: 0.45; }   /* the ⟳ recedes; the X is the message */
+html[data-mesh="nobody"] .resync-fab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  pointer-events: none;   /* the tap must still land on the button underneath */
+  /* Two corner-to-corner diagonals. Gradients rather than an SVG so it inherits the fab's exact
+     box and radius for free, and scales with --fab-size without a second source of truth. */
+  background:
+    linear-gradient(to bottom right, transparent calc(50% - 1.6px), rgba(239, 68, 68, 0.95) calc(50% - 1.6px),
+                    rgba(239, 68, 68, 0.95) calc(50% + 1.6px), transparent calc(50% + 1.6px)),
+    linear-gradient(to bottom left,  transparent calc(50% - 1.6px), rgba(239, 68, 68, 0.95) calc(50% - 1.6px),
+                    rgba(239, 68, 68, 0.95) calc(50% + 1.6px), transparent calc(50% + 1.6px));
+}
+/* The pill itself renders nothing in this state — the X above IS the indicator. */
+html[data-role="follower"] .director-mode-badge.is-nobody { display: none; }
+/* Hide the right-side fabs WHILE the drawer is open (director-only; the drawer has its own
+   nav). !important so it still wins over the director rule above. */
+/* THE WHOLE CLUSTER HIDES TOGETHER, not most of it. This listed only ♪ and ⌕, so opening the search
+   dropdown left the role controls — Salir Director and ★ Ser Director — and the ⟳ floating over a
+   panel that covers the page. Enumerating a subset means every control added later is hidden by
+   default only if someone remembers this line; naming all of them makes the omission visible.
+   The sync status is included for the same reason: it is a control now (tapping it leaves the role),
+   so a stray tap while reading the search results would drop the choir's director. */
+body.sv-drawer-open .song-jump-fab,
+body.sv-drawer-open .search-fab,
+body.sv-drawer-open .resync-fab,
+body.sv-drawer-open .become-director-pill,
+body.sv-drawer-open .director-mode-badge { display: none !important; }
+
+/* Modal shell + backdrop */
+.song-jump-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.song-jump-modal.is-hidden { display: none; }
+.song-jump-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* White card */
+.song-jump-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.song-jump-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  color: #1a1a2e;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 34px;
+  letter-spacing: 0.02em;
+}
+
+/* Display — light theme (override the dark drawer styles) */
+.song-jump-card .numberpad-display-wrap { margin: 0; }
+.song-jump-card .numberpad-display {
+  width: 100%;
+  min-height: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #f4f4f4;
+  color: #111;
+  font-size: 50px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: normal;
+  text-align: center;
+  box-shadow: none;
+}
+/* Director-code unlock feedback flashed in the numpad display (smaller so a message fits the
+   number-sized field; shakes on an invalid code). Higher specificity beats the 50px rule above. */
+.song-jump-card .numberpad-display.is-err {
+  color: #c0392b;
+  font-size: 22px;
+  font-weight: 700;
+  animation: numpad-shake 0.4s ease;
+}
+.song-jump-card .numberpad-display.is-ok {
+  color: #1e7a3c;
+  font-size: 26px;
+  font-weight: 700;
+}
+@keyframes numpad-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+.song-jump-card .numberpad-display:empty::before {
+  content: "Número de canto";
+  color: rgba(0, 0, 0, 0.35);
+  font-size: 0.62em;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+/* Numpad grid */
+.song-jump-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* Keys — native light-gray (override dark glass) */
+.song-jump-card .numberpad-key,
+.song-jump-card .numberpad-key[data-digit] {
+  min-height: 0;
+  height: 78px;
+  border: 0;
+  border-radius: 12px;
+  background: #D1D5DB;
+  color: #111827;
+  font-size: 33px;
+  font-weight: 700;
+  text-shadow: none;
+  box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.song-jump-card .numberpad-key:active,
+.song-jump-card .numberpad-key[data-digit]:active {
+  background: #9CA3AF;
+  transform: translateY(1px);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+}
+/* Backspace (⌫) — subtly distinct, no bright color */
+.song-jump-card .numberpad-key-back {
+  background: #E5E7EB;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  /* 28 -> 46px (owner, 2026-08-17): the ⌫ glyph is meant to FILL its 78px key the way the digits
+     do, minus a sensible margin. At 28px it sat as a small mark in a large empty button and read as
+     disabled next to the 33px digits — and it is the key people hit fastest, mid-Mass, without
+     looking. */
+  /* 46 -> 80 -> 60px. The 75% jump overshot: at 80px the ⌫ dominated a key it only needs to be
+     legible on, and read louder than the digits it sits beside. 60px keeps it comfortably bigger
+     than the 33px digits without taking over the row. Softened 10% for the same reason. */
+  /* 46 -> 80 -> 60 -> 45px. Each step tried the glyph against the 33px digits beside it;
+     45px is clearly the ⌫ without competing with the numbers, which are what the key row
+     is for. */
+  font-size: 45px;
+  line-height: 1;
+  opacity: 0.9;
+}
+.song-jump-card .numberpad-key-back:active { background: #D1D5DB; }
+/* Empty bottom-left cell */
+/* The keypad's bottom-left cell is EMPTY again. A role control lived here briefly; it moved out
+   because the top-left cluster already owns the role, and two exits are one too many. */
+.song-jump-card .numberpad-key-blank { height: 78px; }
+/* The role key. Styled EXACTLY like a digit — the owner's rule is that it must not draw the eye,
+   because the loud control in this card is "open the song". Two lines so "Ser Director" names the
+   role in full rather than shrinking to fit. */
+
+
+/* Hidden, not blanked: while directing there is no entry to offer, and the cell returns to the dead
+   space it was before. The grid keeps its shape because the row is a 3-column grid either way. */
+
+
+
+
+/* Action buttons */
+.song-jump-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+/* Cancelar + Abrir Canto share ONE row (owner, 2026-08-17); Dirigir keeps its own full-width row
+   above, unchanged. Stacked, the three buttons pushed the primary action toward the fold on a 10.2"
+   portrait iPad — the same problem that moved the old director control out of this card.
+   align-items: stretch equalises their heights without touching either button's own padding or
+   font size, so each keeps the height it already had. Cancel sits left, primary right. */
+.song-jump-actions-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.song-jump-actions-row > .song-jump-cancel,
+.song-jump-actions-row > .song-jump-go {
+  flex: 1 1 0;
+  min-width: 0;
+  /* ONE LINE EACH. At full width "♪ Abrir Canto ♪" fitted on one line; at half width it wrapped to
+     two and drove the row to 119 px, when the owner asked for the height these buttons already had.
+     Sized down just enough to fit rather than padded down, so the buttons keep their generous tap
+     target — this is a control people hit mid-Mass without looking. Measured back to ~82 px, which
+     is where the taller of the two (Cancelar) already sat.
+     The primary still dominates by FILL, not by type size: solid blue against flat grey. */
+  white-space: nowrap;
+}
+/* FLUID, not fixed. A flat 21px fitted the tablet I measured on and CLIPPED "♪ Abrir Canto ♪" on a
+   375px phone — nowrap plus a fixed size is a promise you cannot keep across devices. clamp() ties
+   the type to the viewport so the label always fits on one line, on any screen, without the wrap
+   that pushed this row from 86px to 119px. */
+.song-jump-actions-row > .song-jump-go { font-size: clamp(14px, 4.4vw, 21px); }
+.song-jump-actions-row > .song-jump-cancel { font-size: clamp(15px, 4.8vw, 23px); }
+.song-jump-actions-row > .song-jump-go,
+.song-jump-actions-row > .song-jump-cancel { padding-left: 8px; padding-right: 8px; }
+.song-jump-go {
+  padding: 24px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #0A84FF;
+  color: #fff;
+  font-size: 26px;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.song-jump-go:active { background: #0066CC; }
+.song-jump-go:disabled { background: #9CA3AF; cursor: default; }
+.song-jump-cancel {
+  padding: 27px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #f0f0f0;
+  color: #555;
+  font-size: 27px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.song-jump-cancel:active { background: #e2e2e2; }
+/* Taking the choir. Deliberately the quietest control in the modal — smaller, outlined, no fill —
+   because it is rare and consequential, and the loud button here must stay "open the song". */
+/* .song-jump-direct removed 2026-08-06 — the control lives on the sync pill now. */
+
+/* Rescue block. Quieter than everything else in the modal on purpose — these are once-a-year
+   controls and the loud button here must stay "open the song". */
+.song-jump-rescue { margin-top: 18px; border-top: 1px solid #e5e5e5; padding-top: 12px; }
+.song-jump-rescue.is-hidden { display: none; }
+.song-jump-rescue-toggle {
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  color: #999;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.song-jump-rescue-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.song-jump-rescue-actions.is-hidden { display: none; }
+.song-jump-rescue-btn {
+  padding: 14px;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  background: transparent;
+  color: #666;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.song-jump-rescue-btn:active { background: #ececec; }
+
+/* Diagnostics dump. Monospace, scrollable, selectable — it exists to be read and copied. */
+#sv-diag {
+  position: fixed;
+  inset: 0;
+  /* Above .song-jump-modal (200). At 80 it rendered BEHIND an open modal — invisible, with no clue
+     why. The request is fired from inside that modal, so this is not a hypothetical ordering. */
+  z-index: 260;
+  display: none;
+  flex-direction: column;
+  background: #111;
+  color: #d8d8d8;
+}
+#sv-diag.is-on { display: flex; }
+#sv-diag header {
+  display: flex;
+  align-items: center;
+  white-space: pre-line;
+  gap: 10px;
+  padding: max(0.8rem, env(safe-area-inset-top, 0px)) 0.9rem 0.6rem;
+  font: 700 0.95rem system-ui, -apple-system, sans-serif;
+  border-bottom: 1px solid #333;
+}
+#sv-diag pre {
+  flex: 1;
+  margin: 0;
+  padding: 0.8rem 0.9rem max(0.8rem, env(safe-area-inset-bottom, 0px));
+  overflow: auto;
+  font: 400 0.78rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+#sv-diag button {
+  margin-left: auto;
+  padding: 0.45rem 0.9rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: #333;
+  color: #fff;
+  font: 700 0.9rem system-ui, sans-serif;
+  cursor: pointer;
+}
+
+/* Retire the drawer's Teclado/Explorar mode switch — jump-to-song is the modal now */
+.drawer-mode-switch { display: none; }
+
+/* Native parity: no left side-bar. The ♪ (upper-right) is the song navigator. */
+.drawer-handle { display: none !important; }
+
+/* Initial-download spinner — replaces the old (misleading) progress bar */
+.offline-spinner {
+  width: 52px;
+  height: 52px;
+  margin: 10px auto 6px;
+  border: 4px solid rgba(0, 0, 0, 0.12);
+  border-top-color: var(--blue-strong);
+  border-radius: 50%;
+  animation: offline-spin 0.9s linear infinite;
+}
+.offline-spinner.is-hidden { display: none; }
+@keyframes offline-spin { to { transform: rotate(360deg); } }
+
+
+
+/* ── "Nadie está dirigiendo" tip ─────────────────────────────────────────────
+   A speech bubble anchored under the ⟳ it explains (owner, 2026-08-18), not a modal: a backdropped
+   dialog reads as an app-level failure, which is the opposite of the message. Shape is [i] … OK.
+
+   Anchored off the SAME ladder variables as the fab itself, so it stays glued if --fab-size or
+   --fab-gutter ever move — the class of bug that put the old empty-seat pill 2.3rem out of place. */
+.nodir-tip { position: fixed; inset: 0; z-index: 260; }
+.nodir-tip.is-hidden { display: none; }
+/* Invisible catcher: tapping anywhere dismisses. No dimming — the music must stay readable. */
+.nodir-tip-catch { position: absolute; inset: 0; }
+.nodir-tip-bubble {
+  position: absolute;
+  top: calc(max(var(--fab-gutter), env(safe-area-inset-top, 0px)) + var(--fab-size) + 0.65rem);
+  left: max(var(--fab-gutter), env(safe-area-inset-left, 0px));
+  width: min(19rem, calc(100vw - 2 * var(--fab-gutter)));
+  box-sizing: border-box;
+  padding: 0.85rem 0.95rem 0.8rem;
+  background: rgba(16, 24, 38, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+/* The tail points at the ⟳'s horizontal centre — derived, not a magic number. */
+.nodir-tip-tail {
+  position: absolute; top: -6px; left: calc(var(--fab-size) / 2 - 6px);
+  width: 12px; height: 12px; transform: rotate(45deg);
+  background: rgba(16, 24, 38, 0.97);
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
+}
+.nodir-tip-title {
+  display: flex; align-items: center; gap: 0.45rem;
+  margin: 0 0 0.4rem; color: #fff; font-size: 1rem; font-weight: 700; line-height: 1.25;
+}
+.nodir-tip-mark {
+  flex: 0 0 auto; width: 1.25rem; height: 1.25rem; border-radius: 50%;
+  background: rgba(10, 132, 255, 0.22); color: #6BB6FF;
+  font: 700 0.85rem/1.25rem Georgia, "Times New Roman", serif;   /* a serif i reads as an info mark */
+  text-align: center;
+}
+.nodir-tip-body { margin: 0 0 0.75rem; color: rgba(255, 255, 255, 0.82); font-size: 0.9rem; line-height: 1.45; }
+.nodir-tip-body strong { color: #fff; }
+.nodir-tip-ok {
+  width: 100%; padding: 0.6rem 1rem; border: 0; border-radius: 10px;
+  background: #0A84FF; color: #fff; font: 600 0.95rem/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.nodir-tip-ok:active { background: #0968CC; transform: scale(0.98); }
+/* QUIET BY DESIGN. Five of the six people who ever see this bubble are not Braulio, so the default
+   action is OK and this sits below it as a plain link — present for the one person who needs it,
+   never competing to be tapped by the five who do not. */
+.nodir-tip-braulio {
+  display: block; width: 100%; margin-top: 0.55rem; padding: 0.35rem;
+  border: 0; background: none; color: rgba(255, 255, 255, 0.5);
+  font: 500 0.82rem/1 system-ui, -apple-system, sans-serif;
+  text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.nodir-tip-braulio:active { color: rgba(255, 255, 255, 0.8); }
+
+
+/* ── ★ Ser Director — top-RIGHT, the only way into the role ───────────────────
+   Owner, 2026-08-18: Braulio "NEEDS a become director pill button on the top right with a star w/
+   outline and a super subtle blue hue/tint... same margins/padding as top left buttons/pills".
+
+   Deliberately a SIBLING OF THE DIRECTOR PILL, mirrored across the screen: same height, same gutter,
+   same 0.16 blue wash over the same navy, same OUTLINE star (☆ U+2606, not the filled ★). Entering
+   the role and holding it are one idea, so they look like one idea — the only difference is which
+   corner it sits in and which word it carries.
+
+   It shares the top-right with ⌕ the way ⟳ shares the top-left with DIRECTOR: ⌕ is director-only,
+   this is follower-only, so the corner never holds both. */
+.become-director-pill {
+  position: fixed;
+  top: max(var(--fab-gutter-top), env(safe-area-inset-top, 0px));
+  /* TOP-RIGHT, ONE SLOT LEFT OF IR A CANTO (owner, 2026-08-18). Ir a Canto stays flush in the corner
+     where the choir already looks for it; this is ADDED to its left, in space that was empty. For a
+     follower ⌕ is hidden, so the right cluster is ★ Ser Director · Ir a Canto. */
+  right: calc(max(var(--fab-gutter), env(safe-area-inset-right, 0px)) + var(--fab-slot2));
+  z-index: 46;
+  display: none;               /* shown only for a follower inside the native shell — see below */
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 14px;
+  /* NO blue wash (owner, 2026-08-18: "style it just like Ir a Canto... background color... and
+     opacity"). Plain rgba(26, 26, 46, 0.61) — byte-identical to .song-jump-fab/.search-fab's own
+     background, so ★ Ser Director reads as an ordinary control in the row, not a status pill that
+     had to look different. */
+  background: rgba(26, 26, 46, 0.61);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  /* Plain white (owner, 2026-08-18: "scope includes text color too") — matching
+     .song-jump-fab/.search-fab exactly rather than the blue-tinted #E4EEFF used before. */
+  color: #fff;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.become-director-pill:active { background: rgba(26, 26, 46, 0.73); transform: scale(0.96); }
+/* ☆ RIDES ON LINE 1, beside "Ser" (owner, 2026-08-18) rather than standing to the left of the whole
+   stack. Line 1 is the short line, so the star occupies width that was already empty instead of
+   adding its own column — the pill gets narrower for free. */
+.become-director-star { font-size: 0.98rem; line-height: 1; color: #fff; }
+/* TWO LINES — "Ser" over "Director" (owner). Stacking is what lets the pill be narrow: on one line
+   it is as wide as the whole phrase, and the phrase was most of that 7.6rem. */
+.become-director-label { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.06; }
+.become-director-l1 {
+  display: flex; align-items: center; gap: 0.22rem;
+  font: 700 0.78rem/1.06 system-ui, -apple-system, sans-serif; opacity: 0.82;
+}
+.become-director-l2 { font: 700 0.95rem/1.06 system-ui, -apple-system, sans-serif; white-space: nowrap; }
+/* FOLLOWER + NATIVE SHELL ONLY. Driven by attributes on <html> that renderDirectorModeBadge sets on
+   every render, rather than by a one-shot JS call: the function that used to hide the keypad's copy
+   of this ran exactly once at init and never again on a role change, so it never actually hid.
+   signovivo.com has no mesh and no role to take, hence the shell gate. */
+html[data-shell="native"][data-role="follower"] .become-director-pill { display: flex; }
+
+/* SQUARE, WITH THE TYPE SCALED TO FIT (owner, 2026-08-18: "try hard to keep buttons square, scale
+   contents to get them square when necessary"). Both role buttons carry the word "Director", and
+   that word sets the floor: at Ir a Canto's size it overflows a --fab-size box, so the TYPE shrinks
+   instead of the box growing. Same two-line treatment as Ir a Canto otherwise, so the whole top row
+   reads as one family. */
+.become-director-pill,
+html[data-role="director"] .director-mode-badge {
+  width: var(--fab-size);
+  height: var(--fab-size);
+  aspect-ratio: 1 / 1;
+  padding: 0 0.22rem;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.05rem;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  font-size: 0.9rem;          /* below Ir a Canto's 1.03: "Director" is longer than "Canto" */
+}
+.become-director-l1, .director-exit-l1 { font-size: 1.02em; opacity: 0.9; }
+.become-director-l2, .director-exit-l2 { font-size: 1.18em; white-space: nowrap; }
+
+
+/* ── Diagnostics: debug settings row ─────────────────────────────────────────
+   sv.logSink + sv.telemetry, editable where a person already is when something is wrong. Compact
+   because the dump's job is the event list below it; this is a control strip, not a form. */
+.sv-diag-dbg {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+.sv-diag-sink {
+  flex: 1 1 auto; min-width: 0;
+  padding: 0.4rem 0.55rem; border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22); background: rgba(0, 0, 0, 0.35);
+  color: #fff; font: 500 0.82rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sv-diag-tel {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 0.3rem;
+  color: rgba(255, 255, 255, 0.85); font: 600 0.82rem/1 system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+}
+.sv-diag-save {
+  flex: 0 0 auto; padding: 0.42rem 0.7rem; border: 0; border-radius: 8px;
+  background: #0A84FF; color: #fff;
+  font: 700 0.82rem/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.sv-diag-save:active { background: #0968CC; transform: scale(0.97); }

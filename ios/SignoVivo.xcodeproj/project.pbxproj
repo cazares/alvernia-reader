@@ -37,7 +37,7 @@
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = SignoVivo/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* SignoVivo-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "SignoVivo-Bridging-Header.h"; path = "SignoVivo/SignoVivo-Bridging-Header.h"; sourceTree = "<group>"; };
 		F5BA1DE0523234ABF80A7618 /* Pods-SignoVivo.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SignoVivo.debug.xcconfig"; path = "Target Support Files/Pods-SignoVivo/Pods-SignoVivo.debug.xcconfig"; sourceTree = "<group>"; };
-		WEBB0004000000000000001A /* WebBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebBundle; path = WebBundle; sourceTree = "<group>"; };
+		WEBB0004000000000000001A /* WebBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebBundle; path = SignoVivo/WebBundle; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -355,7 +355,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = SignoVivo/SignoVivo.entitlements;
-				CURRENT_PROJECT_VERSION = 472;
+				CURRENT_PROJECT_VERSION = 473;
 				DEVELOPMENT_TEAM = 7QRW68DD5X;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -392,7 +392,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = SignoVivo/SignoVivo.entitlements;
-				CURRENT_PROJECT_VERSION = 472;
+				CURRENT_PROJECT_VERSION = 473;
 				DEVELOPMENT_TEAM = 7QRW68DD5X;
 				INFOPLIST_FILE = SignoVivo/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
@@ -471,7 +471,7 @@
 				LIBRARY_SEARCH_PATHS = "$(SDKROOT)/usr/lib/swift\"$(inherited)\"";
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				USE_HERMES = true;
@@ -525,7 +525,7 @@
 				);
 				LIBRARY_SEARCH_PATHS = "$(SDKROOT)/usr/lib/swift\"$(inherited)\"";
 				MTL_ENABLE_DEBUG_INFO = NO;
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				USE_HERMES = true;
 				VALIDATE_PRODUCT = YES;

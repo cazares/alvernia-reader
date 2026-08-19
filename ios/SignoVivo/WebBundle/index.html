@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, user-scalable=yes, viewport-fit=cover" />
+    <meta name="theme-color" content="#060a18" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Signo Vivo" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Signo Vivo" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="description" content="Manual de coro Signo Vivo — lector simple y navegación rápida." />
+    <title>Signo Vivo</title>
+    <!-- Open Graph / Twitter link-preview card (iMessage, WhatsApp, Facebook, etc.) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Signo Vivo" />
+    <meta property="og:title" content="Signo Vivo" />
+    <meta property="og:description" content="Manual de coro Signo Vivo — sigue al director en vivo desde tu teléfono." />
+    <meta property="og:url" content="https://signovivo.com/" />
+    <meta property="og:image" content="https://signovivo.com/icon.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="1024" />
+    <meta property="og:image:alt" content="Signo Vivo" />
+    <meta property="og:locale" content="es_MX" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Signo Vivo" />
+    <meta name="twitter:description" content="Manual de coro Signo Vivo — sigue al director en vivo." />
+    <meta name="twitter:image" content="https://signovivo.com/icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="icon-512.png" />
+    <!-- Warm the relay origin so the first live-follow WS/state connection is fast on
+         signovivo.com cold loads. Harmless in native file:// mode (origin unused). -->
+    <link rel="preconnect" href="https://signovivo-sync.4j4982y8jp.workers.dev" crossorigin />
+    <link rel="dns-prefetch" href="https://signovivo-sync.4j4982y8jp.workers.dev" />
+    <link rel="stylesheet" href="styles.css" />
+    <script id="books-data" type="application/json">{"default":"standard","books":{"standard":{"label":"Manual Alvernia","totalPages":372}}}</script>
+  <script id="pages-data" type="application/json">{"totalPages":372,"bookVersion":"bv_d5fce34847a4f1b0"}</script>
+</head>
+  <body>
+    <!-- Full-page loading screen: covers the reader for the brief moment before the first page
+         paints. Visible by default; app.js reveals it via revealReader() in initReader. (Legacy id
+         "geo-gate" kept to avoid churn across app.js/CSS — the app is single-book now, no geo.) -->
+    <div id="geo-gate" role="status" aria-live="polite" aria-label="Cargando Signo Vivo">
+      <div class="geo-gate-inner" aria-hidden="true">
+        <div class="geo-gate-spinner"></div>
+        <p class="geo-gate-text" id="geo-gate-text">Cargando Signo Vivo…</p>
+      </div>
+    </div>
+    <!-- Always-visible build badge (web only; populated by app.js, hidden until then). -->
+    <div class="build-badge" id="build-badge" aria-hidden="true"></div>
+    <main class="app-shell">
+      <section class="viewer-shell" id="viewer-shell">
+        <img id="page-image" src="books/standard/pages/page-001.webp" alt="Pagina actual del manual" decoding="async" fetchpriority="high" />
+        <div class="loading" id="loading">Cargando...</div>
+        <div class="offline-gate is-hidden" id="offline-gate" role="dialog" aria-live="polite" aria-label="Descarga para uso sin internet">
+          <div class="offline-gate-card">
+            <p class="offline-gate-eyebrow">Modo sin internet</p>
+            <h1 class="offline-gate-title" id="offline-gate-title">Preparando Signo Vivo</h1>
+            <p class="offline-gate-body" id="offline-gate-body">Descargando todo el manual para que funcione 100% offline.</p>
+            <div class="offline-spinner" id="offline-spinner" aria-hidden="true"></div>
+            <p class="offline-progress-value" id="offline-progress-value" aria-live="polite">Preparando…</p>
+            <p class="offline-admin-note is-hidden" id="offline-admin-note">No entregues este iPad hasta ver “Offline listo”.</p>
+            <p class="offline-ready-note is-hidden" id="offline-ready-note">Ya puedes usar Signo Vivo sin internet en este iPad.</p>
+            <p class="offline-meta-note is-hidden" id="offline-meta-note"></p>
+            <button class="offline-test-button is-hidden" id="offline-test-button" type="button">Probar sin internet</button>
+            <button class="offline-continue-button is-hidden" id="offline-continue-button" type="button">Continuar</button>
+            <button class="offline-retry-button is-hidden" id="offline-retry-button" type="button">Reintentar descarga</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Drawer handle: left-edge pull-tab -->
+      <button class="drawer-handle" id="drawer-handle" type="button" aria-label="Abrir controles">
+        <span class="drawer-handle-lines" aria-hidden="true">›</span>
+      </button>
+
+      <!-- OUTSIDE #viewer-shell ON PURPOSE — this is a stacking-context fix, not tidying.
+           #viewer-shell sets `isolation: isolate` and `contain: content`, each of which creates a
+           stacking context. While this button lived in there, its z-index:46 was scoped INSIDE that
+           context, and #viewer-shell itself sits at z-index:auto — so the ⟳ fab's z-index:45, which
+           is a sibling of the SECTION, painted above the whole subtree. The follower's green
+           "you are synced" dot was rendering BEHIND the button it sits on, in shipped builds.
+           An earlier note here claimed `position: fixed` had fixed that. It had not: `fixed`
+           escapes normal-flow positioning, never an ancestor's stacking context. Only moving out
+           does. e2e/fabLayout.test.mjs pins the ancestry so it cannot drift back in. -->
+      <!-- The room's sync state, and the control for it, in one place. Three states: you are
+             directing / someone is / nobody is. It replaces a badge that only ever appeared for the
+             director — which meant the one state worth shouting about, an EMPTY DIRECTOR SEAT,
+             looked exactly like everything being fine. Text is filled in by renderSyncPill(). -->
+      <!-- DIRECTOR: status AND the way out. Tapping it opens the "¿Salir de director?" confirm,
+             so the label never lies and the destructive step still needs an explicit yes. A separate
+             ✕ lived here briefly and was removed — two controls for one act, and the ✕ said nothing
+             about which role you were in. -->
+      <button class="director-mode-badge is-hidden" id="director-mode-badge" type="button">
+        <span class="director-mode-badge-star" aria-hidden="true">&#9734;</span>
+        <!-- SALIR / DIRECTOR. Names the act rather than the state: the button is shown to nobody but
+             the director, so its presence already reports the role, and "Salir" is the same verb the
+             confirm uses ("¿Salir de director?"). -->
+        <span class="director-exit-label" aria-hidden="true">
+          <span class="director-exit-l1">Salir</span>
+          <span class="director-exit-l2">Director</span>
+        </span>
+        <strong class="director-mode-badge-title" id="sync-pill-title">DIRECTOR</strong>
+        <!-- EMPTY ON PURPOSE. Every SYNC_PILL state now sets action: "" — the pill REPORTS, it does
+               not carry a verb. "Tomar" sat here as static markup that app.js overwrote on first
+               render, so it never shipped visibly, but it would flash if a render were ever delayed
+               past first paint, and it read as a live label to anyone opening this file.
+               "Tomar" was rejected as a bare verb (take WHAT?) and "Tomar el control" as a promise
+               the app cannot keep — it names a native dialog that only exists inside an 8s window
+               the pill cannot see. See SYNC_PILL in app.js. -->
+        <span class="director-mode-badge-exit" id="sync-pill-action" aria-hidden="true"></span>
+      </button>
+
+      <!-- ⟳ resync — top-LEFT FOLLOWER control: rejoin the live director + refresh the link.
+           Shown for followers (incl. all of signovivo.com); hidden for a director (data-role).
+           The icon spins while reconnecting so it's obvious something is happening. -->
+      <!-- ★ SER DIRECTOR — top-RIGHT, and the ONLY way into the role (owner, 2026-08-18: Braulio
+           "NEEDS a become director pill button on the top right"). He forgets the procedure most
+           weeks, and the empty seat is what caused the 2026-07-01 no-director-all-night outage.
+           It shares the top-right corner with ⌕ the way ⟳ and DIRECTOR share the top-left: ⌕ is
+           director-only and this is follower-only, so they are never both on screen.
+           This reverses "a permanently visible become-director control is a split-brain generator".
+           That rule was leaning on obscurity, which was never what protected the role — #role-gate
+           is: tapping this opens the red "ESTO CAMBIA LA PÁGINA DE TODOS" wall and you must type
+           braulio. Visible button, same gate, no new authority. -->
+      <button class="become-director-pill" id="become-director-pill" type="button"
+              aria-label="Ser director del coro">
+        <span class="become-director-label">
+          <span class="become-director-l1"><span class="become-director-star" aria-hidden="true">&#9734;</span>Ser</span>
+          <span class="become-director-l2">Director</span>
+        </span>
+      </button>
+
+      <button class="resync-fab" id="resync-fab" type="button" aria-label="Volver a sincronizar con el director">
+        <span class="resync-icon" aria-hidden="true">⟳</span>
+        <span class="resync-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+      </button>
+
+      <!-- ♪ Jump-to-song (top-RIGHT, everyone) + ⌕ search (top-RIGHT, DIRECTOR only via data-role) -->
+      <button class="song-jump-fab" id="song-jump-trigger" type="button" aria-label="Ir a canto"><span class="song-jump-fab-l1" aria-hidden="true">Ir a</span><span class="song-jump-fab-l2" aria-hidden="true">Canto</span></button>
+      <button class="search-fab" id="search-fab" type="button" aria-label="Buscar">⌕</button>
+
+      <!-- ⛶ Fullscreen — bottom-RIGHT, same fab styling. Hidden where fullscreen isn't supported
+           (e.g. a regular iOS Safari tab); shown on desktop / Android / installed PWA. -->
+      <button class="fullscreen-fab is-hidden" id="fullscreen-fab" type="button" aria-label="Pantalla completa">
+        <!-- Standard "expand" fullscreen icon: 4 arrows emanating from center to the 4 corners. -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="9 4 4 4 4 9" />
+          <line x1="4" y1="4" x2="10" y2="10" />
+          <polyline points="15 4 20 4 20 9" />
+          <line x1="20" y1="4" x2="14" y2="10" />
+          <polyline points="20 15 20 20 15 20" />
+          <line x1="20" y1="20" x2="14" y2="14" />
+          <polyline points="9 20 4 20 4 15" />
+          <line x1="4" y1="20" x2="10" y2="14" />
+        </svg>
+      </button>
+
+      <!-- ── Jump-to-song modal (native-style) ── -->
+      <div class="song-jump-modal is-hidden" id="song-jump-modal" role="dialog" aria-modal="true" aria-label="Ir a canto">
+        <div class="song-jump-backdrop" id="song-jump-backdrop"></div>
+        <div class="song-jump-card" role="document">
+          <h2 class="song-jump-title">IR A CANTO</h2>
+
+          <div class="numberpad-display-wrap">
+            <div
+              class="numberpad-display"
+              id="song-display"
+              role="status"
+              aria-live="polite"
+              aria-label="Número de canto"
+            ></div>
+          </div>
+
+          <div class="numberpad-grid song-jump-grid" id="numberpad-grid" aria-label="Teclado numérico">
+            <button class="numberpad-key" type="button" data-digit="1">1</button>
+            <button class="numberpad-key" type="button" data-digit="2">2</button>
+            <button class="numberpad-key" type="button" data-digit="3">3</button>
+            <button class="numberpad-key" type="button" data-digit="4">4</button>
+            <button class="numberpad-key" type="button" data-digit="5">5</button>
+            <button class="numberpad-key" type="button" data-digit="6">6</button>
+            <button class="numberpad-key" type="button" data-digit="7">7</button>
+            <button class="numberpad-key" type="button" data-digit="8">8</button>
+            <button class="numberpad-key" type="button" data-digit="9">9</button>
+            <!-- EMPTY CELL, ON PURPOSE. "Ser Director" lived here from 2026-08-17 and moved to the
+                 top-right pill on 2026-08-18 (owner: "remove keypad director stuff") — Braulio has to
+                 FIND it, and a control buried in a modal named IR A CANTO is not findable by someone
+                 who forgets the procedure every week. It must stay a cell rather than be deleted: the
+                 grid is navigated by muscle memory, and removing it slides 0 and ⌫ left. -->
+            <span class="numberpad-key-blank" aria-hidden="true"></span>
+            <button class="numberpad-key" type="button" data-digit="0">0</button>
+            <button class="numberpad-key numberpad-key-back" id="backspace-button" type="button" aria-label="Borrar último dígito">⌫</button>
+          </div>
+
+          <div class="song-jump-actions">
+            <!-- ROLE CONTROL. Deliberately behind the modal rather than on the reader: a permanently
+                 visible "become director" button on six choir iPads is a split-brain generator, and
+                 the choir is non-technical. Opening this dialog is the deliberate act, so the star is
+                 FILLED here — inside something you opened on purpose it reads as an affordance, not
+                 a distraction over the music. Same slot flips to "Salir" while directing, so one
+                 place owns the whole concept.
+                 Placed ABOVE the primary action on purpose: an earlier attempt at a director control
+                 in this card sat below the fold on a 10.2" portrait iPad. -->
+            <!-- Cancelar + Abrir Canto share one row (owner, 2026-08-17). Cancel LEFT, primary
+                 RIGHT — the platform convention, and it puts the destructive-ish option away from
+                 the thumb that is reaching for the loud one. Dirigir keeps its own row above. -->
+            <div class="song-jump-actions-row">
+              <button class="song-jump-cancel" id="song-cancel" type="button">Cancelar</button>
+              <button class="song-jump-go" id="go-button" type="button" aria-label="Abrir canto">♪ Abrir Canto ♪</button>
+            </div>
+          </div>
+
+          <!-- "Dirigir el coro" used to live here. It moved to the sync pill (top-left), which shows
+               the room's state and IS the control for it. A director button inside a dialog titled
+               IR A CANTO was the wrong place twice over: nobody looking to direct opens the
+               go-to-song keypad, and on a 10.2" portrait iPad it sat below the card's fold. -->
+
+          <!-- The rescue block ("¿Algo anda mal?" + the two panic switches + diagnostics) was removed
+               2026-08-06. IR A CANTO is the dialog people open constantly during Mass, and it had
+               grown a once-a-year maintenance drawer under it. The numpad codes still reach every
+               one of those actions, and the native handlers are untouched. -->
+
+        </div>
+      </div>
+
+      <!-- TAKE-THE-ROLE GATE. One dialog, deliberately hostile. Taking the role changes the page for
+           EVERY device in the loft, and the person doing it is usually mid-song — so the gate is a
+           typed word, not a tap. All-caps is right HERE (a one-time alarm) where it is wrong on a
+           label you live with. Stepping DOWN gets a plain confirm instead: that direction is
+           recoverable, this one is not. -->
+      <!-- WHY THIS EXISTS. A crossed-out button is unmistakable but not self-explaining, and to a
+           non-technical singer the first reading of one is "my iPad is broken". It is not — the book
+           works perfectly, there is simply nobody driving.
+           A BUBBLE ANCHORED TO THE BUTTON, not a modal (owner, 2026-08-18). A full-screen dialog
+           with a backdrop reads as an app-level failure, which is the exact wrong message; a tip
+           with a tail pointing at the ⟳ is visibly ABOUT that button and nothing more.
+           IT DELIBERATELY DOES NOT TEACH ANYONE TO TAKE THE ROLE ("users need less complexity not
+           more"). Beyond simplicity: the audience here is six FOLLOWERS, and #role-gate warns in as
+           many words that anyone who is not Braulio taking the role "va a causar problemas para
+           TODO EL CORO". A how-to on the one screen every singer sees when the seat is empty would
+           be instructions for producing a split brain. It explains, and it closes. -->
+      <div class="nodir-tip is-hidden" id="nodir-info" role="dialog" aria-label="Nadie esta dirigiendo">
+        <div class="nodir-tip-catch" id="nodir-info-backdrop"></div>
+        <div class="nodir-tip-bubble" role="document">
+          <span class="nodir-tip-tail" aria-hidden="true"></span>
+          <p class="nodir-tip-title"><span class="nodir-tip-mark" aria-hidden="true">i</span>Nadie est&aacute; dirigiendo</p>
+          <p class="nodir-tip-body">
+            Tu iPad est&aacute; bien. El <strong>&#10227;</strong> est&aacute; tachado porque no hay a qui&eacute;n seguir.
+            Las p&aacute;ginas no van a cambiar solas hasta que alguien dirija.
+          </p>
+          <button class="nodir-tip-ok" id="nodir-info-close" type="button">OK</button>
+          <!-- THE ONE SHORTCUT WORTH HAVING, and it is a question, not an instruction. The empty
+               seat is exactly when Braulio needs the role, and without this his path is five taps
+               (close → Ir a Canto → ★ Ser Director → type → confirm). Phrased as "¿Eres Braulio?"
+               it is SELF-FILTERING: a singer named María reads it and thinks "no". A how-to line
+               would have taught all six followers to produce a split brain; a question does not.
+               It opens #role-gate — it does NOT take the role. The typed word and the red
+               "ESTO CAMBIA LA PÁGINA DE TODOS" warning are still the only way through, so this adds
+               a shortcut to the check and no authority whatsoever. request-director keeps exactly
+               one call site, which e2e/directorButton.test.mjs pins. -->
+          <button class="nodir-tip-braulio" id="nodir-info-braulio" type="button">&iquest;Eres Braulio?</button>
+        </div>
+      </div>
+      </div>
+        </div>
+      </div>
+
+      <div class="role-gate is-hidden" id="role-gate" role="dialog" aria-modal="true" aria-label="Confirmar dirigir el coro">
+        <div class="role-gate-backdrop" id="role-gate-backdrop"></div>
+        <div class="role-gate-card" role="document">
+          <h2 class="role-gate-title">ESTO CAMBIA LA P&Aacute;GINA DE TODOS</h2>
+          <p class="role-gate-body">
+            Si <strong>NO eres Braulio</strong>, esto va a causar problemas para
+            <strong>TODO EL CORO</strong>.
+          </p>
+          <label class="role-gate-label" for="role-gate-input">Escribe <strong>braulio</strong> para confirmar</label>
+          <input class="role-gate-input" id="role-gate-input" type="text" autocomplete="off"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
+          <div class="role-gate-actions">
+            <button class="role-gate-confirm" id="role-gate-confirm" type="button" disabled>Confirmar</button>
+            <button class="role-gate-cancel" id="role-gate-cancel" type="button">Cancelar</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="overlay-controls" id="overlay-controls">
+
+        <!-- Tap-outside backdrop -->
+        <div class="drawer-backdrop" id="drawer-backdrop" role="button" tabindex="-1" aria-label="Cerrar"></div>
+
+        <!-- ── Left-side navigation drawer ─────────────────────────────── -->
+        <div class="navigation-drawer mode-browse" id="navigation-drawer">
+
+          <!-- ★ Always visible: close + song navigation ★ -->
+          <div class="drawer-top-bar">
+            <button class="drawer-close-btn" id="drawer-close" type="button" aria-label="Cerrar menú">
+              ← Cerrar menú
+            </button>
+          </div>
+
+          <!-- Prev / Next song — always accessible in either mode -->
+          <div class="drawer-nav-row">
+            <button class="drawer-nav-btn drawer-nav-prev" id="prev-page" type="button" aria-label="Canción anterior">
+              <span class="drawer-nav-arrow" aria-hidden="true">←</span>
+              <span class="nav-label">Canción<br>Anterior</span>
+            </button>
+
+            <div class="drawer-nav-center" id="drawer-nav-center">
+              <button class="drawer-back-btn is-hidden" id="drawer-back" type="button" aria-label="Volver al índice">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                Volver
+              </button>
+              <p class="numberpad-status" id="song-status">Canción 0</p>
+              <p class="numberpad-intro is-hidden" id="song-intro"></p>
+            </div>
+
+            <button class="drawer-nav-btn drawer-nav-next" id="next-page" type="button" aria-label="Canción siguiente">
+              <span class="drawer-nav-arrow" aria-hidden="true">→</span>
+              <span class="nav-label">Siguiente<br>Canción</span>
+            </button>
+          </div>
+
+          <!-- ★ Mode switcher: Teclado ↔ Explorar ★ -->
+          <div class="drawer-mode-switch" role="tablist" aria-label="Modo del menú">
+            <button class="drawer-mode-btn is-active" id="mode-btn-numpad" data-mode="numpad"
+              type="button" role="tab" aria-selected="true">
+              <span class="mode-icon">🔢</span>
+              <span class="mode-label">Teclado</span>
+            </button>
+            <button class="drawer-mode-btn" id="mode-btn-browse" data-mode="browse"
+              type="button" role="tab" aria-selected="false">
+              <span class="mode-icon">📚</span>
+              <span class="mode-label">Explorar</span>
+            </button>
+          </div>
+
+          <!-- ════════════════════════════════════════════════════ -->
+          <!-- NUMPAD PANEL — visible in "teclado" mode            -->
+          <!-- ════════════════════════════════════════════════════ -->
+          <div class="drawer-panel drawer-numpad-panel" id="numpad-panel">
+
+            <!-- Numpad moved to the centered modal (#song-jump-modal). These controls
+                 are kept hidden only so existing JS references stay valid; the web reader
+                 no longer surfaces them (matching native's minimal reader). -->
+            <div class="numpad-section" id="numpad-section">
+              <button id="fullscreen-button" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
+              <button id="prev-corner" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
+              <button id="help-button" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
+              <button id="display-clear" type="button" aria-hidden="true" style="display:none" tabindex="-1"></button>
+            </div>
+
+            <div class="numpad-tip-wrap" id="numpad-tip-wrap">
+              <p class="numpad-tip">🎉 <strong>¡Buenas noticias!</strong> Ya no tienes que pasar páginas. Escribe el número y toca <strong>↵ Ir</strong> — vas directo, <strong>sin scroll</strong>.</p>
+              <button class="numpad-tip-dismiss" id="tip-dismiss" type="button" aria-label="Cerrar aviso">✕</button>
+            </div>
+
+          </div><!-- /drawer-numpad-panel -->
+
+          <!-- ════════════════════════════════════════════════════ -->
+          <!-- BROWSE PANEL — visible in "explorar" mode           -->
+          <!-- ════════════════════════════════════════════════════ -->
+          <div class="drawer-panel drawer-browse-panel" id="browse-panel">
+
+            <!-- LEFT: persistent tab rail -->
+            <nav class="drawer-tab-rail" id="drawer-tab-rail" role="tablist" aria-label="Explorar canciones">
+              <button class="rail-tab" role="tab" data-tab="buscar"    type="button"><span class="rail-icon">🔍</span><span class="rail-label">Buscar</span></button>
+              <button class="rail-tab" role="tab" data-tab="misa"      type="button"><span class="rail-icon">⛪</span><span class="rail-label">Misa</span></button>
+              <button class="rail-tab" role="tab" data-tab="recientes" type="button"><span class="rail-icon">🕐</span><span class="rail-label">Recientes</span></button>
+              <button class="rail-tab" role="tab" data-tab="temporada" type="button"><span class="rail-icon">📅</span><span class="rail-label">Tiempo</span></button>
+              <button class="rail-tab" role="tab" data-tab="temas"     type="button"><span class="rail-icon">🏷️</span><span class="rail-label">Temas</span></button>
+              <button class="rail-tab" role="tab" data-tab="tono"      type="button"><span class="rail-icon">🎵</span><span class="rail-label">Tono</span></button>
+              <button class="rail-tab is-active" role="tab" data-tab="todas" type="button"><span class="rail-icon">📋</span><span class="rail-label">Todas</span></button>
+            </nav>
+
+            <!-- RIGHT: scrollable content pane -->
+            <div class="drawer-pane-content" id="drawer-pane-content">
+
+              <!-- Search row: back + input (fullscreen when Buscar tab active) -->
+              <div class="search-row is-hidden" id="search-row">
+                <button class="search-back-btn" id="search-back" type="button" aria-label="Volver">
+                  <span class="search-back-arrow">←</span>
+                  <span class="search-back-label">Volver</span>
+                </button>
+                <div class="search-input-wrap">
+                  <input
+                    class="search-input"
+                    id="search-input"
+                    type="search"
+                    inputmode="search"
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    placeholder="Título, letra o tema…"
+                    aria-label="Buscar canciones"
+                  />
+                  <button class="search-clear-btn is-hidden" id="search-clear" type="button" aria-label="Limpiar" tabindex="-1">✕</button>
+                </div>
+              </div>
+
+              <div class="search-col-header is-hidden" id="search-col-header">
+                <span class="search-col-no">No.</span>
+                <span class="search-col-title">Canción</span>
+                <button class="search-sort-toggle" id="search-sort-toggle" type="button" aria-label="Cambiar orden de resultados">⇅ Mejor</button>
+              </div>
+
+              <div class="search-results" id="search-results" role="list" aria-live="polite"></div>
+            </div><!-- /drawer-pane-content -->
+
+          </div><!-- /drawer-browse-panel -->
+
+          <!-- Hidden compat stubs -->
+          <button id="search-cancel" type="button" aria-hidden="true" tabindex="-1" style="display:none"></button>
+
+          <!-- Help overlay panel -->
+          <div class="help-panel is-hidden" id="help-panel" role="dialog" aria-label="Instrucciones">
+            <button class="help-close-btn" id="help-close" type="button" aria-label="Cerrar ayuda">✕</button>
+            <h2 class="help-title">¿Cómo funciona?</h2>
+            <ul class="help-list">
+              <li class="help-item">
+                <span class="help-item-icon">←→</span>
+                <div>
+                  <strong>Canción anterior / siguiente</strong>
+                  <p>Toca las flechas grandes de arriba para cambiar de canción</p>
+                </div>
+              </li>
+              <li class="help-item">
+                <span class="help-item-icon">👆</span>
+                <div>
+                  <strong>Pasar página</strong>
+                  <p>Desliza la pantalla hacia los lados para pasar página por página</p>
+                </div>
+              </li>
+              <li class="help-item">
+                <span class="help-item-icon">◁</span>
+                <div>
+                  <strong>Abrir controles</strong>
+                  <p>Desliza desde el borde izquierdo o toca la franja oscura a la izquierda</p>
+                </div>
+              </li>
+              <li class="help-item">
+                <span class="help-item-icon">← Cerrar</span>
+                <div>
+                  <strong>Cerrar controles</strong>
+                  <p>Toca "← Cerrar menú" arriba, o desliza el panel hacia la izquierda</p>
+                </div>
+              </li>
+              <li class="help-item">
+                <span class="help-item-icon">123</span>
+                <div>
+                  <strong>Ir a una canción</strong>
+                  <p>Escribe el número con el teclado y toca ↵ Ir</p>
+                </div>
+              </li>
+              <li class="help-item">
+                <span class="help-item-icon">🔍</span>
+                <div>
+                  <strong>Buscar</strong>
+                  <p>Escribe parte de la letra, el título o un tema</p>
+                </div>
+              </li>
+              <li class="help-item">
+                <span class="help-item-icon">↩</span>
+                <div>
+                  <strong>← Volver</strong>
+                  <p>Regresa a la última canción que estabas viendo</p>
+                </div>
+              </li>
+            </ul>
+
+            <!-- Settings separator -->
+            <p class="help-settings-label" id="help-settings-label">Ajustes</p>
+            <div class="help-setting-row">
+              <span class="help-item-icon">📳</span>
+              <div class="help-setting-body">
+                <strong>Vibración</strong>
+                <p>Retroalimentación háptica al tocar botones</p>
+              </div>
+              <button class="haptic-toggle" id="haptic-toggle" type="button" aria-label="Activar o desactivar vibración" aria-pressed="true">
+                <span class="haptic-toggle-track">
+                  <span class="haptic-toggle-thumb"></span>
+                </span>
+              </button>
+            </div>
+          <p class="app-version-label" id="app-version-label"></p>
+          </div><!-- /help-panel -->
+
+        </div><!-- /navigation-drawer -->
+
+      </section>
+    </main>
+
+    <!-- Pre-app helpers, loaded first (deferred scripts run in document order).
+         svRelayRoom resolves the relay room (staging vs production) defensively;
+         if it fails to load, app.js falls back to alvernia-main on its own. -->
+    <script defer src="lib/svRelayRoom.js"></script>
+    <script defer src="lib/svSelftest.js"></script>
+    <script defer src="lib/svSyncDecision.js"></script>
+    <script defer src="lib/svRenderPace.js"></script>
+    <script defer src="app.js"></script>
+  </body>
+</html>
