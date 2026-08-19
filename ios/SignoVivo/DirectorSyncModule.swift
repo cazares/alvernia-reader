@@ -1936,7 +1936,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   private func reconsiderFollowerTarget() {
     guard currentRole == "follower", let session = mcSessions.first else { return }
-    guard session.connectedPeers.isEmpty else { emitState(status: "connected"); return }
+    // DEFENSE IN DEPTH, not the primary guard anymore. This used to read
+    // `session.connectedPeers.isEmpty` — "anything connected means we're done" — which silently
+    // wedged for 40+s on real hardware (2026-08-18) when a non-director peer occupied the session:
+    // connectedDirectorPeer was never set, but this guard still bailed every cycle because the slot
+    // wasn't empty, so a live director sitting in discoveredDirectors never got invited. The accept
+    // side (didReceiveInvitationFromPeer) and the .connected handler (session:peer-not-director,
+    // now actively disconnecting) are what should keep connectedPeers accurate; this checks the
+    // thing that actually matters.
+    guard connectedDirectorPeer == nil else { emitState(status: "connected"); return }
 
     // Pick the HIGHEST token — the one that SURVIVES director-conflict resolution
     // (handleDirectorConflict demotes the strictly-lower token). Selecting ascending here would
@@ -2073,7 +2081,28 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           invitationHandler(false, nil) // all sessions full (> maxSessions followers)
         }
       } else {
-        // Follower accepts from director into its single session
+        // A FOLLOWER MUST NEVER ACCEPT AN INVITE FROM ANOTHER FOLLOWER.
+        //
+        // This branch used to accept unconditionally — "a follower only ever gets invited by the
+        // director" was an assumption, not something enforced here. It is not actually true:
+        // followers advertise too (so a device that recently WAS director, or briefly advertised
+        // as one during a promotion race, can still have a stale/in-flight invite land on another
+        // follower), and nothing on the accept side checked who was asking. Confirmed on real
+        // hardware 2026-08-18: a follower's session connected to ANOTHER follower
+        // (`session:peer-not-director`), which silently wedged reconsiderFollowerTarget for 40+s
+        // (see its own comment) because a non-director peer occupying the session looked
+        // identical to being connected to the director.
+        //
+        // Same three-way "is this peer actually the director" check used at .connected and by
+        // reconsiderFollowerTarget, so all three places cannot drift out of agreement.
+        let peerIsKnownDirector = self.pendingInvitePeer == peerID
+          || self.discoveredDirectors[peerID] != nil
+          || self.discoveredDirectorInfo[peerID]?["role"] == "director"
+        guard peerIsKnownDirector else {
+          self.dbgLog("invite:reject", ["from": peerID.displayName, "why": "not-a-director"])
+          invitationHandler(false, nil)
+          return
+        }
         self.dbgLog("invite:accept", ["from": peerID.displayName, "as": "follower"])
         invitationHandler(true, self.mcSessions.first)
       }
@@ -2250,6 +2279,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             || self.discoveredDirectorInfo[peerID]?["role"] == "director"
           guard isDirector else {
             self.dbgLog("session:peer-not-director", ["peer": peerID.displayName])
+            // ACTIVELY DROP IT — logging and returning here used to be the whole handler. That left
+            // a rejected-but-still-transport-connected peer sitting in session.connectedPeers
+            // forever, which made reconsiderFollowerTarget's `connectedPeers.isEmpty` guard (its own
+            // comment covers this in full) believe the follower was done and stop retrying the real
+            // director. Disconnecting it here means that guard's premise is actually true again:
+            // if anything is in connectedPeers, it is the director.
+            session.cancelConnectPeer(peerID)
             return
           }
           self.connectedDirectorPeer = peerID; self.pendingInvitePeer = nil
