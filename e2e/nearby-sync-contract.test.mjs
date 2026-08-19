@@ -167,9 +167,21 @@ test("timers are generation-guarded so stale callbacks cannot survive reset", ()
   assert.match(swiftSource, /DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ Self\.followerRetryDelay\)[\s\S]*self\.resetGeneration == generation/);
 });
 
-test("director can accept up to 10 followers via multi-session allocation", () => {
-  assert.match(swiftSource, /private static let maxFollowersPerSession = 7/);
-  assert.match(swiftSource, /private static let maxSessions = 2/);
+test("each follower gets its OWN session — no follower-to-follower cross-connect", () => {
+  // Miguel, 2026-08-18: "nuke peer sharing and any peer connections... one director to one
+  // follower... that setup times N followers". MCSession connects every member of ONE session to
+  // every OTHER member — not a choice this codebase made, Apple's framework behavior — so any
+  // session with more than 2 peers lets followers see each other's traffic at the protocol level.
+  // A prior measured incident (2026-08-16, comment near "22 follower-to-follower connections")
+  // documented this exact cross-connect causing a follower to misidentify ANOTHER FOLLOWER as its
+  // director. maxFollowersPerSession=1 makes that structurally impossible: a session with exactly
+  // 2 members (director + one follower) has no other follower in it to cross-connect with.
+  assert.match(swiftSource, /private static let maxFollowersPerSession = 1/,
+    "maxFollowersPerSession is not 1 — followers can still cross-connect within a shared session");
+  const m = swiftSource.match(/private static let maxSessions = (\d+)/);
+  assert.ok(m, "maxSessions constant missing");
+  assert.ok(Number(m[1]) >= 8,
+    `maxSessions=${m?.[1]} is too low for real fleet capacity now that each session holds only 1 follower`);
   assert.match(swiftSource, /availableSessionForNewFollower\(\)/);
 });
 
