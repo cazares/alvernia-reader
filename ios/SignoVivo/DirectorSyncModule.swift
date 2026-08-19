@@ -110,10 +110,30 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// Seconds a follower waits for a director before entering self-directed mode.
   private static let selfDirectedTimeoutSeconds: TimeInterval = 10
   private static let maxInboundPayloadBytes = 8 * 1024
-  /// MCSession hard limit is 8 peers total (including local). Director occupies 1 slot → 7 followers/session.
-  private static let maxFollowersPerSession = 7
-  /// Two sessions → up to 14 followers simultaneously.
-  private static let maxSessions = 2
+  /// ONE FOLLOWER PER SESSION, ON PURPOSE (Miguel, 2026-08-18: "nuke peer sharing and any peer
+  /// connections... it should be one director to one follower... that setup times N followers").
+  ///
+  /// MCSession is not a star topology by choice — it is Apple's framework behavior: every peer
+  /// joined to the SAME MCSession object is directly connected to EVERY OTHER peer in it (full
+  /// mesh), not just to whoever invited them. There is no "broadcast-only" mode. The comment this
+  /// replaced ("7 followers in one session still all cross-connect") already documented this as a
+  /// known, unfixed property — followers really could see each other's traffic at the protocol
+  /// level, not just the director's.
+  //
+  // Hunted down (2026-08-18) as the likely cause of a repeated, hard-to-pin bug: a follower whose
+  // OWN device navigated to a song WHILE nobody was directing showed up as a phantom page source
+  // for the OTHER followers once a new director took over — three followers converged on the
+  // SAME wrong song (matching whichever device had most recently touched a page), self-corrected
+  // after ~10s once the real director's session stabilized. Consistent with cross-session/
+  // cross-peer bleed that a strict 1-follower-per-session topology makes structurally impossible:
+  // a session with exactly 2 members (director + one follower) has no OTHER follower in it to
+  // bleed from.
+  //
+  // Was 7 (Apple's per-session hard cap is 8 peers including local, so 7 followers/session).
+  private static let maxFollowersPerSession = 1
+  /// Was 2 (7-per-session × 2 = 14). Raised to keep real fleet capacity headroom (measured fleet:
+  /// 1 director + ~6-8 followers) now that each session holds only 1 follower instead of 7.
+  private static let maxSessions = 12
 
   private var localPeerID: MCPeerID?
   /// Director uses up to maxSessions instances; follower uses exactly one (mcSessions[0]).
@@ -2048,7 +2068,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           invitationHandler(true, session)
         } else {
           self.dbgLog("invite:reject", ["from": peerID.displayName, "why": "sessions-full"])
-          invitationHandler(false, nil) // all sessions full (>14 followers)
+          invitationHandler(false, nil) // all sessions full (> maxSessions followers)
         }
       } else {
         // Follower accepts from director into its single session
@@ -2209,6 +2229,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           // It needs THREE devices to appear at all: with a single follower there is no second
           // follower to cross-connect with, which is why every two-device test ever run passed, and
           // why this survived from build 381 through 429 untouched.
+          //
+          // UPDATE 2026-08-18: maxFollowersPerSession dropped 7 -> 1 (see its own comment) — a
+          // session now has exactly 2 members (director + one follower), so there is structurally
+          // no OTHER follower to receive a spurious .connected for. This guard stays as
+          // defense-in-depth (it costs nothing and the discoveredDirectors/token checks are cheap
+          // to keep correct), but its "session:peer-not-director" branch should now be unreachable
+          // in practice — if it ever fires again, the 1-follower-per-session topology has a hole.
           //
           // So: only the peer we deliberately invited, or one we have seen advertising role=director,
           // may claim the slot. Anything else is a peer sharing our session and is ignored here.
