@@ -80,6 +80,48 @@ test("471's failure signature — an unanswered invite hammer with no eviction �
   assert.match(r.out, /FAIL\s+invite hammering with no eviction: iPad-A->iPad-B \(run of 5\)/);
 });
 
+test("the same evidence as JSONL yields the same verdicts as Console text", () => {
+  // A device that was never attached to Console can still be read afterwards from its own
+  // persisted unified log (sudo log collect → logarchive-to-jsonl). That path is the ONLY one
+  // available for a device that ran at Mass, so it must not be a second, weaker analyzer: same
+  // evidence in, same verdicts out. Built from the Console fixture so the two can never drift.
+  const rows = [];
+  for (const line of fs.readFileSync(FIXTURE, "utf8").split("\n")) {
+    const m = /(\d{2}):(\d{2}):(\d{2})\.(\d{6}).*SignoVivo\t(follower|director|off) (\S+) (\S+)(.*)$/.exec(line);
+    if (!m) continue;
+    const [, hh, mm, ss, us, role, dev, event, rest] = m;
+    // 2026-08-24 local, the real capture's date, + the line's time-of-day.
+    const base = new Date(2026, 7, 24, +hh, +mm, +ss, 0).getTime() + +us / 1000;
+    const row = { t: base, dev, role, event, src: "swift", build: null };
+    for (const kvp of rest.trim().split(/\s+/)) {
+      const i = kvp.indexOf("=");
+      if (i > 0) row[kvp.slice(0, i)] = kvp.slice(i + 1);
+    }
+    rows.push(JSON.stringify(row));
+  }
+  assert.ok(rows.length > 50, `expected a full JSONL conversion, got ${rows.length} rows`);
+  const p = write("capture.jsonl", rows);
+  const r = run(p);
+
+  assert.equal(r.code, 1, "the ghost must still be caught through the JSONL path");
+  assert.match(r.out, /nonce=4ca1 page=7 .*GHOST/);
+  assert.match(r.out, /nonce=1e3f page=213 .*explained by a logged ble:page-send/);
+  // Verdict lines must match the Console run exactly — the input shape must not change the answer.
+  const verdicts = (s) => s.slice(s.indexOf("══ VERDICTS ══")).trim();
+  assert.equal(verdicts(r.out), verdicts(real.out));
+});
+
+test("mixing Console text and JSONL in one run is refused, not silently misread", () => {
+  // Their timestamps live on different axes (seconds-of-day vs epoch); pooling them would put
+  // events ~57 years apart on one timeline and make every cross-device check meaningless.
+  const p = write("mixed.txt", [
+    JSON.stringify({ t: Date.UTC(2026, 7, 24, 10, 0, 0), dev: "iPad-A", role: "follower", event: "ble:page-apply", page: "7" }),
+    line("05:03:02.877849", "director iPhone-B ble:page-send coldRadio=false page=213 seq=1"),
+  ]);
+  const r = run(p);
+  assert.equal(r.code, 2, "a mixed pool must abort, not produce a verdict");
+});
+
 test("471's fix signature — eviction after 2 failures — PASSes and ends the run", () => {
   const p = write("evict.txt", [
     line("06:00:00.000000", "follower iPad-A invite:send to=iPad-B"),
