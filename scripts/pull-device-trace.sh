@@ -22,12 +22,37 @@
 # rather than trusting it.
 #
 # Usage:  sudo bash scripts/pull-device-trace.sh <UDID>[,<UDID>...] [minutes]
-#   mPad      00008030-000314A91443C02E
-#   iPhone 17 00008150-0008299C0EBB401C
-#   Other devices' UDIDs: Xcode > Window > Devices and Simulators, the "Identifier" field. NOT the
-#   UUID from `xcrun devicectl list devices` — that is a coredevice id and `log collect` rejects it.
+#         bash scripts/pull-device-trace.sh --list          # every paired device + its real UDID
+#   mPad        00008030-000314A91443C02E
+#   iPhone 17   00008150-0008299C0EBB401C
+#   Brau MASTER 91626b8e6d3bdd4fb336ad9199fea3edeebb9c93
+#
+# GETTING A UDID is a trap worth naming: the UUID that `xcrun devicectl list devices` PRINTS is a
+# coredevice id, and `log collect` rejects it. The real hardware UDID is only in that command's
+# --json-output, under hardwareProperties.udid — which is what `--list` below digs out. (Xcode >
+# Window > Devices and Simulators shows the same value as "Identifier".)
 set -uo pipefail
-UDIDS="${1:?usage: sudo bash scripts/pull-device-trace.sh <UDID>[,<UDID>...] [minutes]}"
+UDIDS="${1:?usage: sudo bash scripts/pull-device-trace.sh <UDID>[,<UDID>...] [minutes]  |  --list}"
+
+if [ "$UDIDS" = "--list" ]; then
+  TMP="$(mktemp -t svdev).json"
+  xcrun devicectl list devices --json-output "$TMP" >/dev/null 2>&1 || {
+    echo "✖ xcrun devicectl failed — is Xcode installed and selected?" >&2; exit 2; }
+  node -e '
+    const d = require(process.argv[1]);
+    const rows = (d.result && d.result.devices) || [];
+    if (!rows.length) { console.log("(no paired devices)"); process.exit(0); }
+    for (const x of rows) {
+      const name = (x.deviceProperties || {}).name || "?";
+      const udid = (x.hardwareProperties || {}).udid || "(no udid)";
+      const state = (x.connectionProperties || {}).tunnelState || "?";
+      console.log(`${name.padEnd(14)} ${udid.padEnd(42)} ${state}`);
+    }
+    console.log("\nOnly a CONNECTED device can be collected. A device that was merely paired\nstill holds its own log — plug it in and it becomes collectable.");
+  ' "$TMP"
+  rm -f "$TMP"
+  exit 0
+fi
 MINS="${2:-15}"
 STAMP="$(date +%H%M%S)"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
