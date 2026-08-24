@@ -1,0 +1,79 @@
+default	05:01:34.946989-0500	SignoVivo	follower iPad-4CEFD0 lost peer=iPad-prime
+default	05:01:35.345500-0500	SignoVivo	follower iPad-91B171 lost peer=iPad-prime
+default	05:02:00.682523-0500	SignoVivo	follower iPad-4E3E79 found peer=iPad-91B171 prole=follower
+default	05:02:00.682533-0500	SignoVivo	follower iPad-4E3E79 found peer=iPad-91B171 prole=follower
+default	05:02:00.682543-0500	SignoVivo	follower iPad-4E3E79 found peer=iPad-91B171 prole=follower
+default	05:02:00.682553-0500	SignoVivo	follower iPad-4E3E79 found peer=iPad-91B171 prole=follower
+default	05:02:00.682564-0500	SignoVivo	follower iPad-4E3E79 found peer=iPhone-3C85E1 prole=follower
+default	05:02:00.682574-0500	SignoVivo	follower iPad-4E3E79 found peer=iPhone-3C85E1 prole=follower
+default	05:03:02.853398-0500	SignoVivo	follower iPhone-3C85E1 ble:stop-publishing
+default	05:03:02.859812-0500	SignoVivo	off ? ble:stop-publishing
+default	05:03:02.877293-0500	SignoVivo	follower iPad-4CEFD0 ble:new-advertiser nonce=4ca1 page=7
+default	05:03:02.877657-0500	SignoVivo	follower iPad-4CEFD0 ble:page-recv page=7 rssi=-49 seq=1
+default	05:03:02.877839-0500	SignoVivo	director iPhone-3C85E1 ble:on-air ms=0
+default	05:03:02.877849-0500	SignoVivo	director iPhone-3C85E1 ble:page-send coldRadio=false page=213 seq=1
+default	05:03:02.877921-0500	SignoVivo	director iPhone-3C85E1 ble:readvertise
+default	05:03:02.878216-0500	SignoVivo	follower iPad-4CEFD0 ble:rebase nonce=4ca1 page=7 seq=1
+default	05:03:02.878426-0500	SignoVivo	follower iPad-4CEFD0 ble:page-apply page=7 seq=1
+default	05:03:02.958429-0500	SignoVivo	follower iPad-4E3E79 ble:new-advertiser nonce=4ca1 page=7
+default	05:03:02.958493-0500	SignoVivo	follower iPad-4E3E79 ble:new-advertiser nonce=4ca1 page=7
+default	05:03:02.958511-0500	SignoVivo	follower iPad-4E3E79 ble:new-advertiser nonce=4ca1 page=7
+default	05:03:02.958527-0500	SignoVivo	follower iPad-4E3E79 ble:new-advertiser nonce=4ca1 page=7
+default	05:03:02.959779-0500	SignoVivo	follower iPad-4E3E79 ble:page-recv page=7 rssi=-38 seq=1
+default	05:03:02.959830-0500	SignoVivo	follower iPad-4E3E79 ble:page-recv page=7 rssi=-38 seq=1
+default	05:03:02.959846-0500	SignoVivo	follower iPad-4E3E79 ble:page-recv page=7 rssi=-38 seq=1
+default	05:03:02.959862-0500	SignoVivo	follower iPad-4E3E79 ble:page-recv page=7 rssi=-38 seq=1
+default	05:03:02.959886-0500	SignoVivo	follower iPad-4E3E79 ble:rebase nonce=4ca1 page=7 seq=1
+default	05:03:02.959928-0500	SignoVivo	follower iPad-4E3E79 ble:rebase nonce=4ca1 page=7 seq=1
+default	05:03:02.959947-0500	SignoVivo	follower iPad-4E3E79 ble:page-apply page=7 seq=1
+default	05:03:02.959988-0500	SignoVivo	follower iPad-4E3E79 ble:page-apply page=7 seq=1
+default	05:03:02.960021-0500	SignoVivo	follower iPad-4E3E79 ble:contention advertisers=2
+default	05:03:02.960146-0500	SignoVivo	follower iPad-4E3E79 ble:contention advertisers=2
+default	05:03:02.974224-0500	SignoVivo	follower iPad-91B171 ble:new-advertiser nonce=4ca1 page=7
+default	05:03:02.974443-0500	SignoVivo	follower iPad-91B171 ble:page-recv page=7 rssi=-40 seq=1
+default	05:03:02.974627-0500	SignoVivo	follower iPad-91B171 ble:rebase nonce=4ca1 page=7 seq=1
+default	05:03:02.974814-0500	SignoVivo	follower iPad-91B171 ble:page-apply page=7 seq=1
+default	05:03:02.975002-0500	SignoVivo	follower iPad-91B171 ble:contention advertisers=2
+default	05:03:03.029055-0500	SignoVivo	follower iPad-4CEFD0 ble:contention advertisers=2
+default	05:03:03.822802-0500	SignoVivo	director iPhone-3C85E1 found peer=iPad-91B171 prole=follower
+default	05:03:03.822835-0500	SignoVivo	director iPhone-3C85E1 found peer=iPad-4E3E79 prole=follower
+default	05:03:03.822983-0500	SignoVivo	director iPhone-3C85E1 found peer=iPad-4CEFD0 prole=follower
+default	05:03:07.871287-0500	SignoVivo	director iPhone-3C85E1 refresh:hold-serving connected=0 discovered=3
+default	05:03:09.052090-0500	SignoVivo	follower iPad-91B171 found peer=iPad-4CEFD0 prole=follower
+default	05:03:09.052228-0500	SignoVivo	follower iPad-91B171 found peer=iPhone-3C85E1 prole=director
+default	05:03:09.052848-0500	SignoVivo	follower iPad-91B171 invite:send to=iPhone-3C85E1
+default	05:03:09.331387-0500	SignoVivo	director iPhone-3C85E1 invite:recv from=iPad-91B171
+default	05:03:09.331497-0500	SignoVivo	director iPhone-3C85E1 invite:accept from=iPad-91B171
+default	05:03:09.738188-0500	SignoVivo	follower iPad-91B171 session:connecting peer=iPhone-3C85E1
+default	05:03:10.435668-0500	SignoVivo	follower iPad-91B171 session:connected peer=iPhone-3C85E1
+default	05:03:10.473123-0500	SignoVivo	director iPhone-3C85E1 session:connected peer=iPad-91B171
+default	05:03:10.928149-0500	SignoVivo	follower iPad-4CEFD0 ble:new-advertiser nonce=1e3f page=213
+default	05:03:10.928369-0500	SignoVivo	follower iPad-4CEFD0 ble:page-recv page=213 rssi=-43 seq=1
+default	05:03:10.928584-0500	SignoVivo	follower iPad-4CEFD0 ble:rebase nonce=1e3f page=213 seq=1
+default	05:03:10.929023-0500	SignoVivo	follower iPad-4CEFD0 ble:page-apply page=213 seq=1
+default	05:03:11.042347-0500	SignoVivo	follower iPad-91B171 ble:new-advertiser nonce=1e3f page=213
+default	05:03:11.042416-0500	SignoVivo	follower iPad-91B171 ble:page-recv page=213 rssi=-40 seq=1
+default	05:03:11.043031-0500	SignoVivo	follower iPad-91B171 ble:rebase nonce=1e3f page=213 seq=1
+default	05:03:11.043088-0500	SignoVivo	follower iPad-91B171 ble:page-apply page=213 seq=1
+default	05:03:11.050735-0500	SignoVivo	follower iPad-4E3E79 ble:new-advertiser nonce=1e3f page=213
+default	05:03:11.050816-0500	SignoVivo	follower iPad-4E3E79 ble:page-recv page=213 rssi=-42 seq=1
+default	05:03:11.050894-0500	SignoVivo	follower iPad-4E3E79 ble:rebase nonce=1e3f page=213 seq=1
+default	05:03:11.051028-0500	SignoVivo	follower iPad-4E3E79 ble:page-apply page=213 seq=1
+default	05:03:12.712142-0500	SignoVivo	follower iPad-4E3E79 found peer=iPhone-3C85E1 prole=director
+default	05:03:12.714539-0500	SignoVivo	follower iPad-4E3E79 invite:send to=iPhone-3C85E1
+default	05:03:12.714550-0500	SignoVivo	follower iPad-4E3E79 invite:send to=iPhone-3C85E1
+default	05:03:12.714559-0500	SignoVivo	follower iPad-4E3E79 invite:send to=iPhone-3C85E1
+default	05:03:12.714569-0500	SignoVivo	follower iPad-4E3E79 invite:send to=iPhone-3C85E1
+default	05:03:13.058454-0500	SignoVivo	director iPhone-3C85E1 invite:recv from=iPad-4E3E79
+default	05:03:13.058974-0500	SignoVivo	director iPhone-3C85E1 invite:accept from=iPad-4E3E79
+default	05:03:13.090341-0500	SignoVivo	follower iPad-4E3E79 session:connecting peer=iPhone-3C85E1
+default	05:03:13.258021-0500	SignoVivo	follower iPad-4E3E79 session:connected peer=iPhone-3C85E1
+default	05:03:13.321737-0500	SignoVivo	director iPhone-3C85E1 session:connected peer=iPad-4E3E79
+default	05:03:14.145819-0500	SignoVivo	follower iPad-4CEFD0 found peer=iPhone-3C85E1 prole=director
+default	05:03:14.149195-0500	SignoVivo	follower iPad-4CEFD0 invite:send to=iPhone-3C85E1
+default	05:03:14.283503-0500	SignoVivo	director iPhone-3C85E1 invite:recv from=iPad-4CEFD0
+default	05:03:14.284043-0500	SignoVivo	director iPhone-3C85E1 invite:accept from=iPad-4CEFD0
+default	05:03:14.307960-0500	SignoVivo	follower iPad-4CEFD0 session:connecting peer=iPhone-3C85E1
+default	05:03:14.773360-0500	SignoVivo	follower iPad-4CEFD0 session:connected peer=iPhone-3C85E1
+default	05:03:14.842664-0500	SignoVivo	director iPhone-3C85E1 session:connected peer=iPad-4CEFD0
+default	05:03:17.874001-0500	SignoVivo	director iPhone-3C85E1 refresh:hold-serving connected=3 discovered=3
