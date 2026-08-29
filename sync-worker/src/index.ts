@@ -19,6 +19,10 @@ import { decideBookUpdate } from "./bookArming.js";
 // this is the instrument every mesh diagnosis depends on, so it gets real tests.
 // @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
 import { foldLogEntries, logIntervalMs, logLevel, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
+// Publish sequencing (clamp a fast clock, refuse the reserved 0 while live, hold the monotonic
+// guard). Plain JS for the same reason as the two above: it is load-bearing and now tested.
+// @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
+import { decidePublish } from "./publishSeq.js";
 
 export interface Env {
   SYNC_ROOM: DurableObjectNamespace<SyncRoom>;
@@ -161,62 +165,30 @@ export class SyncRoom extends DurableObject<Env> {
     if (this.rateLimited(ip, 15, 2)) {
       return { ok: true, seq: this.snapshot.seq, rateLimited: true };
     }
-    // Sanitize seq before it touches the guard. A non-finite (Infinity/NaN), negative, or
-    // unreachably-high seq would poison the room: Infinity serializes as null and, since every
-    // finite seq is <= Infinity, would block every future director for the whole live window.
-    // Collapse any such value to 0 so the `incomingSeq > 0 ? … : this.snapshot.seq + 1` branch
-    // below assigns a sane monotonic seq instead.
-    let incomingSeq = Number(input.seq ?? 0);
-    if (!Number.isFinite(incomingSeq) || incomingSeq < 0) {
-      incomingSeq = 0;
-    } else if (incomingSeq > Date.now() + 60000) {
-      // CLAMP A FAST CLOCK, DO NOT COLLAPSE IT TO THE RESERVED VALUE.
-      //
-      // The native transmitter's seq IS the device's wall clock in ms (directorRelaySync.js:
-      // `Math.max(seqCounter + 1, Date.now())`). So a director iPad whose clock runs more than a
-      // minute ahead of Cloudflare's — automatic date/time off, or drift on a device that was long
-      // powered down — trips this bound on EVERY publish. Folding that to 0 then met the seq=0 gate
-      // below, which rejects 0 while the snapshot is fresh, and the two rules wedged each other: the
-      // first publish landed (stale snapshot lets 0 through) and refreshed ts, which then made every
-      // page turn and every keepalive for the next 90 s "ignored", after which exactly one more
-      // landed. Web followers advanced roughly once per 90 seconds while the app reported ok:true on
-      // every publish and the pill stayed green — the silent frozen-congregation failure, with no
-      // banner and no breadcrumb anywhere.
-      //
-      // 0 is a RESERVED value meaning "no director has published"; a real seq must never be folded
-      // into it. Clamping into the window keeps the director monotonic under the SERVER's clock, and
-      // the snapshot.seq + 1 floor keeps two publishes clamped in the same server millisecond from
-      // colliding with the <= guard.
-      incomingSeq = Math.max(Date.now() + 60000, this.snapshot.seq + 1);
+    // The seq rule lives in publishSeq.js so node --test can cover it without a worker runtime —
+    // the same reason bookArming.js and logBuffer.js are plain JS. It decides three things at once:
+    // clamp a fast device clock instead of folding it into the reserved 0 (the wedge that froze the
+    // web congregation to one page per ~90 s), refuse the reserved 0 while a director is live, and
+    // hold the monotonic guard so an out-of-order burst cannot rewind the song. A stale room accepts
+    // anything, which is what lets a NEW director take over and self-heals a poisoned seq.
+    const decision = decidePublish({
+      rawSeq: input.seq,
+      nowMs: Date.now(),
+      snapshotSeq: this.snapshot.seq,
+      snapshotTs: this.snapshot.ts,
+      maxAgeS: RELAY_LIVE_MAX_AGE_S,
+    });
+    if (!decision.apply) {
+      return { ok: true, seq: decision.seq, ignored: true };
     }
-    // The seq guard stops a burst of page turns on a weak link from arriving out of order
-    // and rewinding the song — but ONLY while a director is actively live (fresh snapshot).
-    // If nobody has published within the live window the snapshot is stale (no active
-    // director), so a NEW director may take over regardless of seq. This also self-heals a
-    // poisoned / wrongly-scaled seq left behind by a gone director (otherwise a too-high
-    // stale seq would silently block every future director from ever transmitting).
-    const nowSec = Math.floor(Date.now() / 1000);
-    const snapshotStale =
-      this.snapshot.seq === 0 || nowSec - this.snapshot.ts > RELAY_LIVE_MAX_AGE_S;
-    // A2 seq=0 gate: seq=0 must NOT bypass the monotonic guard while a director is live. A legit live
-    // director always sends a real (>0) monotonic seq (native transmitters use wall-clock ms); a
-    // seq=0 — or an invalid seq we collapsed to 0 above — arriving while a FRESH director is
-    // broadcasting is malformed or an override attempt, so reject it. seq=0 is only honored as a
-    // takeover/reset when the snapshot is already stale (no active director), which the branch below
-    // and the next-seq assignment already handle.
-    if (!snapshotStale && incomingSeq === 0) {
-      return { ok: true, seq: this.snapshot.seq, ignored: true };
-    }
-    if (!snapshotStale && incomingSeq > 0 && incomingSeq <= this.snapshot.seq) {
-      return { ok: true, seq: this.snapshot.seq, ignored: true };
-    }
+    const incomingSeq = decision.seq;
     const next: Snapshot = {
       v: PROTOCOL_VERSION,
       page: Math.max(1, Math.min(Number(input.page ?? this.snapshot.page) || 1, 100000)),
       totalPages: Math.max(0, Math.min(Number(input.totalPages ?? this.snapshot.totalPages) || 0, 100000)),
       mode: String(input.mode ?? this.snapshot.mode ?? "").slice(0, 64),
       bookId: String(input.bookId ?? this.snapshot.bookId ?? "").slice(0, 64),
-      seq: incomingSeq > 0 ? incomingSeq : this.snapshot.seq + 1,
+      seq: incomingSeq,
       ts: Math.floor(Date.now() / 1000),
     };
     // Persist first, then cache, then broadcast (durability before fan-out).
