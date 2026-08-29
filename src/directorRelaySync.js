@@ -56,6 +56,24 @@ let authErrorNotified = false;
 let publishEnabled = false;
 export const setRelayPublishing = (enabled) => {
   publishEnabled = Boolean(enabled);
+  // STEPPING DOWN MUST ALSO DROP WHAT IS ALREADY QUEUED.
+  //
+  // The gate above was placed at publishPageToRelay's entry and nowhere else, so the straggler this
+  // whole mechanism exists to stop still left the device: a page turned while a publish was in
+  // flight sits in `pending`, and the coalescer's drain in doPublish's finally posts it as soon as
+  // the in-flight request settles — after the step-down, with no gate in its path. The comment above
+  // describes that failure exactly and says the refusal moved to a local gate; the drain went
+  // around it. Measured against the real module: publish(10), publish(11), step down, release the
+  // hung request — the relay received both 10 and 11.
+  //
+  // It used to be survivable by accident. /publish required a code, so the straggler came back 401
+  // and was never applied. /publish has been open since 2026-08-06, so it now SUCCEEDS: the
+  // ex-director's page lands on every signovivo.com follower after the congregation has already
+  // been handed to somebody else, and it wins outright whenever the handover is quick enough that
+  // the new director has not published a higher seq yet.
+  //
+  // Pinned by "a director that steps down sends NOTHING further" in e2e/svSyncSystem.test.mjs.
+  if (!publishEnabled) pending = null;
   // A role change is a NEW attempt: re-arm the one-time warning so a genuine later rejection
   // (403, a WAF rule, anything upstream) can still surface once.
   authErrorNotified = false;
@@ -130,7 +148,13 @@ const doPublish = async (payload) => {
     if (pending) {
       const next = pending;
       pending = null;
-      doPublish(next);
+      // Re-check the gate HERE, not only at the entry point. setRelayPublishing already clears
+      // `pending`, so this is the second lock on the same door — but it is the lock on the door the
+      // payload actually leaves through. This runs as a promise continuation an arbitrary time
+      // after the payload was queued (up to PUBLISH_TIMEOUT_MS on a black-holed socket), and the
+      // device's role can change during that window. "This device decides locally whether it is
+      // allowed to publish" has to be true at the moment of sending, not at the moment of queuing.
+      if (publishEnabled) doPublish(next);
     }
   }
 };
