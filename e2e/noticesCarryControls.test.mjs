@@ -32,6 +32,15 @@ const APP = fs.readFileSync("web/src/app.js", "utf8");
 // of the source's own toast literals, so a seventh notice cannot arrive in a shape the extractor
 // cannot see and be skipped in silence — the sweep either covers everything or it goes red.
 
+// WHAT ROUND 3 STILL FOUND AFTER THAT. The text window ran FORWARD from the `type:` key, so writing
+// the same object with its keys in the other order — `{ text: "…", type: "toast" }`, identical at
+// runtime — put the sentence outside the window and the notice went unscanned. Fixed below by
+// bounding the window to the whole enclosing object literal. The same brittleness is still true of
+// the SECOND test in this file, knowingly: it pins `text: "…"` and `action:` as adjacent lines, so
+// reordering those two keys reddens it although nothing about the notice changed. Read that one as a
+// spelling check on today's formatting, not as a claim about behaviour. What would actually decide
+// whether a notice carries its control is rendering the toast and looking for the button.
+
 // ── Reading the source at STRUCTURE level ───────────────────────────────────────────────────────
 // Strings, templates and comments are skipped whole, so a brace or comma inside prose (this file's
 // subject matter is prose) can never be mistaken for syntax. Nothing here re-implements the app;
@@ -167,15 +176,44 @@ const identifierStrings = (src, bare, ident, beforeIdx) => {
   return { strings, writes, declLine: lineOf(src, declIdx) };
 };
 
+// From an offset to the `{` that OPENS the object literal containing it. A backward walk over the
+// masked view: a closing bracket goes deeper, and the first opener that would take us above the
+// starting level is the enclosing one. If that opener is a `(` or `[` the offset is not inside an
+// object literal at all, and the caller refuses rather than pretending it read one.
+const objectOpen = (bare, from) => {
+  let depth = 0;
+  for (let j = from; j >= 0; j -= 1) {
+    const c = bare[j];
+    if (c === "}" || c === ")" || c === "]") depth += 1;
+    else if (c === "{" || c === "(" || c === "[") {
+      if (depth === 0) return c === "{" ? j : -1;
+      depth -= 1;
+    }
+  }
+  return -1;
+};
+
 // One entry per `type: "toast"` in the source, with `text` resolved or left null. Null is the
 // interesting case: it means a notice shipped in a shape nothing reads.
+//
+// WHAT ROUND 3 FOUND. The window used to start AT the `type:` key and run forward to the object's
+// closing brace, which quietly made KEY ORDER part of the contract: a notice written
+// `{ text: "…", type: "toast" }` — byte-for-byte the same object at runtime — had its text sitting
+// BEFORE the window, so the scanner reported it unreadable and the directional sentence inside it
+// went unexamined. Reordering two keys is the sort of edit a formatter does. The window is the whole
+// enclosing object literal now, walked back to its opening brace and forward to the brace that
+// closes it, so every key is in scope no matter what order they were written in.
 const toastSites = (src) => {
   const bare = maskOut(src, { strings: true });
   const sites = [];
   for (const m of src.matchAll(/type:\s*(["'`])toast\1/g)) {
     const site = { line: lineOf(src, m.index), text: null, how: "unresolved" };
     sites.push(site);
-    const body = objectBody(src, m.index);
+    const open = objectOpen(bare, m.index - 1);
+    assert.ok(open >= 0,
+      `the toast at line ${site.line} is not inside an object literal this scanner can bound — ` +
+      "refusing to report on a notice it cannot read whole; teach it that shape before shipping it");
+    const body = objectBody(src, open + 1);
     const skel = skeleton(body);
     const key = skel.search(/(^|[\s,{])text\s*:/);
     if (key < 0) continue;                              // a toast with no text at all
@@ -191,7 +229,7 @@ const toastSites = (src) => {
       // same sentence appended a line later.
       const ident = expr.trim();
       if (!/^[A-Za-z_$][\w$]*$/.test(ident)) continue;
-      const resolved = identifierStrings(src, bare, ident, m.index);
+      const resolved = identifierStrings(src, bare, ident, open);
       if (!resolved) continue;
       strings = resolved.strings;
       how = `${ident} declared at line ${resolved.declLine}, ${resolved.writes} write(s) scanned`;

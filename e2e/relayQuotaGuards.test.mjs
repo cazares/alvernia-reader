@@ -353,26 +353,77 @@ test("a stale mirror is only ever a fallback, never silently trusted over a fres
     "an else branch now runs when no fresh page was supplied — the mirror fallback must be a no-op, " +
     "because that is the branch every caller that cannot supply a fresh page still takes");
 
-  // Execute the real statement over a mock mirror preset to page 2 — the WebView's boot default,
-  // and one of the two wrong pages actually broadcast on hardware.
+  // AND WHAT ROUND 3 FOUND, third time round. Executing a slice of TSX is only sound if the
+  // environment tolerates everything the real function may call. It did not: the statement ran with
+  // exactly two names in scope, so adding one ordinary line inside the consequent —
+  // `breadcrumb("took web page");`, a dbgLog, a setState — threw ReferenceError, and the catch below
+  // turned that into "the mirror correction no longer runs", a confident and wrong accusation
+  // against an edit that cannot change the property at all. Two changes fix it, in opposite
+  // directions:
+  //
+  // FIRST, the CONDITION must be scoreable from the page alone, or this file refuses. A truth table
+  // is only worth reading if the thing under test is the guard and not a stub: if the condition
+  // starts consulting a name this file cannot supply (`isFreshPage(...)`, a ref, a feature flag),
+  // a no-op stand-in would make it evaluate falsy and the table would "catch" a regression that
+  // isn't there. Refuse by name instead. What would actually answer it is rendering becomeDirector
+  // in a real React runtime with the real surrounding state, which no source-reading test can do.
+  const condIdents = [
+    ...new Set(
+      maskOut(cond).replace(/\.\s*[A-Za-z_$][\w$]*/g, " ").match(/[A-Za-z_$][\w$]*/g) || [],
+    ),
+  ].filter((id) => !["typeof", "true", "false", "null", "undefined", "NaN", "Infinity",
+    "in", "instanceof", "void"].includes(id));
+  const SCOREABLE = ["knownCurrentPage", "Number", "Math", "String", "Boolean",
+    "isFinite", "isNaN", "parseInt", "parseFloat"];
+  const unscoreable = condIdents.filter((id) => !SCOREABLE.includes(id));
+  assert.deepEqual(unscoreable, [],
+    `the freshness guard now consults ${unscoreable.join(", ")}, which this file cannot supply: ` +
+    `\`${cond.trim()}\`. Refusing to score a truth table against a stubbed condition — what would ` +
+    "settle it is rendering becomeDirector in a real React runtime with the real surrounding state.");
+
+  // SECOND, the CONSEQUENT may contain anything, so the environment tolerates anything. Unknown
+  // names resolve through a proxy: real globals stay real (`Number.isFinite` must work), the two
+  // modelled bindings stay modelled, and everything else becomes a no-op function — so logging,
+  // breadcrumbs and setState inside the branch are harmless, exactly as they are to the property.
+  // A no-op that was supposed to compute the page still shows up: the mirror ends holding undefined
+  // and the table below says so.
   const stmt = body.slice(ifIdx, consequentEnd);
+  const noop = () => {};
+  const stubbed = new Set();
   const afterGuard = (knownCurrentPage) => {
     const currentPageRef = { current: 2 };
+    const modelled = { currentPageRef, knownCurrentPage };
+    const env = new Proxy(modelled, {
+      has: (_t, k) => k !== Symbol.unscopables,
+      get: (t, k) => {
+        if (k === Symbol.unscopables) return undefined;
+        if (k in t) return t[k];
+        if (typeof k === "string" && k in globalThis) return globalThis[k];
+        stubbed.add(String(k));
+        return noop;
+      },
+      set: (t, k, v) => { t[k] = v; return true; },
+    });
     try {
-      new Function("currentPageRef", "knownCurrentPage", stmt)(currentPageRef, knownCurrentPage);
+      new Function("__env", `with (__env) { ${stmt} }`)(env);
     } catch (e) {
-      assert.fail(`the mirror correction no longer runs on the page it was handed alone (${e.message}): ${stmt}`);
+      assert.fail(`the lifted freshness guard will not run at all (${e.message}): ${stmt}`);
     }
     return currentPageRef.current;
   };
 
-  assert.equal(afterGuard(372), 372, "a fresh known page did not override the stale mirror — the lagging page ships");
-  assert.equal(afterGuard(1), 1, "page 1 is a real page (the cover) and must be able to override the mirror");
+  // Every name the branch used that this file stubbed out. Named in each failure below, because a
+  // wrong number here is far likelier to be a stub that should have computed something than a
+  // genuine inversion of the guard, and the reader should not have to guess which.
+  const stubs = () => (stubbed.size ? ` [names stubbed to no-ops while running it: ${[...stubbed].join(", ")}]` : "");
+
+  assert.equal(afterGuard(372), 372, "a fresh known page did not override the stale mirror — the lagging page ships" + stubs());
+  assert.equal(afterGuard(1), 1, "page 1 is a real page (the cover) and must be able to override the mirror" + stubs());
   assert.equal(afterGuard(undefined), 2,
     "no known page, and the mirror did not survive — the fallback must be a NO-OP, or becomeDirector " +
-    "breaks for every caller (an older web bundle, any path with no bridge payload) that has none to give");
-  assert.equal(afterGuard(0), 2, "a page of 0 was trusted — that is not a real page");
-  assert.equal(afterGuard(-5), 2, "a negative page was trusted");
-  assert.equal(afterGuard(NaN), 2, "NaN was trusted as a page");
-  assert.equal(afterGuard("372"), 2, "a string off the bridge payload was trusted without a type check");
+    "breaks for every caller (an older web bundle, any path with no bridge payload) that has none to give" + stubs());
+  assert.equal(afterGuard(0), 2, "a page of 0 was trusted — that is not a real page" + stubs());
+  assert.equal(afterGuard(-5), 2, "a negative page was trusted" + stubs());
+  assert.equal(afterGuard(NaN), 2, "NaN was trusted as a page" + stubs());
+  assert.equal(afterGuard("372"), 2, "a string off the bridge payload was trusted without a type check" + stubs());
 });

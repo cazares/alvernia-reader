@@ -258,6 +258,18 @@ test("LEGACY (pre-435): no pill label is a bare verb", { skip: "the pill no long
 });
 
 // ── A small cascade resolver ────────────────────────────────────────────────────────────────────
+// THE STANDING RULE FOR EVERYTHING BELOW, and the lesson of round 3: a test file cannot become a
+// browser, so it must not pretend to be one. Every extra CSS feature modelled here is another chance
+// to be confidently wrong, and a confidently wrong "no rule decides this" is exactly the failure the
+// resolver exists to prevent — it reads as reassurance while the shipped pixels say the opposite.
+// So the resolver REFUSES, loudly and by name, on every construct it cannot score soundly:
+// !important, a selector shape whose specificity it cannot compute, an id or attribute it has not
+// read out of the document, a functional pseudo, a combinator, a statement at-rule, a conditional
+// rule. A refusal names the construct, the selector and the styles.css line, so the next reader
+// knows where to look. What would actually ANSWER any of these questions is a real browser
+// computing the cascade on the real document — nothing in this file is a substitute for that, and
+// where it refuses, that is the tool to reach for.
+//
 // Every rule in the sheet, in source order, with its at-rule context. Rules are bounded by their
 // own braces, never by a character count.
 //
@@ -266,25 +278,63 @@ test("LEGACY (pre-435): no pill label is a bare verb", { skip: "the pill no long
 // failure message that points at the wrong line sends the next reader to the wrong rule, which is
 // worse than no line at all. Each comment now leaves its newlines behind, so line numbers are
 // counted against the ORIGINAL text while the comment's CONTENT still cannot be read as CSS.
+//
+// WHAT ROUND 3 FOUND. The selector list was split on EVERY comma with no awareness of parentheses,
+// so a single `:is(a, b)` or `:not(.x, .y)` was torn into two malformed halves and the whole file
+// died on a parse error instead of returning a verdict. Commas are now split at paren depth zero
+// only, and the functional pseudo that survives the split is refused by name further down.
+
+// A refusal raised while PARSING the sheet, before any test has run. Collected rather than thrown at
+// import time so it surfaces as a named test failure with a readable message instead of a module
+// that fails to load.
+const SHEET_REFUSALS = [];
+
+// Split on a separator that appears at paren/bracket depth zero and outside quotes. Used for the
+// commas between selectors and for the semicolons between declarations, both of which can legally
+// appear inside `:is(a, b)` or `url(data:...;base64,...)`.
+const splitTopLevel = (text, sep) => {
+  const out = [];
+  let buf = "", depth = 0, quote = null;
+  for (const ch of text) {
+    if (quote) { buf += ch; if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; buf += ch; continue; }
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    else if (ch === sep && depth === 0) { out.push(buf); buf = ""; continue; }
+    buf += ch;
+  }
+  out.push(buf);
+  return out;
+};
+
 const cssRules = (() => {
   const src = CSS.replace(/\/\*[\s\S]*?\*\//g, (c) => ` ${"\n".repeat((c.match(/\n/g) || []).length)}`);
+  const lineAt = (i) => src.slice(0, i).split("\n").length;
   const out = [];
   const conds = [];
   let buf = "";
   for (let i = 0; i < src.length; i++) {
     const c = src[i];
+    // A STATEMENT at-rule — `@import "x";`, `@charset "utf-8";`, `@layer a, b;` — never opens a
+    // block, so this brace-counting loop would carry its text forward and glue it onto the front of
+    // the NEXT rule's selector list, scoring a selector that does not exist anywhere. Refuse.
+    if (c === ";") {
+      SHEET_REFUSALS.push(`line ${lineAt(i)}: styles.css contains the statement "${`${buf.trim()};`.trim()}", and this resolver does not model statement at-rules — it would fold that text into the next rule's selector list. Teach it that statement, or check the cascade in a real browser.`);
+      buf = "";
+      continue;
+    }
     if (c === "{") {
       const prelude = buf.trim();
       buf = "";
       if (prelude.startsWith("@")) { conds.push(prelude); continue; }
       const end = src.indexOf("}", i);
-      assert.ok(end > i, `the rule "${prelude}" is never closed`);
+      if (end <= i) { SHEET_REFUSALS.push(`line ${lineAt(i)}: the rule "${prelude}" is never closed`); break; }
       out.push({
-        selectors: prelude.split(",").map((s) => s.trim()).filter(Boolean),
+        selectors: splitTopLevel(prelude, ",").map((s) => s.trim()).filter(Boolean),
         body: src.slice(i + 1, end),
         order: out.length,
         conds: [...conds],
-        line: src.slice(0, i).split("\n").length,
+        line: lineAt(i),
       });
       i = end;
       continue;
@@ -292,25 +342,65 @@ const cssRules = (() => {
     if (c === "}") { conds.pop(); continue; }
     buf += c;
   }
-  assert.equal(conds.length, 0, "styles.css has an unbalanced at-rule block");
+  if (conds.length) SHEET_REFUSALS.push("styles.css has an unbalanced at-rule block");
   return out;
 })();
 
+// Split a selector into its compounds and combinators, respecting parens, brackets and quotes.
+//
+// WHAT ROUND 3 FOUND. The old version padded `>`, `+` and `~` with spaces ANYWHERE in the string,
+// including inside `:has(> .x)` and `:nth-child(2n + 1)`, and then split on every run of whitespace
+// — so a functional pseudo containing a combinator or a space came out as two broken fragments that
+// no longer parsed as written. Both the padding and the split now happen at depth zero only.
+const selectorParts = (sel) => {
+  const parts = [];
+  let buf = "", depth = 0, quote = null;
+  const flush = () => { if (buf.trim()) parts.push(buf.trim()); buf = ""; };
+  for (const ch of sel.trim()) {
+    if (quote) { buf += ch; if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; buf += ch; continue; }
+    if (ch === "(" || ch === "[") { depth++; buf += ch; continue; }
+    if (ch === ")" || ch === "]") { depth--; buf += ch; continue; }
+    if (depth === 0 && /\s/.test(ch)) { flush(); continue; }
+    if (depth === 0 && /[>+~]/.test(ch)) { flush(); parts.push(ch); continue; }
+    buf += ch;
+  }
+  flush();
+  return parts;
+};
+
 // A compound like `html[data-role="follower"]`, parsed strictly: anything this does not understand
 // throws instead of being silently treated as "no constraint", which is how a matcher starts
-// matching more than it should.
+// matching more than it should. A functional pseudo is read WHOLE, with balanced parens, so
+// `:is(:not(.a), .b)` arrives downstream as one named construct to refuse rather than as a parse
+// error at a stray bracket — the refusal message is the useful half.
 const parseCompound = (text) => {
   const part = { tag: null, ids: [], classes: [], attrs: [], pseudos: [] };
-  const token = /^(?:([a-zA-Z][\w-]*)|#([\w-]+)|\.([\w-]+)|\[([^\]]+)\]|(::?[\w-]+(?:\([^)]*\))?)|(\*))/;
+  const token = /^(?:([a-zA-Z][\w-]*)|#([\w-]+)|\.([\w-]+)|\[([^\]]+)\]|(\*))/;
   let rest = text;
   while (rest.length) {
+    if (rest[0] === ":") {
+      const name = /^(::?[\w-]+)/.exec(rest);
+      if (!name) throw new Error(`cannot parse the selector fragment "${text}" at "${rest}"`);
+      let take = name[1].length;
+      if (rest[take] === "(") {
+        let depth = 0, closed = false;
+        for (let i = take; i < rest.length; i++) {
+          if (rest[i] === "(") depth++;
+          else if (rest[i] === ")") { depth--; if (depth === 0) { take = i + 1; closed = true; break; } }
+        }
+        if (!closed) throw new Error(`the pseudo "${name[1]}(" in "${text}" never closes its parenthesis`);
+      }
+      part.pseudos.push(rest.slice(0, take));
+      rest = rest.slice(take);
+      continue;
+    }
     const m = token.exec(rest);
     if (!m) throw new Error(`cannot parse the selector fragment "${text}" at "${rest}"`);
-    if (m[1]) part.tag = m[1];
+    if (m[1]) part.tag = m[1].toLowerCase();
     else if (m[2]) part.ids.push(m[2]);
     else if (m[3]) part.classes.push(m[3]);
     else if (m[4]) part.attrs.push(m[4]);
-    else if (m[5]) part.pseudos.push(m[5]);
     // `*` is the one thing that really IS "no constraint" — it matches every element and adds
     // nothing to specificity, so it is recorded as nothing rather than assumed to be nothing.
     rest = rest.slice(m[0].length);
@@ -325,17 +415,23 @@ const parseCompound = (text) => {
 // a rule was allowed to vanish from the cascade for reasons this resolver had never actually
 // decided. Measured: appending `… .director-mode-badge-exit:not(.gone) { display: flex }` un-hides
 // the follower action in a real browser and the whole file stayed green, because :not() dropped the
-// rule on the floor. Only the two kinds below are a SOUND non-match; everything else now throws.
+// rule on the floor. Only the two kinds below are a SOUND non-match; everything else now refuses.
 const DECIDABLY_ABSENT = (p) =>
   // A pseudo-ELEMENT styles a generated box, never this element, so it cannot decide our display.
   p.startsWith("::")
   // A transient state pseudo describes a finger on the glass, not the resting pill on the wall.
   || /^:(hover|active|focus|focus-visible|focus-within)$/.test(p);
 
-// The few pseudos this resolver genuinely DOES model, evaluated against the fixture rather than
+// The two pseudos this resolver genuinely DOES model, evaluated against the fixture rather than
 // assumed. :root is the document root, which in this modelled chain is the one <html>. :disabled is
-// an attribute the chain declares explicitly, exactly like [data-role] — a modelled element that
-// does not list `disabled` is not disabled.
+// read straight out of index.html: none of the modelled elements carries the attribute.
+//
+// THE CEILING ON :disabled, written down so it is not rediscovered: this is a STATIC read of the
+// markup. If app.js ever set `el.disabled = true` on one of these elements at runtime the model
+// would be wrong and nothing here would notice — only a browser computing the cascade on the live
+// document can settle that. It stays modelled because `button:disabled` (styles.css:108) matches
+// the badge's tag, and refusing it would redden every cascade answer in this file over a rule that
+// has never applied.
 const MODELLED_PSEUDO = {
   ":root": (el) => el.tag === "html",
   ":disabled": (el) => "disabled" in el.attrs,
@@ -345,22 +441,52 @@ const MODELLED_PSEUDO = {
 // describe this element), YES, and UNKNOWN (a constraint this resolver does not model).
 const NO = "no", YES = "yes", UNKNOWN = "unknown";
 
+const attrName = (a) => {
+  const eq = a.indexOf("=");
+  return (eq < 0 ? a : a.slice(0, eq)).replace(/[~|^$*]$/, "").trim();
+};
+
+// Everything in this compound that this resolver cannot score, named for the failure message.
+const unmodelledIn = (el, text) => {
+  const c = parseCompound(text);
+  const out = [];
+  for (const p of c.pseudos) if (!(p in MODELLED_PSEUDO)) out.push(`the pseudo "${p}"`);
+  for (const a of c.attrs) {
+    const n = attrName(a);
+    if (!el.knownAttrs.has(n)) out.push(`the attribute "${n}", which index.html does not set on <${el.tag}> and this fixture does not model at runtime`);
+    else if (/[~|^$*]=/.test(a)) out.push(`the attribute matcher in "[${a}]"`);
+  }
+  if (c.ids.length && !("id" in el)) out.push(`an id selector against a fixture element that never declared its id`);
+  return out.length ? out : [`something this resolver does not model`];
+};
+
 const compoundVerdict = (el, text) => {
   const c = parseCompound(text);
   // One decidably-absent pseudo is enough: it excludes the rule from the resting cascade no matter
   // what else the compound carries (`.btn:hover:not(.is-active)` is simply not hovered right now).
   if (c.pseudos.some(DECIDABLY_ABSENT)) return NO;
   if (c.tag && c.tag !== el.tag) return NO;
-  if (c.ids.some((id) => id !== el.id)) return NO;
+  // Tags, ids and static attributes are READ OUT of index.html (see the document reader below), so
+  // their absence is a fact about the document rather than a hole in the fixture. A fixture element
+  // that never declared its id cannot decide an id selector and says so.
+  if (c.ids.length) {
+    if (!("id" in el)) return UNKNOWN;
+    if (c.ids.some((id) => id !== el.id)) return NO;
+  }
   if (c.classes.some((cl) => !el.classes.includes(cl))) return NO;
-  const attrsOk = c.attrs.every((a) => {
+  for (const a of c.attrs) {
+    const n = attrName(a);
+    // An attribute this element's open tag never carried MIGHT still be set by app.js at runtime.
+    // "Absent from the markup" is not "absent from the DOM", so it is UNKNOWN, never NO.
+    if (!el.knownAttrs.has(n)) return UNKNOWN;
     const eq = a.indexOf("=");
-    if (eq < 0) return a in el.attrs;
-    const name = a.slice(0, eq).trim();
+    if (eq < 0) { if (!(n in el.attrs)) return NO; continue; }
+    // [x~="a"] / [x^="a"] / [x*="a"] / [x|="a"] / [x$="a"] are substring and token matchers, none
+    // of which this resolver computes.
+    if (/[~|^$*]=/.test(a)) return UNKNOWN;
     const want = a.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-    return el.attrs[name] === want;
-  });
-  if (!attrsOk) return NO;
+    if (el.attrs[n] !== want) return NO;
+  }
   for (const p of c.pseudos) {
     if (!(p in MODELLED_PSEUDO)) return UNKNOWN;
     if (!MODELLED_PSEUDO[p](el)) return NO;
@@ -373,16 +499,27 @@ const compoundVerdict = (el, text) => {
 const compoundMatches = (el, text) => {
   const v = compoundVerdict(el, text);
   if (v === UNKNOWN) {
-    const unmodelled = parseCompound(text).pseudos.filter((p) => !(p in MODELLED_PSEUDO));
-    throw new Error(`compound "${text}" uses ${unmodelled.join("")}, which this resolver does not model`);
+    throw new Error(`compound "${text}" carries ${unmodelledIn(el, text).join(" and ")}, which this resolver does not model`);
   }
   return v === YES;
 };
 
+// Specificity, computed only for shapes it can compute EXACTLY. A functional pseudo does not
+// contribute a flat class-worth: :where() contributes nothing at all, and :is()/:not()/:has() each
+// contribute the maximum specificity of their argument list. Guessing "one class" for those is the
+// kind of quiet arithmetic error that hands the cascade to the wrong declaration, so it refuses.
 const specificity = (sel) => {
   let ids = 0, cls = 0, els = 0;
-  for (const compound of sel.split(/\s+/)) {
+  for (const compound of selectorParts(sel)) {
+    if (/^[>+~]$/.test(compound)) {
+      throw new Error(`cannot score the specificity of "${sel}": it uses the combinator "${compound}"`);
+    }
     const c = parseCompound(compound);
+    for (const p of c.pseudos) {
+      if (p.includes("(")) {
+        throw new Error(`cannot score the specificity of "${sel}": the functional pseudo "${p}" contributes the specificity of its ARGUMENT (:where() none, :is()/:not()/:has() the maximum of theirs), which this resolver does not compute`);
+      }
+    }
     ids += c.ids.length;
     cls += c.classes.length + c.attrs.length + c.pseudos.filter((p) => !p.startsWith("::")).length;
     els += (c.tag ? 1 : 0) + c.pseudos.filter((p) => p.startsWith("::")).length;
@@ -400,8 +537,9 @@ const specificity = (sel) => {
 // unrelated `>` and `~` rules quiet. If the subject DOES match, the answer is genuinely unknown and
 // the selector is thrown at the caller instead of being reported as an absence.
 const selectorMatches = (sel, chain) => {
-  const parts = sel.trim().replace(/\s*([>+~])\s*/g, " $1 ").split(/\s+/).filter(Boolean);
+  const parts = selectorParts(sel);
   const subject = parts[parts.length - 1];
+  if (subject === undefined) throw new Error(`selector "${sel}" is empty`);
   if (/^[>+~]$/.test(subject)) throw new Error(`selector "${sel}" ends in a combinator`);
   // A descendant-or-child selector requires every one of its compounds to match somewhere on this
   // element's ancestor path. If one of them matches nowhere — decided on structure alone, never on
@@ -409,7 +547,7 @@ const selectorMatches = (sel, chain) => {
   // so. That is what lets `.resync-dots span:nth-child(2)` stay quiet without pretending to know
   // what :nth-child means. Sibling combinators are excluded because their compounds describe
   // siblings, which this chain does not model at all.
-  if (!/[+~]/.test(sel)) {
+  if (!parts.some((p) => /^[+~]$/.test(p))) {
     for (const compound of parts.filter((p) => !/^[>+~]$/.test(p))) {
       if (chain.every((el) => compoundVerdict(el, compound) === NO)) return false;
     }
@@ -435,31 +573,43 @@ const selectorMatches = (sel, chain) => {
 // which turned every deliberate "I cannot decide this" into the exact wrong answer the throw exists
 // to prevent: a silent "no match". An undecidable selector must redden the file and name itself, so
 // that whoever added it either teaches this resolver or hand-checks the cascade in a browser.
+//
+// WHAT ROUND 3 FOUND. The per-rule loop stopped at the FIRST matching selector of the comma list and
+// scored the whole rule at THAT selector's specificity. A browser scores a rule at the HIGHEST
+// specificity among the selectors of its list that match, so a rule whose list happened to open with
+// a low-specificity match was under-scored, the wrong declaration won, and resolve() returned a
+// value the browser never uses. Measured: appending `.director-mode-badge-exit,
+// html[data-role="follower"] .app-shell .director-mode-badge.is-following .director-mode-badge-exit
+// { display: flex }` un-hides the follower action in a real browser and the file stayed green. Every
+// matching selector of a rule is now scored and the maximum is kept.
 const matchingRules = (chain) => {
+  assert.equal(SHEET_REFUSALS.length, 0, `this resolver cannot read styles.css:\n${SHEET_REFUSALS.join("\n")}`);
   const hits = [];
   for (const r of cssRules) {
     if (r.conds.some((c) => c.startsWith("@keyframes"))) continue;
+    const matched = [];
     for (const sel of r.selectors) {
-      let ok = false;
       try {
-        ok = selectorMatches(sel, chain);
+        if (selectorMatches(sel, chain)) matched.push({ sel, spec: specificity(sel) });
       } catch (e) {
-        assert.fail(`line ${r.line}: ${e.message} — this resolver refuses to guess, because a wrong "no match" is indistinguishable from a real absence. Teach it that selector, or check styles.css by hand.`);
+        assert.fail(`line ${r.line}: ${e.message} — this resolver refuses to guess, because a wrong "no match" is indistinguishable from a real absence. Teach it that selector, or compute the cascade in a real browser.`);
       }
-      if (!ok) continue;
-      assert.deepEqual(r.conds, [], `line ${r.line}: "${sel}" now matches from inside ${r.conds.join(" ")} — this resolver cannot decide a conditional rule`);
-      hits.push({ ...r, sel, spec: specificity(sel) });
-      break;
     }
+    if (!matched.length) continue;
+    assert.deepEqual(r.conds, [], `line ${r.line}: "${matched[0].sel}" now matches from inside ${r.conds.join(" ")} — this resolver cannot decide a conditional rule`);
+    const best = matched.reduce((a, b) => (b.spec > a.spec ? b : a));
+    hits.push({ ...r, sel: best.sel, spec: best.spec });
   }
   return hits.sort((a, b) => a.spec - b.spec || a.order - b.order);
 };
 
-// !important first, then specificity, then source order — and a later declaration inside the same
-// rule beats an earlier one, which is why the last comparison is >=.
+// Specificity, then source order — and a later declaration inside the same rule beats an earlier
+// one, which is why the last comparison is >=. There is deliberately no !important branch here:
+// resolve() refuses rather than ranking one, because important declarations are ordered by ORIGIN
+// (author / user / user-agent, and cascade layers invert within them) and this resolver reads one
+// author sheet with no idea what else the document loads.
 const beats = (a, b) => {
   if (!b) return true;
-  if (a.important !== b.important) return a.important;
   if (a.spec !== b.spec) return a.spec > b.spec;
   return a.order >= b.order;
 };
@@ -467,63 +617,173 @@ const beats = (a, b) => {
 const resolve = (prop, chain) => {
   let winner = null;
   for (const r of matchingRules(chain)) {
-    for (const d of r.body.split(";")) {
+    for (const d of splitTopLevel(r.body, ";")) {
       const colon = d.indexOf(":");
       if (colon < 0) continue;
       if (d.slice(0, colon).trim() !== prop) continue;
       const raw = d.slice(colon + 1).trim();
-      const cand = {
-        value: raw.replace(/\s*!important$/, ""),
-        important: /!important$/.test(raw),
-        spec: r.spec, order: r.order, line: r.line, sel: r.sel,
-      };
+      if (/!\s*important$/i.test(raw)) {
+        assert.fail(`line ${r.line}: "${r.sel}" declares ${prop}: ${raw} — this resolver refuses to score !important, whose ordering depends on the origin and layer of every sheet the document loads, not just this one. Compute the cascade in a real browser and pin the answer here.`);
+      }
+      const cand = { value: raw, spec: r.spec, order: r.order, line: r.line, sel: r.sel };
       if (beats(cand, winner)) winner = cand;
     }
   }
   return winner;
 };
 
-const FOLLOWER_HTML = { tag: "html", id: null, classes: [], attrs: { "data-role": "follower", "data-shell": "native" } };
-const FOLLOWING_BADGE = { tag: "button", id: "director-mode-badge", classes: ["director-mode-badge", "is-following"], attrs: {} };
-// <body> carries no class in the resting state — the drawer-open rule that hides the whole cluster
-// is a different moment, and modelling body explicitly is what keeps it from matching by accident.
-// <main class="app-shell"> is the badge's real parent in index.html; leaving it out of the chain was
-// a quieter version of the same bug the resolver above now refuses to commit, because any rule
-// scoped under .app-shell would have resolved to a confident, wrong "no rule decides this".
+// ── The document the cascade is resolved against ────────────────────────────────────────────────
+// index.html with every HTML comment blanked to same-length spaces. Offsets and newlines survive, so
+// indexes and line numbers still line up, while commented-out markup cannot be read as markup.
+//
+// WHAT ROUND 3 FOUND. The ancestor walk scanned the raw file, so open tags inside `<!-- ... -->`
+// counted as real ancestry — wrapping an unrelated block in a comment, a behaviour-neutral edit,
+// moved the modelled chain and the assertion moved with it. This markup is full of comments that
+// contain example markup, so that was not a hypothetical.
+const HTML_DOC = fs.readFileSync("web/src/index.html", "utf8")
+  .replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, " "));
+
+// The attributes of one open tag, `class` and `id` lifted out because the matcher treats them
+// separately. Quoted values are consumed whole, so a value containing a space or a ">" is safe.
+const attrsOf = (tagText) => {
+  const inner = tagText.replace(/^<[a-zA-Z][\w-]*/, "").replace(/\/?>$/, "");
+  const out = {};
+  for (const m of inner.matchAll(/([a-zA-Z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) {
+    if (!m[1]) continue;
+    out[m[1]] = m[2] ?? m[3] ?? m[4] ?? "";
+  }
+  return out;
+};
+
+// The element whose open tag contains `at`, as a fixture element: its tag, id, classes and the
+// complete set of attributes index.html gives it. `knownAttrs` is the honest boundary — an
+// attribute outside it may still be set by app.js at runtime, so the matcher refuses on it rather
+// than reporting an absence.
+const elementAt = (at, what) => {
+  const start = HTML_DOC.lastIndexOf("<", at);
+  assert.ok(start >= 0, `${what} is not inside any tag in index.html`);
+  // The first ">" at or after the tag start that is not inside a quoted attribute value. Requiring
+  // it to sit at or beyond `at` is also what proves `at` really is inside THIS open tag.
+  let quote = null, end = -1;
+  for (let i = start; i < HTML_DOC.length; i++) {
+    const ch = HTML_DOC[i];
+    if (quote) { if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === ">") { end = i; break; }
+  }
+  assert.ok(end >= at, `the tag carrying ${what} never closes its open tag — this reader is misreading index.html`);
+  const name = /^<([a-zA-Z][\w-]*)/.exec(HTML_DOC.slice(start, end + 1));
+  assert.ok(name, `${what} is not inside an element open tag in index.html`);
+  const attrs = attrsOf(HTML_DOC.slice(start, end + 1));
+  const classes = (attrs.class || "").split(/\s+/).filter(Boolean);
+  const id = attrs.id ?? null;
+  delete attrs.class;
+  delete attrs.id;
+  return { tag: name[1].toLowerCase(), id, classes, attrs, knownAttrs: new Set(Object.keys(attrs)), tagStart: start };
+};
+
+const docElement = (marker) => {
+  const at = HTML_DOC.indexOf(marker);
+  assert.ok(at > 0, `${marker} is gone from index.html, or lives only inside a comment — the cascade fixture describes an element that does not exist`);
+  return elementAt(at, marker);
+};
+
+// The still-open ancestors at a byte offset, outermost first. Void and self-closed elements never
+// push; a close tag pops only when it matches the top of the stack, so a stray `</div>` cannot
+// unwind the document.
+const VOID = new Set(["meta", "link", "br", "img", "input", "hr", "source", "path", "circle", "area", "base", "col", "embed", "track", "wbr"]);
+const docAncestors = (offset) => {
+  const stack = [];
+  for (const m of HTML_DOC.slice(0, offset).matchAll(/<(\/?)([a-zA-Z][\w-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>/g)) {
+    const tag = m[2].toLowerCase();
+    if (m[1]) { if (stack.length && stack[stack.length - 1].tag === tag) stack.pop(); continue; }
+    if (VOID.has(tag) || m[4] === "/") continue;
+    stack.push(elementAt(m.index + 1, `<${tag}> at offset ${m.index}`));
+  }
+  return stack;
+};
+
+// The runtime half of the modelled state, kept separate from the document because index.html cannot
+// show it: renderDirectorModeBadge() writes data-role onto <html>, and the native shell writes
+// data-shell. These two names are therefore MODELLED (present, with these values); every other
+// attribute on <html> — data-mesh among them — is not, and the matcher refuses on it.
+const RUNTIME_HTML_ATTRS = { "data-role": "follower", "data-shell": "native" };
+// The badge's runtime classes. index.html ships it `is-hidden`; the state under test is the one a
+// follower sees while someone else directs.
+const FOLLOWING_BADGE_CLASSES = ["director-mode-badge", "is-following"];
+
+const withRuntime = (el) => el.tag !== "html" ? el : {
+  ...el,
+  attrs: { ...el.attrs, ...RUNTIME_HTML_ATTRS },
+  knownAttrs: new Set([...el.knownAttrs, ...Object.keys(RUNTIME_HTML_ATTRS)]),
+};
+
+const BADGE_DOC = docElement('id="director-mode-badge"');
 const badgeChain = [
-  FOLLOWER_HTML,
-  { tag: "body", id: null, classes: [], attrs: {} },
-  { tag: "main", id: null, classes: ["app-shell"], attrs: {} },
-  FOLLOWING_BADGE,
+  ...docAncestors(BADGE_DOC.tagStart).map(withRuntime),
+  { ...BADGE_DOC, classes: FOLLOWING_BADGE_CLASSES },
 ];
-const childChain = (cls, id) => [...badgeChain, { tag: "span", id, classes: [cls], attrs: {} }];
+
+// WHAT ROUND 3 FOUND. This leaf was hardcoded as `{ tag: "span" }` for BOTH children, while
+// index.html:107 ships `<strong class="director-mode-badge-title" id="sync-pill-title">`. A fixture
+// that disagrees with the document produces exactly the confident wrong answer the resolver refuses
+// to produce on its own, and in both directions at once: a `strong.…` rule is missed, and a
+// `span.…` rule is falsely matched. The tag, the id and the attributes now come out of the document;
+// only the class the caller names is checked against it, so a rename fails loudly.
+const childChain = (cls, id) => {
+  const leaf = docElement(`id="${id}"`);
+  assert.ok(leaf.classes.includes(cls),
+    `#${id} in index.html carries classes [${leaf.classes.join(" ")}] — the cascade fixture asks for .${cls}, so the two disagree and every answer below would be decided against an element that does not exist`);
+  return [...badgeChain, leaf];
+};
+
+test("the resolver can read every rule in styles.css", () => {
+  // A construct the parser cannot take apart is not a green light; it is a rule whose declarations
+  // silently never entered the cascade. Surfaced here as its own failure so the message is readable
+  // rather than a module that refuses to load.
+  assert.equal(SHEET_REFUSALS.length, 0, SHEET_REFUSALS.join("\n"));
+  assert.ok(cssRules.length > 100, `only ${cssRules.length} rules parsed out of a 3000-line sheet — this parser is skipping the file`);
+});
 
 test("the modelled ancestor chain is the one index.html actually builds", () => {
   // The resolver above answers "no rule decides this" by walking THIS chain, so a chain that has
   // drifted from the markup produces exactly the confident wrong "no" the resolver now refuses to
   // produce on its own. Wrap the badge in one new <div class="…"> and every `.that-div .badge` rule
-  // silently stops existing as far as the cascade tests are concerned. So the chain is checked
-  // against the real ancestry rather than trusted: read the open tags that are still unclosed at the
-  // badge, and require the fixture to name the same elements.
-  const HTML = fs.readFileSync("web/src/index.html", "utf8");
-  const at = HTML.indexOf('id="director-mode-badge"');
-  assert.ok(at > 0, "the badge is gone from index.html — the cascade fixture describes nothing");
-  const VOID = new Set(["meta", "link", "br", "img", "input", "hr", "source", "path", "circle"]);
-  const stack = [];
-  for (const m of HTML.slice(0, at).matchAll(/<(\/?)([a-zA-Z][\w-]*)([^>]*)>/g)) {
-    const tag = m[2].toLowerCase();
-    if (m[1]) { if (stack.length && stack[stack.length - 1].tag === tag) stack.pop(); }
-    else if (!VOID.has(tag) && !m[3].trimEnd().endsWith("/")) {
-      stack.push({ tag, classes: (m[3].match(/class="([^"]*)"/) || ["", ""])[1].split(/\s+/).filter(Boolean) });
-    }
-  }
-  assert.ok(stack.length > 0, "found no open ancestors at all — this walker is misreading the markup");
-  const shape = (e) => [e.tag, ...[...e.classes].sort()].join(".");
-  assert.deepEqual(
-    stack.map(shape),
-    badgeChain.slice(0, -1).map(shape),
-    "the modelled chain no longer matches index.html — every cascade answer below is now decided against a document that does not exist",
-  );
+  // silently stops existing as far as the cascade tests are concerned.
+  //
+  // The chain is now READ OUT of index.html rather than written down, so it cannot drift — which
+  // means this test can no longer compare it against itself. It is compared against the shape
+  // spelled out below instead, so restructuring the markup fails here, loudly, once, rather than
+  // quietly changing what every cascade answer in this file means.
+  const shape = (e) => [e.tag + (e.id ? `#${e.id}` : ""), ...[...e.classes].sort()].join(".");
+  assert.deepEqual(badgeChain.map(shape), [
+    "html",
+    "body",
+    "main.app-shell",
+    "button#director-mode-badge.director-mode-badge.is-following",
+  ], "index.html no longer builds the ancestry this file resolves the cascade against");
+
+  // Both children hang off the badge itself. Their TAGS are the half round 3 caught being wrong, so
+  // they are pinned by name: the title is a <strong>, the action is a <span>.
+  const under = (id) => [...docAncestors(docElement(`id="${id}"`).tagStart), docElement(`id="${id}"`)].map(shape);
+  assert.deepEqual(under("sync-pill-title"), [
+    "html",
+    "body",
+    "main.app-shell",
+    "button#director-mode-badge.director-mode-badge.is-hidden",
+    "strong#sync-pill-title.director-mode-badge-title",
+  ], "the pill title moved, or changed element — the cascade fixture below describes a different document");
+  assert.deepEqual(under("sync-pill-action"), [
+    "html",
+    "body",
+    "main.app-shell",
+    "button#director-mode-badge.director-mode-badge.is-hidden",
+    "span#sync-pill-action.director-mode-badge-exit",
+  ], "the pill action moved, or changed element — the cascade fixture below describes a different document");
+
+  // And the runtime half is modelled, not read: <html> in the file carries neither attribute.
+  assert.equal(badgeChain[0].attrs["data-role"], "follower");
+  assert.equal(badgeChain[0].attrs["data-shell"], "native");
 });
 
 test("FINDING: the following action is HIDDEN, not dimmed — the dot design won and this test was wrong", () => {
@@ -542,11 +802,16 @@ test("FINDING: the following action is HIDDEN, not dimmed — the dot design won
   // decision that SIGUIENDO was a claim that lied. The dot is deliberate and documented in both the
   // sheet and app.js; the old assertion is the stale half. This test now pins the DOT, resolved
   // through the whole cascade, so the first-match blindness cannot come back.
+  //
+  // ROUND 3 found the resolver underneath it scoring rules at the wrong specificity (first matching
+  // selector of a list rather than the highest) and modelling the title as a <span> when it ships as
+  // a <strong>; both are fixed above, so these answers are now decided against the real document.
   const exit = resolve("display", childChain("director-mode-badge-exit", "sync-pill-action"));
   const title = resolve("display", childChain("director-mode-badge-title", "sync-pill-title"));
   assert.ok(exit, "nothing in the sheet decides the follower action's display any more");
   assert.equal(exit.value, "none",
     `the follower action resolves to display:${exit.value} (line ${exit.line}) — it must not render beside a 0.6rem dot`);
+  assert.ok(title, "nothing in the sheet decides the follower title's display any more");
   assert.equal(title.value, "none",
     `the follower title resolves to display:${title.value} (line ${title.line}) — SIGUIENDO is back on screen`);
 
