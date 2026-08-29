@@ -4228,6 +4228,12 @@ const startRelayFollow = () => {
   });
   window.addEventListener("online", () => {
     relay.backoff = 500;
+    // Force a resync on regaining the network, symmetric with visibilitychange above. This used to
+    // happen implicitly because startRelayPolling re-armed (and immediately polled) on every call;
+    // making that idempotent — which is what stopped the backoff loop tripling relay traffic —
+    // removed the accelerator with it. Not a stall (the 15 s tick still corrects), but a follower
+    // that just rejoined the Wi-Fi should not wait out a tick to see the right page.
+    relayPollOnce(true);
     // Symmetric with the visibilitychange recheck above: iOS can keep a DEAD socket at
     // readyState OPEN with NO close event after a network drop. connectRelay's dupe-guard
     // would then see the stale OPEN socket and return immediately — no new socket, no resync —
