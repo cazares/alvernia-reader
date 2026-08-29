@@ -96,6 +96,7 @@ jobs:
           e2e/otaCheckinRestored.test.mjs
           e2e/relayQuotaGuards.test.mjs
           e2e/sessionAdmission.test.mjs
+          e2e/otaRevokeIsTotal.test.mjs
           e2e/transportBackoff.test.mjs
           e2e/nativeBridgeExports.test.mjs
           e2e/analyzeJoinLatency.test.mjs

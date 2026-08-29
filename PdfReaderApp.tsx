@@ -231,6 +231,13 @@ export default function App() {
   // VETOES an apply — a guess would have been worse than nothing here.
   const meshPeerCountRef = useRef(0);
   const stagingInFlightRef = useRef(false);
+  /// Set when an authoritative disarm lands WHILE a download is running. A revoke that arrives
+  /// mid-flight has nothing to delete yet — the staged record does not exist until stageBook
+  /// finishes — so without this it was simply ignored and the device installed the withdrawn book
+  /// a minute later. Safe to treat a null pointer as authoritative here: the worker's throttle
+  /// exempts any device reporting bookStage "downloading…", so a downloading device is never
+  /// throttled to null.
+  const stagingDisarmedRef = useRef(false);
   const onCheckinResponseRef = useRef<((body: unknown) => void) | null>(null);
   // applyStagedBook is declared far BELOW the numpad dispatch that invokes it. Referencing it
   // directly would capture the first render's copy (it is not in that useCallback's deps) and
@@ -1994,6 +2001,12 @@ export default function App() {
           // staged copy; a ⟳ tap in a bad-signal parking lot would then replay the revoked pointer
           // and download all 27 MB of it straight back. A revoke that one tap undoes is not a revoke.
           pendingPointerRef.current = null;
+          // A DISARM DURING THE DOWNLOAD IS STILL A DISARM. The revoke branch above deletes a
+          // STAGED copy, but a device that is mid-download has not written one yet, so it matched
+          // nothing and the operator's withdrawal was dropped on the floor — the download ran to
+          // completion and auto-applied, putting that iPad on the withdrawn book while the fleet
+          // stayed on the good one. Recorded here and honoured where the staging finishes.
+          if (stagingInFlightRef.current) stagingDisarmedRef.current = true;
           return;
         }
 
@@ -2042,6 +2055,7 @@ export default function App() {
         }
 
         stagingInFlightRef.current = true;
+        stagingDisarmedRef.current = false;
         setBookStage("downloading:0%");
         try {
           const rec = await stageBook({
@@ -2121,6 +2135,16 @@ export default function App() {
                 ],
               );
             }
+          }
+          // WITHDRAWN WHILE IT WAS DOWNLOADING — do not install it, and do not keep it.
+          // Checked before the apply because the operator disarmed for a reason, and the whole
+          // point of a revoke is that it beats work already in progress.
+          if (stagingDisarmedRef.current) {
+            breadcrumb(`staged-disarmed:${pointer.bookVersion}`);
+            await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
+            await bookFs.rmrf("WebBundleStaged");
+            setBookStage("");
+            return;
           }
           // Install it. Don't wait to be asked — canApplyNow decides WHEN, and if right now is a
           // Mass or a rehearsal it defers and the next foreground/check-in retries.
