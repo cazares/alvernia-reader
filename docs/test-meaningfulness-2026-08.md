@@ -230,3 +230,36 @@ wolf.
 is about — break it and see — applied to the campaign itself. None would have been visible from a
 green run, and the two most serious were in the tools that produce the evidence. If you take one
 thing from this document: measure the instrument before believing the measurement.
+
+## 10. Rounds 3 and 4 — where text-based testing hits its ceiling
+
+The re-hunt was itself re-hunted. Round 3 looked for what round 2's fixes broke and confirmed **24
+defects**; round 4 fixed them. The distribution is the interesting part: a third were in the CSS
+resolvers `fabLayout` and `pillWording`, and they **alternated between false negatives and false
+positives** — a `!important` or an `#id` override slipping through, and a whitespace change or an
+added comment reddening a correct build.
+
+That alternation is a diagnosis, not a list of bugs. It is what a model too weak for its question
+looks like from the outside. Those two files were being asked *"what does the browser actually
+compute for this element?"*, and answering it properly means implementing the cascade — specificity
+across a rule's whole selector list, `!important` as an origin rather than a specificity, custom
+properties inheriting down the real ancestor chain, functional pseudos, at-rules. Every feature
+modelled is another chance to be confidently wrong, and a confidently wrong "no match" is exactly
+the defect being fixed.
+
+**So round 4 stopped modelling and started refusing.** Where a reader cannot decide something
+soundly it now calls `assert.fail`, naming the construct, the selector and the `styles.css` line.
+A refusal is sound in a way a guess is not: it converts every false negative into a failure that
+sends a person to look, and it writes the ceiling into the file instead of leaving it to be
+rediscovered. Each file now says in its own header what it cannot decide and what would — for the
+CSS ones, a real browser calling `getComputedStyle` on the live document; for the Swift ones, the
+module on a device.
+
+That is the honest end of this road. A test file can read source soundly, execute a module, or
+compile and run extracted Swift — this branch does all three. What it cannot do is *be* the runtime.
+Where the question is genuinely "what does the browser render", the next real step is a headless
+browser in CI, not a better parser.
+
+**A red from these files now has two meanings.** Either the code is wrong, or the file met a
+construct it will not score — the message says which. That is deliberate. Every one of round 3's
+defects here was a silence.
