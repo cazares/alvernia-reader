@@ -32,7 +32,17 @@
  * in the same file. A file-level pass would let an unrelated sibling assertion take the credit.
  *
  * Usage: node scripts/verify-behavioural-guards.mjs [repoRoot]
- * Exits non-zero if any mutation is MISSED or SKIPPED.
+ * Exits non-zero if any mutation is MISSED, SKIPPED, or names a test that does not exist.
+ *
+ * TO CHECK THAT THIS SCRIPT ITSELF STILL HAS TEETH — worth doing after any edit to it, because a
+ * broken guard and a working guard produce identical output on a healthy tree:
+ *
+ *   cp scripts/verify-behavioural-guards.mjs /tmp/drift.mjs
+ *   # in /tmp/drift.mjs, append " BUT RENAMED" to any one of the testName strings below
+ *   node /tmp/drift.mjs "$PWD"
+ *
+ * It must refuse with "NAME MATCHES NOTHING" and exit non-zero. If it instead reports 19 CAUGHT,
+ * the ran-detection in runNamed() is broken and every number this script prints is meaningless.
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -210,27 +220,57 @@ const orig = Object.fromEntries(FILES.map((f) => [f, fs.readFileSync(path.join(R
 const restore = () => FILES.forEach((f) => fs.writeFileSync(path.join(ROOT, f), orig[f]));
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Run one named test. Returns { ran, green }.
+ *
+ * `ran` IS NOT OPTIONAL BOOKKEEPING. `--test-name-pattern` that matches nothing exits ZERO with an
+ * empty plan:
+ *
+ *     TAP version 13
+ *     1..0
+ *     # Subtest: e2e/svSyncBoundaries.test.mjs
+ *     ok 1 - e2e/svSyncBoundaries.test.mjs
+ *
+ * The `ok 1` there is the FILE, not a test. So a name that drifts — a test renamed, a typo, an em
+ * dash turned into a hyphen — makes the baseline look green AND every mutation look caught, while
+ * running nothing at all. This script would then report a confident "19 CAUGHT" having verified
+ * zero of them, which is precisely the silent-nothing failure it exists to detect. Verified against
+ * node 22: the zero-match case is distinguishable only by the absence of a Subtest line naming the
+ * test.
+ */
 function runNamed(testFile, testName) {
+  let out = "";
+  let green = true;
   try {
-    execFileSync("node", ["--test", "--test-name-pattern", esc(testName), testFile],
-      { cwd: ROOT, stdio: "pipe" });
-    return true;   // green
-  } catch {
-    return false;  // red
+    out = execFileSync("node", ["--test", "--test-name-pattern", esc(testName), testFile],
+      { cwd: ROOT, encoding: "utf8", stdio: "pipe" });
+  } catch (e) {
+    green = false;
+    out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
   }
+  const named = new RegExp(`^# Subtest: .*${esc(testName)}`, "m");
+  const ran = named.test(out) && !/^1\.\.0$/m.test(out);
+  return { ran, green };
 }
 
 // BASELINE FIRST. A red baseline makes every mutation look "caught" and reports a perfect score
 // while proving nothing — which is exactly what happened the first time the sibling harness ran.
 let baselineBad = 0;
 for (const [, , , testFile, testName] of MUTATIONS) {
-  if (!runNamed(testFile, testName)) {
+  const { ran, green } = runNamed(testFile, testName);
+  if (!ran) {
+    console.error(`✖ NAME MATCHES NOTHING: ${testFile} :: "${testName}"`);
+    console.error("  The test has been renamed or removed. Every mutation below would report CAUGHT");
+    console.error("  while running nothing at all.");
+    baselineBad++;
+  } else if (!green) {
     console.error(`✖ BASELINE RED: ${testFile} :: ${testName}`);
     baselineBad++;
   }
 }
 if (baselineBad) {
-  console.error(`\n${baselineBad} test(s) are already failing. Fix them before trusting any result here.`);
+  console.error(`\n${baselineBad} test(s) are already failing or unmatched. Fix them before trusting any result here.`);
   fs.rmSync(ROOT, { recursive: true, force: true });
   process.exit(1);
 }
@@ -247,10 +287,15 @@ for (const [name, file, mutate, testFile, testName] of MUTATIONS) {
     continue;
   }
   fs.writeFileSync(path.join(ROOT, file), after);
-  const caught = !runNamed(testFile, testName);
+  const { ran, green } = runNamed(testFile, testName);
+  // A mutation that made the named test stop MATCHING proves nothing either — it is a MISSED wearing
+  // a pass, for the same reason the baseline check above rejects an unmatched name.
+  const caught = ran && !green;
   console.log(`${caught ? "CAUGHT" : "MISSED"}  ${name}`);
   if (!caught) {
-    console.log(`        ${testFile} :: "${testName}" stayed GREEN with this regression live`);
+    console.log(ran
+      ? `        ${testFile} :: "${testName}" stayed GREEN with this regression live`
+      : `        ${testFile} :: "${testName}" did not run at all under the mutation`);
     missed++;
   }
 }
