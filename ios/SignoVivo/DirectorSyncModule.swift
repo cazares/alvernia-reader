@@ -1436,6 +1436,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   private var advertiserAttemptToken = 0
   private var browserAttemptToken = 0
 
+  /// A FAILURE CANCELS THE PENDING SETTLE. Without this the ladder sawtooths and never climbs.
+  ///
+  /// The settle is scheduled when an attempt STARTS, and only a newer attempt superseded it. But
+  /// once the delay exceeds transportSettleSeconds — which happens at the third rung (12 s) — the
+  /// settle from the attempt that ALREADY FAILED fires during the wait and zeroes the counter.
+  /// Replayed against the real delays the count runs 1, 2, 3, reset, 1, 2, 3, reset… forever: the
+  /// 45 s last-resort tier is never reached and handleAppDidBecomeActive's `> 5` permission-recovery
+  /// branch stays exactly as unreachable as it was before this was "fixed".
+  private func invalidatePendingSettle(advertiser isAdvertiser: Bool) {
+    if isAdvertiser { advertiserAttemptToken &+= 1 } else { browserAttemptToken &+= 1 }
+  }
+
   private func noteTransportSettled(advertiser isAdvertiser: Bool) {
     let generation = resetGeneration
     if isAdvertiser {
@@ -2325,6 +2337,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.emitError(code: "DIRECTOR_START_FAILED", message: error.localizedDescription)
       }
       self.advertiserFailureCount += 1
+      // This attempt failed: cancel the settle it scheduled, or that timer will zero the counter
+      // mid-wait and the ladder can never climb. See invalidatePendingSettle.
+      self.invalidatePendingSettle(advertiser: true)
       // M-F7: fast exponential backoff for the first 5 failures (transient radio/thermal hiccup or a
       // permission race), then a SLOW 45 s last-resort retry FOREVER — never give up permanently. A
       // foregrounded director whose radio hiccups past the ceiling would otherwise stay dark until a
@@ -2433,6 +2448,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         self.emitError(code: "FOLLOWER_START_FAILED", message: error.localizedDescription)
       }
       self.browserFailureCount += 1
+      // Same as the advertiser: a failed attempt must not leave its settle timer armed.
+      self.invalidatePendingSettle(advertiser: false)
       // M-F7: same as the advertiser — fast backoff for 5, then a slow 45 s retry forever so a
       // follower whose radio hiccups past the ceiling keeps trying to find the director instead of
       // going permanently dark on a foregrounded device.
