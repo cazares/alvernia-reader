@@ -5,6 +5,16 @@ import fs from "node:fs";
 const BEACON = fs.readFileSync("ios/SignoVivo/BlePageBeacon.swift", "utf8");
 const MODULE = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
 
+// A missing marker must FAIL, not silently produce a slice from -1 that happens to contain the
+// string being looked for. Every bounded read in this file goes through here.
+const slice = (from, to, src = BEACON) => {
+  const a = src.indexOf(from);
+  const b = src.indexOf(to, a + 1);
+  assert.ok(a >= 0, `slice start marker is gone: ${from}`);
+  assert.ok(b > a, `slice end marker is gone or precedes the start: ${to}`);
+  return src.slice(a, b);
+};
+
 // WHY THIS FILE EXISTS. BLE is the only path that can show a follower the right page BEFORE the
 // mesh finishes its ~10s first handshake, and it never once did — because the seq guard exists in
 // TWO layers and only one of them knew about advertising sessions.
@@ -377,6 +387,11 @@ test("a director does not scan — and cannot be made to by a radio restart", ()
   assert.match(ready, /guard wantsScanning/, "scanIfReady scans regardless of whether we want to");
   const ensure = BEACON.slice(BEACON.indexOf("func ensureScanning"), BEACON.indexOf("private func startAdvertisingIfReady"));
   assert.match(ensure, /guard wantsScanning/, "the 1 Hz self-heal re-arms a deliberately stopped scan");
-  const stop = BEACON.slice(BEACON.indexOf("func stopScanning"), BEACON.indexOf("/// ASK FOR THE CURRENT PAGE"));
+  // Bounded by a marker that is ASSERTED to exist. This used to end at a doc-comment that the
+  // resetScanBaseline revert deleted, so indexOf returned -1, the slice ran to end-of-file, and the
+  // assertion below passed by finding `wantsScanning = false` somewhere else entirely — a test
+  // reporting green for a property it had stopped checking, which is the failure this whole file
+  // exists to prevent.
+  const stop = slice("func stopScanning", "/// NOT PROVIDED, DELIBERATELY");
   assert.match(stop, /wantsScanning = false/, "stopping the scan does not clear the intent");
 });

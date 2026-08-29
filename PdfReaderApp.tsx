@@ -1986,7 +1986,16 @@ export default function App() {
           await bookFs.rmrf("WebBundleStaged");
           setBookStage("");
         }
-        if (!pointer) return;
+        if (!pointer) {
+          // THE PARKING-LOT OFFER DIES WITH THE ARMING. pendingPointerRef is the offer ⟳ replays
+          // when its own check-in cannot reach the relay — and it was only ever written, never
+          // cleared, so a check-in that explicitly reported NO arming left the old pointer parked
+          // forever. The block above has just treated that same response as a REVOKE and deleted the
+          // staged copy; a ⟳ tap in a bad-signal parking lot would then replay the revoked pointer
+          // and download all 27 MB of it straight back. A revoke that one tap undoes is not a revoke.
+          pendingPointerRef.current = null;
+          return;
+        }
 
         // OWNER DECISION, 2026-08-05 (fourth amendment): IT UPDATES WHEN YOU OPEN IT, AND ⟳ FORCES
         // IT. Two triggers, one sentence each. No third path, and nothing decides on its own
@@ -2549,7 +2558,20 @@ export default function App() {
   // gated on syncAvailable, so this is harmless for a plain offline follower.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
-      if (next !== "active") return;
+      if (next !== "active") {
+        // FLUSH BEFORE iOS SUSPENDS US. Timers do not fire once suspended, so whatever is sitting in
+        // the batch window would wait for the app to come back — and the breadcrumbs written just
+        // before a backgrounding are exactly the ones that explain a director going dark. The window
+        // is 15 s by default and can be tuned to minutes, so this is up to minutes of evidence, not
+        // the ~1 s the old debounce risked. DirectorSyncModule.handleAppDidEnterBackground has
+        // flushed on this transition all along; the JS side never did.
+        if (dbgFlushTimerRef.current) {
+          clearTimeout(dbgFlushTimerRef.current);
+          dbgFlushTimerRef.current = null;
+        }
+        dbgFlush();
+        return;
+      }
       // IT UPDATES WHEN YOU OPEN IT (owner decision, 2026-08-05). The 90 s check-in timer only
       // ticks while the app is awake, so an iPad asleep when a book was published would otherwise
       // sit on the old one until someone happened to leave it open. Checking here means "open the
@@ -2598,7 +2620,7 @@ export default function App() {
       }
     });
     return () => sub.remove();
-  }, [syncAvailable, broadcastPage, injectEvent, startDirectorHeartbeat]);
+  }, [syncAvailable, broadcastPage, injectEvent, startDirectorHeartbeat, dbgFlush]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {

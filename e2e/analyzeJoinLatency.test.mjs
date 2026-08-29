@@ -121,3 +121,43 @@ test("Central time is a real zone conversion, not a hardcoded summer offset", ()
   assert.doesNotMatch(resync, /5 \* 3600 \* 1000/, "analyze-resync still hardcodes the CDT offset");
   assert.match(resync, /timeZone: "America\/Chicago"/, "analyze-resync has no explicit zone conversion");
 });
+
+test("a follower that joined LATE is not reported as wedged", () => {
+  // The mirror of the bug above, and a regression the first fix introduced. Judging every device
+  // against the director's FIRST page made any device that arrived after that turn read as NEVER
+  // CONVERGED — a red banner and exit 1 on a follower that then tracked every page it was present
+  // for. Judging against the LAST page (what that replaced) false-flagged the opposite case. The
+  // honest question is whether the director's pages reached it while it was there.
+  const T = 1787060000000;
+  const pages = [10, 50, 101, 203, 300, 372];
+  const rows = [{ t: T, dev: "mPad", role: "director", event: "become:director" }];
+  pages.forEach((page, i) => {
+    const at = T + i * 30000;
+    rows.push({ t: at, dev: "mPad", role: "director", event: "page:send", page });
+    rows.push({ t: at + 200, dev: "iPad1", role: "follower", event: "mesh:page-recv", page });
+    // iPad3 shows up halfway through and then tracks perfectly.
+    if (i >= 3) rows.push({ t: at + 250, dev: "iPad3", role: "follower", event: "mesh:page-recv", page });
+  });
+  const { code, stdout } = run(rows);
+  assert.match(stdout, /iPad3.*joined late — tracked 3\/6 turns/,
+    "a late joiner is not described as a late joiner");
+  assert.doesNotMatch(stdout, /NEVER CONVERGED/, "a late joiner is still being called wedged");
+  assert.equal(code, 0, "a late joiner still exits non-zero");
+});
+
+test("the wedge verdict is per-page-turn, not presence at assert time", () => {
+  // A follower present the whole time that never once receives a page the director turned to IS
+  // wedged, and must still be caught — the change above must not blunt that.
+  const T = 1787060000000;
+  const rows = [
+    { t: T, dev: "mPad", role: "director", event: "become:director" },
+    { t: T + 1000, dev: "mPad", role: "director", event: "page:send", page: 59 },
+    { t: T + 1200, dev: "iPad1", role: "follower", event: "mesh:page-recv", page: 59 },
+    // iPad2 keeps receiving an OLD page and never the director's — the real wedge.
+    { t: T + 1300, dev: "iPad2", role: "follower", event: "mesh:page-recv", page: 12 },
+    { t: T + 9000, dev: "iPad2", role: "follower", event: "mesh:page-recv", page: 12 },
+  ];
+  const { code, stdout } = run(rows);
+  assert.match(stdout, /never a page the director turned to/, "the real wedge is no longer described");
+  assert.equal(code, 1, "a real wedge must still exit non-zero");
+});

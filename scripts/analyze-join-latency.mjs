@@ -158,11 +158,19 @@ for (const dev of followers) {
     if (got) turns.push((got.t - s.t) / 1000);
   }
   results.push({ dev, lat, any: recv.length, turns });
+  // A FOLLOWER THAT JOINED LATE IS NOT A WEDGED ONE. Judging every device against the director's
+  // FIRST page made any device that arrived after that turn read as NEVER CONVERGED — a red banner
+  // and exit 1 on a follower that then tracked every single page it was present for. (Judging
+  // against the LAST page, which this replaced, false-flagged the mirror case: a follower whose
+  // telemetry ended early.) The honest question is not "did it see one particular page" but "did
+  // the director's page reach it when it was there", which is exactly what the turn samples answer.
   const note = !recv.length
     ? "NEVER RECEIVED ANYTHING — not in the mesh"
-    : !hit
-      ? `NEVER CONVERGED — got pages ${[...new Set(recv.map((r) => r.page))].slice(0, 6).join(",")}`
-      : lat > 10 ? "slow" : "";
+    : !turns.length
+      ? `NEVER CONVERGED — got pages ${[...new Set(recv.map((r) => r.page))].slice(0, 6).join(",")} but never a page the director turned to`
+      : !hit
+        ? `joined late — tracked ${turns.length}/${dirSends.length} turns`
+        : lat > 10 ? "slow" : "";
   console.log(
     dev.padEnd(16) +
       (first ? utc(first.t) : "—").padStart(12) +
@@ -175,7 +183,9 @@ if (!followers.length) console.log("  (no JS-layer followers reported)");
 
 // ── Verdict ───────────────────────────────────────────────────────────────────
 const converged = results.filter((r) => r.lat !== null);
-const stuck = results.filter((r) => r.lat === null);
+// WEDGED means the director's pages never reached it, not that it missed the cold-join page. A
+// device with turn samples is demonstrably in sync for the window it was present.
+const stuck = results.filter((r) => r.turns.length === 0);
 console.log(`\n=== VERDICT ===`);
 if (!results.length) {
   console.log("INCONCLUSIVE — no followers reported. On a network-less device telemetry does not");
@@ -195,7 +205,7 @@ if (allTurns.length) {
   console.log(`page turns (send → recv): ${allTurns.length} samples · median ${tmed.toFixed(2)}s · worst ${allTurns.at(-1).toFixed(2)}s`);
 }
 if (stuck.length) {
-  console.log(`\n🔴 ${stuck.length} follower(s) NEVER reached the director's page: ${stuck.map((r) => r.dev).join(", ")}`);
+  console.log(`\n🔴 ${stuck.length} follower(s) never received ANY page the director turned to: ${stuck.map((r) => r.dev).join(", ")}`);
   console.log(`   A follower that received OTHER pages but not this one is a wedge — see`);
   console.log(`   scripts/analyze-resync.mjs. One that received nothing at all never joined the mesh.`);
   process.exit(1);
