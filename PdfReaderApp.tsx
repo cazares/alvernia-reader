@@ -370,6 +370,10 @@ export default function App() {
   const dbgDeviceRef = useRef<string>("?");
   const dbgBufferRef = useRef<Array<Record<string, unknown>>>([]);
   const dbgFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /// How long a batch window stays open, in ms. Retunable by the relay via LOG_INTERVAL_MS — the
+  /// documented knob that, until now, was read into a type annotation and applied nowhere. Defaults
+  /// to the 15 s the worker's quota arithmetic is sized against, not to a hard-coded 1 s.
+  const dbgIntervalRef = useRef<number>(15000);
   // TELEMETRY IS OPT-IN AND OFF BY DEFAULT (Miguel, 2026-08-18: "we only want to turn on the faucet
   // when we need water not suck up a whole lake").
   //
@@ -492,6 +496,7 @@ export default function App() {
         r.json?.().then((j: {
           policy?: { logIntervalMs?: number; logLevel?: number };
           logLevel?: number;
+          logIntervalMs?: number;
         }) => {
           // BOTH SHAPES. The LAN sink nests the policy; the worker spread it FLAT for months, so
           // every value it echoed was silently discarded and LOG_LEVEL — "the kill switch", "retunes
@@ -500,6 +505,12 @@ export default function App() {
           // switch, which is the entire point of having one.
           const lvl = Number.isFinite(j?.policy?.logLevel) ? j?.policy?.logLevel : j?.logLevel;
           if (Number.isFinite(lvl)) logLevelRef.current = Number(lvl);
+          // Adopt the CADENCE too. Clamped so no echoed policy — or a malformed one — can push a
+          // device above roughly one flush per second against a shared 100,000/day account quota.
+          const ms = Number.isFinite(j?.policy?.logIntervalMs) ? j?.policy?.logIntervalMs : j?.logIntervalMs;
+          if (Number.isFinite(ms) && Number(ms) > 0) {
+            dbgIntervalRef.current = Math.min(Math.max(Number(ms), 1000), 300000);
+          }
         }).catch(() => {});
       })
       .catch(() => {
@@ -525,8 +536,30 @@ export default function App() {
           event,
           ...(data || {}),
         });
-        if (dbgFlushTimerRef.current) clearTimeout(dbgFlushTimerRef.current);
-        dbgFlushTimerRef.current = setTimeout(dbgFlush, 1000);
+        // A BATCH WINDOW, NOT A DEBOUNCE — and the interval the relay asks for, not a constant.
+        //
+        // This cleared and re-armed on every event, so it was a 1 s debounce: under sustained
+        // logging it either never fired at all, or fired about once a second the moment activity
+        // paused. The worker's whole quota argument is sized against a BATCH INTERVAL ("15 s
+        // batching is a 4.8x cut with 100% of rows still delivered"), and LOG_INTERVAL_MS exists to
+        // tune it — but logIntervalMs was only ever read into a type annotation and never applied,
+        // so the documented knob controlled nothing.
+        //
+        // That was harmless while the level was deadlocked at `off` and nothing was ever buffered.
+        // Now that seeding the level makes telemetry genuinely live — on a fleet where sv.telemetry
+        // is likely still latched to "1" from the sessions that produced no rows because of that
+        // very deadlock — an unthrottled ~1 Hz flush per device would exhaust the 10,000/day
+        // non-essential budget in under an hour and take /ota/checkin down with it.
+        //
+        // First event opens a window; everything logged inside it rides the same POST; the flush
+        // clears the handle so the next event opens a fresh window. Matches the Swift side's
+        // repeating-timer design and makes the worker's arithmetic true.
+        if (!dbgFlushTimerRef.current) {
+          dbgFlushTimerRef.current = setTimeout(() => {
+            dbgFlushTimerRef.current = null;
+            dbgFlush();
+          }, dbgIntervalRef.current);
+        }
       } catch {
         /* ignore */
       }
@@ -2159,13 +2192,24 @@ export default function App() {
       // quietly staged it minutes later. Its own comment ("so ⟳ works even if this tap's check-in
       // cannot reach the relay") describes a check-in that did not exist.
       //
-      // Awaited FIRST and strictly before the fallback: firing both would let a stale replay claim
-      // stagingInFlightRef and make the fresh pointer wait for the next cycle, wasting a 27 MB
-      // download on the previous version.
+      // Awaited FIRST, and the replay below runs ONLY if it could not reach the relay.
+      //
+      // "Await it, then replay anyway" is not sequencing — the check-in's own staging runs
+      // fire-and-forget inside its response handler (`void (async () => …)()`), so awaiting the
+      // fetch returns BEFORE stagingInFlightRef is set. An unconditional replay therefore starts a
+      // second onCheckinResponse pipeline racing the first, and the guard that is supposed to stop
+      // that cannot see a flag nobody has set yet. Two concurrent stagings of a 27 MB bundle, one of
+      // them possibly for a version the relay has since revoked.
+      //
+      // lastCheckinOkAtRef is stamped inside the response handler and nowhere else, so comparing it
+      // across the await is a truthful "did this tap actually talk to the relay".
+      const checkinAtBefore = lastCheckinOkAtRef.current;
       await otaCheckin();
-      // Only if that could not reach the relay does an earlier-seen pointer get replayed — a
-      // pointer recorded on a routine check-in and deliberately not acted on then.
-      if (!stagingInFlightRef.current && pendingPointerRef.current) {
+      const checkinReachedRelay = lastCheckinOkAtRef.current !== checkinAtBefore;
+      // Bad signal: honour a pointer recorded on an earlier routine check-in and deliberately not
+      // acted on then. This is the whole reason the parking lot exists.
+      if (!checkinReachedRelay && !stagingInFlightRef.current && pendingPointerRef.current) {
+        breadcrumb("manual-refresh:replay-pointer");
         await onCheckinResponseRef.current?.({ bookUpdate: pendingPointerRef.current });
       }
     } catch {

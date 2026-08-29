@@ -64,14 +64,33 @@ test("a director with a fast clock is clamped, not collapsed", () => {
   const skewed = NOW + 120000; // device 2 minutes ahead
   const seq = sanitizeSeq(skewed, NOW, 10);
   assert.notEqual(seq, NO_DIRECTOR_SEQ, "a real seq was folded into the reserved value");
-  assert.equal(seq, NOW + SEQ_FUTURE_TOLERANCE_MS, "clamped to the ceiling under the SERVER's clock");
+  assert.equal(seq, NOW, "clamped to the SERVER's now");
+});
+
+test("the clamp lands on server-now, never a minute in the future", () => {
+  // Clamping to the ceiling (now + tolerance) parks the room ahead of every honest clock, so the
+  // NEXT director's correct seq reads as "not newer" and its page turns are refused for up to a
+  // minute. That is the same poisoning this function exists to prevent, just smaller.
+  const seq = sanitizeSeq(NOW + 10 * 60 * 1000, NOW, 10);
+  assert.ok(seq <= NOW, `clamp left the room ${seq - NOW} ms in the future`);
 });
 
 test("two publishes clamped in the same server millisecond still advance", () => {
-  // Both clamp to the same ceiling, so without the currentSeq + 1 floor the second would be refused
+  // Both clamp to the same instant, so without the currentSeq + 1 floor the second would be refused
   // by the monotonic guard.
-  const ceiling = NOW + SEQ_FUTURE_TOLERANCE_MS;
-  assert.equal(sanitizeSeq(NOW + 120000, NOW, ceiling), ceiling + 1);
+  assert.equal(sanitizeSeq(NOW + 120000, NOW, NOW), NOW + 1);
+});
+
+test("a normal director takes over immediately after a fast-clocked one", () => {
+  // The regression the ceiling clamp introduced: the room held now+60s, so a correct-clock
+  // director's every publish was refused as not-newer until real time caught up.
+  const roomSeq = sanitizeSeq(NOW + 120000, NOW, 10);   // fast director's last publish
+  const handover = NOW + 1000;                          // one second later, correct clock
+  const d = decidePublish({
+    rawSeq: handover, nowMs: handover,
+    snapshotSeq: roomSeq, snapshotTs: Math.floor(NOW / 1000), maxAgeS: MAX_AGE_S,
+  });
+  assert.equal(d.apply, true, "a correct-clock director is locked out by the previous one's clamp");
 });
 
 test("every page turn from a fast-clocked director reaches the congregation", () => {

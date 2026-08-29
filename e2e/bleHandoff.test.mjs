@@ -301,3 +301,39 @@ test("losing the director resumes HUNTING, with the pulse still running", () => 
   assert.match(body, /followerHuntingSince = Date\(\)\.timeIntervalSince1970/,
     "the wedged-session clock does not restart, so escalation never fires after a drop");
 });
+
+test("the BLE scan baseline is never reset on a role change", () => {
+  // A resetScanBaseline() was written to cure a real gap — a device re-entering follower mode while
+  // the SAME director advertises an unchanged nonce+seq is BLE-deaf until the next page turn — and
+  // then removed, because every version of it re-armed the build-444 wrong-song failure.
+  //
+  // Blunt version (wipe nonce + seq): the first advertisement heard after any role change is applied
+  // whatever its age. Narrow version (allow ONE re-delivery of an EQUAL seq from the same nonce): no
+  // better against the case that matters, because a device force-quit while directing leaves
+  // bluetoothd broadcasting a frozen, validly-tagged page (recorded on hardware 2026-08-19) whose
+  // seq sits exactly AT the baseline — "equal seq from the advertiser I was already tracking"
+  // describes that ghost precisely. Modelled: suppressed packet after packet, then re-delivered the
+  // instant a role change asks for a refresh.
+  //
+  // A stationary director and a ghost are byte-identical in a BLE advertisement, so the distinction
+  // the cure needs does not exist. The mesh stays authoritative; the gap stays open on purpose.
+  assert.ok(!/func resetScanBaseline\s*\(/.test(BEACON), "resetScanBaseline is back — it re-arms the 444 ghost window");
+  assert.doesNotMatch(BEACON, /redeliverCurrentPage/, "the one-shot re-delivery is back — a frozen ghost matches it exactly");
+  const reset = MODULE.slice(MODULE.indexOf("private func resetTransport"), MODULE.indexOf("// MARK: - Event emission"));
+  assert.doesNotMatch(reset, /bleAppliedSeq = -1/,
+    "resetTransport drops the module's BLE seq floor — the first packet after a role change will be applied whatever its age");
+});
+
+test("a director does not scan — and cannot be made to by a radio restart", () => {
+  // centralManagerDidUpdateState fires again on every bluetoothd restart and Control Center toggle,
+  // and used to call scanIfReady() with no notion of role — silently resuming an allowDuplicates
+  // packet-rate scan on the director for the rest of the Mass, which is the whole drain that
+  // stopping the scan exists to prevent.
+  assert.match(BEACON, /private var wantsScanning = false/, "there is no record of scan INTENT");
+  const ready = BEACON.slice(BEACON.indexOf("private func scanIfReady"), BEACON.indexOf("func resumeOnForeground"));
+  assert.match(ready, /guard wantsScanning/, "scanIfReady scans regardless of whether we want to");
+  const ensure = BEACON.slice(BEACON.indexOf("func ensureScanning"), BEACON.indexOf("private func startAdvertisingIfReady"));
+  assert.match(ensure, /guard wantsScanning/, "the 1 Hz self-heal re-arms a deliberately stopped scan");
+  const stop = BEACON.slice(BEACON.indexOf("func stopScanning"), BEACON.indexOf("/// ASK FOR THE CURRENT PAGE"));
+  assert.match(stop, /wantsScanning = false/, "stopping the scan does not clear the intent");
+});

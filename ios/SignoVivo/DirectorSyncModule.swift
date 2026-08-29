@@ -2033,17 +2033,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // comment states the contract this restores: "It costs battery, which is why this scans only
     // while following." startFollower re-arms it immediately after its own resetTransport call.
     bleBeacon.stopScanning()
-    // REBASE THE SCAN. seq baselines outlived the scanning session, which breaks the whole premise
-    // of advertising-as-STATE (#386): only a NONCE change rebased them, so a device that left and
-    // re-entered follower mode while the SAME director kept advertising the same nonce and seq
-    // (nobody has turned a page) rejected every sighting of the current page at the monotonic guard
-    // — deaf until the director's next page turn, with no JS-side rescue because becomeFollower
-    // deliberately clears its remembered snapshot. On a role change the old following relationship
-    // is over, so the baseline that belonged to it must go with it. Done HERE and not in
-    // startScanning(): rebasing on every ensureScanning/foreground restart would open a window for
-    // a late CACHED lower-seq advertisement to drag a still-following device backwards.
-    bleBeacon.resetScanBaseline()
-    bleAppliedSeq = -1; bleLastSeenSeq = -1; bleAppliedNonce = ""
+    // The BLE scan baseline is deliberately NOT reset here — see the long note where
+    // resetScanBaseline used to live in BlePageBeacon. Every version of that reset re-armed the
+    // build-444 wrong-song failure at role-change time, because a frozen ghost advertisement and a
+    // stationary director are indistinguishable in a BLE packet.
     localPeerID = nil
     discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredDirectorInfo = [:]
     discoveredFollowers = []; discoveredFollowerInfo = [:]

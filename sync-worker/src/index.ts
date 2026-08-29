@@ -712,6 +712,16 @@ export default {
       // Last-resort guard for anything the per-branch try/catch above didn't cover (an
       // unexpected throw in routing, header reads, or RPC transport). NEVER strip CORS —
       // return a usable no-director snapshot shape so the web client doesn't brick.
+      //
+      // EXCEPT FOR /ota/checkin, WHERE A 200 IS THE DESTRUCTIVE ANSWER. To an armed device, an OK
+      // response that does not name its staged bookVersion is an explicit REVOKE: it deletes
+      // WebBundleStaged and re-downloads 27 MB. So this generic "be friendly on the way out" reply —
+      // which is right for /state, where an empty snapshot just means no director — silently
+      // destroys verified work on that one route. The per-branch catch already returns 503 there;
+      // without this the outer one quietly undoes it for anything thrown outside that try.
+      if (url.pathname === "/ota/checkin") {
+        return json({ ok: false, error: "arming_unavailable" }, 503, cors);
+      }
       return json(EMPTY_SNAPSHOT, 200, cors);
     }
   },

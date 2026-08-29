@@ -90,6 +90,13 @@ final class BlePageBeacon: NSObject {
   private static func newNonce() -> String { String(UUID().uuidString.prefix(4)).lowercased() }
   private var lastAppliedPage = -1
   private var isScanning = false
+  /// Whether this device WANTS to be scanning. CBCentralManager hands back .poweredOn on every
+  /// bluetoothd restart and Control Center toggle, and centralManagerDidUpdateState answered that by
+  /// scanning again regardless of role — so a director whose scan was deliberately stopped at
+  /// promotion silently resumed a packet-rate allowDuplicates scan for the rest of the Mass, which
+  /// is the entire drain that stopping it was meant to prevent. Intent belongs in a field, not
+  /// inferred from which call site last ran.
+  private var wantsScanning = false
 
   /// The advertised seq, owned HERE and incremented once per real page change.
   ///
@@ -193,7 +200,7 @@ final class BlePageBeacon: NSObject {
   /// the session while believing it is listening. `central.isScanning` is the actual state, so this
   /// asks the framework rather than our memory of it.
   func ensureScanning() {
-    guard let c = central, c.state == .poweredOn, !c.isScanning else { return }
+    guard wantsScanning, let c = central, c.state == .poweredOn, !c.isScanning else { return }
     if isScanning { log?("ble:rescan", [:]) }   // only interesting when we THOUGHT we were scanning
     isScanning = false
     scanIfReady()
@@ -245,12 +252,13 @@ final class BlePageBeacon: NSObject {
   // MARK: - Follower side
 
   func startScanning() {
+    wantsScanning = true
     if central == nil { central = CBCentralManager(delegate: self, queue: .main) }
     scanIfReady()
   }
 
   private func scanIfReady() {
-    guard let c = central, c.state == .poweredOn, !isScanning else { return }
+    guard wantsScanning, let c = central, c.state == .poweredOn, !isScanning else { return }
     isScanning = true
     // allowDuplicates is ESSENTIAL. Without it iOS reports each peripheral once and a later page
     // change is never delivered — the probe would measure "first sighting" and report a beautiful
@@ -276,33 +284,37 @@ final class BlePageBeacon: NSObject {
   }
 
   func stopScanning() {
+    wantsScanning = false
     isScanning = false
     central?.stopScan()
     log?("ble:scan-stop", [:])
   }
 
-  /// FORGET WHICH ADVERTISER WE WERE TRACKING. Called on every role change (resetTransport), never
-  /// on a mere scan restart.
+  /// NOT PROVIDED, DELIBERATELY: a way to re-ask for the current page.
   ///
-  /// An advertisement is continuous STATE (#386), but the receiver deduped it like an event stream
-  /// using baselines that outlived the scanning session: only a NONCE change rebased them. So a
-  /// device that stopped following and started again — while the SAME director kept advertising the
-  /// same nonce at the same seq, because nobody had turned a page — measured every fresh sighting
-  /// of the CURRENT page against a baseline it had already passed, and dropped it at the monotonic
-  /// guard. Deaf until the director's next page turn, which is precisely when BLE is supposed to be
-  /// the channel that needs no handshake and no waiting.
+  /// There is a real gap here. A device that leaves and re-enters follower mode while the SAME
+  /// director keeps advertising the same nonce at the same seq — nobody has turned a page — measures
+  /// every fresh sighting against a baseline it has already passed and drops it at the monotonic
+  /// guard. It stays BLE-deaf until the next page turn.
   ///
-  /// Deliberately NOT called from startScanning()/scanIfReady(): those also run on every
-  /// ensureScanning() self-heal and every foreground, and rebasing there would open a window in
-  /// which a late-delivered CACHED advertisement (same nonce, lower seq) is applied and drags a
-  /// still-following device backwards — the failure the monotonic guard exists to prevent.
-  func resetScanBaseline() {
-    lastSeenNonce = ""
-    lastSeenSeq = -1
-    lastAppliedPage = -1
-    recentNonces.removeAll()
-    lastContentionAt = 0
-  }
+  /// A resetScanBaseline() that cleared the baseline was written, and then removed, because every
+  /// version of it re-armed the build-444 wrong-song failure at every role change. The blunt version
+  /// (wipe nonce + seq) applies the first advertisement heard afterwards whatever its age. The
+  /// narrow version (allow ONE re-delivery of an equal seq from the same nonce) is no better against
+  /// the case that matters: a device force-quit while directing leaves bluetoothd broadcasting a
+  /// validly-HMAC-tagged frozen page with no in-process owner — recorded on this hardware
+  /// 2026-08-19 — and that ghost's seq is frozen precisely AT the baseline, so "equal seq from the
+  /// advertiser I was already tracking" describes it exactly. Modelled: the ghost is correctly
+  /// suppressed packet after packet, and re-delivered the moment a role change asks for a refresh.
+  ///
+  /// The distinction the fix needs — "this advertiser is alive" versus "this advertiser is frozen" —
+  /// does not exist in a BLE advertisement. A stationary director and a ghost are byte-identical.
+  /// That is the whole reason this file's design makes the mesh authoritative and BLE its fast
+  /// follower, and it is why the gap is left open rather than closed with a guess.
+  ///
+  /// What covers it in practice: the mesh re-delivers the page on reconnect at a 100 ms heartbeat,
+  /// so the exposure is the window where the mesh is ALSO down and the director turns no page. A
+  /// slow page is the accepted cost; a wrong one in front of the congregation is not.
 
   /// Truncated HMAC-SHA256(key: sessionCode, msg: nonce|seq|page). 4 hex chars (16 bits) is a
   /// deliberate space/security tradeoff: this rides in a BLE local name with an already-tight
@@ -374,6 +386,11 @@ extension BlePageBeacon: CBPeripheralManagerDelegate {
 
 extension BlePageBeacon: CBCentralManagerDelegate {
   func centralManagerDidUpdateState(_ c: CBCentralManager) {
+    // .poweredOn arrives again on every bluetoothd restart and every Control Center toggle, so this
+    // is a scan-RESUME path as much as a startup one. scanIfReady now refuses unless this device
+    // actually wants to scan — otherwise a director whose scan was stopped at promotion silently
+    // resumed a packet-rate allowDuplicates scan for the rest of the Mass, on the one device the
+    // choir cannot afford to have run flat.
     if c.state == .poweredOn { scanIfReady() } else { log?("ble:central-state", ["state": c.state.rawValue]) }
   }
 

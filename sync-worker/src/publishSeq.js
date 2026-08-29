@@ -36,8 +36,16 @@ export const SEQ_FUTURE_TOLERANCE_MS = 60000;
 export function sanitizeSeq(rawSeq, nowMs, currentSeq) {
   const seq = Number(rawSeq ?? 0);
   if (!Number.isFinite(seq) || seq < 0) return NO_DIRECTOR_SEQ;
-  const ceiling = nowMs + SEQ_FUTURE_TOLERANCE_MS;
-  if (seq > ceiling) return Math.max(ceiling, currentSeq + 1);
+  if (seq > nowMs + SEQ_FUTURE_TOLERANCE_MS) {
+    // Clamp to the SERVER'S NOW, not to the ceiling. Clamping to the ceiling parks the room a full
+    // minute in the future, and a seq that is minutes ahead of every honest clock is the same
+    // poisoning this function exists to prevent — just smaller. Concretely: a fast-clocked director
+    // finishes, and the next director's correct-clock seq (≈ server now) is BELOW the room's stored
+    // ceiling, so every page it turns is refused as "not newer" for up to a minute while the choir
+    // watches a stale page. Server-now keeps the fast director monotonic without leaving that trap
+    // behind for whoever directs next.
+    return Math.max(nowMs, currentSeq + 1);
+  }
   return seq;
 }
 
