@@ -354,13 +354,31 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
   }
 
-  private func releaseSlot(_ peerID: MCPeerID) {
+  /// Release the reservation this peer holds IN THIS SESSION.
+  ///
+  /// The session check is the point. An unconditional release-by-peer meant a stale or duplicate
+  /// terminal callback — MPC delivers them for torn-down sessions, and forceFollowerReconnect and
+  /// resetTransport rebuild sessions routinely — freed whatever reservation the peer held AT THAT
+  /// MOMENT, including a newer one whose handshake was still in flight. That re-opens the exact
+  /// double-admission window the reservation exists to close, which is the same ABA the expiry
+  /// timer was tokened to avoid, arriving by the other door.
+  private func releaseSlot(_ peerID: MCPeerID, in session: MCSession) {
+    guard let held = pendingAdmissions[peerID], held.session === session else { return }
     pendingAdmissions.removeValue(forKey: peerID)
   }
 
-  /// The session to answer THIS peer's invitation with. A retry re-uses the session we already
-  /// offered it; only if that session is gone do we pick a fresh one.
+  /// The session to answer THIS peer's invitation with. ONE PEER, ONE SESSION — which is the whole
+  /// invariant, and it has to hold across all three ways a peer can already be attached to us.
   private func sessionForAdmitting(_ peerID: MCPeerID) -> MCSession? {
+    // Already CONNECTED here. A follower whose link went half-open on its side re-invites while the
+    // director still counts it as connected; without this it was handed a different session and
+    // became a member of two at once, burning a session and putting two peers where the topology
+    // permits one. The legacy invite path has always guarded this (allConnectedPeers.contains); the
+    // accept path never did.
+    if let joined = mcSessions.first(where: { $0.connectedPeers.contains(peerID) }) {
+      return joined
+    }
+    // Already RESERVED here — a retry, which arrives every inviteRetryAfter until it connects.
     if let held = pendingAdmissions[peerID], mcSessions.contains(where: { $0 === held.session }) {
       return held.session
     }
@@ -2464,10 +2482,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       guard self.mcSessions.contains(where: { $0 === session }) else { return }
       let stateName = state == .connected ? "connected" : (state == .connecting ? "connecting" : "notConnected")
       self.dbgLog("session:\(stateName)", ["peer": peerID.displayName])
-      // The handshake has resolved one way or the other — the slot this peer was holding is now
-      // either really occupied (connectedPeers reports it) or free again. Either way the
-      // reservation's job is done. Idempotent, and a no-op for a follower, which reserves nothing.
-      if state != .connecting { self.releaseSlot(peerID) }
+      // ONLY .connected RELEASES. At that point the peer really is in connectedPeers, so the
+      // session's occupancy is counted by the session itself and the reservation is redundant.
+      //
+      // .notConnected deliberately does NOT release, and letting it was a bug: a failed handshake is
+      // exactly when a stale or duplicate terminal callback is most likely — MPC delivers them for
+      // torn-down sessions, and forceFollowerReconnect and resetTransport rebuild sessions
+      // routinely — and freeing on one of those hands the slot away while a RETRY's handshake is in
+      // flight, re-opening the double-admission this exists to close. The reservation lapses on its
+      // own tokened expiry instead, which nothing outside this class can trigger early. It costs a
+      // slot held a few extra seconds and blocks nobody: a retrying peer is routed back into its own
+      // held session by sessionForAdmitting, and the fleet runs far under maxSessions.
+      if state == .connected { self.releaseSlot(peerID, in: session) }
       switch state {
       case .connected:
         if self.currentRole == "follower" {

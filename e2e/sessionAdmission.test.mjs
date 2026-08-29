@@ -43,10 +43,34 @@ test("the slot is claimed BEFORE the invitation is answered", () => {
   assert.ok(reserveIdx < answerIdx, "the slot is reserved AFTER answering — the race is still open");
 });
 
-test("the reservation is released on every terminal handshake state", () => {
+test("ONLY a completed handshake releases the reservation, and only for its own session", () => {
+  // Releasing on .notConnected as well looked like tidy bookkeeping and was a second ABA door: a
+  // failed handshake is exactly when a stale or duplicate terminal callback is most likely (MPC
+  // delivers them for torn-down sessions, and forceFollowerReconnect and resetTransport rebuild
+  // sessions routinely), so it handed the slot away while a RETRY's handshake was still in flight.
+  // The reservation lapses on its own tokened expiry instead, which nothing outside the class can
+  // trigger early.
   const body = fn("func session(_ session: MCSession, peer peerID: MCPeerID, didChange", "case .connected:");
-  assert.match(body, /if state != \.connecting \{ self\.releaseSlot\(peerID\) \}/,
-    "a completed or failed handshake no longer frees its slot — sessions will look permanently full");
+  assert.match(body, /if state == \.connected \{ self\.releaseSlot\(peerID, in: session\) \}/,
+    "a failed handshake frees the slot again, or the release ignores which session it came from");
+  assert.doesNotMatch(body, /state != \.connecting/, "the release is back on every terminal state");
+
+  const rel = fn("private func releaseSlot", "/// The session to answer");
+  assert.match(rel, /held\.session === session/,
+    "releaseSlot ignores the session, so a callback for a torn-down one frees a live reservation");
+});
+
+test("a peer already connected here is admitted back into THAT session, not a new one", () => {
+  // A follower whose link went half-open on its side re-invites while the director still counts it
+  // as connected. Without this it was handed a different session and became a member of two at
+  // once — burning a session and putting two peers where the topology permits one. The legacy
+  // invite path has always guarded this; the accept path never did.
+  const admit = fn("private func sessionForAdmitting", "private func availableSessionForNewFollower");
+  assert.match(admit, /mcSessions\.first\(where: \{ \$0\.connectedPeers\.contains\(peerID\) \}\)/,
+    "an already-connected peer can still be routed into a second session");
+  // …and it must be checked BEFORE falling through to a fresh session.
+  assert.ok(admit.indexOf("connectedPeers.contains(peerID)") < admit.indexOf("availableSessionForNewFollower()"),
+    "the already-connected check runs after a new session has been chosen");
 });
 
 // ── REGRESSIONS IN THE FIRST DRAFT OF THE FIX ────────────────────────────────────────────────
