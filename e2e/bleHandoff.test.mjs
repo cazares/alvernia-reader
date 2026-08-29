@@ -99,8 +99,14 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
   const handler = slice("self.bleBeacon.onPage = {", "A FOLLOWER MUST NEVER ADVERTISE", MODULE);
   assert.match(handler, /if nonce != self\.bleAppliedNonce \{[\s\S]*?self\.bleAppliedSeq = -1/,
     "the module does not reset its seq on a new advertiser — the exact half-landing this fixes");
-  // Order matters: rebase must happen BEFORE the monotonic guard, or it changes nothing.
-  assert.ok(handler.indexOf("bleAppliedSeq = -1") < handler.indexOf("guard seq > self.bleAppliedSeq"),
+  // Order matters: rebase must happen BEFORE the monotonic guard, or it changes nothing. Presence
+  // of BOTH operands is asserted first: a bare `a < b` on offsets reports -1 for a deleted marker,
+  // and -1 is less than everything, so the check would pass precisely because the code went missing.
+  const rebaseAt = handler.indexOf("bleAppliedSeq = -1");
+  const monotonicAt = handler.indexOf("guard seq > self.bleAppliedSeq");
+  assert.ok(rebaseAt >= 0, "the rebase that clears the seq floor on a new advertiser is gone");
+  assert.ok(monotonicAt >= 0, "the within-session monotonic guard is gone");
+  assert.ok(rebaseAt < monotonicAt,
     "the rebase runs AFTER the monotonic guard, so the guard still rejects the first page");
 });
 
@@ -159,12 +165,33 @@ test("the advertised seq is bounded by page turns, not by wall-clock seconds", (
   // sendPageUpdate runs at 1 Hz from the director heartbeat. Passing ITS counter meant the number
   // in a fixed-size BLE name grew all Mass — ~5400 after 90 minutes and never resetting — in a
   // 31-byte advertisement already carrying a 128-bit service UUID.
+  //
+  // WHAT THE OLD ASSERTION MISSED. It was a bare offset comparison,
+  // `body.indexOf("guard page != lastPublishedPage") < body.indexOf("advertSeq += 1")`. Delete the
+  // early return — the exact regression this test names — and the left indexOf returns -1, and
+  // -1 < 30 is true, so the assertion passed BECAUSE the code it was looking for was gone. Presence
+  // is asserted first now, and the operator with it: an early return that no longer returns, or a
+  // `==` where a `!=` belongs, is the same bug written differently.
   assert.match(BEACON, /private var advertSeq = 0/, "the beacon does not own its seq");
   assert.match(BEACON, /func publish\(page: Int\)/, "publish still takes a caller-supplied seq");
-  const pub = BEACON.slice(BEACON.indexOf("func publish(page: Int)"));
-  const body = pub.slice(0, pub.indexOf("\n  }"));
-  assert.ok(body.indexOf("guard page != lastPublishedPage") < body.indexOf("advertSeq += 1"),
+  const body = slice("func publish(page: Int)", "\n  }");
+  assert.match(body, /guard\s+page\s*!=\s*lastPublishedPage\s+else\s*\{\s*return\s*\}/,
+    "publish() no longer early-returns on an unchanged page — the 1 Hz sendPageUpdate heartbeat " +
+      "now bumps advertSeq and tears down the advertiser once per second, ~5400 times a Mass");
+  const guardAt = body.indexOf("guard page != lastPublishedPage");
+  const bumpAt = body.indexOf("advertSeq += 1");
+  const rememberAt = body.indexOf("lastPublishedPage = page");
+  assert.ok(guardAt >= 0 && bumpAt >= 0 && rememberAt >= 0,
+    `publish() lost a required statement (guard ${guardAt}, bump ${bumpAt}, remember ${rememberAt})`);
+  assert.ok(guardAt < bumpAt,
     "seq increments even when the page has not changed — that is the unbounded growth again");
+  assert.ok(guardAt < rememberAt,
+    "the remembered page is written before the guard reads it, so the guard can never fire");
+  // Nothing may reach the air before that guard, or the teardown/restart storm returns even with
+  // the seq held still. The guard has to be the FIRST executable statement in the function.
+  const preamble = body.slice(body.indexOf("{") + 1, guardAt).replace(/\/\/[^\n]*/g, "").trim();
+  assert.equal(preamble, "",
+    `publish() does work before the unchanged-page guard: ${JSON.stringify(preamble)}`);
   assert.match(MODULE, /publish\(page: self\.currentPageNumber \?\? page\.intValue\)/,
     "the module still passes its own seq");
   assert.doesNotMatch(MODULE, /private var bleSeq/, "the module's per-second counter is back");

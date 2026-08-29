@@ -42,13 +42,80 @@ test("the way in is the pill, not a button buried in the song-jump modal", () =>
     "nothing asks native for the role any more");
 });
 
+// Brace-match a `const NAME = (...) => { ... }` body out of the source. Both endpoints are
+// asserted, so a rename or a deleted declaration fails loudly instead of silently widening the
+// window to EOF the way a missing end-marker does.
+const arrowBody = (src, decl) => {
+  const at = src.indexOf(decl);
+  assert.ok(at >= 0, `could not find the declaration ${decl}`);
+  const open = src.indexOf("{", src.indexOf("=>", at));
+  assert.ok(open > at, `could not find the body of ${decl}`);
+  let depth = 0, end = -1;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") { depth--; if (depth === 0) { end = i; break; } }
+  }
+  assert.ok(end > open, `could not find the closing brace of ${decl}`);
+  return src.slice(open + 1, end);
+};
+
+// Run the REAL renderDirectorModeBadge body against stub DOM/mesh dependencies. Stubs stand in for
+// collaborators only — every branch that decides anything is the shipped source's.
+const renderBadge = new Function(
+  "NATIVE_FILE_MODE", "hasNativeBridge", "state", "directorModeBadge",
+  "syncPillState", "SYNC_PILL", "document",
+  arrowBody(APP, "const renderDirectorModeBadge = () => {"),
+);
+
+const runRenderBadge = ({ nativeFileMode = false, bridge = false, role = "follower", key = "nobody" } = {}) => {
+  const classes = new Set(["is-hidden"]); // hidden markup is the boot state
+  const badge = {
+    classList: {
+      add: (...c) => c.forEach((x) => classes.add(x)),
+      remove: (...c) => c.forEach((x) => classes.delete(x)),
+    },
+    setAttribute() {},
+  };
+  const dataset = {};
+  const doc = { documentElement: { dataset }, getElementById: () => ({ setAttribute() {}, textContent: "" }) };
+  const pill = {
+    directing: { cls: "", title: "d", action: "" },
+    following: { cls: "is-following", title: "f", action: "" },
+    nobody: { cls: "is-nobody", title: "n", action: "" },
+  };
+  renderBadge(nativeFileMode, () => bridge, { nativeSyncRole: role }, badge, () => key, pill, doc);
+  return { classes, dataset };
+};
+
 test("the pill is the only thing that asks for the role, and it is shell-only", () => {
   // One request site. Two would drift, and the second is always the one nobody re-checks.
   assert.equal((APP.match(/type: "request-director"/g) || []).length, 1,
     "more than one place asks for the director role");
-  const render = APP.slice(APP.indexOf("const renderDirectorModeBadge"), APP.indexOf("// ── Sync \"working\""));
-  assert.match(render, /NATIVE_FILE_MODE \|\| hasNativeBridge\(\)/,
+
+  // WHAT THE OLD ASSERTION MISSED. It grepped for the literal `NATIVE_FILE_MODE || hasNativeBridge()`
+  // inside a slice whose END was the decorative `// ── Sync "working"` banner — and that same
+  // expression appears three more times further down app.js. Reword the banner (a behaviour-neutral
+  // edit) and the window ran past it, so `const inShell = true;` — the pill rendering on
+  // signovivo.com, where there is no mesh and no role to take — passed green. This EXECUTES the
+  // shipped renderDirectorModeBadge body instead, so the gate has to actually gate.
+  const web = runRenderBadge({ bridge: false, nativeFileMode: false });
+  assert.equal(web.dataset.shell, "web", "a plain browser is being told it is inside the native shell");
+  assert.ok(web.classes.has("is-hidden"),
     "the pill is not gated to the native shell — signovivo.com has no room to describe");
+  assert.equal(web.dataset.mesh, undefined,
+    "the web path ran on past the shell gate and published mesh state it cannot know");
+
+  // …and both ways into the shell still show it, so the gate cannot be 'fixed' by nailing it shut.
+  for (const shell of [{ bridge: true }, { nativeFileMode: true }]) {
+    const native = runRenderBadge(shell);
+    assert.equal(native.dataset.shell, "native", `the shell is unrecognised for ${JSON.stringify(shell)}`);
+    assert.ok(!native.classes.has("is-hidden"), `the pill is hidden inside the shell for ${JSON.stringify(shell)}`);
+  }
+
+  // The role attribute is set for EVERYONE, shell or not — that is what drives ⟳+♪ vs ♪+⌕, and the
+  // web must default to follower controls from boot.
+  assert.equal(runRenderBadge({ bridge: false, role: "director" }).dataset.role, "director");
+  assert.equal(web.dataset.role, "follower");
 });
 
 test("the web never learns the director code — it asks", () => {

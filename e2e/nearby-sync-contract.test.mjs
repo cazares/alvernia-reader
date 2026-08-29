@@ -17,6 +17,204 @@ const dtsSyncSource = fs.readFileSync(path.join(APP_ROOT, "src", "nearbyDirector
 const swiftSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
 const bridgeSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModuleBridge.m"), "utf8");
 
+// A COMMENT IS NOT CODE, AND THIS FILE USED TO TREAT IT AS BOTH. Round 3 found that the windows
+// below were cut out of the RAW Swift, so a comment could satisfy an assertion or break one on an
+// edit that cannot change a single byte of the compiled binary: `// note: never use try! here`
+// inside parseInboundPayload tripped its own force-try ban, and `// note: not .unreliable — MPC may
+// drop it` inside sendCurrentPageSnapshot's do-block tripped the best-effort ban. In the other
+// direction a cap deleted but left behind in a trailing comment still counted as a cap. So every
+// STRUCTURAL search below runs against `swiftCode`: the same source with comments blanked to spaces,
+// offsets and line breaks preserved, so a slice taken at these offsets still lines up with the file.
+//
+// maskSwift lexes strings so a `//` inside a literal cannot start a fake comment. Where it meets a
+// construct it cannot lex soundly — a `"""` multi-line string, a `#"raw"#` literal, a nested block
+// comment, anything unterminated — it REFUSES by name and line rather than guessing, because a
+// masker that quietly mis-lexes turns every assertion downstream into a confident wrong answer. The
+// thing that would settle any of this properly is a Swift parser (or the compiler); this is a
+// lexer's worth of certainty and it should stop where a lexer's certainty stops.
+function maskSwift(src, { strings = false, label = "DirectorSyncModule.swift" } = {}) {
+  const out = src.split("");
+  const lineAt = (i) => src.slice(0, i).split("\n").length;
+  const blank = (from, to) => {
+    for (let k = from; k < to && k < out.length; k += 1) out[k] = out[k] === "\n" ? "\n" : " ";
+  };
+  for (let j = 0; j < src.length; ) {
+    if (src.startsWith('"""', j)) {
+      assert.fail(`${label}:${lineAt(j)}: a """ multi-line string literal — this file's masker cannot lex one, so it refuses to score the source rather than mis-read it`);
+    }
+    if (src[j] === "#" && src[j + 1] === '"') {
+      assert.fail(`${label}:${lineAt(j)}: a #"raw"# string literal — this file's masker cannot lex one, so it refuses to score the source rather than mis-read it`);
+    }
+    if (src[j] === '"') {
+      let e = j + 1;
+      while (e < src.length && src[e] !== '"' && src[e] !== "\n") e += src[e] === "\\" ? 2 : 1;
+      assert.ok(src[e] === '"', `${label}:${lineAt(j)}: unterminated string literal — refusing to score the source`);
+      if (strings) blank(j + 1, e);
+      j = e + 1;
+      continue;
+    }
+    if (src[j] === "/" && src[j + 1] === "/") {
+      const nl = src.indexOf("\n", j);
+      const e = nl < 0 ? src.length : nl;
+      blank(j, e);
+      j = e;
+      continue;
+    }
+    if (src[j] === "/" && src[j + 1] === "*") {
+      const e = src.indexOf("*/", j + 2);
+      assert.ok(e > 0, `${label}:${lineAt(j)}: unterminated block comment — refusing to score the source`);
+      assert.ok(src.slice(j + 2, e).indexOf("/*") < 0,
+        `${label}:${lineAt(j)}: a NESTED block comment (legal in Swift) — this file's masker cannot lex one, so it refuses to score the source rather than mis-read it`);
+      blank(j, e + 2);
+      j = e + 2;
+      continue;
+    }
+    j += 1;
+  }
+  return out.join("");
+}
+
+// Comments blanked, string literals intact: assertions here legitimately match protocol text like
+// `"type": "hello"`, so only the commentary is removed. Computed on FIRST USE, not at import, so a
+// refusal reddens the handful of tests that actually depend on the masked view instead of taking
+// the whole file — and the other 30-odd assertions keep reporting.
+let swiftCodeCache = null;
+const swiftCodeOf = () => (swiftCodeCache ??= maskSwift(swiftSource));
+
+// Swift cannot be executed here, so several assertions below are source-anchored. That is only
+// honest if the window they read is the ONE function under test — this repo has repeatedly shipped
+// whole-file regexes that stayed green because an identical call in an UNRELATED function satisfied
+// them. These two helpers cut the window on STRUCTURE (a declaration, a `case` label, the member's
+// own closing brace at 2-space indent) and both refuse to return a window unless BOTH endpoints
+// were actually located — a missing end marker must fail loudly, never silently widen to EOF.
+function memberBody(src, declRe, label) {
+  const start = src.search(declRe);
+  assert.ok(start > 0, `${label}: declaration not found — the member this test guards is gone or renamed`);
+  const rel = src.slice(start).indexOf("\n  }");
+  assert.ok(rel > 0, `${label}: could not find the member's closing brace at 2-space indent`);
+  return src.slice(start, start + rel + 4);
+}
+
+function between(src, startRe, endRe, label) {
+  const start = src.search(startRe);
+  assert.ok(start > 0, `${label}: start marker not found`);
+  const rel = src.slice(start + 1).search(endRe);
+  assert.ok(rel > 0, `${label}: end marker not found after the start marker`);
+  return src.slice(start, start + 1 + rel);
+}
+
+// Below, the MCPeerID test needs to read the ARGUMENT of a specific call and the SCOPE that call
+// sits in, rather than counting occurrences across the file. These four helpers do that on
+// structure only — balanced parentheses, the enclosing member declaration, the member's own closing
+// brace — and every one of them fails loudly rather than returning a widened or empty window.
+
+// Text between the parentheses that open at `openIdx`. Swift string interpolation (`\(x)`) nests
+// real parens, so a balanced-depth walk is required; a naive indexOf(")") would truncate.
+function parenArgs(src, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i += 1) {
+    if (src[i] === "(") depth += 1;
+    else if (src[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return src.slice(openIdx + 1, i);
+    }
+  }
+  return null;
+}
+
+// Identifiers that are real CODE in an expression. Plain string-literal text is dropped so a word
+// inside "…" cannot masquerade as a capped local; interpolated segments are kept because they are
+// code.
+function exprIdentifiers(expr) {
+  const code = expr.replace(
+    /"(?:[^"\\]|\\[^(]|\\\([^)]*\))*"/g,
+    (lit) => (lit.match(/\\\([^)]*\)/g) || []).join(" "),
+  );
+  return code.match(/[A-Za-z_]\w*/g) || [];
+}
+
+// End of the Swift statement whose right-hand side starts at `from`. Swift has no statement
+// terminator, so the end is a newline — but only one that is not inside brackets and not followed by
+// a `.method()` continuation, the two ways a binding legitimately spans lines. Leading whitespace is
+// skipped first, so `let x =` followed by a newline continues rather than ending empty.
+function swiftStatementEnd(src, from) {
+  let i = from;
+  while (i < src.length && /\s/.test(src[i])) i += 1;
+  let depth = 0;
+  for (; i < src.length; i += 1) {
+    const c = src[i];
+    if (c === "(" || c === "[" || c === "{") depth += 1;
+    else if (c === ")" || c === "]" || c === "}") {
+      if (depth === 0) return i;
+      depth -= 1;
+    } else if (c === "\n" && depth === 0) {
+      const rest = src.slice(i + 1);
+      const nextIdx = rest.search(/\S/);
+      if (nextIdx < 0 || rest[nextIdx] !== ".") return i;
+    }
+  }
+  return src.length;
+}
+
+// Locals in `body` that were bound to a 50-char-capped value, by whatever name the source chose.
+// Derived from the source, never hard-coded, so renaming the local is behaviour-neutral here.
+//
+// Round 3 broke this helper in BOTH directions with one character class. It read
+// `(?:let|var)\s+(\w+)\s*=\s*[^\n]*\.prefix\(50\)`, and `[^\n]*` is exactly one physical line: it
+// spanned the trailing comment, so `let peerName = rawName // was String(rawName.prefix(50))`
+// registered peerName as capped when the cap had been DELETED — the priming peer's MCPeerID then
+// took an uncapped UIDevice.name and the whole file stayed green. And it stopped at the newline, so
+// wrapping the very same binding across two lines — behaviour-neutral — made the local look
+// uncapped and reddened the test. Both are gone: the body handed in is comment-masked, and the
+// binding is read to the end of its STATEMENT rather than the end of its line.
+function cappedLocals(body) {
+  const bare = maskSwift(body, { strings: true, label: "member body" });
+  const out = new Set();
+  const re = /(?:let|var)\s+(\w+)\s*=/g;
+  for (let m; (m = re.exec(bare)); ) {
+    const stmt = bare.slice(m.index, swiftStatementEnd(bare, m.index + m[0].length));
+    if (/\.prefix\(50\)/.test(stmt)) out.add(m[1]);
+  }
+  return out;
+}
+
+// The body of the member (func/var/init) that lexically contains `idx`.
+function enclosingMemberBody(src, idx, label) {
+  const declRe = /\n  (?:(?:private|public|internal|fileprivate|open|static|override|final|lazy)\s+)*(?:func|var|init|subscript)\b/g;
+  let declIdx = -1;
+  for (let m; (m = declRe.exec(src)) && m.index < idx; ) declIdx = m.index;
+  assert.ok(declIdx > -1, `${label}: could not locate the member that contains this call`);
+  const rel = src.slice(declIdx).indexOf("\n  }");
+  assert.ok(rel > 0, `${label}: could not find that member's closing brace at 2-space indent`);
+  const end = declIdx + rel + 4;
+  assert.ok(idx < end, `${label}: the call sits outside the member body the scan found`);
+  return src.slice(declIdx, end);
+}
+
+// Whether `name` is a member of this type that caps a value to 50 chars AND hands that capped value
+// back to its caller — i.e. whether passing `name` to MCPeerID is safe. Three answers, not two:
+// "capped", "uncapped", and "unknown" for a name this file has no business ruling on (not a member
+// of the type at all — a free function, a type name, a property). A helper that collapses "I cannot
+// tell" into "no" is how a confidently wrong failure gets shipped, so the caller refuses on unknown
+// instead of accusing the source of dropping a cap it may well still have.
+function memberVerdict(src, name) {
+  const decl = new RegExp(
+    `\\n  (?:(?:private|public|internal|fileprivate|open|static|final|lazy)\\s+)*(?:var|func)\\s+${name}\\b`,
+  );
+  const start = src.search(decl);
+  if (start < 0) return "unknown";
+  const rel = src.slice(start).indexOf("\n  }");
+  assert.ok(rel > 0,
+    `${name} is declared as a member but its body has no closing brace at 2-space indent — refusing to rule on whether it caps its name`);
+  const body = src.slice(start, start + rel + 4);
+  const capped = cappedLocals(body);
+  if (capped.size === 0) return "uncapped";
+  const returns = body.match(/\n\s*return\s+[^\n]+/g) || [];
+  return returns.some((r) => [...capped].some((c) => new RegExp(`\\b${c}\\b`).test(r)))
+    ? "capped"
+    : "uncapped";
+}
+
 test("nearby sync page updates include mode and book identity", () => {
   assert.match(jsSyncSource, /sendPageUpdate\(\s*page,\s*totalPages,\s*String\(context\.mode/);
   assert.match(jsSyncSource, /String\(context\.bookId/);
@@ -43,9 +241,30 @@ test("unsupported-platform sync entrypoints reject through promises instead of t
   assert.doesNotMatch(jsSyncSource, /throw new Error\("La sincronización offline solo está disponible en iPad\."\);/);
 });
 
+// A follower that joins mid-Mass has no page until the director tells it one. Two independent
+// paths cover that: the director pushes a snapshot the moment a peer connects, and it answers every
+// follower "hello" with one. They are belt-and-suspenders for each other, so BOTH must be pinned
+// separately — which is exactly what the old assertions failed to do.
 test("happy path: director immediately snapshots on connect and on hello", () => {
-  assert.match(swiftSource, /case \.connected:[\s\S]*currentRole == "director"[\s\S]*sendCurrentPageSnapshot/);
-  assert.match(swiftSource, /if type == "hello"[\s\S]*currentRole == "director"[\s\S]*sendCurrentPageSnapshot/);
+  // What the old assertions missed: `/case \.connected:[\s\S]*director[\s\S]*sendCurrentPageSnapshot/`
+  // spans the whole 2800-line file, so deleting the snapshot from the .connected director branch
+  // was invisible — the third term was still satisfied by the hello handler ~66 lines further
+  // down. The two paths now get two disjoint, structurally-bounded windows, so losing either one
+  // reddens on its own.
+  const connectedArm = between(
+    swiftSource, /\n      case \.connected:/, /\n      case \.connecting:/, "session(_:peer:didChange:) .connected arm");
+  const dirIdx = connectedArm.search(/self\.currentRole == "director"/);
+  assert.ok(dirIdx > -1, "the .connected arm no longer has a director branch");
+  const directorOnConnect = connectedArm.slice(dirIdx);
+  assert.match(directorOnConnect, /self\.sendCurrentPageSnapshot\(to: peerID, via: session\)/,
+    "a peer connecting to the director no longer gets an immediate page snapshot — a late joiner sits on the wrong page until its next hello tick (8s)");
+
+  const helloHandler = between(
+    swiftSource, /if type == "hello" \{/, /\n      if type == "/, "didReceive hello handler");
+  assert.match(helloHandler, /self\.currentRole == "director"/,
+    "the hello handler no longer checks that WE are the director before answering");
+  assert.match(helloHandler, /self\.sendCurrentPageSnapshot\(to: peerID, via: session\)/,
+    "the director no longer answers a follower hello with a snapshot — the follower's own recovery path is dead");
 });
 
 test("happy path: takeover approved/denied messages are handled only by follower", () => {
@@ -100,7 +319,62 @@ test("follower invite ownership lives in reconsiderFollowerTarget", () => {
 
 // Peer display names longer than 63 chars cause an ObjC exception in MCPeerID init.
 test("Swift caps peer display name to 50 chars before creating MCPeerID", () => {
-  assert.match(swiftSource, /prefix\(50\)/);
+  // What the old single-line assertion missed: prefix(50) occurs at TWO sites — the throwaway
+  // permission-priming peer and stablePeerName, which feeds the real archived MCPeerID. A
+  // whole-file /prefix\(50\)/ is satisfied by either, so removing the cap at the site that
+  // actually matters stayed green while a device whose UIDevice.name exceeds 63 chars would throw
+  // the very ObjC exception this test is named after. Now the cap is asserted INSIDE
+  // stablePeerName, and it must be the value the display name is actually built from.
+  const stable = memberBody(swiftCodeOf(), /private var stablePeerName: String \{/, "stablePeerName");
+  const capped = stable.match(/let\s+(\w+)\s*=\s*String\(\s*\w+(?:\.\w+)*\.prefix\(50\)\s*\)/);
+  assert.ok(capped,
+    "stablePeerName no longer caps the device name with prefix(50) — a long UIDevice.name will throw in MCPeerID init");
+  const returned = stable.match(/\n\s*return\s+(.+)/)?.[1] ?? "";
+  assert.ok(returned.length > 0, "stablePeerName has no return statement");
+  assert.ok(returned.includes(capped[1]),
+    `stablePeerName returns ${returned.trim()}, which does not use the capped name \`${capped[1]}\` — the cap is computed and thrown away`);
+
+  // Every MCPeerID the module mints must be fed by a capped name, not just one of them.
+  //
+  // What the previous version of THIS assertion missed: it compared the NUMBER of prefix(50)
+  // occurrences to the NUMBER of MCPeerID(displayName:) sites. An occurrence count is not the
+  // property the message claimed. Two capped locals feeding a single MCPeerID plus one site fed by
+  // a raw UIDevice.name satisfies the equality exactly — and a device whose name exceeds 63 chars
+  // still throws the ObjC exception this test is named after. The property is now checked per SITE:
+  // the expression each MCPeerID is handed must cap inline, or name a local capped in the same
+  // member, or name a member (stablePeerName, above) that caps and returns the capped value.
+  const siteRe = /MCPeerID\(\s*displayName:/g;
+  const sites = [];
+  for (let m; (m = siteRe.exec(swiftCodeOf())); ) sites.push(m.index);
+  assert.ok(sites.length > 0, "no MCPeerID is created anywhere — the mesh cannot start");
+
+  for (const siteIdx of sites) {
+    const args = parenArgs(swiftCodeOf(), swiftCodeOf().indexOf("(", siteIdx));
+    assert.ok(args !== null, "unbalanced MCPeerID(displayName:) call — its argument cannot be read");
+    const expr = args.replace(/^\s*displayName:\s*/, "").trim();
+    const where = `MCPeerID(displayName: ${expr})`;
+    if (/\.prefix\(50\)/.test(expr)) continue; // capped inline, at the site itself
+    const scope = enclosingMemberBody(swiftCodeOf(), siteIdx, where);
+    const locals = cappedLocals(scope);
+    // Score every identifier the expression is built from. "unknown" is its own answer: an
+    // identifier that is neither a local of this member nor a member of this type is something this
+    // file cannot follow, and reporting a missing cap on that basis would be a guess dressed as a
+    // finding. Refuse instead, by name — still red, but red for the true reason.
+    const idents = exprIdentifiers(expr);
+    const declaredHere = (id) => new RegExp(`(?:let|var)\\s+${id}\\b`).test(scope);
+    const verdicts = idents.map((id) =>
+      locals.has(id) ? "capped"
+        : declaredHere(id) ? "uncapped"       // a local of this member, and cappedLocals did not find a cap on it
+          : memberVerdict(swiftCodeOf(), id));
+    if (verdicts.includes("capped")) continue;
+    const unknown = idents.filter((id, i) => verdicts[i] === "unknown");
+    assert.ok(unknown.length === 0,
+      `${where}: this file cannot decide whether ${unknown.join(", ")} carries a 50-char cap — ` +
+      "neither a capped local of the enclosing member nor a member of this type. Refusing to guess; " +
+      "what would settle it is compiling the module and reading the display name that actually reaches MCPeerID init.");
+    assert.fail(
+      `${where} is handed a name that nothing caps to 50 chars — on a device whose UIDevice.name exceeds 63 chars this throws the ObjC exception in MCPeerID init`);
+  }
 });
 
 // sendPageUpdate must store the new page state BEFORE the early-return guard that checks
@@ -237,10 +511,37 @@ test("edge case: protocolVersion mismatch is ignored (v != 0 and != protocolVers
   assert.match(swiftSource, /if v != 0, v != Self\.protocolVersion \{ return \}/);
 });
 
+// parseInboundPayload is the ONLY thing standing between the app and an arbitrary byte string
+// handed to it by any device in Bluetooth/AWDL range. A malformed or absurdly large packet must
+// return nil, not trap.
 test("edge case: parseInboundPayload gracefully rejects invalid JSON", () => {
-  assert.match(swiftSource, /private func parseInboundPayload/);
-  assert.match(swiftSource, /try\?\s*JSONSerialization\.jsonObject/);
-  assert.match(swiftSource, /return nil/);
+  // The old assertions were three whole-file scans, and the source has more than one of each:
+  // `try? JSONSerialization.jsonObject` also appears in an unrelated decoder further down, and
+  // `return nil` appears in availableSessionForNewFollower 30 lines EARLIER. Replacing this entire
+  // body with `try!` / `as!` — which turns any stranger's malformed packet into a crash and drops
+  // the size guard — left the test green. The window is now the function's own body.
+  //
+  // Round 3: the window was cut out of the raw source, so writing `// note: never use try! here`
+  // inside this function tripped the force-try ban below — a comment failing a test about compiled
+  // behaviour. The window is comment-masked now, which also stops a commented-out `return nil` from
+  // padding the rejection-path count.
+  const body = memberBody(swiftCodeOf(), /private func parseInboundPayload\(/, "parseInboundPayload");
+
+  assert.match(body, /data\.count\s*<=\s*Self\.maxInboundPayloadBytes/,
+    "the payload size guard is gone — a pathological packet is handed straight to JSONSerialization");
+  assert.match(body, /try\?\s*JSONSerialization\.jsonObject/,
+    "the JSON parse is no longer an optional try — malformed JSON now throws instead of returning nil");
+  assert.match(body, /as\?\s*\[String\s*:\s*Any\]/,
+    "the dictionary cast is no longer conditional — a JSON array or scalar would trap");
+  assert.doesNotMatch(body, /try\s*!/,
+    "force-try in parseInboundPayload: any peer in range can crash the app with one bad packet");
+  assert.doesNotMatch(body, /as\s*!/,
+    "force-cast in parseInboundPayload: a well-formed JSON array from a peer would crash the app");
+
+  // Both rejection paths (oversized, unparseable) must actually bail rather than fall through.
+  const bails = (body.match(/return nil/g) || []).length;
+  assert.ok(bails >= 2,
+    `parseInboundPayload has only ${bails} nil-returning rejection path(s) — the size guard and the parse failure each need one`);
 });
 
 test("edge case: followerHello is throttled when pages are being received", () => {
@@ -278,9 +579,34 @@ test("edge case: requestCurrentSnapshot only sends when follower is connected to
 });
 
 test("edge case: director sendCurrentPageSnapshot uses reliable delivery", () => {
-  assert.match(swiftSource, /private func sendCurrentPageSnapshot/);
-  assert.match(swiftSource, /with: \.reliable/);
-  assert.match(swiftSource, /with: \.unreliable/);
+  // The catch-up snapshot is a ONE-SHOT: unlike the page heartbeat, nothing resends it on its own.
+  // Sent best-effort it can simply vanish, and the late-joining iPad stays on the wrong page.
+  //
+  // What the old assertions missed: `with: .reliable` appears at six sites and `with: .unreliable`
+  // at two, all matched against the whole file, so flipping the ONE send inside this function to
+  // .unreliable was invisible. The window is now the function body, and the two ordering modes are
+  // checked in their own halves of it — reliable on the primary send, unreliable only as the catch
+  // fallback — so a swap in either direction reddens.
+  //
+  // Round 3: the do/catch split was computed over raw source, so a comment inside the do-block that
+  // merely MENTIONED the other ordering mode — `// note: not .unreliable — MPC may drop it`, the
+  // most natural thing a maintainer would write here — landed inside the primary half and failed the
+  // best-effort ban. Comments are masked out before the split now.
+  const body = memberBody(swiftCodeOf(), /private func sendCurrentPageSnapshot\(/, "sendCurrentPageSnapshot");
+
+  const doIdx = body.search(/\bdo\s*\{/);
+  const catchIdx = body.search(/\}\s*catch\b/);
+  assert.ok(doIdx > -1, "the primary snapshot send is no longer wrapped in do/catch");
+  assert.ok(catchIdx > doIdx, "the catch fallback after the primary send is gone");
+  const primary = body.slice(doIdx, catchIdx);
+  const fallback = body.slice(catchIdx);
+
+  assert.match(primary, /session\.send\([^)]*with:\s*\.reliable\)/,
+    "the primary catch-up snapshot is no longer sent .reliable — MPC may drop it and leave a late-joining follower on the wrong page");
+  assert.doesNotMatch(primary, /\.unreliable/,
+    "the primary send has been downgraded to best-effort delivery");
+  assert.match(fallback, /session\.send\([^)]*with:\s*\.unreliable\)/,
+    "the .unreliable catch fallback is gone — a throwing reliable send now drops the snapshot entirely");
 });
 
 // ── The peer bundle-push rail is RETIRED (plan §5.12 / Q4, red team A5) ──────

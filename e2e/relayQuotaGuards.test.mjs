@@ -191,6 +191,65 @@ test("a never-saved sink resolves to the default, not the string \"null\"", () =
     "String(saved) is back — on the null branch that produces the literal text \"null\"");
 });
 
+/**
+ * Index of the closing bracket that balances the one at openIdx, or -1 if they never balance. Lets
+ * an assertion lift a whole `if (...)` condition, or a whole `{ ... }` consequent, out of the source
+ * by STRUCTURE — surviving reformatting and an added clause — instead of quoting today's text or
+ * slicing a fixed number of characters.
+ */
+const matchBracket = (src, openIdx, open, close) => {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i += 1) {
+    if (src[i] === open) depth += 1;
+    else if (src[i] === close) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+};
+const matchParen = (src, openIdx) => matchBracket(src, openIdx, "(", ")");
+const matchBrace = (src, openIdx) => matchBracket(src, openIdx, "{", "}");
+
+/**
+ * The same source with every comment and the inside of every string literal blanked out, offsets
+ * preserved. Structural searches run against this, so a brace inside a string or the word `else`
+ * inside a comment can neither hide a branch nor invent one, while a slice taken at these offsets
+ * still reads the real text out of the original.
+ */
+const maskOut = (src) => {
+  const out = src.split("");
+  const blank = (from, to) => { for (let k = from; k < to && k < out.length; k += 1) out[k] = out[k] === "\n" ? "\n" : " "; };
+  for (let j = 0; j < src.length; ) {
+    const c = src[j];
+    if (c === '"' || c === "'" || c === "`") {
+      let e = j + 1;
+      while (e < src.length && src[e] !== c) e += src[e] === "\\" ? 2 : 1;
+      blank(j + 1, e);
+      j = e + 1;
+      continue;
+    }
+    if (c === "/" && src[j + 1] === "/") { const nl = src.indexOf("\n", j); const e = nl < 0 ? src.length : nl; blank(j, e); j = e; continue; }
+    if (c === "/" && src[j + 1] === "*") { const e = src.indexOf("*/", j); if (e < 0) throw new Error("unterminated comment"); blank(j, e + 2); j = e + 2; continue; }
+    j += 1;
+  }
+  return out.join("");
+};
+
+/**
+ * becomeDirector's body, bounded by DECLARATIONS on both ends — the next `const … = useCallback`
+ * after it. Both endpoints are asserted, because a slice whose end marker has been renamed returns
+ * -1 and quietly becomes the whole rest of the file, at which point every `indexOf` ordering check
+ * in here starts measuring some other function.
+ */
+const becomeDirectorBody = () => {
+  const start = NATIVE.indexOf("const becomeDirector = useCallback");
+  assert.ok(start > 0, "becomeDirector is gone");
+  const end = NATIVE.indexOf("const performSoftReset = useCallback", start);
+  assert.ok(end > start, "becomeDirector is no longer followed by performSoftReset — re-anchor this slice");
+  return NATIVE.slice(start, end);
+};
+
 test("the director's first broadcast uses the WEB's true page, not a lagging native mirror", () => {
   // THE RACE THIS CLOSES, confirmed on hardware 2026-08-18 across two separate test runs, each
   // showing a DIFFERENT wrong page (song 2, then page 1) before self-correcting to the director's
@@ -226,8 +285,10 @@ test("the director's first broadcast uses the WEB's true page, not a lagging nat
   // 4. becomeDirector corrects the mirror BEFORE anything downstream can read it — every broadcast
   //    path (no-mesh transmitter, mesh, both heartbeats) reads currentPageRef.current rather than
   //    asking the web again, so the fix has to land here, once, ahead of the first read.
-  const fn = NATIVE.slice(NATIVE.indexOf("const becomeDirector = useCallback"));
-  const body = fn.slice(0, fn.indexOf("const becomeFollower"));
+  //    (The old bound here was `const becomeFollower`, which is declared ABOVE becomeDirector and so
+  //     never appears again — indexOf returned -1 and the "body" was the whole rest of the file
+  //     minus one character. Bounded on the next declaration now, with both ends asserted.)
+  const body = becomeDirectorBody();
   const fixIdx = body.indexOf("currentPageRef.current = knownCurrentPage");
   assert.ok(fixIdx > 0, "becomeDirector no longer corrects the mirror from the known page");
   const firstBroadcastIdx = body.indexOf("broadcastPage(currentPageRef.current");
@@ -236,13 +297,133 @@ test("the director's first broadcast uses the WEB's true page, not a lagging nat
 });
 
 test("a stale mirror is only ever a fallback, never silently trusted over a fresh value", () => {
-  // Model of the fix, executed rather than grepped: with a known-fresh page supplied, the stale
-  // mirror must never win. Without one (an older web bundle, or no bridge payload), the mirror is
-  // still the correct fallback — this must not regress into REQUIRING a fresh value to broadcast at
-  // all, which would break becomeDirector for any caller that cannot supply one.
-  const applyKnownPage = (mirror, known) => (typeof known === "number" && known > 0 ? known : mirror);
-  assert.equal(applyKnownPage(2, 372), 372, "a fresh known page did not override the stale mirror");
-  assert.equal(applyKnownPage(2, undefined), 2, "no known page — the mirror fallback broke");
-  assert.equal(applyKnownPage(2, 0), 2, "a page of 0 was trusted — that is not a real page");
-  assert.equal(applyKnownPage(2, -5), 2, "a negative page was trusted");
+  // With a known-fresh page supplied, the stale mirror must never win. Without one (an older web
+  // bundle, or no bridge payload), the mirror is still the correct fallback — this must not regress
+  // into REQUIRING a fresh value to broadcast at all, which would break becomeDirector for any
+  // caller that cannot supply one.
+  //
+  // WHAT THE OLD ASSERTION MISSED. It called `applyKnownPage`, a four-line model of the guard
+  // written in this file, and imported nothing. The truth table it checked was the truth table of
+  // the TEST, so inverting the real guard in becomeDirector to `knownCurrentPage < 0` — which ships
+  // the lagging mirror on the director's very first broadcast, the whole outage — left all four
+  // assertions green. The guard is now LIFTED OUT OF PdfReaderApp.tsx and executed: the same table,
+  // run against the statement the app actually ships.
+  //
+  // AND WHAT THE REWRITE ITSELF MISSED, twice. First, its "no else branch" check scanned
+  // body.slice(closeIdx, assignIdx) — the text between the condition's `)` and the assignment inside
+  // the consequent, which in `if (…) { assign; } else { … }` is always just " { ". The else it
+  // claimed to catch lies AFTER the assignment, so the assertion was structurally incapable of
+  // firing on the one regression it named. The whole if-statement is bounded by brace matching now,
+  // and the check is on what FOLLOWS the consequent's closing brace. Second, the rewrite dropped the
+  // old model's `applyKnownPage(2, undefined) === 2` case, the only thing that asserted the fallback
+  // path is a NO-OP; testing the condition alone cannot see a branch that rewrites the mirror. So
+  // the table below asserts the value the mirror is left holding, not merely which inputs pass.
+  const body = becomeDirectorBody();
+  const bare = maskOut(body);
+  const assignIdx = bare.indexOf("currentPageRef.current = knownCurrentPage");
+  assert.ok(assignIdx > 0, "becomeDirector no longer corrects the mirror from the known page at all");
+  const ifIdx = bare.lastIndexOf("if (", assignIdx);
+  assert.ok(ifIdx >= 0, "the mirror correction is not guarded — a bogus page would be broadcast as-is");
+  const openIdx = bare.indexOf("(", ifIdx);
+  const closeIdx = matchParen(bare, openIdx);
+  assert.ok(closeIdx > openIdx, "the freshness guard's condition never closes its parentheses");
+  assert.ok(closeIdx < assignIdx, "the correction sits outside the guard that is supposed to gate it");
+  const cond = body.slice(openIdx + 1, closeIdx);
+  assert.match(cond, /knownCurrentPage/,
+    `the freshness guard no longer tests the page it was handed: ${cond}`);
+
+  // The consequent, bounded by STRUCTURE at both ends: from the first thing after the condition to
+  // the brace (or the semicolon, if someone drops the braces) that closes it. Both endpoints are
+  // asserted, so a slice that failed to find its end can never silently become the rest of the
+  // function.
+  const bodyStart = closeIdx + 1 + bare.slice(closeIdx + 1).search(/\S/);
+  assert.ok(bodyStart > closeIdx, "the freshness guard has no consequent at all");
+  let consequentEnd;
+  if (bare[bodyStart] === "{") {
+    const closeBrace = matchBrace(bare, bodyStart);
+    assert.ok(closeBrace > bodyStart, "the freshness guard's consequent block never closes");
+    consequentEnd = closeBrace + 1;
+  } else {
+    const semi = bare.indexOf(";", bodyStart);
+    assert.ok(semi > bodyStart, "the freshness guard's brace-less consequent never ends");
+    consequentEnd = semi + 1;
+  }
+  assert.ok(consequentEnd > assignIdx, "the mirror correction is not inside the guard's consequent");
+  assert.doesNotMatch(bare.slice(consequentEnd), /^\s*else\b/,
+    "an else branch now runs when no fresh page was supplied — the mirror fallback must be a no-op, " +
+    "because that is the branch every caller that cannot supply a fresh page still takes");
+
+  // AND WHAT ROUND 3 FOUND, third time round. Executing a slice of TSX is only sound if the
+  // environment tolerates everything the real function may call. It did not: the statement ran with
+  // exactly two names in scope, so adding one ordinary line inside the consequent —
+  // `breadcrumb("took web page");`, a dbgLog, a setState — threw ReferenceError, and the catch below
+  // turned that into "the mirror correction no longer runs", a confident and wrong accusation
+  // against an edit that cannot change the property at all. Two changes fix it, in opposite
+  // directions:
+  //
+  // FIRST, the CONDITION must be scoreable from the page alone, or this file refuses. A truth table
+  // is only worth reading if the thing under test is the guard and not a stub: if the condition
+  // starts consulting a name this file cannot supply (`isFreshPage(...)`, a ref, a feature flag),
+  // a no-op stand-in would make it evaluate falsy and the table would "catch" a regression that
+  // isn't there. Refuse by name instead. What would actually answer it is rendering becomeDirector
+  // in a real React runtime with the real surrounding state, which no source-reading test can do.
+  const condIdents = [
+    ...new Set(
+      maskOut(cond).replace(/\.\s*[A-Za-z_$][\w$]*/g, " ").match(/[A-Za-z_$][\w$]*/g) || [],
+    ),
+  ].filter((id) => !["typeof", "true", "false", "null", "undefined", "NaN", "Infinity",
+    "in", "instanceof", "void"].includes(id));
+  const SCOREABLE = ["knownCurrentPage", "Number", "Math", "String", "Boolean",
+    "isFinite", "isNaN", "parseInt", "parseFloat"];
+  const unscoreable = condIdents.filter((id) => !SCOREABLE.includes(id));
+  assert.deepEqual(unscoreable, [],
+    `the freshness guard now consults ${unscoreable.join(", ")}, which this file cannot supply: ` +
+    `\`${cond.trim()}\`. Refusing to score a truth table against a stubbed condition — what would ` +
+    "settle it is rendering becomeDirector in a real React runtime with the real surrounding state.");
+
+  // SECOND, the CONSEQUENT may contain anything, so the environment tolerates anything. Unknown
+  // names resolve through a proxy: real globals stay real (`Number.isFinite` must work), the two
+  // modelled bindings stay modelled, and everything else becomes a no-op function — so logging,
+  // breadcrumbs and setState inside the branch are harmless, exactly as they are to the property.
+  // A no-op that was supposed to compute the page still shows up: the mirror ends holding undefined
+  // and the table below says so.
+  const stmt = body.slice(ifIdx, consequentEnd);
+  const noop = () => {};
+  const stubbed = new Set();
+  const afterGuard = (knownCurrentPage) => {
+    const currentPageRef = { current: 2 };
+    const modelled = { currentPageRef, knownCurrentPage };
+    const env = new Proxy(modelled, {
+      has: (_t, k) => k !== Symbol.unscopables,
+      get: (t, k) => {
+        if (k === Symbol.unscopables) return undefined;
+        if (k in t) return t[k];
+        if (typeof k === "string" && k in globalThis) return globalThis[k];
+        stubbed.add(String(k));
+        return noop;
+      },
+      set: (t, k, v) => { t[k] = v; return true; },
+    });
+    try {
+      new Function("__env", `with (__env) { ${stmt} }`)(env);
+    } catch (e) {
+      assert.fail(`the lifted freshness guard will not run at all (${e.message}): ${stmt}`);
+    }
+    return currentPageRef.current;
+  };
+
+  // Every name the branch used that this file stubbed out. Named in each failure below, because a
+  // wrong number here is far likelier to be a stub that should have computed something than a
+  // genuine inversion of the guard, and the reader should not have to guess which.
+  const stubs = () => (stubbed.size ? ` [names stubbed to no-ops while running it: ${[...stubbed].join(", ")}]` : "");
+
+  assert.equal(afterGuard(372), 372, "a fresh known page did not override the stale mirror — the lagging page ships" + stubs());
+  assert.equal(afterGuard(1), 1, "page 1 is a real page (the cover) and must be able to override the mirror" + stubs());
+  assert.equal(afterGuard(undefined), 2,
+    "no known page, and the mirror did not survive — the fallback must be a NO-OP, or becomeDirector " +
+    "breaks for every caller (an older web bundle, any path with no bridge payload) that has none to give" + stubs());
+  assert.equal(afterGuard(0), 2, "a page of 0 was trusted — that is not a real page" + stubs());
+  assert.equal(afterGuard(-5), 2, "a negative page was trusted" + stubs());
+  assert.equal(afterGuard(NaN), 2, "NaN was trusted as a page" + stubs());
+  assert.equal(afterGuard("372"), 2, "a string off the bridge payload was trusted without a type check" + stubs());
 });

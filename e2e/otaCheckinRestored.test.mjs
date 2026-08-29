@@ -12,6 +12,24 @@ const WORKER = fs.readFileSync("sync-worker/src/index.ts", "utf8");
 // canApplyNow's safety gate depends on. Caught before merge, not after — see the git history around
 // 96995e1 for the original mechanism this restores, narrower.
 
+// Cut out the `{ … }` block that follows a marker, bounded by its MATCHING brace rather than by a
+// character count or a comment banner. Both endpoints are asserted: a marker that moved, or a block
+// that lost its brace, fails by name here instead of silently returning a window that runs to EOF
+// (or an empty one that every doesNotMatch trivially passes).
+const blockAfter = (src, marker, what) => {
+  const at = src.indexOf(marker);
+  assert.ok(at >= 0, `could not find ${what}`);
+  const open = src.indexOf("{", at);
+  assert.ok(open > at, `${what} has no block body`);
+  let depth = 0, end = -1;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") { depth--; if (depth === 0) { end = i; break; } }
+  }
+  assert.ok(end > open, `could not find the closing brace of ${what}`);
+  return src.slice(open, end + 1);
+};
+
 test("the worker has its OWN narrow OTA route, never touching the deleted fleet store", () => {
   assert.match(WORKER, /if \(url\.pathname === "\/ota\/checkin"\)/, "no OTA route exists");
   const route = WORKER.slice(WORKER.indexOf('if (url.pathname === "/ota/checkin")'));
@@ -124,16 +142,30 @@ test("the modal is gated on mesh-idle — never blocks a director's screen mid-M
   const start = NATIVE.indexOf("const onCheckinResponse = useCallback");
   const end = NATIVE.indexOf("onCheckinResponseRef.current = onCheckinResponse;");
   const body = NATIVE.slice(start, end);
-  const shellTooOldIdx = body.indexOf('rec.error === "shell-too-old"');
-  const modalSection = body.slice(shellTooOldIdx, shellTooOldIdx + 1200);
-  assert.match(modalSection, /meshPeerCountRef\.current === 0/,
+  // WHAT THE OLD ASSERTION MISSED. It cut a 1200-CHARACTER window off the shell-too-old branch and
+  // then compared string offsets — "the guard appears later than the gate condition". Later is not
+  // inside. The measured mutation (hoisting the one-shot assignment out past the gate block's
+  // closing brace, still inside the shell-too-old branch) only reddened it by accident: the ~600-char
+  // Alert.alert literal shoved the assignment past 1200 chars so indexOf returned -1. A shorter
+  // Alert body, or a move of a few lines, escaped it entirely — and a deleted operand makes -1 <
+  // anything true, so the check could pass BECAUSE the code went missing. Now the gate block is
+  // brace-matched and containment is asserted directly, in both directions.
+  const branch = blockAfter(body, 'if (rec.error === "shell-too-old"', "the shell-too-old branch");
+  const gate = blockAfter(branch, "if (meshPeerCountRef.current === 0)",
+    "the mesh-idle gate inside the shell-too-old branch");
+  assert.match(gate, /Alert\.alert\(/,
     "the modal is not gated on mesh being idle — it could interrupt an active Mass/rehearsal");
+
   // The one-shot guard must be set ONLY inside the mesh-idle branch, so a busy check-in retries
   // the modal on the next one instead of permanently suppressing it.
-  const idleGateIdx = modalSection.indexOf("meshPeerCountRef.current === 0");
-  const oneShotIdx = modalSection.indexOf("didShellTooOldNoticeRef.current = true");
-  assert.ok(idleGateIdx > 0 && oneShotIdx > idleGateIdx,
+  assert.match(gate, /didShellTooOldNoticeRef\.current = true/,
+    "the one-shot guard is not set inside the mesh-idle branch");
+  const outsideGate = branch.replace(gate, "");
+  assert.doesNotMatch(outsideGate, /didShellTooOldNoticeRef\.current = true/,
     "the one-shot guard is set outside the mesh-idle branch — a busy device would never get the modal");
+  // …and the modal itself must not have escaped the gate either.
+  assert.doesNotMatch(outsideGate, /Alert\.alert\(/,
+    "an Alert fires outside the mesh-idle gate — it would blank a director's screen mid-Mass");
 });
 
 test("native build freshness: client reports its own build, server confirms only when current", () => {

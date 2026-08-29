@@ -1,0 +1,327 @@
+#!/usr/bin/env node
+/**
+ * Replays the 19 regressions that were PROVEN to slip past this repo's tests, and requires each one
+ * to redden the test that names it.
+ *
+ * WHAT HAPPENED. On 2026-08-29 every source-text assertion in e2e/ that looked decorative was
+ * checked by measurement rather than by argument: apply a real regression to the real source, re-run
+ * the named test, record whether it goes red. Nineteen stayed GREEN. Among them:
+ *
+ *   • the publish rate limit — the ONLY abuse control on an open, unauthenticated endpoint — deleted
+ *   • the four-way director predicate flipped from `||` to `&&`, which makes a follower hang up on
+ *     its own director (this was the round-5 fix of the previous campaign)
+ *   • parseInboundPayload rewritten to force-unwrap, so any peer in range crashes the app with one
+ *     malformed packet
+ *   • a late joiner's catch-up snapshot downgraded from .reliable to .unreliable
+ *   • the songbook index truncated from 317 entries to 10, and separately every song remapped to
+ *     page 1
+ *   • clampPage's upper bound removed, so a song jump past the end sticks on a 404
+ *   • assets/songbook.pdf truncated to zero bytes, with app.json pointing at a renamed icon
+ *   • the two director fabs overlapping by 2rem on the iPad
+ *
+ * Each was invisible for the same reason: an assertion looked for a STRING, and the string still
+ * existed somewhere else in the file. This script is the standing proof that the repairs work, and
+ * the thing that will notice if a future edit quietly undoes one.
+ *
+ * SAME CONTRACT as its siblings (verify-smoke-guards, verify-sw-page-cache-guards,
+ * verify-director-rescue-guards): mutate a COPY, rerun the matching test, require RED. A SKIP is a
+ * FAILURE — it means the mutation's pattern no longer matches the source, so that mutation has
+ * silently stopped testing anything, and a silent stop is indistinguishable from coverage.
+ *
+ * Scoped with --test-name-pattern so each mutation must redden THE NAMED TEST, not merely something
+ * in the same file. A file-level pass would let an unrelated sibling assertion take the credit.
+ *
+ * Usage: node scripts/verify-behavioural-guards.mjs [repoRoot]
+ * Exits non-zero if any mutation is MISSED, SKIPPED, or names a test that does not exist.
+ *
+ * TO CHECK THAT THIS SCRIPT ITSELF STILL HAS TEETH — worth doing after any edit to it, because a
+ * broken guard and a working guard produce identical output on a healthy tree:
+ *
+ *   cp scripts/verify-behavioural-guards.mjs /tmp/drift.mjs
+ *   # in /tmp/drift.mjs, append " BUT RENAMED" to any one of the testName strings below
+ *   node /tmp/drift.mjs "$PWD"
+ *
+ * It must refuse with "NAME MATCHES NOTHING" and exit non-zero. If it instead reports 19 CAUGHT,
+ * the ran-detection in runNamed() is broken and every number this script prints is meaningless.
+ */
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const REPO = path.resolve(process.argv[2] || process.cwd());
+
+/** Files a mutation may touch. Copied once, restored between mutations from an in-memory pristine. */
+const FILES = [
+  "PdfReaderApp.tsx",
+  "app.json",
+  "ios/SignoVivo/BlePageBeacon.swift",
+  "ios/SignoVivo/DirectorSyncModule.swift",
+  "scripts/release.sh",
+  "src/alverniaManual2SongIndex.js",
+  "sync-worker/src/index.ts",
+  "web/src/app.js",
+  "web/src/styles.css",
+];
+
+const sub = (a, b) => (s) => s.replace(a, b);
+
+// Each entry: [description, file, mutate, testFile, testName]
+// `testName` is matched with --test-name-pattern, so the NAMED test must be the one that fails.
+const MUTATIONS = [
+  ["the publish rate limit — the only abuse control on an open endpoint — is deleted",
+   "sync-worker/src/index.ts",
+   sub("    if (this.rateLimited(ip, 15, 2)) {", "    if (false) {"),
+   "e2e/relayPublishGate.test.mjs", "publish is still rate limited"],
+
+  ["the four-way director predicate becomes a conjunction — a follower hangs up on its own director",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   (s) => {
+     const at = s.indexOf("let isDirector = self.pendingInvitePeer == peerID");
+     if (at < 0) return s;
+     const end = s.indexOf('== "director"', at);
+     if (end < 0) return s;
+     const block = s.slice(at, end + '== "director"'.length);
+     return s.slice(0, at) + block.replace(/\|\|/g, "&&") + s.slice(at + block.length);
+   },
+   "e2e/sessionAdmission.test.mjs", "both director predicates stay in agreement"],
+
+  ["parseInboundPayload force-unwraps — one malformed packet from any peer crashes the app",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub(`    guard data.count > 0, data.count <= Self.maxInboundPayloadBytes else { return nil }
+    guard let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
+    return obj as? [String: Any]`,
+       `    let obj = try! JSONSerialization.jsonObject(with: data)
+    return (obj as! [String: Any])`),
+   "e2e/nearby-sync-contract.test.mjs", "parseInboundPayload gracefully rejects invalid JSON"],
+
+  ["a peer connecting to the director no longer gets an immediate page snapshot",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub(`          self.sendDirectorAnnounce(to: peerID)
+          self.sendCurrentPageSnapshot(to: peerID, via: session)`,
+       `          self.sendDirectorAnnounce(to: peerID)`),
+   "e2e/nearby-sync-contract.test.mjs", "director immediately snapshots on connect and on hello"],
+
+  ["the catch-up snapshot for a late joiner becomes best-effort and can be dropped",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub(`    do {
+      try session.send(data, toPeers: [peerID], with: .reliable)`,
+       `    do {
+      try session.send(data, toPeers: [peerID], with: .unreliable)`),
+   "e2e/nearby-sync-contract.test.mjs", "sendCurrentPageSnapshot uses reliable delivery"],
+
+  ["the MCPeerID display-name cap is removed at the site that feeds the real peer identity",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("    let peerName = String(rawName.prefix(50))", "    let peerName = rawName"),
+   "e2e/nearby-sync-contract.test.mjs", "caps peer display name to 50 chars"],
+
+  ["invalidatePendingSettle becomes a no-op — the retry ladder sawtooths and never climbs",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("    if isAdvertiser { advertiserAttemptToken &+= 1 } else { browserAttemptToken &+= 1 }",
+       "    _ = isAdvertiser"),
+   "e2e/transportBackoff.test.mjs", "a failed attempt cancels the settle it scheduled"],
+
+  ["a mesh-page precondition returns to the BLE path — the fallback dies exactly when the mesh breaks",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("      guard seq > self.bleAppliedSeq else { return }",
+       "      guard self.lastKnownTotalPages != 0 else { return }\n      guard seq > self.bleAppliedSeq else { return }"),
+   "e2e/dumbFollowerResync.test.mjs", "BLE renders standalone again"],
+
+  ["the BLE unchanged-page early return is deleted — advertSeq climbs ~5,400 times a Mass",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("    guard page != lastPublishedPage else { return }\n", ""),
+   "e2e/bleHandoff.test.mjs", "advertised seq is bounded by page turns"],
+
+  ["clampPage loses its upper bound — a song jump past the end sticks on a 404",
+   "web/src/app.js",
+   sub("  return Math.max(1, Math.min(n, total));", "  return Math.max(1, n);"),
+   "e2e/native-entrypoint.test.mjs", "song index resolves correctly"],
+
+  ["renderPage consults the pacing rule and ignores it — the 1 Hz retry storm returns",
+   "web/src/app.js",
+   sub("  if (!userInitiated && svShouldPaceRender(state.lastRenderFailure, nextPage, Date.now())) return;",
+       "  if (!userInitiated && svShouldPaceRender(state.lastRenderFailure, nextPage, Date.now())) { /* ignored */ }"),
+   "e2e/renderRetryStorm.test.mjs", "actually CALLS the shared rule inside renderPage"],
+
+  ["the director pill ships to the public web, where there is no mesh and no role to take",
+   "web/src/app.js",
+   sub("  const inShell = NATIVE_FILE_MODE || hasNativeBridge();", "  const inShell = true;"),
+   "e2e/directorButton.test.mjs", "the pill is the only thing that asks for the role"],
+
+  ["the two director fabs overlap by 2rem on the iPad",
+   "web/src/styles.css",
+   sub("  --fab-slot2: calc(var(--fab-size) + var(--fab-gap));", "  --fab-slot2: calc(var(--fab-size) - 2rem);"),
+   "e2e/fabLayout.test.mjs", "never overlap"],
+
+  ["the songbook index is truncated — 300+ songs no longer resolve",
+   "src/alverniaManual2SongIndex.js",
+   (s) => {
+     const open = s.indexOf("[");
+     const close = s.lastIndexOf("]");
+     if (open < 0 || close < open) return s;
+     const pairs = [...s.slice(open, close).matchAll(/\[\s*\d+\s*,\s*\d+\s*\]/g)].map((m) => m[0]);
+     if (pairs.length < 20) return s;
+     return s.slice(0, open + 1) + "\n  " + pairs.slice(0, 10).join(", ") + ",\n" + s.slice(close);
+   },
+   "e2e/offline-books-integrity.test.mjs", "canonical standard song index"],
+
+  ["every song in the index is remapped to page 1",
+   "src/alverniaManual2SongIndex.js",
+   (s) => s.replace(/\[\s*(\d+)\s*,\s*(\d+)\s*\]/g, (m, song) => `[${song}, 1]`),
+   "e2e/offline-books-integrity.test.mjs", "canonical standard song index"],
+
+  ["app config points its icon at a file that does not exist",
+   "app.json",
+   sub('"icon": "./assets/03_icon_1024x1024.png"', '"icon": "./assets/03_icon_RENAMED.png"'),
+   "e2e/eas-config.test.mjs", "Release assets required by app config"],
+
+  ["a stale native page mirror is trusted over the web's fresh one at takeover",
+   "PdfReaderApp.tsx",
+   sub('      if (typeof knownCurrentPage === "number" && knownCurrentPage > 0) {',
+       '      if (typeof knownCurrentPage === "number" && knownCurrentPage < 0) {'),
+   "e2e/relayQuotaGuards.test.mjs", "a stale mirror is only ever a fallback"],
+
+  ["a notice starts telling people where a control is, which is the rot that outlives the layout",
+   "PdfReaderApp.tsx",
+   sub(`        const noticeText = "Hay una versión más reciente del app disponible. Puedes " +
+          "actualizar ahora, o mientras tanto usar signovivo.com desde cualquier navegador.";`,
+       `        const noticeText = "Hay una versión más reciente del app disponible. Toca el " +
+          "botón arriba a la izquierda para actualizar ahora.";`),
+   "e2e/noticesCarryControls.test.mjs", "no notice tells anyone where a control is"],
+
+  ["the release script's build-number collision guard is inverted",
+   "scripts/release.sh",
+   sub('  if [ -e "$IPA_OUT" ] && [ "${ALLOW_REUSED_BUILD:-0}" != "1" ]; then',
+       '  if [ ! -e "$IPA_OUT" ] && [ "${ALLOW_REUSED_BUILD:-0}" != "1" ]; then'),
+   "e2e/buildNumberGuard.test.mjs", "refuses a number whose IPA already exists"],
+];
+
+// ── run ─────────────────────────────────────────────────────────────────────────────────────────
+const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "sv-behavguard-"));
+const TESTS = [...new Set(MUTATIONS.map((m) => m[3]))];
+const HELPERS = fs.existsSync(path.join(REPO, "e2e/helpers"))
+  ? fs.readdirSync(path.join(REPO, "e2e/helpers")).map((f) => `e2e/helpers/${f}`)
+  : [];
+// Copy the whole tracked tree: these tests read assets, fixtures and sibling sources, and a
+// hand-maintained file list is the kind of thing that silently rots into a skip.
+const TRACKED = execFileSync("git", ["-C", REPO, "ls-files", "-z"], { encoding: "utf8" })
+  .split("\0").filter(Boolean);
+for (const f of [...TRACKED, ...HELPERS]) {
+  const from = path.join(REPO, f);
+  let st;
+  try { st = fs.lstatSync(from); } catch { continue; }
+  if (!st.isFile()) continue;   // `.claude/worktrees/*` is a committed gitlink, not a file
+  const to = path.join(ROOT, f);
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.copyFileSync(from, to);
+}
+
+const orig = Object.fromEntries(FILES.map((f) => [f, fs.readFileSync(path.join(ROOT, f), "utf8")]));
+const restore = () => FILES.forEach((f) => fs.writeFileSync(path.join(ROOT, f), orig[f]));
+
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Run one named test. Returns { ran, green }.
+ *
+ * `ran` IS NOT OPTIONAL BOOKKEEPING. `--test-name-pattern` that matches nothing exits ZERO with an
+ * empty plan:
+ *
+ *     TAP version 13
+ *     1..0
+ *     # Subtest: e2e/svSyncBoundaries.test.mjs
+ *     ok 1 - e2e/svSyncBoundaries.test.mjs
+ *
+ * The `ok 1` there is the FILE, not a test. So a name that drifts — a test renamed, a typo, an em
+ * dash turned into a hyphen — makes the baseline look green AND every mutation look caught, while
+ * running nothing at all. This script would then report a confident "19 CAUGHT" having verified
+ * zero of them, which is precisely the silent-nothing failure it exists to detect. Verified against
+ * node 22: the zero-match case is distinguishable only by the absence of a Subtest line naming the
+ * test.
+ */
+function runNamed(testFile, testName) {
+  let out = "";
+  let green = true;
+  try {
+    // The reporter is PINNED to tap. The first version of this read the default reporter's output,
+    // which makes the check quietly dependent on a node upgrade changing its default — and on how
+    // that reporter escapes a test name containing `#` or a backslash. The TAP plan line is a
+    // documented part of the format and needs no name matching at all.
+    out = execFileSync("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(testName), testFile],
+      { cwd: ROOT, encoding: "utf8", stdio: "pipe" });
+  } catch (e) {
+    green = false;
+    out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+  }
+  // TWO SIGNALS, BOTH REQUIRED.
+  //
+  // A pattern that matches nothing emits an EMPTY PLAN (`1..0`) and exits zero — so without the
+  // first check a drifted test name would make the baseline look green and every mutation look
+  // caught while running none of them.
+  //
+  // But the plan check ALONE is not enough either, and that was a real regression in an earlier
+  // version of this file: when a mutation breaks the test file at module scope (a syntax error, a
+  // failing top-level assertion, a bad import) the run aborts before any test executes. TAP then
+  // emits a failing subtest named after the FILE and no `1..0` at all, so `ran` was true, `green`
+  // was false, and the mutation was scored CAUGHT — crediting the tests for what is really a
+  // loader error. So the named test must ALSO appear as a subtest of its own.
+  const emptyPlan = /^\s*1\.\.0\s*$/m.test(out);
+  const namedSubtest = out.split("\n").some(
+    (l) => l.startsWith("# Subtest:") && l.slice("# Subtest:".length).includes(testName),
+  );
+  return { ran: !emptyPlan && namedSubtest, green };
+}
+
+// BASELINE FIRST. A red baseline makes every mutation look "caught" and reports a perfect score
+// while proving nothing — which is exactly what happened the first time the sibling harness ran.
+let baselineBad = 0;
+for (const [, , , testFile, testName] of MUTATIONS) {
+  const { ran, green } = runNamed(testFile, testName);
+  if (!ran) {
+    console.error(`✖ NAME MATCHES NOTHING: ${testFile} :: "${testName}"`);
+    console.error("  The test has been renamed or removed. Every mutation below would report CAUGHT");
+    console.error("  while running nothing at all.");
+    baselineBad++;
+  } else if (!green) {
+    console.error(`✖ BASELINE RED: ${testFile} :: ${testName}`);
+    baselineBad++;
+  }
+}
+if (baselineBad) {
+  console.error(`\n${baselineBad} test(s) are already failing or unmatched. Fix them before trusting any result here.`);
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  process.exit(1);
+}
+console.log(`baseline: all ${MUTATIONS.length} named tests green — the mutations below are meaningful\n`);
+
+let missed = 0, skipped = 0;
+for (const [name, file, mutate, testFile, testName] of MUTATIONS) {
+  restore();
+  const before = fs.readFileSync(path.join(ROOT, file), "utf8");
+  const after = mutate(before);
+  if (after === before) {
+    console.log(`SKIP    ${name}\n        (pattern drifted in ${file} — update this mutation)`);
+    skipped++;
+    continue;
+  }
+  fs.writeFileSync(path.join(ROOT, file), after);
+  const { ran, green } = runNamed(testFile, testName);
+  // A mutation that made the named test stop MATCHING proves nothing either — it is a MISSED wearing
+  // a pass, for the same reason the baseline check above rejects an unmatched name.
+  const caught = ran && !green;
+  console.log(`${caught ? "CAUGHT" : "MISSED"}  ${name}`);
+  if (!caught) {
+    console.log(ran
+      ? `        ${testFile} :: "${testName}" stayed GREEN with this regression live`
+      : `        ${testFile} :: "${testName}" did not run at all under the mutation`);
+    missed++;
+  }
+}
+restore();
+fs.rmSync(ROOT, { recursive: true, force: true });
+
+console.log(`\n${missed} MISSED, ${skipped} SKIPPED, ${MUTATIONS.length - missed - skipped} CAUGHT.`);
+if (missed || skipped) {
+  console.error("\nA regression that reaches the congregation would not be caught. Tighten the named assertions.");
+  process.exit(1);
+}
