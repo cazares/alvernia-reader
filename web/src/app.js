@@ -1789,6 +1789,7 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, use
 
     state.currentPage = nextPage;
     state.lastRenderFailure = null; // this page renders again — stop pacing it
+    syncBuildBadgeVisibility();
     // A PAGE THAT RENDERS DESERVES A FRESH RE-HOME BUDGET. The heartbeat's bounded re-home spends an
     // attempt per tick, but svShouldPaceRender swallows a retry for RENDER_RETRY_COOLDOWN_MS (5 s)
     // while the heartbeat runs every 4 s — so on a page that just failed, two of the three attempts
@@ -1799,7 +1800,6 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, use
     // that could actually have worked.
     relay.rehomeFor = null;
     relay.rehomeTries = 0;
-    syncBuildBadgeVisibility();
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
     if (loadState === "timeout") {
