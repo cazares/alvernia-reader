@@ -153,11 +153,28 @@ for (const dev of followers) {
   // THAT page. Measured from the send, not from the assert, so it answers "how fast does a page
   // travel" instead of "how long was the director directing".
   const turns = [];
+  // A TURN THIS DEVICE WAS PRESENT FOR AND NEVER RECEIVED IS A MISS — and a miss is the whole point
+  // of the tool ("one iPad sitting on song 11 while the director and everyone else are on 372").
+  //
+  // Counting only successes made a follower that converged ONCE and then wedged forever report a
+  // clean ✅: one sample was enough to clear the verdict. That is a false GREEN on the exact failure
+  // being hunted, which is worse than the false RED it replaced.
+  //
+  // Presence is bracketed rather than assumed: the device must have logged something BEFORE the turn
+  // and something AFTER it. That excludes a follower that had not joined yet and one that had
+  // already gone — the two cases whose false reds this tool has already been fixed for — while
+  // catching the device that was demonstrably in the room and did not get the page.
+  const devRows = rows.filter((r) => r.dev === dev);
+  const firstRowAt = devRows[0]?.t ?? null;
+  const lastRowAt = devRows.at(-1)?.t ?? null;
+  let misses = 0;
   for (const s of dirSends) {
     const got = recv.find((r) => Number(r.page) === Number(s.page) && r.t >= s.t);
-    if (got) turns.push((got.t - s.t) / 1000);
+    if (got) { turns.push((got.t - s.t) / 1000); continue; }
+    const present = firstRowAt !== null && firstRowAt <= s.t && lastRowAt > s.t;
+    if (present) misses += 1;
   }
-  results.push({ dev, lat, any: recv.length, turns });
+  results.push({ dev, lat, any: recv.length, turns, misses });
   // A FOLLOWER THAT JOINED LATE IS NOT A WEDGED ONE. Judging every device against the director's
   // FIRST page made any device that arrived after that turn read as NEVER CONVERGED — a red banner
   // and exit 1 on a follower that then tracked every single page it was present for. (Judging
@@ -168,9 +185,11 @@ for (const dev of followers) {
     ? "NEVER RECEIVED ANYTHING — not in the mesh"
     : !turns.length
       ? `NEVER CONVERGED — got pages ${[...new Set(recv.map((r) => r.page))].slice(0, 6).join(",")} but never a page the director turned to`
-      : !hit
-        ? `joined late — tracked ${turns.length}/${dirSends.length} turns`
-        : lat > 10 ? "slow" : "";
+      : misses
+        ? `WEDGED — present for ${misses} turn(s) it never received (last good: ${turns.length})`
+        : !hit
+          ? `joined late — tracked ${turns.length}/${dirSends.length} turns`
+          : lat > 10 ? "slow" : "";
   console.log(
     dev.padEnd(16) +
       (first ? utc(first.t) : "—").padStart(12) +
@@ -185,7 +204,8 @@ if (!followers.length) console.log("  (no JS-layer followers reported)");
 const converged = results.filter((r) => r.lat !== null);
 // WEDGED means the director's pages never reached it, not that it missed the cold-join page. A
 // device with turn samples is demonstrably in sync for the window it was present.
-const stuck = results.filter((r) => r.turns.length === 0);
+// Wedged either way: never received a director page at all, OR missed one it was present for.
+const stuck = results.filter((r) => r.turns.length === 0 || r.misses > 0);
 console.log(`\n=== VERDICT ===`);
 if (!results.length) {
   console.log("INCONCLUSIVE — no followers reported. On a network-less device telemetry does not");
@@ -205,7 +225,7 @@ if (allTurns.length) {
   console.log(`page turns (send → recv): ${allTurns.length} samples · median ${tmed.toFixed(2)}s · worst ${allTurns.at(-1).toFixed(2)}s`);
 }
 if (stuck.length) {
-  console.log(`\n🔴 ${stuck.length} follower(s) never received ANY page the director turned to: ${stuck.map((r) => r.dev).join(", ")}`);
+  console.log(`\n🔴 ${stuck.length} follower(s) missed pages the director turned to while present: ${stuck.map((r) => r.dev).join(", ")}`);
   console.log(`   A follower that received OTHER pages but not this one is a wedge — see`);
   console.log(`   scripts/analyze-resync.mjs. One that received nothing at all never joined the mesh.`);
   process.exit(1);

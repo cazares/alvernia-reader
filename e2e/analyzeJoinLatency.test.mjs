@@ -161,3 +161,36 @@ test("the wedge verdict is per-page-turn, not presence at assert time", () => {
   assert.match(stdout, /never a page the director turned to/, "the real wedge is no longer described");
   assert.equal(code, 1, "a real wedge must still exit non-zero");
 });
+
+test("a follower that converges once and then wedges is NOT a green run", () => {
+  // The false GREEN that judging on "has at least one successful sample" introduced. One page early
+  // on cleared the verdict for the rest of the capture — on the precise failure this tool's own
+  // header names: "one iPad sitting on song 11 while the director and everyone else are on 372".
+  // A false green on an instrument is worse than the false red it replaced, because nobody looks
+  // again.
+  const T = 1787060000000;
+  const pages = [10, 50, 101, 203, 300, 372];
+  const rows = [{ t: T, dev: "mPad", role: "director", event: "become:director" }];
+  pages.forEach((page, i) => {
+    const at = T + i * 30000;
+    rows.push({ t: at, dev: "mPad", role: "director", event: "page:send", page });
+    rows.push({ t: at + 200, dev: "iPad1", role: "follower", event: "mesh:page-recv", page });
+    // iPad2 gets the first page, then keeps re-receiving it while the director moves on. It is
+    // demonstrably present the whole time — it is logging — and demonstrably not following.
+    rows.push({ t: at + 300, dev: "iPad2", role: "follower", event: "mesh:page-recv", page: i === 0 ? page : 10 });
+  });
+  const { code, stdout } = run(rows);
+  assert.match(stdout, /iPad2.*WEDGED — present for \d+ turn\(s\) it never received/,
+    "a follower that stopped following is not reported as wedged");
+  assert.doesNotMatch(stdout, /✅/, "a capture containing a wedged follower still prints the green tick");
+  assert.equal(code, 1, "a wedged follower no longer exits non-zero");
+});
+
+test("presence is bracketed, so late joiners and early leavers are still not misses", () => {
+  // The three cases have to be told apart by the SAME rule, or fixing one re-breaks another — which
+  // is exactly what happened twice. A turn counts as missed only if the device logged something
+  // before it AND after it.
+  const src = fs.readFileSync(SCRIPT, "utf8");
+  assert.match(src, /firstRowAt <= s\.t && lastRowAt > s\.t/,
+    "presence is no longer bracketed — a late joiner or an early leaver will be called wedged again");
+});

@@ -236,6 +236,21 @@ for (const [dev, list] of byDevice) {
     // most likely gone. Its broadcast must not be assumed to continue across that hole.
     if (prevT != null && e.t - prevT > SILENCE_GRACE_S) {
       close(prevT + SILENCE_GRACE_S, "silent");
+      // END THE PUBLISHING STATE, not just the span. This advanced `since` while leaving
+      // publishing/role/page loaded, so the NEXT state change closed a second span from the instant
+      // the device's log resumed — zero-length, and therefore silently dropped while close() still
+      // required `t > since`. Once close() started recording point spans (which it must, or a
+      // director whose page-send is the newest row in a short capture leaves no span at all and its
+      // followers are accused of rendering a ghost), that phantom became a real span — and
+      // explainedBy widens every span by ±PUBLISH_TOL_S, so it granted a 4-second alibi anchored at
+      // exactly the moment a force-quit ex-director's log comes back as a FOLLOWER. That is when a
+      // stale advertisement is most expected to be read, so the alibi covered the very burst the
+      // ghost check exists to catch: a false GREEN on the tool's headline finding.
+      //
+      // Nothing was broadcasting across a silence that long by assumption — that is what the grace
+      // means — so the state must be cleared, not carried.
+      publishing = false;
+      page = null;
       since = e.t;
     }
     let pub = publishing, pg = page;
