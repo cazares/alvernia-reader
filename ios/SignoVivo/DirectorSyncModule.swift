@@ -154,7 +154,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// was shipped to make "structurally impossible", plus an N×(N-1) burst of peer-not-director
   /// cancelConnectPeer churn at the worst possible moment. Nothing evicts the extras afterwards, so
   /// the violation is permanent for the life of the session.
-  private var pendingAdmissions: [ObjectIdentifier: Set<MCPeerID>] = [:]
+  private var pendingAdmissions: [MCPeerID: (session: MCSession, token: Int)] = [:]
+  private var admissionToken = 0
   private var advertiser: MCNearbyServiceAdvertiser?
   private var browser: MCNearbyServiceBrowser?
   private var currentRole = "off"
@@ -317,35 +318,53 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
   /// Peers admitted to `session` but still mid-handshake.
   private func admissionCount(_ session: MCSession) -> Int {
-    pendingAdmissions[ObjectIdentifier(session)]?.count ?? 0
+    pendingAdmissions.values.reduce(0) { $1.session === session ? $0 + 1 : $0 }
   }
 
   /// Hold the slot from the moment we say yes until the handshake reaches a terminal state.
   ///
-  /// Per-peer rather than a bare counter so a release always frees exactly its own reservation and
-  /// can never double-decrement. The timeout is the backstop for the case that has no callback at
-  /// all: MPC can drop an invitation silently, and a leaked reservation would make a session look
-  /// permanently full. Sized above inviteTimeout so a slow-but-succeeding handshake is never
-  /// double-booked by its own expiry.
+  /// ONE RESERVATION PER PEER, IDENTIFIED BY TOKEN. Both properties are load-bearing, and the first
+  /// draft of this mechanism had neither:
+  ///
+  /// - Keyed by PEER, because a follower re-invites every inviteRetryAfter (2.5 s) until it
+  ///   connects. With reservations held in a per-session set, that peer's own slot made the session
+  ///   it was already offered look full, so every retry was answered with a NEWLY CREATED session:
+  ///   one follower holding four or five reservations at once, and a couple of retrying followers
+  ///   exhausting maxSessions until the director answered every invitation with "sessions-full".
+  ///   A retry now goes back into the session already offered to that peer (sessionForAdmitting).
+  ///
+  /// - TOKENED, because the expiry fires on a schedule and the world moves underneath it. A peer
+  ///   that connects, drops, and re-invites inside the window would otherwise have its NEW
+  ///   reservation cancelled by its OLD timer, freeing a slot whose handshake is still in flight —
+  ///   re-opening the double-admission this whole mechanism exists to prevent.
+  ///
+  /// The timeout is the backstop for the case with no callback at all: MPC can drop an invitation
+  /// silently, and a leaked reservation would make a session look permanently full. Sized above
+  /// inviteTimeout so a slow-but-succeeding handshake is never evicted by its own expiry.
   private func reserveSlot(_ peerID: MCPeerID, in session: MCSession) {
-    pendingAdmissions[ObjectIdentifier(session), default: []].insert(peerID)
+    admissionToken &+= 1
+    let token = admissionToken
+    pendingAdmissions[peerID] = (session: session, token: token)
     let generation = resetGeneration
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.inviteTimeout + 2) { [weak self] in
-      guard let self, self.resetGeneration == generation else { return }
-      if self.releaseSlot(peerID, in: session) {
-        self.dbgLog("admission:expired", ["peer": peerID.displayName])
-      }
+      guard let self, self.resetGeneration == generation,
+            self.pendingAdmissions[peerID]?.token == token else { return }
+      self.pendingAdmissions.removeValue(forKey: peerID)
+      self.dbgLog("admission:expired", ["peer": peerID.displayName])
     }
   }
 
-  /// Returns true if a reservation was actually held (so the caller can log an expiry only when it
-  /// really expired, not on every timer that outlived a completed handshake).
-  @discardableResult
-  private func releaseSlot(_ peerID: MCPeerID, in session: MCSession) -> Bool {
-    let key = ObjectIdentifier(session)
-    guard var held = pendingAdmissions[key], held.remove(peerID) != nil else { return false }
-    if held.isEmpty { pendingAdmissions.removeValue(forKey: key) } else { pendingAdmissions[key] = held }
-    return true
+  private func releaseSlot(_ peerID: MCPeerID) {
+    pendingAdmissions.removeValue(forKey: peerID)
+  }
+
+  /// The session to answer THIS peer's invitation with. A retry re-uses the session we already
+  /// offered it; only if that session is gone do we pick a fresh one.
+  private func sessionForAdmitting(_ peerID: MCPeerID) -> MCSession? {
+    if let held = pendingAdmissions[peerID], mcSessions.contains(where: { $0 === held.session }) {
+      return held.session
+    }
+    return availableSessionForNewFollower()
   }
 
   /// Returns an existing session with room, or creates a new one (up to maxSessions).
@@ -2256,7 +2275,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           return
         }
         // Route incoming follower to a session with room
-        if let session = self.availableSessionForNewFollower() {
+        if let session = self.sessionForAdmitting(peerID) {
           self.dbgLog("invite:accept", ["from": peerID.displayName])
           // Claim the slot BEFORE answering. connectedPeers will not show this peer for the whole
           // handshake, so without the reservation the next invitation in this same burst is routed
@@ -2348,7 +2367,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         let isLegacyFollower = info?["hgen"] == nil  // build ≤226: no hgen → director must invite
         if isLegacyFollower {
           // Legacy follower sits and waits — invite it immediately (it will never self-invite).
-          guard let session = self.availableSessionForNewFollower() else { return }
+          // sessionForAdmitting, not availableSessionForNewFollower: foundPeer re-fires for the same
+          // peer on every browser restart (a refresh cycle, a lost/found flap), and picking a fresh
+          // session each time would consume one per sighting.
+          guard let session = self.sessionForAdmitting(peerID) else { return }
           // Same reservation as the accept path: an outbound invite occupies the slot from the
           // moment it is issued, or two legacy followers found in one browse burst share a session.
           self.reserveSlot(peerID, in: session)
@@ -2435,7 +2457,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // The handshake has resolved one way or the other — the slot this peer was holding is now
       // either really occupied (connectedPeers reports it) or free again. Either way the
       // reservation's job is done. Idempotent, and a no-op for a follower, which reserves nothing.
-      if state != .connecting { self.releaseSlot(peerID, in: session) }
+      if state != .connecting { self.releaseSlot(peerID) }
       switch state {
       case .connected:
         if self.currentRole == "follower" {
