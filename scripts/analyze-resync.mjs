@@ -73,7 +73,10 @@ if (!file) {
 }
 
 const utc = (ms) => new Date(ms).toISOString().slice(11, 19);
-const ct = (ms) => new Date(ms - 5 * 3600 * 1000).toISOString().slice(11, 19);
+// See the same note in analyze-join-latency.mjs: a fixed -5 h is CDT, so every "CT" label printed
+// between early November and early March was an hour late.
+const ct = (ms) =>
+  new Date(ms).toLocaleTimeString("en-US", { hourCycle: "h23", timeZone: "America/Chicago" });
 
 // ── Load ───────────────────────────────────────────────────────────────────────
 const seen = new Set();

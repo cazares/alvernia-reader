@@ -52,7 +52,17 @@ if (!file) {
 }
 
 const utc = (ms) => new Date(ms).toISOString().slice(11, 19);
-const ct = (ms) => new Date(ms - 5 * 3600 * 1000).toISOString().slice(11, 19);
+// A REAL ZONE CONVERSION, NOT A FIXED OFFSET. This subtracted a hardcoded 5 hours, which is CDT —
+// so from the first Sunday of November to the second Sunday of March every time labelled "CT" here
+// was an hour late. Invisible in August, wrong all winter, and these are the timestamps read back
+// when reconstructing what a device did at a specific moment in a Mass.
+//
+// America/Chicago is pinned rather than using the host's local zone: host-local is right only
+// because this Mac happens to sit in Central, and would print a differently-wrong label from CI or
+// any other machine. hourCycle "h23" rather than hour12:false — some ICU builds render midnight as
+// "24:00:00" under the latter.
+const ct = (ms) =>
+  new Date(ms).toLocaleTimeString("en-US", { hourCycle: "h23", timeZone: "America/Chicago" });
 
 const seen = new Set();
 let rows = [];
@@ -90,8 +100,13 @@ const jsDevices = [...new Set(rows.filter((r) => !isSwift(r)).map((r) => r.dev))
 // ── Who directed, and when did they first assert? ─────────────────────────────
 const becomes = rows.filter((r) => r.event === "become:director");
 const sends = rows.filter((r) => r.event === "page:send");
-const director = becomes.at(-1)?.dev ?? sends.at(-1)?.dev ?? null;
-const assertAt = becomes.at(-1)?.t ?? sends[0]?.t ?? null;
+// ONE ROW DECIDES BOTH. These were read from different rows: the director came from the LAST
+// page:send but the assert time from the FIRST, so a window containing two directors named D2 while
+// timing from D1's first send — every number after that describes neither device.
+const dirRow = becomes.at(-1) ?? sends.at(-1) ?? null;
+const director = dirRow?.dev ?? null;
+const assertAt =
+  becomes.at(-1)?.t ?? sends.find((s) => s.dev === director)?.t ?? null;
 
 console.log(`\n=== join latency — ${file.split("/").pop()} ===`);
 console.log(`window ${utc(rows[0].t)}–${utc(rows.at(-1).t)} UTC (${ct(rows[0].t)}–${ct(rows.at(-1).t)} CT) · ${rows.length} rows`);
@@ -103,10 +118,25 @@ if (assertAt === null) {
 }
 console.log(`took the role at ${utc(assertAt)}Z (${ct(assertAt)} CT)`);
 
-// The page the director was actually on, from its own sends after taking the role.
+// THE COLD-JOIN TARGET IS THE FIRST PAGE ASSERTED, NOT THE LAST ONE IN THE WINDOW.
+//
+// This took `dirSends.at(-1)` — the final page:send in the capture — while still measuring latency
+// from the moment the role was taken. So on any capture where the director went on directing (i.e.
+// any real rehearsal), the reported "latency" was however long the director kept turning pages: a
+// director who asserts on page 10 and finishes on 372 five minutes later produced ~300 s for every
+// follower, every one flagged "slow", against a tool whose own standard is "longer than a few
+// seconds is a failure". Worse, a follower whose telemetry stopped before that final turn was
+// printed as NEVER CONVERGED and exited 1 — a red banner on a mesh that was converging in under a
+// second. pull-device-trace.sh runs this on every collected trace, so that banner is the first
+// thing seen after a hardware capture.
+//
+// Cold join and steady state are two different questions and now get two different numbers.
 const dirSends = sends.filter((r) => r.dev === director && r.t >= assertAt);
-const targetPage = dirSends.at(-1)?.page ?? dirSends[0]?.page ?? null;
-console.log(`director's page: ${targetPage ?? "unknown (no page:send after the assert)"}`);
+const targetPage = dirSends[0]?.page ?? null;
+console.log(`director's first page after taking the role: ${targetPage ?? "unknown (no page:send after the assert)"}`);
+if (dirSends.length > 1) {
+  console.log(`director turned ${dirSends.length} pages in this window (last: ${dirSends.at(-1).page})`);
+}
 
 // ── Per-follower convergence ──────────────────────────────────────────────────
 console.log(`\n${"follower".padEnd(16)}${"first recv".padStart(12)}${"converged".padStart(12)}${"latency".padStart(10)}  note`);
@@ -119,7 +149,15 @@ for (const dev of followers) {
   const first = recv[0];
   const hit = targetPage == null ? recv[0] : recv.find((r) => Number(r.page) === Number(targetPage));
   const lat = hit ? (hit.t - assertAt) / 1000 : null;
-  results.push({ dev, lat, any: recv.length });
+  // STEADY STATE: for each page the director actually turned to, how long until this follower saw
+  // THAT page. Measured from the send, not from the assert, so it answers "how fast does a page
+  // travel" instead of "how long was the director directing".
+  const turns = [];
+  for (const s of dirSends) {
+    const got = recv.find((r) => Number(r.page) === Number(s.page) && r.t >= s.t);
+    if (got) turns.push((got.t - s.t) / 1000);
+  }
+  results.push({ dev, lat, any: recv.length, turns });
   const note = !recv.length
     ? "NEVER RECEIVED ANYTHING — not in the mesh"
     : !hit
@@ -147,7 +185,14 @@ if (!results.length) {
 if (converged.length) {
   const ls = converged.map((r) => r.lat).sort((a, b) => a - b);
   const med = ls[Math.floor(ls.length / 2)];
-  console.log(`${converged.length}/${results.length} converged · median ${med.toFixed(1)}s · worst ${ls.at(-1).toFixed(1)}s`);
+  console.log(`cold join (assert → director's first page): ${converged.length}/${results.length} converged · median ${med.toFixed(1)}s · worst ${ls.at(-1).toFixed(1)}s`);
+}
+// The number that actually describes sync health during a Mass, and the one to compare against
+// "longer than a few seconds is a failure".
+const allTurns = results.flatMap((r) => r.turns).sort((a, b) => a - b);
+if (allTurns.length) {
+  const tmed = allTurns[Math.floor(allTurns.length / 2)];
+  console.log(`page turns (send → recv): ${allTurns.length} samples · median ${tmed.toFixed(2)}s · worst ${allTurns.at(-1).toFixed(2)}s`);
 }
 if (stuck.length) {
   console.log(`\n🔴 ${stuck.length} follower(s) NEVER reached the director's page: ${stuck.map((r) => r.dev).join(", ")}`);

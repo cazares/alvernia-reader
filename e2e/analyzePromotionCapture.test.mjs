@@ -283,3 +283,30 @@ test("AUDIT: every real device logging boot-stop-stale is a PASS", () => {
   ]);
   assert.match(run(p).out, /PASS\s+every device \(2\) logged ble:boot-stop-stale/);
 });
+
+test("AUDIT: a send and an apply in the SAME instant is a healthy exchange, not a ghost", () => {
+  // THE ZERO-LENGTH SPAN. A publish span whose open and close land on the same timestamp used to be
+  // discarded (`t > since`), so a director whose ble:page-send is the newest row in the pool left no
+  // span at all — and the ghost check then reported the page the follower had just CORRECTLY applied
+  // as "rendered with nobody broadcasting it". That is the normal shape of a short capture that ends
+  // on a page turn, and it is exactly the shape of this repo's own sv-log-2026-08-18.jsonl.
+  //
+  // A capture that FAILS the ghost check reads as PR #380 regressing, which costs a hardware night.
+  const p = write("same-instant.txt", [
+    line(T0, "director mPad ble:page-send page=372 seq=1"),
+    line(T0, "follower iPad-A ble:page-apply page=372 seq=1"),
+  ]);
+  const r = run(p);
+  assert.doesNotMatch(r.out, /nobody in the pool ever broadcast it/,
+    "a page broadcast in the same instant it was applied is still called a ghost");
+  assert.doesNotMatch(verdictsOf(r.out), /FAIL/,
+    "the healthiest possible BLE exchange still fails the capture");
+});
+
+test("AUDIT: the real ghost fixture still FAILS — the instrument is not blunted", () => {
+  // The counterweight to the test above: widening the span rule must not stop the tool catching a
+  // page that genuinely nobody was broadcasting. This is the captured page-7 ghost from hardware.
+  assert.equal(real.code, 1, "the real ghost capture no longer fails");
+  assert.match(real.out, /page\(s\) rendered with nobody broadcasting them: 7/,
+    "the page-7 ghost is no longer named");
+});

@@ -210,7 +210,23 @@ for (const e of evs) {
 for (const [dev, list] of byDevice) {
   let role = null, publishing = false, page = null, since = null, prevT = null;
   const close = (t, closedBy) => {
-    if (publishing && page != null && role === "director" && since != null && t > since) {
+    // `>=`, NOT `>`. A publish span that opens and closes at the same instant is still a real
+    // instant of broadcasting, and dropping it made the analyzer accuse a HEALTHY capture of a ghost
+    // page. It happens whenever the director's ble:page-send is the newest row in the pool — which
+    // is the normal shape of a short capture that ends on a page turn: `since`, `prevT` and `endT`
+    // are all that same timestamp, so the final close is a zero-length span and no span is recorded
+    // at all. explainedBy() then finds nobody broadcasting the page the follower just correctly
+    // applied and exits 1.
+    //
+    // Reproduced on this repo's own sv-log-2026-08-18.jsonl — a director ble:page-send of page 372
+    // and a follower ble:page-apply of page 372 in the SAME millisecond, the healthiest possible BLE
+    // exchange — which FAILED as "nobody in the pool ever broadcast 372". The next hardware capture
+    // would have read as PR #380 regressing.
+    //
+    // Safe: explainedBy() already widens by ±PUBLISH_TOL_S on both sides, so a point span still
+    // covers renders around it, and the real ghost fixture (console-capture-ghost7) still fails
+    // byte-identically.
+    if (publishing && page != null && role === "director" && since != null && t >= since) {
       spans.push({ device: dev, page, from: since, to: t, closedBy });
     }
   };
