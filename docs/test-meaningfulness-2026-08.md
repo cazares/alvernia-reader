@@ -103,23 +103,28 @@ has moved, and when the extracted code no longer compiles.
 
 ## 5. Measurements
 
-Mutation coverage, before and after, measured with the sweeper:
+Mutation coverage, both columns measured with the **same, corrected** instrument — the "before"
+column against the branch point `f2dffe4`:
 
 | Module | Before | After |
 |---|---|---|
-| `sync-worker/src/publishSeq.js` | 79% | **89%** |
-| `web/src/lib/svSyncDecision.js` | 72% | **83%** |
-| `src/directorRelaySync.js` | 44% | **71%** |
-| `DirectorSyncModule.swift` (extracted regions) | — | **81%** |
+| `sync-worker/src/publishSeq.js` | 31/41 = 76% | **37/41 = 90%** |
+| `web/src/lib/svSyncDecision.js` | 70/104 = 67% | **86/104 = 83%** |
+| `src/directorRelaySync.js` | 8/63 = **13%** | **46/65 = 71%** |
+| `DirectorSyncModule.swift` (extracted regions) | 20/52 = 38% | **42/52 = 81%** |
 
-Suite: **570 pass / 0 fail / 2 skipped**, up from 517 at the branch point. Worker 60/60.
+> **An earlier version of this page published different numbers, and they were wrong.** The sweeper
+> was scoring syntax-invalid mutants as "caught" — the parser was doing the tests' work — so every
+> figure was inflated. `src/directorRelaySync.js` was at **13%**, not the 44% first reported. Section
+> 9 has the details. The corrected numbers are above; the improvements are larger, not smaller.
+
+Suite: **573 pass / 0 fail / 2 skipped**, up from 517 at the branch point. Worker 60/60.
 `verify-behavioural-guards` 19/19 caught. The three pre-existing guard scripts still 16/16, 11/11 and
 6/6.
 
-CI no longer runs a hand-maintained allowlist of 45 filenames. It enumerates `e2e/` and
+CI no longer runs a hand-maintained allowlist of filenames. It enumerates `e2e/` and
 `sync-worker/test/` and excludes exactly three files, each for a stated reason. A new test file runs
-in CI the moment it lands rather than the moment somebody remembers to add a line — the earlier list
-had silently stopped running 24 files, including all four that were red at the time.
+in CI the moment it lands rather than the moment somebody remembers to add a line.
 
 ## 6. A bug the simulation found
 
@@ -175,3 +180,53 @@ node scripts/verify-behavioural-guards.mjs
 When you add a test, mutate the thing it claims to protect and watch it go red. If it does not, the
 test is decoration — and decoration is worse than nothing, because it occupies the space where a real
 guard would have gone.
+
+## 9. The re-hunt — what this campaign broke
+
+Fixes create bugs. This repo's own measured rate is that about a third of each round's findings are
+defects in the previous round's fixes, so the work above was re-hunted adversarially: nine agents
+looking for what it broke, then one independent skeptic per finding whose default was to refute.
+**48 findings, 32 survived refutation.** The ones that mattered:
+
+**The measuring instrument was inflating its own scores.** `mutation-sweep` scored *syntax-invalid*
+mutants as "caught" — the exact false pass its header swore was impossible. The token scan restarts
+at every byte, so at the second `=` of `===` it still saw `==` and emitted `a =!= b`; on Swift it
+turned `-> Int` into `->= Int`. Neither compiles; the test process died on the parse error, and a
+non-zero exit was scored identically to a real assertion failure. Its `node --check` guard was inert
+too — it ran only for statement deletions, and for a bare `.js` under Node 22's automatic module
+detection a file failing *both* parses still exits 0.
+
+Every mutant is now parse-checked (`.mjs` then `.cjs` for JS, `xcrun swiftc -parse` for Swift) and a
+failure is excluded from scoring rather than credited. Proven by construction: a test asserting only
+`typeof clamp === "function"` now scores **0%** where it scored 11%; a real behavioural test of the
+same function scores 75%. Four of the sixteen operator pairs were also unreachable — a table that
+read like coverage and was not.
+
+**`assertHarnessFidelity()` did not exist.** `sv-sync-sim.mjs`'s header named it twice as the only
+thing keeping the harness from becoming fiction. Nobody had written it — this campaign's own thesis,
+turned back on it. It exists now, and reads the relay's field assembly out of *both*
+`sync-worker/src/index.ts` and the harness so drift on either side fails.
+
+**The black-hole test could not catch its own outage.** It was three regexes plus an assertion
+(`aborted === false`) that is satisfied *more* easily when the wiring breaks. It now intercepts the
+abort timer instead of waiting it out and observes the drain — verified red on all three regressions
+that reinstate the whole-Mass freeze.
+
+**One repair would have blocked the repo's normal workflow.** The songbook check pinned
+`assets/songbook.pdf` to `web/manifest-baseline.json`, which only a *production release* writes. Any
+legitimate song splice would have redded CI with no way to green it before merge — and because
+`verify-behavioural-guards` refuses to run on a red baseline, that one assertion would have taken all
+nineteen guards with it. It now checks properties of the tree instead.
+
+The rest were defects in the rewritten tests themselves: `fabLayout` was blind to `@media` (a
+media-query override overlapped the two director controls by 2rem with 14/14 green); `pillWording`'s
+cascade resolver swallowed its own deliberate throws, so a `:not()` or a `>` combinator vanished
+rather than failing loudly; `nearby-sync` compared occurrence *counts* rather than the property;
+`relayQuotaGuards`' new "no else branch" assertion was structurally incapable of firing. All fixed
+and proven red-then-green, each also checked against a behaviour-neutral edit so it does not cry
+wolf.
+
+**What that says about the method.** Every one of these was found by the same discipline the campaign
+is about — break it and see — applied to the campaign itself. None would have been visible from a
+green run, and the two most serious were in the tools that produce the evidence. If you take one
+thing from this document: measure the instrument before believing the measurement.

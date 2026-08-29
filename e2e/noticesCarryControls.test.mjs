@@ -24,6 +24,14 @@ const APP = fs.readFileSync("web/src/app.js", "utf8");
 // its declaration — and the count of resolved texts must equal the count of toast sites, so a new
 // shape fails loudly instead of being skipped.
 
+// WHAT THE FIRST REWRITE STILL MISSED. Following `text: noticeText` back to its declaration reads
+// only the initializer, and a sentence is just as easily added afterwards — `noticeText += "Toca el
+// estado arriba a la izquierda."`, or a reassignment on a branch. That copy ships to the choir and
+// the old extractor never looked at it. Every write to the identifier inside the block that declares
+// it is scanned now, not just the first. And the site count is pinned against an independent count
+// of the source's own toast literals, so a seventh notice cannot arrive in a shape the extractor
+// cannot see and be skipped in silence — the sweep either covers everything or it goes red.
+
 // ── Reading the source at STRUCTURE level ───────────────────────────────────────────────────────
 // Strings, templates and comments are skipped whole, so a brace or comma inside prose (this file's
 // subject matter is prose) can never be mistaken for syntax. Nothing here re-implements the app;
@@ -96,11 +104,75 @@ const literalsIn = (code) => {
 
 const lineOf = (src, index) => src.slice(0, index).split("\n").length;
 
+// Two offset-preserving views of the whole file. `comments: true` blanks comments, so prose quoting
+// `type: "toast"` cannot invent a notice that does not exist; `strings: true` additionally blanks
+// the INSIDE of every literal (the quotes stay), so an identifier search can only ever match code.
+// Offsets are preserved in both, which is the whole point: a line number or a slice taken from one
+// view means the same thing in the original.
+const maskOut = (src, { strings = false, comments = false }) => {
+  const out = src.split("");
+  const blank = (from, to) => { for (let k = from; k < to && k < out.length; k++) out[k] = out[k] === "\n" ? "\n" : " "; };
+  for (let j = 0; j < src.length; ) {
+    const c = src[j];
+    if (c === '"' || c === "'" || c === "`") { const e = skipLiteral(src, j); if (strings) blank(j + 1, e - 1); j = e; continue; }
+    if (c === "/" && src[j + 1] === "/") { const nl = src.indexOf("\n", j); const e = nl < 0 ? src.length : nl; if (comments) blank(j, e); j = e; continue; }
+    if (c === "/" && src[j + 1] === "*") { const e = src.indexOf("*/", j); if (e < 0) throw new Error("unterminated comment"); if (comments) blank(j, e + 2); j = e + 2; continue; }
+    j++;
+  }
+  return out.join("");
+};
+
+// From an offset inside a block to the `}` that closes it. Structural endpoint: the scope an
+// identifier's writes can live in ends where its declaring block ends, not some number of lines on.
+const blockEnd = (bare, from) => {
+  let depth = 0;
+  for (let j = from; j < bare.length; j++) {
+    const c = bare[j];
+    if (c === "{" || c === "(" || c === "[") depth++;
+    else if (c === "}" || c === ")" || c === "]") { if (depth === 0) return j; depth--; }
+  }
+  return bare.length;
+};
+
+// End of the statement starting at `from`: the first `;` at this bracket depth, or the close of the
+// enclosing block if the statement is the last one and unterminated.
+const statementEnd = (bare, from) => {
+  let depth = 0;
+  for (let j = from; j < bare.length; j++) {
+    const c = bare[j];
+    if (c === "{" || c === "(" || c === "[") depth++;
+    else if (c === "}" || c === ")" || c === "]") { if (depth === 0) return j; depth--; }
+    else if (c === ";" && depth === 0) return j;
+  }
+  return bare.length;
+};
+
+// Every string the identifier can be holding by the time a notice reads it: its declaration's
+// initializer AND every later write to it — `x = …`, `x += …` — inside the block that declares it.
+// Reading only the declaration is how appended copy ships unread.
+const identifierStrings = (src, bare, ident, beforeIdx) => {
+  const declRe = new RegExp(`(?:const|let|var)\\s+${ident}\\s*=(?![=>])`, "g");
+  let declIdx = -1;
+  for (const d of bare.matchAll(declRe)) { if (d.index < beforeIdx) declIdx = d.index; }
+  if (declIdx < 0) return null;
+  const scopeEnd = blockEnd(bare, declIdx);
+  const writeRe = new RegExp(`\\b${ident}\\s*\\+?=(?![=>])`, "g");
+  const strings = [];
+  let writes = 0;
+  for (const w of bare.slice(declIdx, scopeEnd).matchAll(writeRe)) {
+    const at = declIdx + w.index + w[0].length;
+    strings.push(...literalsIn(src.slice(at, statementEnd(bare, at))));
+    writes++;
+  }
+  return { strings, writes, declLine: lineOf(src, declIdx) };
+};
+
 // One entry per `type: "toast"` in the source, with `text` resolved or left null. Null is the
 // interesting case: it means a notice shipped in a shape nothing reads.
 const toastSites = (src) => {
+  const bare = maskOut(src, { strings: true });
   const sites = [];
-  for (const m of src.matchAll(/type:\s*"toast"/g)) {
+  for (const m of src.matchAll(/type:\s*(["'`])toast\1/g)) {
     const site = { line: lineOf(src, m.index), text: null, how: "unresolved" };
     sites.push(site);
     const body = objectBody(src, m.index);
@@ -113,19 +185,16 @@ const toastSites = (src) => {
     let strings = literalsIn(expr);
     let how = "inline";
     if (!strings.length) {
-      // `text: someIdent` — follow it back to the declaration it was assigned in. This is the shape
-      // the old matcher could not see, and the one the mutation used.
+      // `text: someIdent` — follow it back to EVERY write to that identifier in the block that
+      // declares it, not just the initializer. This is the shape the old matcher could not see, and
+      // the one both mutations used: first a directional sentence written into the const, then the
+      // same sentence appended a line later.
       const ident = expr.trim();
       if (!/^[A-Za-z_$][\w$]*$/.test(ident)) continue;
-      const decl = new RegExp(`(?:const|let|var)\\s+${ident}\\s*=`, "g");
-      let declIdx = -1;
-      for (const d of src.matchAll(decl)) { if (d.index < m.index) declIdx = d.index; }
-      if (declIdx < 0) continue;
-      const tail = src.slice(declIdx);
-      const end = skeleton(tail).indexOf(";");
-      if (end < 0) continue;
-      strings = literalsIn(tail.slice(0, end));
-      how = `${ident} declared at line ${lineOf(src, declIdx)}`;
+      const resolved = identifierStrings(src, bare, ident, m.index);
+      if (!resolved) continue;
+      strings = resolved.strings;
+      how = `${ident} declared at line ${resolved.declLine}, ${resolved.writes} write(s) scanned`;
     }
     if (!strings.length) continue;
     site.text = strings.join(" | ");
@@ -135,11 +204,23 @@ const toastSites = (src) => {
 };
 
 test("no notice tells anyone where a control is", () => {
-  const sites = toastSites(NATIVE);
-  // A floor, so the notices cannot be deleted into a vacuously clean sweep, and an exact
-  // resolved-vs-declared equality, so a seventh toast written in a new shape reddens this instead
-  // of being quietly ignored the way three of the six were for weeks.
-  assert.ok(sites.length >= 6, `only ${sites.length} toast sites — the notices moved; re-read this test`);
+  // Read the source with its comments blanked out, so prose that happens to quote a notice cannot
+  // invent a site, and so the independent count below counts shipped copy rather than commentary.
+  const CODE = maskOut(NATIVE, { comments: true });
+  const sites = toastSites(CODE);
+
+  // THE SWEEP MUST BE COMPLETE BEFORE IT MEANS ANYTHING. Three counts have to agree: the toast
+  // objects the extractor found, the file's own `"toast"` literals (an independent count that does
+  // not go through the extractor at all), and the six notices that exist today. A seventh notice, or
+  // one written in a shape `type: "toast"` does not describe, breaks the agreement and reddens here
+  // — instead of being skipped in silence the way three of the six were for weeks.
+  const literalCount = (CODE.match(/(["'`])toast\1/g) || []).length;
+  assert.equal(sites.length, literalCount,
+    `the extractor found ${sites.length} toast sites but the source has ${literalCount} "toast" literals — ` +
+    "a notice ships in a shape this scanner cannot see; teach it that shape before shipping it");
+  assert.equal(sites.length, 6,
+    `${sites.length} toast sites, not the 6 this sweep was written against — if a notice was added, ` +
+    "confirm the extractor resolves its text and update this count; if one was deleted, say so here");
   const unread = sites.filter((s) => s.text === null).map((s) => `line ${s.line}`);
   assert.deepEqual(unread, [],
     `the scanner cannot read the text of ${unread.join(", ")} — an unread notice is an unchecked one, so teach the extractor that shape before shipping it`);

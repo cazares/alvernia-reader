@@ -39,6 +39,75 @@ function between(src, startRe, endRe, label) {
   return src.slice(start, start + 1 + rel);
 }
 
+// Below, the MCPeerID test needs to read the ARGUMENT of a specific call and the SCOPE that call
+// sits in, rather than counting occurrences across the file. These four helpers do that on
+// structure only — balanced parentheses, the enclosing member declaration, the member's own closing
+// brace — and every one of them fails loudly rather than returning a widened or empty window.
+
+// Text between the parentheses that open at `openIdx`. Swift string interpolation (`\(x)`) nests
+// real parens, so a balanced-depth walk is required; a naive indexOf(")") would truncate.
+function parenArgs(src, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i += 1) {
+    if (src[i] === "(") depth += 1;
+    else if (src[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return src.slice(openIdx + 1, i);
+    }
+  }
+  return null;
+}
+
+// Identifiers that are real CODE in an expression. Plain string-literal text is dropped so a word
+// inside "…" cannot masquerade as a capped local; interpolated segments are kept because they are
+// code.
+function exprIdentifiers(expr) {
+  const code = expr.replace(
+    /"(?:[^"\\]|\\[^(]|\\\([^)]*\))*"/g,
+    (lit) => (lit.match(/\\\([^)]*\)/g) || []).join(" "),
+  );
+  return code.match(/[A-Za-z_]\w*/g) || [];
+}
+
+// Locals in `body` that were bound to a 50-char-capped value, by whatever name the source chose.
+// Derived from the source, never hard-coded, so renaming the local is behaviour-neutral here.
+function cappedLocals(body) {
+  const out = new Set();
+  const re = /(?:let|var)\s+(\w+)\s*=\s*[^\n]*\.prefix\(50\)/g;
+  for (let m; (m = re.exec(body)); ) out.add(m[1]);
+  return out;
+}
+
+// The body of the member (func/var/init) that lexically contains `idx`.
+function enclosingMemberBody(src, idx, label) {
+  const declRe = /\n  (?:(?:private|public|internal|fileprivate|open|static|override|final|lazy)\s+)*(?:func|var|init|subscript)\b/g;
+  let declIdx = -1;
+  for (let m; (m = declRe.exec(src)) && m.index < idx; ) declIdx = m.index;
+  assert.ok(declIdx > -1, `${label}: could not locate the member that contains this call`);
+  const rel = src.slice(declIdx).indexOf("\n  }");
+  assert.ok(rel > 0, `${label}: could not find that member's closing brace at 2-space indent`);
+  const end = declIdx + rel + 4;
+  assert.ok(idx < end, `${label}: the call sits outside the member body the scan found`);
+  return src.slice(declIdx, end);
+}
+
+// True when `name` is a member of this type that caps a value to 50 chars AND hands that capped
+// value back to its caller — i.e. passing `name` to MCPeerID is safe.
+function memberCapsAndReturns(src, name) {
+  const decl = new RegExp(
+    `\\n  (?:(?:private|public|internal|fileprivate|open|static|final|lazy)\\s+)*(?:var|func)\\s+${name}\\b`,
+  );
+  const start = src.search(decl);
+  if (start < 0) return false;
+  const rel = src.slice(start).indexOf("\n  }");
+  if (rel < 0) return false;
+  const body = src.slice(start, start + rel + 4);
+  const capped = cappedLocals(body);
+  if (capped.size === 0) return false;
+  const returns = body.match(/\n\s*return\s+[^\n]+/g) || [];
+  return returns.some((r) => [...capped].some((c) => new RegExp(`\\b${c}\\b`).test(r)));
+}
+
 test("nearby sync page updates include mode and book identity", () => {
   assert.match(jsSyncSource, /sendPageUpdate\(\s*page,\s*totalPages,\s*String\(context\.mode/);
   assert.match(jsSyncSource, /String\(context\.bookId/);
@@ -159,11 +228,32 @@ test("Swift caps peer display name to 50 chars before creating MCPeerID", () => 
     `stablePeerName returns ${returned.trim()}, which does not use the capped name \`${capped[1]}\` — the cap is computed and thrown away`);
 
   // Every MCPeerID the module mints must be fed by a capped name, not just one of them.
-  const peerIdSites = (swiftSource.match(/MCPeerID\(displayName:/g) || []).length;
-  const cappings = (swiftSource.match(/String\(\s*\w+(?:\.\w+)*\.prefix\(50\)\s*\)/g) || []).length;
-  assert.ok(peerIdSites > 0, "no MCPeerID is created anywhere — the mesh cannot start");
-  assert.strictEqual(cappings, peerIdSites,
-    `${peerIdSites} MCPeerID(displayName:) site(s) but only ${cappings} prefix(50) capping(s) — at least one peer name reaches MCPeerID uncapped`);
+  //
+  // What the previous version of THIS assertion missed: it compared the NUMBER of prefix(50)
+  // occurrences to the NUMBER of MCPeerID(displayName:) sites. An occurrence count is not the
+  // property the message claimed. Two capped locals feeding a single MCPeerID plus one site fed by
+  // a raw UIDevice.name satisfies the equality exactly — and a device whose name exceeds 63 chars
+  // still throws the ObjC exception this test is named after. The property is now checked per SITE:
+  // the expression each MCPeerID is handed must cap inline, or name a local capped in the same
+  // member, or name a member (stablePeerName, above) that caps and returns the capped value.
+  const siteRe = /MCPeerID\(\s*displayName:/g;
+  const sites = [];
+  for (let m; (m = siteRe.exec(swiftSource)); ) sites.push(m.index);
+  assert.ok(sites.length > 0, "no MCPeerID is created anywhere — the mesh cannot start");
+
+  for (const siteIdx of sites) {
+    const args = parenArgs(swiftSource, swiftSource.indexOf("(", siteIdx));
+    assert.ok(args !== null, "unbalanced MCPeerID(displayName:) call — its argument cannot be read");
+    const expr = args.replace(/^\s*displayName:\s*/, "").trim();
+    const where = `MCPeerID(displayName: ${expr})`;
+    if (/\.prefix\(50\)/.test(expr)) continue; // capped inline, at the site itself
+    const scope = enclosingMemberBody(swiftSource, siteIdx, where);
+    const locals = cappedLocals(scope);
+    const fedByCapped = exprIdentifiers(expr).some(
+      (id) => locals.has(id) || memberCapsAndReturns(swiftSource, id));
+    assert.ok(fedByCapped,
+      `${where} is handed a name that nothing caps to 50 chars — on a device whose UIDevice.name exceeds 63 chars this throws the ObjC exception in MCPeerID init`);
+  }
 });
 
 // sendPageUpdate must store the new page state BEFORE the early-return guard that checks

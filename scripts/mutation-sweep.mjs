@@ -28,7 +28,9 @@
  *   --cmd "<shell>"     Run this instead of `node --test <tests>` (for non-node suites).
  *   --lines A-B         Only mutate within this line range of each source. Repeatable.
  *   --only <regex>      Only run mutants whose description matches.
- *   --limit N           Cap the number of mutants (deterministic prefix after shuffling by hash).
+ *   --limit N           Cap the number of mutants. A deterministic prefix in file order, NOT a
+ *                       random sample — so it covers the TOP of the file and says nothing about the
+ *                       rest. Use --lines to sample a region deliberately.
  *   --jobs N            Parallel mirrors. Default: min(8, cpus-1).
  *   --timeout MS        Per-mutant test timeout. Default 120000.
  *   --json              Emit machine-readable JSON instead of the human report.
@@ -214,10 +216,22 @@ function generate(src, ext, ranges) {
   };
 
   // Token operators. Longest-match first so `>=` is never mutated as `>`.
+  //
+  // The replacements for one operator are collected TOGETHER. An earlier version broke out of the
+  // loop after the first match, which silently made every second replacement for a given operator
+  // dead: `>=` was only ever mutated to `>`, never to `<`, and the same for `<=`, `>` and `<`.
+  // Four of the sixteen declared pairs generated nothing, which is a table that reads like coverage
+  // and is not — the same failure this whole tool exists to find, in the tool.
   const byLen = [...TOKEN_MUTATIONS].sort((a, b) => b[0].length - a[0].length);
+  const bySource = new Map();
+  for (const [from, to] of byLen) {
+    if (!bySource.has(from)) bySource.set(from, []);
+    bySource.get(from).push(to);
+  }
+  const froms = [...bySource.keys()];
   for (let i = 0; i < src.length; i++) {
     if (!mask[i]) continue;
-    for (const [from, to] of byLen) {
+    for (const from of froms) {
       if (!src.startsWith(from, i)) continue;
       // Don't treat `=>`, `<=` inside `<<=`, or the `=` of `>=` in `>>=` as a comparison.
       if (from === ">" && src[i + 1] === "=") break;
@@ -235,7 +249,7 @@ function generate(src, ext, ranges) {
       // and every one was scored "caught", inflating that file's reported coverage by ~3 points.
       if ((from === "==" || from === "!=") && (src[i - 1] === "=" || src[i - 1] === "!")) break;
       if ((from === "==" || from === "!=") && src[i + 2] === "=") break;
-      add(i, i + from.length, to, "operator");
+      for (const to of bySource.get(from)) add(i, i + from.length, to, "operator");
       break; // longest match wins; don't also emit the shorter overlapping one
     }
   }
@@ -347,11 +361,18 @@ function runTests(dir, timeout) {
   return new Promise((resolve) => {
     const child = spawn("sh", ["-c", RUN_CMD], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
-    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* already gone */ } }, timeout);
+    // A KILLED RUN IS NOT A CAUGHT MUTANT. Reported separately, because "the suite noticed" and
+    // "the suite hung and we shot it" are different facts, and a mutation that makes the tests hang
+    // (an infinite loop, a timer defanged to 700 seconds) would otherwise be scored as coverage.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    }, timeout);
     child.stdout.on("data", (d) => { out += d; });
     child.stderr.on("data", (d) => { out += d; });
-    child.on("close", (code) => { clearTimeout(timer); resolve({ ok: code === 0, out }); });
-    child.on("error", () => { clearTimeout(timer); resolve({ ok: false, out }); });
+    child.on("close", (code) => { clearTimeout(timer); resolve({ ok: code === 0, out, timedOut }); });
+    child.on("error", () => { clearTimeout(timer); resolve({ ok: false, out, timedOut }); });
   });
 }
 
@@ -437,7 +458,7 @@ const workers = Array.from({ length: JOBS }, (_, w) => (async () => {
     if (!parseCheck(m.source, target)) verdict = "unparseable";
     if (!verdict) {
       const r = await runTests(dir, opt.timeout);
-      verdict = r.ok ? "SURVIVED" : "caught";
+      verdict = r.timedOut ? "timeout" : r.ok ? "SURVIVED" : "caught";
     }
     fs.writeFileSync(target, pristine[m.source]);
     results.push({ ...m, verdict });
@@ -452,18 +473,28 @@ fs.rmSync(baseDir, { recursive: true, force: true });
 const survived = results.filter((r) => r.verdict === "SURVIVED");
 const caught = results.filter((r) => r.verdict === "caught");
 const unparseable = results.filter((r) => r.verdict === "unparseable");
+const timedOut = results.filter((r) => r.verdict === "timeout");
 const scored = survived.length + caught.length;
 const pct = scored ? Math.round((caught.length / scored) * 100) : 0;
 
 if (opt.json) {
   console.log(JSON.stringify({
     sources: SOURCES, tests: TESTS, cmd: RUN_CMD,
-    total: results.length, caught: caught.length, survived: survived.length, unparseable: unparseable.length,
+    total: results.length, caught: caught.length, survived: survived.length,
+    unparseable: unparseable.length, timedOut: timedOut.length,
     caughtPct: pct,
-    survivors: survived.map((s) => ({ source: s.source, line: s.line, before: s.before, after: s.after, kind: s.kind })),
+    // Sorted: the workers finish out of order, and an unstable list makes two runs of the same
+    // command look like different results.
+    survivors: [...survived]
+      .sort((a, b) => a.source.localeCompare(b.source) || a.line - b.line || a.after.localeCompare(b.after))
+      .map((s) => ({ source: s.source, line: s.line, before: s.before, after: s.after, kind: s.kind })),
   }, null, 2));
 } else {
-  console.log(`\n\n${caught.length} caught, ${survived.length} SURVIVED${unparseable.length ? `, ${unparseable.length} unparseable (not scored)` : ""} — ${pct}% of ${scored} scored mutants caught.`);
+  const aside = [
+    unparseable.length ? `${unparseable.length} unparseable` : "",
+    timedOut.length ? `${timedOut.length} timed out` : "",
+  ].filter(Boolean).join(", ");
+  console.log(`\n\n${caught.length} caught, ${survived.length} SURVIVED${aside ? `, ${aside} (not scored)` : ""} — ${pct}% of ${scored} scored mutants caught.`);
   if (survived.length) {
     // Grouped by line so a single under-tested function reads as one problem, not twelve.
     const byLine = new Map();

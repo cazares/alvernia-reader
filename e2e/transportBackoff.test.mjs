@@ -102,11 +102,25 @@ test("the ladder the model replays is the one the Swift actually computes", () =
     "the browser ladder has drifted from the advertiser's");
 });
 
+/// How long after a launch attempt the didNotStart callback lands. MPC reports a Local Network
+/// permission denial essentially at once, so this is small — but it is NOT zero, and the gap matters:
+/// a settle window shorter than it would fire before the failure it is supposed to be cancelled by.
+const FAILURE_LATENCY = 0.1;
+
 /**
- * Replay a transport that fails immediately on every attempt.
+ * Replay a transport that fails on every attempt.
  * `invalidateOnFailure` models whether a failure cancels the settle its attempt scheduled; it
  * defaults to what invalidatePendingSettle's body in the Swift actually does, and the settle window
  * defaults to the Swift's transportSettleSeconds.
+ *
+ * The clock is advanced explicitly and the settle is given a chance to fire at EVERY point the real
+ * main queue would reach it — both while waiting for didNotStart and during the backoff wait that
+ * follows. The earlier model only checked it during the backoff wait, applying the failure (and its
+ * token bump) unconditionally first, which made the whole replay blind to transportSettleSeconds on
+ * the shipped path: the Swift constant could be set to 0 — a transport pronounced healthy the
+ * instant it launches, so the counter can never leave rung 1 — and every test here stayed green. The
+ * sawtooth is a RELATIONSHIP between that constant and the ladder delays, so a model that cannot
+ * feel the constant is not testing the relationship.
  */
 const replay = ({
   invalidateOnFailure = SWIFT_INVALIDATES_ON_FAILURE,
@@ -117,28 +131,51 @@ const replay = ({
   let token = 0;
   let settle = null;
   const counts = [];
+  // Run the main queue forward to `now`: a settle whose deadline has passed fires, and zeroes the
+  // counter, unless a newer attempt has already superseded its token.
+  const advanceTo = (now) => {
+    if (settle && settle.at <= now && settle.token === token) {
+      count = 0; // the settle fired and declared the transport healthy
+      settle = null;
+    }
+  };
   const attempt = (at) => {
     token += 1;
     settle = { at: at + settleSeconds, token };
   };
   const fail = (at) => {
+    advanceTo(at); // the settle may already have fired while we waited for didNotStart
     count += 1;
     if (invalidateOnFailure) token += 1;
     counts.push(count);
     return at + delayFor(count);
   };
   attempt(0);
-  let next = fail(0.1);
+  let next = fail(FAILURE_LATENCY);
   for (let i = 0; i < rounds; i++) {
-    if (settle && settle.at < next && settle.token === token) {
-      count = 0; // the settle fired and declared the transport healthy
-      settle = null;
-    }
+    advanceTo(next); // …and it may fire during the backoff wait, which is the original sawtooth
     attempt(next);
-    next = fail(next + 0.1);
+    next = fail(next + FAILURE_LATENCY);
   }
   return counts;
 };
+
+test("the settle window and the ladder are in the relationship the fix assumes", () => {
+  // Both halves of the M-F7 bug live in this one comparison, so it is asserted directly rather than
+  // left implicit in the replay: the window has to outlast the failure callback (or the counter can
+  // never leave the first rung at all, and invalidatePendingSettle protects nothing), and some rung
+  // has to grow past the window (or the settle from an already-doomed attempt could never fire
+  // during the wait, and the sawtooth this file exists to prevent could not happen). Moving
+  // transportSettleSeconds outside that band is a real design change and should be a visible one.
+  assert.ok(SETTLE_SECONDS > FAILURE_LATENCY,
+    `transportSettleSeconds is ${SETTLE_SECONDS}s, no longer than the ${FAILURE_LATENCY}s a ` +
+    "didNotStart takes to land — every launch is pronounced healthy before it can be reported " +
+    "failed, so the counter is pinned to rung 1 and the whole ladder is dead again");
+  const rungs = [1, 2, 3, 4, 5, 6].map(delayFor);
+  assert.ok(rungs.some((d) => d > SETTLE_SECONDS),
+    `no rung of the ladder (${rungs.join(", ")}) outlasts the ${SETTLE_SECONDS}s settle window — ` +
+    "the sawtooth this file models can no longer occur, so confirm the change was deliberate");
+});
 
 test("invalidatePendingSettle bumps the failed transport's attempt token", () => {
   // Named separately from the replay so an emptied body reports itself in one line instead of only

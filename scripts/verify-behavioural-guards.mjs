@@ -243,14 +243,20 @@ function runNamed(testFile, testName) {
   let out = "";
   let green = true;
   try {
-    out = execFileSync("node", ["--test", "--test-name-pattern", esc(testName), testFile],
+    // The reporter is PINNED to tap. The first version of this read the default reporter's output,
+    // which makes the check quietly dependent on a node upgrade changing its default — and on how
+    // that reporter escapes a test name containing `#` or a backslash. The TAP plan line is a
+    // documented part of the format and needs no name matching at all.
+    out = execFileSync("node", ["--test", "--test-reporter=tap", "--test-name-pattern", esc(testName), testFile],
       { cwd: ROOT, encoding: "utf8", stdio: "pipe" });
   } catch (e) {
     green = false;
     out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
   }
-  const named = new RegExp(`^# Subtest: .*${esc(testName)}`, "m");
-  const ran = named.test(out) && !/^1\.\.0$/m.test(out);
+  // A pattern that matches nothing emits an EMPTY PLAN (`1..0`) and exits zero. Without this, a
+  // drifted test name would make the baseline look green and every mutation look caught, while
+  // running none of them.
+  const ran = !/^\s*1\.\.0\s*$/m.test(out);
   return { ran, green };
 }
 

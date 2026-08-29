@@ -147,46 +147,101 @@ test("a lostPeer mid-handshake does not make the follower reject its real direct
   assert.match(reset, /invitedDirector = nil/, "the invite record survives a role change");
 });
 
+// Strip Swift comments so nothing a human writes ABOUT the predicate is mistaken for the predicate.
+// Block comments first, then line comments, so a `//` living inside a `/* … */` cannot orphan half
+// of it.
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+// Whitespace carries no meaning inside a Swift boolean expression, so remove all of it: the
+// comparison is then blind to indentation, to where the author chose to break the lines, and to the
+// spacing around ==. None of these clauses contain a string literal with a space in it, so nothing
+// meaningful is lost.
+const squash = (s) => s.replace(/\s+/g, "");
+
+// Drop redundant wrapping parens, but only when the opening one really closes at the very end —
+// `(a)||(b)` must not be mistaken for a parenthesised whole.
+const unwrap = (s) => {
+  let t = s;
+  for (;;) {
+    if (!t.startsWith("(") || !t.endsWith(")")) return t;
+    let depth = 0;
+    let closesAtEnd = true;
+    for (let i = 0; i < t.length; i++) {
+      if (t[i] === "(") depth += 1;
+      else if (t[i] === ")") {
+        depth -= 1;
+        if (depth === 0 && i < t.length - 1) {
+          closesAtEnd = false;
+          break;
+        }
+      }
+    }
+    if (!closesAtEnd) return t;
+    t = t.slice(1, -1);
+  }
+};
+
+// Read the predicate that a given `guard` consumes: find the guard, then walk back to the LAST
+// binding of that name before it. Anchoring on the guard matters — `peerIsKnownDirector` is bound
+// twice in this file, and the other one (the director branch's two-clause split-brain check) is a
+// different predicate that must NOT be dragged into this comparison.
+const predicateGuardedBy = (name, guardMarker) => {
+  const guardIdx = MODULE.indexOf(guardMarker);
+  assert.ok(guardIdx > 0, `${guardMarker} is gone`);
+  const declRe = new RegExp(`let\\s+${name}\\s*=`, "g");
+  let decl = null;
+  for (let m; (m = declRe.exec(MODULE)) !== null; ) {
+    if (m.index >= guardIdx) break;
+    decl = m;
+  }
+  assert.ok(decl, `${name} is no longer a plain let-binding before ${guardMarker}`);
+  const from = decl.index + decl[0].length;
+  assert.ok(from < guardIdx, `could not bound ${name}'s predicate`);
+  return MODULE.slice(from, guardIdx);
+};
+
 test("both director predicates stay in agreement", () => {
   // The accept path and the .connected path have drifted apart before; the file's own comments say
   // they must not. Same four clauses, both places — and, load-bearing, joined by OR.
   //
-  // The old version only grepped for the four clause substrings, which says nothing about how they
-  // are combined: joining them with && leaves every substring intact, so the whole point of the
+  // The oldest version only grepped for the four clause substrings, which says nothing about how
+  // they are combined: joining them with && leaves every substring intact, so the whole point of the
   // four-way predicate could be inverted with the test still green. And an inverted predicate is
   // exactly the outage above — a follower needing all four to be true hangs up on its real director
   // the moment a lostPeer clears discoveredDirectors and discoveredDirectorInfo together. So the
-  // operator itself is now asserted: the right-hand side is split on ||, and it must yield exactly
-  // these four operands and contain no && at all.
+  // operator itself is asserted: the right-hand side is split on ||, and it must yield exactly these
+  // four operands and contain no && at all.
+  //
+  // What THAT version missed is that it compared the operands as raw source text, so anything
+  // behaviour-neutral broke it: a comment written inside the OR chain, a re-wrap of the lines, a
+  // pair of clarifying parentheses. Worse, a comment that merely mentioned "&&" — the likeliest
+  // comment to write next to a predicate whose whole point is that it is NOT a conjunction — made
+  // the test fail with an actively false accusation that the shipped code had been inverted. A test
+  // that lies about which way the bug went is worse than no test. Comments and whitespace are
+  // therefore normalised away before anything is compared, and the operator check counts real ||
+  // tokens in the stripped source rather than searching text a human may have written.
   const CLAUSES = [
     "self.pendingInvitePeer == peerID",
     "self.weInvitedAsDirector(peerID)",
     "self.discoveredDirectors[peerID] != nil",
     'self.discoveredDirectorInfo[peerID]?["role"] == "director"',
-  ];
-
-  const rhsOf = (decl, endMarker) => {
-    const block = fn(decl, endMarker);
-    const eq = block.indexOf(" = ");
-    assert.ok(eq > 0, `${decl} is no longer a plain assignment — cannot read its predicate`);
-    return block.slice(eq + 3).replace(/\s+/g, " ").trim();
-  };
+  ].map(squash);
 
   const seen = [];
-  for (const [start, end] of [
-    ["let isDirector = self.pendingInvitePeer == peerID", "guard isDirector else {"],
-    ["let peerIsKnownDirector = self.pendingInvitePeer == peerID", "guard peerIsKnownDirector else {"],
+  for (const [name, guardMarker] of [
+    ["isDirector", "guard isDirector"],
+    ["peerIsKnownDirector", "guard peerIsKnownDirector"],
   ]) {
-    const rhs = rhsOf(start, end);
+    const rhs = squash(stripComments(predicateGuardedBy(name, guardMarker)));
     assert.ok(!rhs.includes("&&"),
-      `${start} is a CONJUNCTION — a follower now needs every clause true at once, so a lostPeer ` +
-      "mid-handshake makes it cancelConnectPeer on its own director");
-    const operands = rhs.split("||").map((s) => s.trim());
-    assert.equal(operands.length, CLAUSES.length,
-      `${start} no longer ORs exactly ${CLAUSES.length} clauses (got ${operands.length}): ${rhs}`);
+      `${name} is a CONJUNCTION — a follower now needs every clause true at once, so a lostPeer ` +
+      `mid-handshake makes it cancelConnectPeer on its own director. Predicate: ${rhs}`);
+    assert.equal((rhs.match(/\|\|/g) || []).length, CLAUSES.length - 1,
+      `${name} no longer joins exactly ${CLAUSES.length} clauses with ||: ${rhs}`);
+    const operands = rhs.split("||").map(unwrap);
     assert.deepEqual([...operands].sort(), [...CLAUSES].sort(),
-      `${start} does not OR the four director clauses — got: ${rhs}`);
-    seen.push(operands.slice().sort().join(" || "));
+      `${name} does not OR the four director clauses — got: ${rhs}`);
+    seen.push(operands.slice().sort().join("||"));
   }
   assert.equal(seen[0], seen[1],
     "the accept path and the .connected path disagree about what makes a peer a director");

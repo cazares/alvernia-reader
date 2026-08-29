@@ -51,35 +51,102 @@ const matchParen = (s, open) => {
   return -1;
 };
 
-// Every TOP-LEVEL rule, as { selectors[], body }. Structural: preludes are read up to their own
+// Split a rule body into its declarations, structurally: on top-level `;`, with parens counted so
+// the commas and nested calls inside a calc()/max()/env() value can never split it.
+//
+// WHAT THE PREVIOUS VERSION MISSED: it read declarations with one regex per property whose match
+// CONSUMED the terminating `;` — `/(?:^|;)\s*(left|right)\s*:\s*([^;]+);/g`. In a body with two
+// consecutive declarations (`right: …; left: auto;`) the separator the second one needed had
+// already been eaten, so only the FIRST was ever seen: the "last one wins" cascade below was a
+// no-op, and a rule that set the same property twice read the value the browser discards.
+const declarations = (body) => {
+  const raw = [];
+  let depth = 0, cur = "";
+  for (const c of body) {
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    else if (c === ";" && depth === 0) { raw.push(cur); cur = ""; continue; }
+    cur += c;
+  }
+  raw.push(cur);
+  return raw.flatMap((d) => {
+    const i = d.indexOf(":");
+    if (i < 0) return [];
+    const prop = d.slice(0, i).trim();
+    if (!prop) return [];
+    // Custom properties are case-SENSITIVE; regular properties are not.
+    return [{ prop: prop.startsWith("--") ? prop : prop.toLowerCase(), value: d.slice(i + 1).trim() }];
+  });
+};
+
+// Conditional group rules hold ordinary style rules — :root overrides included — so the parser has
+// to walk into them. @keyframes is deliberately NOT walked: its inner blocks are keyframe selectors
+// (`0%`, `to`), not style rules, and reading them as such would invent selectors that do not exist.
+const GROUP_AT_RULES = new Set(["media", "supports", "container", "layer", "scope"]);
+
+// Every rule, as { selectors[], body, context[] }, where `context` is the chain of at-rule preludes
+// the rule sits inside (empty for a top-level rule). Structural: preludes are read up to their own
 // opening brace and bodies to the matching close, so an added declaration or a reflowed rule cannot
-// shift anything out of a window. @media blocks are deliberately skipped — see the single-definition
-// assertion below, which is what keeps that safe.
-const RULES = (() => {
+// shift anything out of a window.
+//
+// WHAT THE PREVIOUS VERSION MISSED: it dropped every prelude starting with `@` and never looked
+// inside, so a @media block was invisible to the whole file. cssVar's message promised that a
+// @media override would be caught, and it could not be: appending
+// `@media (max-width: 400px) { :root { --fab-slot2: calc(var(--fab-size) - 3rem); } }` puts ♪ three
+// rem INSIDE ⌕ on a phone, and all fourteen tests stayed green. styles.css already ships two @media
+// blocks that redefine :root variables, so this is a live edit path.
+const parseRules = (css, context = []) => {
   const out = [];
   let i = 0;
-  while (i < CSS_NC.length) {
-    const open = CSS_NC.indexOf("{", i);
+  while (i < css.length) {
+    const open = css.indexOf("{", i);
     if (open < 0) break;
-    const close = matchBrace(CSS_NC, open);
+    const close = matchBrace(css, open);
     if (close < 0) break;
-    const prelude = CSS_NC.slice(i, open).trim();
-    if (!prelude.startsWith("@")) {
-      out.push({
-        selectors: prelude.split(",").map((s) => s.trim()).filter(Boolean),
-        body: CSS_NC.slice(open + 1, close),
-      });
+    const prelude = css.slice(i, open).trim();
+    const body = css.slice(open + 1, close);
+    if (prelude.startsWith("@")) {
+      const at = (/^@([a-zA-Z-]+)/.exec(prelude) || [])[1];
+      if (at && GROUP_AT_RULES.has(at.toLowerCase())) out.push(...parseRules(body, [...context, prelude]));
+    } else {
+      out.push({ selectors: prelude.split(",").map((s) => s.trim()).filter(Boolean), body, context });
     }
     i = close + 1;
   }
   return out;
-})();
+};
+const RULES = parseRules(CSS_NC);
 assert.ok(RULES.length > 100, `only ${RULES.length} CSS rules parsed — the stylesheet did not parse`);
+assert.ok(RULES.some((r) => r.context.length),
+  "no rule was found inside an @media/@supports block — the parser stopped walking into them, and " +
+  "a conditional override of a ladder variable would go unnoticed again");
 
+// Every :root declaration of --<name>, from ANYWHERE in the stylesheet, each tagged with the
+// at-rule context it sits in.
 const declsOf = (name) =>
   RULES.filter((r) => r.selectors.includes(":root"))
-    .flatMap((r) => [...r.body.matchAll(new RegExp(`(?:^|;)\\s*--${name}\\s*:\\s*([^;]+);`, "g"))])
-    .map((m) => m[1].trim());
+    .flatMap((r) => declarations(r.body)
+      .filter((d) => d.prop === `--${name}`)
+      .map((d) => ({ value: d.value, context: r.context })));
+
+// The single value of a ladder variable — or a loud failure. The ladder below is one set of
+// numbers, so it is only derivable while each variable it touches has exactly one value that
+// applies everywhere. A second declaration, at top level OR inside any condition, makes every
+// number downstream of it wrong on some device, and this is the assertion that says so.
+const varValue = (name) => {
+  const decls = declsOf(name);
+  assert.equal(decls.length, 1,
+    `--${name} is declared ${decls.length} times in :root` +
+    (decls.length > 1
+      ? ` (${decls.map((d) => d.context.length ? d.context.join(" / ") : "top level").join("; ")})`
+      : "") +
+    " — the ladder is only derivable while each variable has exactly one value everywhere, so a " +
+    "conditional override has to be resolved per condition rather than ignored");
+  assert.equal(decls[0].context.length, 0,
+    `--${name} is declared only inside ${decls[0].context.join(" / ")} — outside that condition it ` +
+    "falls back to nothing and every offset derived from it collapses");
+  return decls[0].value;
+};
 
 // Evaluate a CSS length the way the browser would, in rem. Anything it does not understand is a
 // hard failure, never a silent 0 — a resolver that shrugs at an unfamiliar expression is how a
@@ -113,7 +180,10 @@ const evalLength = (expr, seen = new Set()) => {
           assert.ok(args.length > 1, `--${varName} is used but never defined in :root`);
           return evalLength(args.slice(1).join(","), seen);
         }
-        return evalLength(decls[decls.length - 1], new Set([...seen, varName]));
+        // varValue(), not "the last declaration wins": a variable this ladder actually reads must
+        // have one value everywhere, and the check has to reach the ones reached INDIRECTLY too —
+        // --fab-size is only ever touched through --fab-slot2's calc().
+        return evalLength(varValue(varName), new Set([...seen, varName]));
       }
       // env(): modelled at its FALLBACK, i.e. a device with no notch. Every anchor wraps env() in a
       // max() against the gutter, and the inset only ever pushes a control FURTHER from the edge —
@@ -147,13 +217,7 @@ const evalLength = (expr, seen = new Set()) => {
   return leaf.sign * Number(num[1]);
 };
 
-const cssVar = (name) => {
-  const decls = declsOf(name);
-  assert.equal(decls.length, 1,
-    `--${name} is declared ${decls.length} times at top level — the ladder is only derivable while ` +
-    "each variable has exactly one value (a @media override would make every number below wrong)");
-  return evalLength(decls[0]);
-};
+const cssVar = (name) => evalLength(varValue(name));
 
 const GUTTER = cssVar("fab-gutter");
 const GUTTER_TOP = cssVar("fab-gutter-top");
@@ -177,18 +241,51 @@ const SLOT2 = cssVar("fab-slot2");
 const near = (a, b, why) =>
   assert.ok(Math.abs(a - b) < 1e-9, `${why} — got ${a}rem, expected ${b}rem`);
 
-// A rule's resolved distance from the screen edge it is anchored to, in rem. Selectors are matched
-// EXACTLY against a rule's own selector list (so `.song-jump-fab` never picks up the director's
-// more specific rule), and the LAST such rule that sets left/right wins, as the cascade does.
-const edgeOffset = (selector) => {
-  let found = null;
+const DIRECTOR = 'html[data-role="director"]';
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A control's resolved distance from the screen edge it is anchored to, in rem, for an element in a
+// given role scope. Every rule whose selector ENDS in `key` targets this control, so all of them are
+// considered: the unscoped ones first, then the ones scoped to `scope`, which outrank them exactly
+// as an added attribute selector outranks nothing. Within a tier the last declaration wins, as the
+// cascade does.
+//
+// WHAT THE PREVIOUS VERSION MISSED: it matched `rule.selectors.includes(selector)` — an exact string
+// match — so any role-scoped override such as `html[data-role="director"] .search-fab { right: … }`
+// was simply invisible, and a ⌕/♪ collision introduced that way stayed green. Anything that moves
+// this control from a state the caller did not name, or from inside an @media condition, now fails
+// loudly rather than being skipped: the numbers below describe ONE layout, and a control that sits
+// somewhere else in some other state has to be re-derived there, not ignored here.
+const edgeOffset = (key, scope) => {
+  const tail = new RegExp(`(?:^|[\\s>+~])${escapeRe(key)}$`);
+  const unscoped = [], scoped = [];
+  let targeted = false;
   for (const rule of RULES) {
-    if (!rule.selectors.includes(selector)) continue;
-    const m = [...rule.body.matchAll(/(?:^|;)\s*(left|right)\s*:\s*([^;]+);/g)].pop();
-    if (m) found = { edge: m[1], value: m[2].trim() };
+    const mine = rule.selectors.filter((s) => tail.test(s));
+    if (!mine.length) continue;
+    targeted = true;
+    const edges = declarations(rule.body).filter((d) => d.prop === "left" || d.prop === "right");
+    if (!edges.length) continue;
+    assert.equal(rule.context.length, 0,
+      `\`${mine.join(", ")}\` is repositioned inside ${rule.context.join(" / ")} — this test resolves ` +
+      "one unconditional layout, so that condition needs its own derivation");
+    if (mine.includes(key)) unscoped.push(...edges);
+    else if (scope && mine.includes(`${scope} ${key}`)) scoped.push(...edges);
+    else assert.fail(
+      `\`${mine.join(", ")}\` moves ${key} in a state this test does not model (scope: ${scope || "none"}) ` +
+      "— derive the ladder for that state too, or this comparison is about a layout the device never shows");
   }
-  assert.ok(found, `no rule with the exact selector \`${selector}\` sets left/right — it was renamed or deleted`);
-  return { edge: found.edge, rem: evalLength(found.value) };
+  assert.ok(targeted, `no rule targets \`${key}\` — it was renamed or deleted`);
+
+  const anchor = {};
+  for (const d of [...unscoped, ...scoped]) anchor[d.prop] = d.value;
+  // `left: auto` beside `right: <length>` is a reset, not a second anchor — but exactly one of the
+  // two must resolve to a length, or the control is not positioned the way this arithmetic assumes.
+  const anchored = ["left", "right"].filter((e) => anchor[e] !== undefined && anchor[e] !== "auto");
+  assert.equal(anchored.length, 1,
+    `${key} resolves to ${anchored.length} edge anchors (${JSON.stringify(anchor)}) — exactly one of ` +
+    "left/right must be a length for its distance from an edge to mean anything");
+  return { edge: anchored[0], rem: evalLength(anchor[anchored[0]]) };
 };
 
 test("the corner cluster is uniformly spaced, by construction", () => {
@@ -224,8 +321,11 @@ test("the two DIRECTOR fabs (top-right ⌕ and ♪) never overlap", () => {
   // is the whole repair: the old version hard-coded ⌕ at the gutter and substituted its own
   // SIZE + GAP for ♪'s offset, so rewriting --fab-slot2's calc() to `var(--fab-size) - 2rem` moved ♪
   // 2.00rem on top of ⌕ on a real iPad while this test went on computing a comfortable 0.50rem.
-  const searchAt = edgeOffset(".search-fab");
-  const songAt = edgeOffset('html[data-role="director"] .song-jump-fab');
+  // Both are resolved IN THE DIRECTOR'S STATE, which is the only state where these two are on
+  // screen together — so a director-scoped override of either one is part of the answer instead of
+  // being invisible to it.
+  const searchAt = edgeOffset(".search-fab", DIRECTOR);
+  const songAt = edgeOffset(".song-jump-fab", DIRECTOR);
   assert.equal(searchAt.edge, "right", "⌕ is no longer right-anchored — this comparison assumes one edge");
   assert.equal(songAt.edge, "right", "the director's ♪ is no longer right-anchored");
 
