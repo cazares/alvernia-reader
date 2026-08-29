@@ -1396,7 +1396,46 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     adv.delegate = self
     adv.startAdvertisingPeer()
     advertiser = adv
-    advertiserFailureCount = 0
+    // RESET ON SUCCESS, NOT ON ATTEMPT — which is what this line used to do, and it made the whole
+    // M-F7 backoff ladder unreachable. didNotStartAdvertisingPeer's retry calls back into here, so
+    // the counter was zeroed before the next failure could increment it: it oscillated 0↔1 forever,
+    // the delay was always the first rung (3 s), and handleAppDidBecomeActive's `> 5` permission-
+    // recovery branch could never be entered. A device whose Local Network permission is denied tore
+    // down and rebuilt its advertiser every 3 seconds for the whole Mass instead of settling to the
+    // designed 45 s last-resort cadence.
+    //
+    // MPC has no "did start advertising" callback, so surviving without a failure IS the success
+    // signal: didNotStart fires immediately, well inside this window.
+    noteTransportSettled(advertiser: true)
+  }
+
+  /// How long a transport must stay up, with no didNotStart callback, to count as working.
+  private static let transportSettleSeconds: TimeInterval = 10
+
+  /// Bumped on every launch attempt so a settle check can tell whether it is still describing the
+  /// attempt it was scheduled for.
+  private var advertiserAttemptToken = 0
+  private var browserAttemptToken = 0
+
+  private func noteTransportSettled(advertiser isAdvertiser: Bool) {
+    let generation = resetGeneration
+    if isAdvertiser {
+      advertiserAttemptToken &+= 1
+      let token = advertiserAttemptToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.transportSettleSeconds) { [weak self] in
+        guard let self, self.resetGeneration == generation,
+              self.advertiserAttemptToken == token else { return }
+        self.advertiserFailureCount = 0
+      }
+    } else {
+      browserAttemptToken &+= 1
+      let token = browserAttemptToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.transportSettleSeconds) { [weak self] in
+        guard let self, self.resetGeneration == generation,
+              self.browserAttemptToken == token else { return }
+        self.browserFailureCount = 0
+      }
+    }
   }
 
   private func startBrowsing() {
@@ -1405,7 +1444,8 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     b.delegate = self
     b.startBrowsingForPeers()
     browser = b
-    browserFailureCount = 0
+    // Same reset-on-success rule as the advertiser above.
+    noteTransportSettled(advertiser: false)
     // A BRAND-NEW BROWSER IS ALREADY AS FRESH AS A REFRESH CAN MAKE IT.
     //
     // startDirector calls startBrowsing directly, and becomeDirector then kicks a re-browse
@@ -2257,24 +2297,28 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
-    // Surface the failure to JS immediately so the director UI can warn the user.
-    // This fires when Local Network permission is denied or the radio is unavailable.
-    if currentRole == "director" {
-      emitError(code: "DIRECTOR_START_FAILED", message: error.localizedDescription)
-    }
-    advertiserFailureCount += 1
-    // M-F7: fast exponential backoff for the first 5 failures (transient radio/thermal hiccup or a
-    // permission race), then a SLOW 45 s last-resort retry FOREVER — never give up permanently. A
-    // foregrounded director whose radio hiccups past the ceiling would otherwise stay dark until a
-    // foreground transition that may never come during a long foregrounded Mass. A genuine
-    // permanent permission denial just keeps failing harmlessly every 45 s.
-    let delay = advertiserFailureCount <= 5
-      ? min(3.0 * pow(2.0, Double(advertiserFailureCount - 1)), 30.0)
-      : 45.0
-    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-      guard let self = self, advertiser === self.advertiser, self.currentRole != "off" else { return }
-      self.advertiser?.stopAdvertisingPeer(); self.advertiser?.delegate = nil; self.advertiser = nil
-      self.startAdvertising()
+    // ON MAIN, like every other delegate callback in this file. This one read currentRole and
+    // mutated advertiserFailureCount straight off MPC's private delegate queue.
+    DispatchQueue.main.async {
+      // Surface the failure to JS immediately so the director UI can warn the user.
+      // This fires when Local Network permission is denied or the radio is unavailable.
+      if self.currentRole == "director" {
+        self.emitError(code: "DIRECTOR_START_FAILED", message: error.localizedDescription)
+      }
+      self.advertiserFailureCount += 1
+      // M-F7: fast exponential backoff for the first 5 failures (transient radio/thermal hiccup or a
+      // permission race), then a SLOW 45 s last-resort retry FOREVER — never give up permanently. A
+      // foregrounded director whose radio hiccups past the ceiling would otherwise stay dark until a
+      // foreground transition that may never come during a long foregrounded Mass. A genuine
+      // permanent permission denial just keeps failing harmlessly every 45 s.
+      let delay = self.advertiserFailureCount <= 5
+        ? min(3.0 * pow(2.0, Double(self.advertiserFailureCount - 1)), 30.0)
+        : 45.0
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        guard let self = self, advertiser === self.advertiser, self.currentRole != "off" else { return }
+        self.advertiser?.stopAdvertisingPeer(); self.advertiser?.delegate = nil; self.advertiser = nil
+        self.startAdvertising()
+      }
     }
   }
 
@@ -2359,22 +2403,25 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   }
 
   func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
-    // Guard against priming browser failures — only the real browser emits to JS.
-    // Fires when Local Network permission is denied or the radio is unavailable.
-    if browser === self.browser, currentRole == "follower" {
-      emitError(code: "FOLLOWER_START_FAILED", message: error.localizedDescription)
-    }
-    browserFailureCount += 1
-    // M-F7: same as the advertiser — fast backoff for 5, then a slow 45 s retry forever so a
-    // follower whose radio hiccups past the ceiling keeps trying to find the director instead of
-    // going permanently dark on a foregrounded device.
-    let delay = browserFailureCount <= 5
-      ? min(3.0 * pow(2.0, Double(browserFailureCount - 1)), 30.0)
-      : 45.0
-    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-      guard let self = self, browser === self.browser, self.currentRole != "off" else { return }
-      self.browser?.stopBrowsingForPeers(); self.browser?.delegate = nil; self.browser = nil
-      self.startBrowsing()
+    // ON MAIN — same reason as the advertiser's didNotStart above.
+    DispatchQueue.main.async {
+      // Guard against priming browser failures — only the real browser emits to JS.
+      // Fires when Local Network permission is denied or the radio is unavailable.
+      if browser === self.browser, self.currentRole == "follower" {
+        self.emitError(code: "FOLLOWER_START_FAILED", message: error.localizedDescription)
+      }
+      self.browserFailureCount += 1
+      // M-F7: same as the advertiser — fast backoff for 5, then a slow 45 s retry forever so a
+      // follower whose radio hiccups past the ceiling keeps trying to find the director instead of
+      // going permanently dark on a foregrounded device.
+      let delay = self.browserFailureCount <= 5
+        ? min(3.0 * pow(2.0, Double(self.browserFailureCount - 1)), 30.0)
+        : 45.0
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        guard let self = self, browser === self.browser, self.currentRole != "off" else { return }
+        self.browser?.stopBrowsingForPeers(); self.browser?.delegate = nil; self.browser = nil
+        self.startBrowsing()
+      }
     }
   }
 

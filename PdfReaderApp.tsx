@@ -403,6 +403,20 @@ export default function App() {
       .then((pairs) => {
         const map = Object.fromEntries(pairs);
         telemetryEnabledRef.current = map["sv.telemetry"] === "1";
+        // SEED THE LEVEL, OR TELEMETRY CAN NEVER TURN ITSELF ON.
+        //
+        // logLevelRef starts at `off` and its ONLY writer is the policy echoed back on a flush
+        // response — but dbgLog drops every event before buffering when its level exceeds the
+        // current one, and levelForEvent's minimum is `error`. So nothing was ever buffered, the
+        // flush that carries the policy never fired, and the level could never be raised: a
+        // bootstrapping deadlock in which enabling telemetry showed its confirmation toast and
+        // changed nothing, including the toast's own breadcrumb. Every debugging session against a
+        // device — the #352 follower stall included — produced zero JS-side rows.
+        //
+        // Seeding at `info` starts the conversation without opening the debug firehose that twice
+        // exhausted the account's daily quota; the first flush's echoed policy then tunes it either
+        // way. Off when telemetry is off, so a resting device is still silent.
+        logLevelRef.current = telemetryEnabledRef.current ? LOG_LEVELS.info : LOG_LEVELS.off;
         // AsyncStorage.multiGet resolves a MISSING key to null, never undefined — checking for
         // undefined here meant "never saved" was never true, so String(null) ran and the field
         // showed the literal text "null" on every device that had not explicitly saved a sink.
@@ -475,9 +489,17 @@ export default function App() {
       .then((r) => {
         // Adopt the flush cadence and level the sink (or worker) hands back, so either can retune
         // this device without a rebuild.
-        r.json?.().then((j: { policy?: { logIntervalMs?: number; logLevel?: number } }) => {
-          const p = j?.policy;
-          if (p && Number.isFinite(p.logLevel)) logLevelRef.current = Number(p.logLevel);
+        r.json?.().then((j: {
+          policy?: { logIntervalMs?: number; logLevel?: number };
+          logLevel?: number;
+        }) => {
+          // BOTH SHAPES. The LAN sink nests the policy; the worker spread it FLAT for months, so
+          // every value it echoed was silently discarded and LOG_LEVEL — "the kill switch", "retunes
+          // the whole fleet in ~20 seconds" — had never once retuned a device. The worker now nests
+          // it too, but reading both means a fleet on an older binary is still reachable by the
+          // switch, which is the entire point of having one.
+          const lvl = Number.isFinite(j?.policy?.logLevel) ? j?.policy?.logLevel : j?.logLevel;
+          if (Number.isFinite(lvl)) logLevelRef.current = Number(lvl);
         }).catch(() => {});
       })
       .catch(() => {
@@ -525,10 +547,13 @@ export default function App() {
   // {deviceId, bookVersion, bookStage} — no label, no role, nothing PII-adjacent — and at a far
   // slower cadence (below) than the dashboard ever needed, since arming is a rare, deliberate,
   // Miguel-supervised action, not something that needs 90s freshness.
-  const otaCheckin = useCallback(() => {
+  // Returns the in-flight check-in so ⟳ can AWAIT one rather than replaying an old pointer. Every
+  // other caller (boot, the 4-minute interval, foreground) still treats it as fire-and-forget; the
+  // chain already terminates in a catch, so an ignored promise can never surface as a rejection.
+  const otaCheckin = useCallback((): Promise<void> => {
     const deviceId = dbgDeviceRef.current;
-    if (!deviceId || deviceId === "?") return;
-    fetch(`${RELAY_BASE}/ota/checkin`, {
+    if (!deviceId || deviceId === "?") return Promise.resolve();
+    return fetch(`${RELAY_BASE}/ota/checkin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1355,6 +1380,12 @@ export default function App() {
           const tel = (msg as Record<string, unknown>).telemetry ? "1" : "";
           logSinkRef.current = sink;
           telemetryEnabledRef.current = tel === "1";
+          // Seed the level so the very first event survives dbgLog's gate — see the boot effect for
+          // the deadlock this breaks. `info` is enough to bootstrap: the LAN sink's first response
+          // echoes debug and raises it, and the worker echoes whatever LOG_LEVEL is deployed. Note
+          // the dbgLog below is itself one of the events that used to be dropped, so the act of
+          // enabling telemetry left no record that it had been enabled.
+          logLevelRef.current = tel === "1" ? LOG_LEVELS.info : LOG_LEVELS.off;
           AsyncStorage.multiSet([["sv.logSink", sink], ["sv.telemetry", tel]]).catch(() => {});
           dbgLog("debug:settings", { sink: sink || "(worker)", telemetry: tel === "1" });
           injectEvent({ type: "toast", text: tel === "1"
@@ -1851,11 +1882,17 @@ export default function App() {
       ) {
         const noticeText = "Hay una versión más reciente del app disponible. Puedes " +
           "actualizar ahora, o mientras tanto usar signovivo.com desde cualquier navegador.";
-        injectEvent({ type: "toast", text: noticeText });
-        // Same mesh-idle gate as shell-too-old: never pop a blocking modal over an active
-        // Mass/rehearsal. If busy right now, the one-shot flag stays false so the NEXT check-in
-        // (~4 min later) tries the modal again once things are quiet.
+        // THE TOAST WAS OUTSIDE THE MESH-IDLE GATE, so the deferral deferred only the modal. The
+        // one-shot flag is set solely inside this branch, which means a device WITH peers connected
+        // re-toasted on every 4-minute check-in and on every foreground. The one device at Mass that
+        // has both internet and connected peers is the director's iPad: the notice slid over the
+        // songbook every four minutes for the whole service — precisely the interruption the gate
+        // was written to prevent, delivered by the half of the nudge the gate did not cover.
+        //
+        // Both halves are behind it now. If the mesh is busy the whole nudge waits for the next
+        // check-in; the flag stays false, so nothing is lost, only deferred to a quiet moment.
         if (meshPeerCountRef.current === 0) {
+          injectEvent({ type: "toast", text: noticeText });
           didNativeBuildNudgeRef.current = true;
           Alert.alert(
             "Actualización disponible",
@@ -2115,8 +2152,19 @@ export default function App() {
     manualRefreshRef.current = true;
     breadcrumb("manual-refresh:start");
     try {
-      // A pointer seen on an earlier routine check-in was recorded but deliberately not acted on.
-      // Honour it now, so ⟳ works even if this tap's check-in cannot reach the relay.
+      // ASK THE RELAY NOW. This is the "do it NOW" affordance and it never once checked in: it only
+      // replayed pendingPointerRef, which is populated exclusively BY check-ins (boot, foreground,
+      // the 4-minute interval). So a book armed after this device's last check-in was invisible to
+      // the button — tap it, nothing downloads, tap again, still nothing, until the interval
+      // quietly staged it minutes later. Its own comment ("so ⟳ works even if this tap's check-in
+      // cannot reach the relay") describes a check-in that did not exist.
+      //
+      // Awaited FIRST and strictly before the fallback: firing both would let a stale replay claim
+      // stagingInFlightRef and make the fresh pointer wait for the next cycle, wasting a 27 MB
+      // download on the previous version.
+      await otaCheckin();
+      // Only if that could not reach the relay does an earlier-seen pointer get replayed — a
+      // pointer recorded on a routine check-in and deliberately not acted on then.
       if (!stagingInFlightRef.current && pendingPointerRef.current) {
         await onCheckinResponseRef.current?.({ bookUpdate: pendingPointerRef.current });
       }
@@ -2126,7 +2174,7 @@ export default function App() {
       manualRefreshRef.current = false;
       breadcrumb("manual-refresh:end");
     }
-  }, [breadcrumb]);
+  }, [breadcrumb, otaCheckin]);
   refreshBookNowRef.current = refreshBookNow;
 
   /**

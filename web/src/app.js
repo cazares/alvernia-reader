@@ -69,10 +69,30 @@ const revealReader = () => liftGateNow();
 // instead of leaving a broken image. Capped so a genuinely-missing asset eventually gives up.
 if (pageImage) {
   let pageImgRetries = 0;
+  // A RETRY MUST NOT OUTLIVE THE PAGE IT WAS FOR. This fired on a timer 350 ms–1.4 s later and
+  // re-assigned the src unconditionally, bypassing renderPage's requestId guard entirely: when the
+  // director turned a page inside that window, the timer put the OLD page's URL back on the visible
+  // <img> while state.currentPage held the new one. Nothing corrected it, because every recovery
+  // path compares state.currentPage to relay.livePage — which agree — and a stationary director's
+  // ping replies are duplicate seqs. The follower sat on the wrong song, green pill, until the next
+  // page turn. Capturing the page and re-checking it at fire time is the whole fix.
+  pageImage.addEventListener("load", () => {
+    // A successful load proves the transient failure is over. Without this the counter only ever
+    // climbed, so four blips ANYWHERE in a session permanently disabled retry for the rest of Mass.
+    pageImgRetries = 0;
+  });
   pageImage.addEventListener("error", () => {
     if (pageImgRetries++ >= 4) return;
     const base = (pageImage.currentSrc || pageImage.src).split("?")[0];
-    window.setTimeout(() => { pageImage.src = `${base}?retry=${pageImgRetries}`; }, 350 * pageImgRetries);
+    const failedPage = state.currentPage;
+    const attempt = pageImgRetries;
+    window.setTimeout(() => {
+      // Superseded by a newer page — the retry is for a page nobody is on any more.
+      if (state.currentPage !== failedPage) return;
+      // Something else already replaced the src (a re-render, a different page): leave it alone.
+      if (!(pageImage.currentSrc || pageImage.src).split("?")[0].endsWith(base.split("/").pop())) return;
+      pageImage.src = `${base}?retry=${attempt}`;
+    }, 350 * attempt);
   });
 }
 const offlineGate = document.getElementById("offline-gate");

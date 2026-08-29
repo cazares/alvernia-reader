@@ -203,7 +203,10 @@ test("a follower scans continuously — BLE is never switched off by connecting"
     MODULE.slice(MODULE.indexOf("case .connected:"), MODULE.indexOf("case .connecting:")),
     MODULE.slice(MODULE.indexOf("private func reconsiderFollowerTarget"), MODULE.indexOf("private func handleDirectorConflict")),
     MODULE.slice(MODULE.indexOf("private func forceFollowerReconnect"), MODULE.indexOf("private func sendFollowerHelloIfNeeded")),
-    MODULE.slice(MODULE.indexOf("func advertiser(\n    _ advertiser: MCNearbyServiceAdvertiser,\n    didReceiveInvitation"), MODULE.indexOf("didNotStartAdvertisingPeer")),
+    MODULE.slice(
+      MODULE.indexOf("didReceiveInvitationFromPeer peerID"),
+      MODULE.indexOf("func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer"),
+    ),
   ];
   for (const path of connectionPaths) {
     assert.ok(path.length > 0, "a connection path could not be located — the slice markers drifted");
