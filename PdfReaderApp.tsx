@@ -220,6 +220,9 @@ export default function App() {
   // CURRENT values without being re-created (re-creating it would restart the 90 s interval).
   const bookStageRef = useRef<string>("");
   const lastCheckinOkAtRef = useRef<number | null>(null);
+  /// When the relay last ANSWERED, ok or not. Distinct from lastCheckinOkAt, which is the
+  /// live-internet proof canApplyNow gates on and must stay tied to a successful response.
+  const lastCheckinRespondedAtRef = useRef<number | null>(null);
   const lastPageTurnAtRef = useRef<number | null>(null);
   const coldBootAtRef = useRef<number>(Date.now());
   const lastKnownRoleRef = useRef<string | null>(null);
@@ -417,10 +420,6 @@ export default function App() {
         // changed nothing, including the toast's own breadcrumb. Every debugging session against a
         // device — the #352 follower stall included — produced zero JS-side rows.
         //
-        // Seeding at `info` starts the conversation without opening the debug firehose that twice
-        // exhausted the account's daily quota; the first flush's echoed policy then tunes it either
-        // way. Off when telemetry is off, so a resting device is still silent.
-        logLevelRef.current = telemetryEnabledRef.current ? LOG_LEVELS.info : LOG_LEVELS.off;
         // AsyncStorage.multiGet resolves a MISSING key to null, never undefined — checking for
         // undefined here meant "never saved" was never true, so String(null) ran and the field
         // showed the literal text "null" on every device that had not explicitly saved a sink.
@@ -428,6 +427,17 @@ export default function App() {
         // only the former falls back to the default; an explicit empty save must still stick.
         const saved = map["sv.logSink"];
         logSinkRef.current = (saved === null || saved === undefined ? DEFAULT_LOG_SINK : saved).replace(/\/+$/, "");
+        // WHERE IT GOES DECIDES HOW LOUD IT MAY START. A LAN sink is Miguel's Mac: no quota, and
+        // full fidelity is the entire reason for pointing a device at it — seeding `info` there
+        // would drop every mesh:page-recv, which is exactly the trace a stall investigation needs.
+        // The worker shares a 100,000/day account quota with signovivo.com, so it starts at `info`
+        // and the echoed policy raises it only if LOG_LEVEL says so. Off when telemetry is off, so
+        // a resting device is silent either way.
+        logLevelRef.current = !telemetryEnabledRef.current
+          ? LOG_LEVELS.off
+          : logSinkRef.current
+            ? LOG_LEVELS.debug
+            : LOG_LEVELS.info;
       })
       .catch(() => {});
   }, []);
@@ -586,7 +596,15 @@ export default function App() {
   const otaCheckin = useCallback((): Promise<void> => {
     const deviceId = dbgDeviceRef.current;
     if (!deviceId || deviceId === "?") return Promise.resolve();
+    // TIME-BOX IT. This became AWAITED when ⟳ started firing a real check-in, and a bare fetch on
+    // parish wifi that associates but does not route never settles — the same failure
+    // directorRelaySync documents for /publish. Without a bound, one tap on a captive-portal
+    // network leaves manualRefreshRef true forever and ⟳ is dead for the rest of the session, which
+    // is worse than the missing check-in it was added to provide.
+    const ac = typeof AbortController === "function" ? new AbortController() : undefined;
+    const abortTimer = ac ? setTimeout(() => { try { ac.abort(); } catch {} }, 7000) : null;
     return fetch(`${RELAY_BASE}/ota/checkin`, {
+      signal: ac?.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -601,6 +619,12 @@ export default function App() {
       }),
     })
       .then(async (r) => {
+        // THE RELAY ANSWERED — which is a different fact from "it answered ok", and ⟳ needs this
+        // one. A 503 (arming unavailable) or a 429 is the relay talking; treating those as "offline"
+        // would send the refresh button to its stored-pointer fallback, which exists only for a
+        // device that could not reach the relay at all, and could re-stage a version the relay has
+        // since revoked.
+        lastCheckinRespondedAtRef.current = Date.now();
         if (!r.ok) return;
         // A SUCCESSFUL check-in is the live-internet proof canApplyNow's safety gate depends on.
         // Recorded here and nowhere else, so it can never be faked by a cached response.
@@ -618,7 +642,8 @@ export default function App() {
       .catch(() => {
         /* offline / relay unreachable — inside the church this is the NORMAL case and must stay
            completely silent: no error state, no UI. */
-      });
+      })
+      .finally(() => { if (abortTimer) clearTimeout(abortTimer); });
   }, []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
@@ -1414,11 +1439,10 @@ export default function App() {
           logSinkRef.current = sink;
           telemetryEnabledRef.current = tel === "1";
           // Seed the level so the very first event survives dbgLog's gate — see the boot effect for
-          // the deadlock this breaks. `info` is enough to bootstrap: the LAN sink's first response
-          // echoes debug and raises it, and the worker echoes whatever LOG_LEVEL is deployed. Note
-          // the dbgLog below is itself one of the events that used to be dropped, so the act of
-          // enabling telemetry left no record that it had been enabled.
-          logLevelRef.current = tel === "1" ? LOG_LEVELS.info : LOG_LEVELS.off;
+          // the deadlock this breaks, and for why a LAN sink starts at full fidelity while the
+          // worker starts conservative. Note the dbgLog below is itself one of the events that used
+          // to be dropped, so the act of enabling telemetry left no record that it had been enabled.
+          logLevelRef.current = tel !== "1" ? LOG_LEVELS.off : sink ? LOG_LEVELS.debug : LOG_LEVELS.info;
           AsyncStorage.multiSet([["sv.logSink", sink], ["sv.telemetry", tel]]).catch(() => {});
           dbgLog("debug:settings", { sink: sink || "(worker)", telemetry: tel === "1" });
           injectEvent({ type: "toast", text: tel === "1"
@@ -2203,9 +2227,12 @@ export default function App() {
       //
       // lastCheckinOkAtRef is stamped inside the response handler and nowhere else, so comparing it
       // across the await is a truthful "did this tap actually talk to the relay".
-      const checkinAtBefore = lastCheckinOkAtRef.current;
+      const respondedBefore = lastCheckinRespondedAtRef.current;
       await otaCheckin();
-      const checkinReachedRelay = lastCheckinOkAtRef.current !== checkinAtBefore;
+      // "Did the relay answer", NOT "did it answer ok". A 503 or 429 means arming is unavailable
+      // right now, not that this device is offline — replaying a stored pointer there could stage a
+      // version the relay has since revoked.
+      const checkinReachedRelay = lastCheckinRespondedAtRef.current !== respondedBefore;
       // Bad signal: honour a pointer recorded on an earlier routine check-in and deliberately not
       // acted on then. This is the whole reason the parking lot exists.
       if (!checkinReachedRelay && !stagingInFlightRef.current && pendingPointerRef.current) {
