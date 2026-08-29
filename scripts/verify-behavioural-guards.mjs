@@ -253,11 +253,23 @@ function runNamed(testFile, testName) {
     green = false;
     out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
   }
-  // A pattern that matches nothing emits an EMPTY PLAN (`1..0`) and exits zero. Without this, a
-  // drifted test name would make the baseline look green and every mutation look caught, while
-  // running none of them.
-  const ran = !/^\s*1\.\.0\s*$/m.test(out);
-  return { ran, green };
+  // TWO SIGNALS, BOTH REQUIRED.
+  //
+  // A pattern that matches nothing emits an EMPTY PLAN (`1..0`) and exits zero — so without the
+  // first check a drifted test name would make the baseline look green and every mutation look
+  // caught while running none of them.
+  //
+  // But the plan check ALONE is not enough either, and that was a real regression in an earlier
+  // version of this file: when a mutation breaks the test file at module scope (a syntax error, a
+  // failing top-level assertion, a bad import) the run aborts before any test executes. TAP then
+  // emits a failing subtest named after the FILE and no `1..0` at all, so `ran` was true, `green`
+  // was false, and the mutation was scored CAUGHT — crediting the tests for what is really a
+  // loader error. So the named test must ALSO appear as a subtest of its own.
+  const emptyPlan = /^\s*1\.\.0\s*$/m.test(out);
+  const namedSubtest = out.split("\n").some(
+    (l) => l.startsWith("# Subtest:") && l.slice("# Subtest:".length).includes(testName),
+  );
+  return { ran: !emptyPlan && namedSubtest, green };
 }
 
 // BASELINE FIRST. A red baseline makes every mutation look "caught" and reports a perfect score
