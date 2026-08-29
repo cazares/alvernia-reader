@@ -132,3 +132,32 @@ test("a fast-clocked director does not permanently lock out a normal one", () =>
   });
   assert.equal(d.apply, true, "a normal director cannot take the room back");
 });
+
+test("a SMALL clock skew parks the room in the future just as surely as a large one", () => {
+  // The trap that survived two earlier versions of the clamp. Anything above the server's clock
+  // locks out the next director for exactly that long, and a device whose time was set by hand is
+  // typically seconds-to-minutes fast — the ORDINARY case, not the extreme one. A 45 s skew sat
+  // comfortably under the 60 s tolerance and was passed through untouched.
+  for (const skewMs of [1000, 45000, SEQ_FUTURE_TOLERANCE_MS - 1, SEQ_FUTURE_TOLERANCE_MS + 1, 10 * 60 * 1000]) {
+    const stored = sanitizeSeq(NOW + skewMs, NOW, 10);
+    assert.ok(stored <= NOW, `a ${skewMs} ms skew left the room ${stored - NOW} ms ahead of the server`);
+  }
+});
+
+test("a handover after ANY skew is accepted on the next page turn", () => {
+  for (const skewMs of [1000, 45000, 120000]) {
+    const roomSeq = sanitizeSeq(NOW + skewMs, NOW, 10);       // fast director's last publish
+    const handover = NOW + 3000;                              // 3 s later, correct clock
+    const d = decidePublish({
+      rawSeq: handover, nowMs: handover,
+      snapshotSeq: roomSeq, snapshotTs: Math.floor(NOW / 1000), maxAgeS: MAX_AGE_S,
+    });
+    assert.equal(d.apply, true, `after a ${skewMs} ms skew the next director is still locked out`);
+  }
+});
+
+test("a SLOW clock is left alone — it is already orderable and must not be promoted", () => {
+  const behind = NOW - 30000;
+  assert.equal(sanitizeSeq(behind, NOW, 10), behind,
+    "a slow-clocked device's seq was pushed up, handing it an unearned advantage over a correct one");
+});

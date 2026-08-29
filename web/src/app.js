@@ -3761,6 +3761,8 @@ const relay = {
   livePage: null,    // latest page the director is on (tracked even while browsing)
   hasDirector: false,
   clockOffsetMs: 0,  // (serverClock - deviceClock), calibrated from /state Date header (P2-CLOCKSKEW)
+  rehomeFor: null,   // which livePage the bounded re-home budget below belongs to
+  rehomeTries: 0,    // forced re-home polls spent on it — see the heartbeat's F1 block
   healthTimer: 0,    // F3: independent time-driven relay-health watchdog (started once)
   cooldownUntil: 0,  // circuit breaker: no relay traffic at all until this timestamp (see tripRelayCooldown)
 };
@@ -3910,6 +3912,7 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
     return;
   }
 
+  const wasLive = relay.hasDirector;
   const d = lib.decideRelaySnapshot(snap, {
     lastSeq: relay.lastSeq,
     hasDirector: relay.hasDirector,
@@ -3942,6 +3945,21 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   }
   if (d.renderPill) renderRelayPill();
   if (d.reveal) revealReader();  // idempotent — safe to call anytime
+
+  // A DEMOTION MAY BE OUR OWN CLOCK, AND ONLY /state CAN TELL US.
+  //
+  // Freshness is judged against (deviceClock + clockOffsetMs), and that offset is calibrated in
+  // exactly one place: the `now` field of a /state body. WebSocket snapshots carry no `now`, and the
+  // open handler stops polling once the socket is live — so a device whose clock jumps after its
+  // last calibration (a user enabling "Set Automatically" on a hand-set clock, a carrier time sync)
+  // reads every subsequent push as stale and demotes. Nothing recovers it: the socket stays healthy
+  // so no reconnect fires, and the heartbeat's re-home is itself gated on hasDirector.
+  //
+  // One poll on the transition is enough to recalibrate and re-promote. Self-limiting — if the
+  // snapshot really is stale we demote again, but wasLive is false by then, so this cannot loop.
+  if (wasLive && !relay.hasDirector && !relay.pollTimer) {
+    relayPollOnce(true);
+  }
 };
 
 const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) + "/state";
@@ -4147,8 +4165,23 @@ const connectRelay = () => {
       // is a duplicate seq → not re-rendered → the follower silently strands on the wrong page with
       // a green "en vivo" pill and no cue, until the director's NEXT move. Force a re-home poll so a
       // drifted follower snaps back within a heartbeat. No-op for an on-page follower (the common case).
+      //
+      // BOUNDED, because "not on the director's page" is not always something a poll can fix. If
+      // renderPage clamps the target (a follower whose cached shell knows fewer pages than the
+      // director's book) or its image load throws, state.currentPage never becomes livePage — and
+      // then this condition is permanently true and fires a forced /state every 4 s for the rest of
+      // the session, silently, on an account whose whole quota is shared with signovivo.com. A few
+      // attempts is a re-home; an unbounded one is a poll loop wearing a re-home's clothes.
       if (!relay.browsing && relay.hasDirector && relay.livePage != null && state.currentPage !== relay.livePage) {
-        relayPollOnce(true);
+        if (relay.rehomeFor !== relay.livePage) { relay.rehomeFor = relay.livePage; relay.rehomeTries = 0; }
+        if (relay.rehomeTries < 3) {
+          relay.rehomeTries += 1;
+          relayPollOnce(true);
+        }
+      } else {
+        // On the director's page (or browsing): arm the budget for whatever comes next.
+        relay.rehomeFor = null;
+        relay.rehomeTries = 0;
       }
     }, 4000);
     relay.heartbeatTimer = myHeartbeat;
