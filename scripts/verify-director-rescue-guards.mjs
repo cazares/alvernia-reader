@@ -62,8 +62,14 @@ const MUTATIONS = [
    sub(".finally(() => {\n          becomeFollower();\n        });",
        ".finally(() => {\n          becomeFollower();\n          void becomeDirector(DIRECTOR_CODE);\n        });")],
   ["a persisted director role is silently RESTORED at boot instead of just announced", "PdfReaderApp.tsx",
-   sub('if (prev === "director") {\n            // Written back as follower',
-       'if (prev === "director") {\n            void becomeDirector(DIRECTOR_CODE);\n            // Written back as follower')],
+   // Anchored on the `if` ALONE. It used to span from the `if` to the "Written back as follower"
+   // comment, and drifted dead the moment a restoredDirectorPageRef line was inserted between them —
+   // the same way the neighbouring ex-director mutation drifted, and for the same reason. A mutation
+   // whose pattern cannot apply reports SKIP, which is a failure here precisely because it looks
+   // exactly like coverage while testing nothing. The branch condition is the one thing this guard
+   // is actually about, and it is unique in the file; anything inside the branch is free to move.
+   sub('if (prev === "director") {',
+       'if (prev === "director") {\n            void becomeDirector(DIRECTOR_CODE);')],
   ["the ex-director toast fires on every boot forever (lastSyncRole never written back)", "PdfReaderApp.tsx",
    // Text drifted 2026-08-18 ("Estabas dirigiendo." -> "...cuando se cerró el app.") when the notice
    // stopped describing a control and started carrying one. Anchored on the setItem + injectEvent
