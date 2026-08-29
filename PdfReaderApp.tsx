@@ -626,17 +626,22 @@ export default function App() {
         // since revoked.
         lastCheckinRespondedAtRef.current = Date.now();
         if (!r.ok) return;
-        // A SUCCESSFUL check-in is the live-internet proof canApplyNow's safety gate depends on.
-        // Recorded here and nowhere else, so it can never be faked by a cached response.
-        const at = Date.now();
-        lastCheckinOkAtRef.current = at;
-        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
         let body: unknown = null;
         try {
           body = await r.json();
         } catch {
+          // A captive portal answers 200 with an HTML login page. Stamping before this parse
+          // counted that as proof of live internet — which is precisely what canApplyNow's safety
+          // gate leans on to decide a staged book is still current. A response we cannot even parse
+          // as our own JSON proves nothing.
           return;
         }
+        // A SUCCESSFUL check-in is the live-internet proof canApplyNow's safety gate depends on.
+        // Recorded here and nowhere else, so it can never be faked by a cached or intercepted
+        // response — it now requires OUR relay's JSON to have come back, not merely some 200.
+        const at = Date.now();
+        lastCheckinOkAtRef.current = at;
+        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
         onCheckinResponseRef.current?.(body);
       })
       .catch(() => {
