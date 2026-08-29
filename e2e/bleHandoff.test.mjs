@@ -302,6 +302,49 @@ test("losing the director resumes HUNTING, with the pulse still running", () => 
     "the wedged-session clock does not restart, so escalation never fires after a drop");
 });
 
+// ── The model that justifies leaving the deafness gap OPEN ───────────────────────────────────
+// A future session WILL look at "a re-entering follower is BLE-deaf until the next page turn" and
+// reach for the same cure. This runs the two candidate cures against the ghost that actually exists
+// on this hardware, so the answer is reproducible rather than a claim in a comment.
+const runGuard = ({ redeliverOnReset, wipeOnReset }) => {
+  const b = { nonce: "", seq: -1, redeliver: false, recent: new Map(), contendedAt: -Infinity };
+  const recv = (adv, now) => {
+    b.recent.set(adv.nonce, now);
+    for (const [n, t] of b.recent) if (now - t > CONTENTION_WINDOW) b.recent.delete(n);
+    if (b.recent.size > 1) { b.contendedAt = now; return null; }
+    if (now - b.contendedAt < CONTENTION_WINDOW) return null;
+    if (adv.nonce !== b.nonce) { b.nonce = adv.nonce; b.seq = -1; }
+    const ok = adv.seq > b.seq || (b.redeliver && adv.seq === b.seq);
+    if (!ok) return null;
+    b.redeliver = false;
+    b.seq = Math.max(b.seq, adv.seq);
+    return adv.page;
+  };
+  // A device force-quit while directing song 357: bluetoothd keeps broadcasting a validly-tagged,
+  // FROZEN packet with no in-process owner (recorded on hardware 2026-08-19).
+  const ghost = { nonce: "G", seq: 4, page: 357 };
+  let t = 0;
+  const applied = [];
+  for (let i = 0; i < 3; i++) { const p = recv(ghost, ++t); if (p !== null) applied.push(p); }
+  // …the mesh has since corrected the screen to the real page. Now a role change asks for a refresh.
+  if (wipeOnReset) { b.nonce = ""; b.seq = -1; b.recent.clear(); b.contendedAt = -Infinity; }
+  if (redeliverOnReset) b.redeliver = true;
+  const afterReset = recv(ghost, ++t);
+  return { firstSightings: applied, afterReset };
+};
+
+test("BOTH candidate cures for the deafness gap re-apply a frozen ghost page", () => {
+  // Blunt cure: forget the advertiser and the seq floor.
+  assert.equal(runGuard({ wipeOnReset: true }).afterReset, 357,
+    "the model no longer reproduces the blunt cure's failure — re-check it before trusting this file");
+  // Narrow cure: allow ONE re-delivery of an EQUAL seq from the SAME nonce, never an older one.
+  // A frozen ghost's seq sits exactly AT the baseline, so this describes it precisely.
+  assert.equal(runGuard({ redeliverOnReset: true }).afterReset, 357,
+    "the narrow cure no longer re-applies the ghost — if this is genuinely fixed, the gap can close");
+  // And with NO reset — what ships — the ghost stays suppressed after its first sighting.
+  assert.equal(runGuard({}).afterReset, null, "the shipped guard leaks a frozen page");
+});
+
 test("the BLE scan baseline is never reset on a role change", () => {
   // A resetScanBaseline() was written to cure a real gap — a device re-entering follower mode while
   // the SAME director advertises an unchanged nonce+seq is BLE-deaf until the next page turn — and
