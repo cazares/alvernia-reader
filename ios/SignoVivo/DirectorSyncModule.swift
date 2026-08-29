@@ -184,6 +184,24 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// bug the backoff already covers.
   private var invalidDirectorStreak: [MCPeerID: Int] = [:]
   private static let invalidDirectorEvictThreshold = 2
+  /// The peer we most recently invited BECAUSE it advertised role=director, and when.
+  ///
+  /// THE THREE-WAY isDirector CHECK HAS A HOLE ITS OWN COMMENT DENIES. That comment says the
+  /// token/info clauses "matter because lostPeer can clear discoveredDirectors moments before
+  /// .connected lands for that same peer" — but lostPeer clears discoveredDirectorInfo in the same
+  /// breath, and reconsiderFollowerTarget then clears pendingInvitePeer because its target vanished.
+  /// So all three clauses are false at once, and a follower whose handshake SUCCEEDS a moment later
+  /// answers its real director with cancelConnectPeer.
+  ///
+  /// A lapsed advertisement is routine — this file says so itself: "a director's advertisement
+  /// lapses routinely under radio congestion, or whenever that device restarts its own advertiser —
+  /// which every peer does on its refresh cycle, so this fires more often the more iPads are in the
+  /// room." That is a race the busiest room loses most often.
+  ///
+  /// This survives lostPeer and the discovery wipe because it is a record of what WE decided, not of
+  /// what the browser can currently see. Time-bounded so it can only ever vouch for a handshake that
+  /// is plausibly still the one we started, and cleared on transport reset.
+  private var invitedDirector: (peer: MCPeerID, at: TimeInterval)?
   private var connectedDirectorPeer: MCPeerID?
   private var discoveryRefreshTimer: Timer?
   private var earlyRefreshCyclesRemaining: Int = 0
@@ -2059,6 +2077,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredDirectorInfo = [:]
     discoveredFollowers = []; discoveredFollowerInfo = [:]
     pendingInvitePeer = nil; pendingInviteTimestamp = 0; connectedDirectorPeer = nil
+    invitedDirector = nil
     pendingTakeoverTimers.values.forEach { $0.invalidate() }
     pendingTakeoverRequests = [:]; pendingTakeoverTimers = [:]
     advertiserFailureCount = 0; browserFailureCount = 0
@@ -2226,6 +2245,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       // Just set pendingInvitePeer and wait for its incoming invitation.
       pendingInvitePeer = target
       pendingInviteTimestamp = Date().timeIntervalSince1970
+      invitedDirector = (peer: target, at: Date().timeIntervalSince1970)
       emitState(status: "connecting")
       return
     }
@@ -2233,6 +2253,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // Modern director: we initiate. No race possible — it won't invite us.
     pendingInvitePeer = target
     pendingInviteTimestamp = Date().timeIntervalSince1970
+    invitedDirector = (peer: target, at: Date().timeIntervalSince1970)
     emitState(status: "connecting")
     let capturedTarget = target
     let capturedSession = session
@@ -2243,6 +2264,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.dbgLog("invite:send", ["to": capturedTarget.displayName])
       self.browser?.invitePeer(capturedTarget, to: capturedSession, withContext: nil, timeout: Self.inviteTimeout)
     }
+  }
+
+  /// Did WE invite this peer as a director recently enough for this handshake to be that invite?
+  /// See invitedDirector. Bounded by the invite window plus a small grace for a slow .connected.
+  private func weInvitedAsDirector(_ peerID: MCPeerID) -> Bool {
+    guard let inv = invitedDirector, inv.peer == peerID else { return false }
+    return Date().timeIntervalSince1970 - inv.at < Self.inviteTimeout + 5
   }
 
   private func handleDirectorConflict(with otherToken: String) {
@@ -2324,7 +2352,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         //
         // Same three-way "is this peer actually the director" check used at .connected and by
         // reconsiderFollowerTarget, so all three places cannot drift out of agreement.
+        // Same four-way predicate as .connected — these must not drift apart.
         let peerIsKnownDirector = self.pendingInvitePeer == peerID
+          || self.weInvitedAsDirector(peerID)
           || self.discoveredDirectors[peerID] != nil
           || self.discoveredDirectorInfo[peerID]?["role"] == "director"
         guard peerIsKnownDirector else {
@@ -2533,7 +2563,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           // places cannot drift: the peer we invited, one carrying a director token, or one whose
           // discoveryInfo says role=director. The token/info clauses matter because lostPeer can
           // clear discoveredDirectors moments before .connected lands for that same peer.
+          // FOUR-WAY, because the first three can all be false at once for the RIGHT peer: lostPeer
+          // clears discoveredDirectors AND discoveredDirectorInfo together, and
+          // reconsiderFollowerTarget then clears pendingInvitePeer because its target vanished. The
+          // fourth clause remembers what we decided rather than what the browser can still see.
           let isDirector = self.pendingInvitePeer == peerID
+            || self.weInvitedAsDirector(peerID)
             || self.discoveredDirectors[peerID] != nil
             || self.discoveredDirectorInfo[peerID]?["role"] == "director"
           guard isDirector else {

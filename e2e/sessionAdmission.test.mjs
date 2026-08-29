@@ -116,3 +116,52 @@ test("a transport reset clears every outstanding reservation", () => {
   assert.match(reset, /pendingAdmissions = \[:\]/,
     "reservations survive a role change — the next session would start out looking occupied");
 });
+
+// ── THE FOLLOWER HANGING UP ON ITS OWN DIRECTOR ──────────────────────────────────────────────
+
+test("a lostPeer mid-handshake does not make the follower reject its real director", () => {
+  // The .connected guard asks "is this peer a director?" three ways, and its comment claims the
+  // token/info clauses cover the case where "lostPeer can clear discoveredDirectors moments before
+  // .connected lands for that same peer". They do not: lostPeer clears discoveredDirectorInfo in
+  // the SAME breath, and reconsiderFollowerTarget then clears pendingInvitePeer because its target
+  // just vanished. All three go false together, for the peer we deliberately invited — and the
+  // handler answers a successful handshake with cancelConnectPeer, hanging up on the real director.
+  //
+  // A lapsed advertisement is routine; this file says so itself ("fires more often the more iPads
+  // are in the room"), so the busiest room loses this race most often.
+  const guardBlock = fn("let isDirector = self.pendingInvitePeer == peerID", "guard isDirector else {");
+  assert.match(guardBlock, /weInvitedAsDirector\(peerID\)/,
+    "the guard still trusts only what the browser can currently see — a lostPeer race rejects the director");
+
+  // The record must survive what lostPeer wipes: it is keyed off OUR decision, not discovery.
+  const lost = fn("func browser(_ browser: MCNearbyServiceBrowser, lostPeer", "func browser(_ browser: MCNearbyServiceBrowser, didNotStart");
+  assert.doesNotMatch(lost, /invitedDirector = nil/,
+    "lostPeer clears the invite record too — it is back to being as forgetful as discovery");
+
+  // Bounded, so it can never vouch for an unrelated later connection.
+  const helper = fn("private func weInvitedAsDirector", "private func handleDirectorConflict");
+  assert.match(helper, /Self\.inviteTimeout/, "the invite record is unbounded in time");
+
+  // Cleared on a transport reset, like every other piece of per-relationship state.
+  const reset = fn("private func resetTransport", "// MARK: - Event emission");
+  assert.match(reset, /invitedDirector = nil/, "the invite record survives a role change");
+});
+
+test("both director predicates stay in agreement", () => {
+  // The accept path and the .connected path have drifted apart before; the file's own comments say
+  // they must not. Same four clauses, both places.
+  for (const [start, end] of [
+    ["let isDirector = self.pendingInvitePeer == peerID", "guard isDirector else {"],
+    ["let peerIsKnownDirector = self.pendingInvitePeer == peerID", "guard peerIsKnownDirector else {"],
+  ]) {
+    const b = fn(start, end);
+    for (const clause of [
+      /pendingInvitePeer == peerID/,
+      /weInvitedAsDirector\(peerID\)/,
+      /discoveredDirectors\[peerID\] != nil/,
+      /discoveredDirectorInfo\[peerID\]\?\["role"\] == "director"/,
+    ]) {
+      assert.match(b, clause, `a director predicate is missing ${clause} — the two places have drifted`);
+    }
+  }
+});
