@@ -32,6 +32,7 @@ import { createRequire } from "node:module";
 import {
   Sim,
   RELAY_LIVE_MAX_AGE_S,
+  assertHarnessFidelity,
   freshnessWindows,
   decisionContract,
   readSource,
@@ -56,6 +57,20 @@ function isSubsequence(sub, sup) {
 // every demotion, dead-director and clock-skew test below would pass vacuously — green, fast, and
 // blind to the exact class of bug they exist to catch.
 // ════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("fidelity: the harness's copies of the relay still match the relay", () => {
+  // RUNS FIRST, because every relay assertion below is only worth anything if this passes.
+  //
+  // The harness delegates the relay's one DECISION to the real decidePublish, but it hand-copies
+  // the mechanical step after it — the page floor, the totalPages floor, the 64-character caps, the
+  // server ts stamp — plus the snapshot-on-accept push, the ping reply, and /state's `now`. Those
+  // copies are the one way this file can quietly become a green test about a system that no longer
+  // exists. This reads both sides and compares them to each other, so drift on EITHER fails.
+  //
+  // It exists because an adversarial re-hunt of this campaign found that the harness's header
+  // promised exactly this function and nobody had written it.
+  assertHarnessFidelity(assert);
+});
 
 test("vacuity: the simulated follower CAN demote — otherwise every staleness test is a no-op", async () => {
   const sim = new Sim({ seed: 1 });
@@ -449,31 +464,70 @@ test("a black-holed network drains the coalescer instead of wedging it forever",
   // AbortController `inFlight` stays true and every later page turn and keepalive only overwrites
   // `pending` and returns — freezing the whole web congregation on the last sent page for the rest
   // of Mass, with no self-heal even after connectivity comes back.
+  //
+  // THIS TEST USED TO BE THREE REGEXES over the module plus `assert.equal(aborted, false)`, and an
+  // adversarial re-hunt showed it could not catch either regression that puts the outage back: the
+  // signal not being handed to fetch at all (`signal: undefined`), or the timeout defanged to 700
+  // seconds. Worse, `aborted === false` is satisfied MORE easily when the wiring is broken. So it
+  // observes the drain instead: the timer is intercepted rather than waited out, which is what makes
+  // a 7-second real timeout testable at all.
   const sim = new Sim({ seed: 12 });
   const director = await sim.addDirector({ id: "d" });
   await sim.settle();
 
-  const realFetch = globalThis.fetch;
-  let aborted = false;
-  globalThis.fetch = (url, init) =>
-    new Promise((_res, rej) => {
-      init.signal?.addEventListener("abort", () => { aborted = true; rej(new Error("aborted")); });
+  const simFetch = globalThis.fetch;          // the sim's transport, restored for the drain
+  const realSetTimeout = globalThis.setTimeout;
+  const delays = [];
+  let signalWasHonoured = false;
+  let blackHoled = 0;
+
+  // Intercept EVERY long timer for the duration, not just the first. Latching on the first one is
+  // what made an earlier version of this test hang: the drain schedules its own abort timer, and a
+  // passed-through 7 s (or, under the defanged-timeout regression, 700 s) timer keeps the runner
+  // alive that long. Recording the delay and firing immediately is what makes this testable.
+  globalThis.setTimeout = (fn, ms, ...rest) => {
+    if (typeof ms === "number" && ms > 1000) { delays.push(ms); return realSetTimeout(fn, 0); }
+    return realSetTimeout(fn, ms, ...rest);
+  };
+  // Only the FIRST request falls down the hole. The page queued behind it must be able to leave
+  // once the abort clears the coalescer — that departure is the behaviour under test.
+  globalThis.fetch = (url, init) => {
+    if (blackHoled++ > 0) return simFetch(url, init);
+    return new Promise((_res, rej) => {
+      if (!init.signal) return;   // no signal: genuinely unabortable, exactly the pre-fix behaviour
+      init.signal.addEventListener("abort", () => { signalWasHonoured = true; rej(new Error("aborted")); });
     });
+  };
 
-  director.turnTo(50);
-  await new Promise((r) => setTimeout(r, 30));
-  globalThis.fetch = realFetch;
+  try {
+    director.turnTo(50);                      // goes out, and hangs
+    await new Promise((r) => realSetTimeout(r, 20));
+    director.turnTo(51);                      // coalesced into `pending` behind the hung request
+    await sim.settle(2000);
+    await new Promise((r) => realSetTimeout(r, 20));
+    await sim.settle(2000);
+  } finally {
+    globalThis.fetch = simFetch;
+    globalThis.setTimeout = realSetTimeout;
+  }
 
-  assert.ok(director.mod, "the transmitter module is not loaded");
-  // The timeout is a REAL timer inside the module (7 s), so rather than wait it out, prove the wiring
-  // that makes the drain possible: an AbortController was attached and the signal is live.
-  assert.equal(aborted, false, "the abort fired instantly — the timeout is not being awaited");
-  const src = readSource("src/directorRelaySync.js");
-  assert.match(src, /const PUBLISH_TIMEOUT_MS = \d+;/, "the publish timeout constant is gone");
-  assert.match(src, /setTimeout\(\(\) => controller\.abort\(\), PUBLISH_TIMEOUT_MS\)/,
-    "nothing aborts a hung publish any more — a black-holed socket will wedge the coalescer for the rest of Mass");
-  assert.match(src, /} finally \{[\s\S]{0,400}?inFlight = false;/,
-    "inFlight is no longer cleared in a finally, so a thrown publish wedges the coalescer permanently");
+  const scheduledDelay = delays[0] ?? null;
+  assert.ok(scheduledDelay !== null,
+    "no abort timer was scheduled for a publish — a black-holed socket now wedges the coalescer for " +
+    "the rest of Mass, and every later page turn only overwrites `pending` and returns");
+  assert.ok(scheduledDelay <= 15000,
+    `the publish abort is scheduled ${scheduledDelay} ms out — a director on dead-but-associated wifi ` +
+    "would freeze the congregation for that long before the coalescer could drain");
+  assert.equal(signalWasHonoured, true,
+    "the AbortController's signal never reached fetch, so nothing can cancel a hung request — " +
+    "this is the `signal: undefined` regression, and it reinstates the whole-Mass freeze");
+
+  // The behaviour that matters: once the hung request is aborted, the page queued behind it must
+  // actually leave.
+  const reached = sim.relay.publishLog.map((p) => p.page);
+  assert.ok(reached.includes(51),
+    `after the black-holed request was aborted the coalescer did not drain — the relay saw ` +
+    `${JSON.stringify(reached)}, and page 51 never left the device`);
   sim.uninstall();
 });
 

@@ -533,6 +533,95 @@ export function freshnessWindows() {
   };
 }
 
+/**
+ * Compare the harness's copy of the relay's field assembly against the real Durable Object.
+ *
+ * The harness delegates the one DECISION (decidePublish) but hand-copies the MECHANICAL step that
+ * follows it: the page floor, the totalPages floor, the 64-character caps, and the server ts stamp.
+ * Those four are load-bearing — the page floor is what stops a follower's -1 render sentinel
+ * reaching the congregation as page 1 — and a hand copy is exactly the thing that drifts while
+ * every test stays green.
+ *
+ * Rather than compare either side against a literal written here (which would drift with neither),
+ * this pulls the numbers out of BOTH and compares them to each other. A change on either side that
+ * is not made on the other fails.
+ */
+export function relayFieldContract() {
+  const worker = readSource("sync-worker/src/index.ts");
+  const harness = readSource("e2e/helpers/sv-sync-sim.mjs");
+
+  const block = (src, startMarker, endMarker, what) => {
+    const a = src.indexOf(startMarker);
+    const b = a >= 0 ? src.indexOf(endMarker, a) : -1;
+    if (a < 0 || b < 0) return null;   // caller asserts; a missing marker must never widen to EOF
+    return src.slice(a, b);
+  };
+  // Bounded by the assignment itself and the very next statement — structural on both sides, and
+  // both endpoints are checked by the caller.
+  const workerBlock = block(worker, "const next: Snapshot = {", "await this.ctx.storage.put", "worker");
+  const harnessBlock = block(harness, "const next = {", "this.snapshot = next;", "harness");
+
+  const shape = (b) => b && ({
+    // Every numeric literal in the block, in order: the clamp bounds and the length caps.
+    numbers: [...b.matchAll(/\b(\d+)\b/g)].map((m) => Number(m[1])),
+    // The relay must stamp its OWN clock, in seconds. A block that echoed the client's ts would
+    // make a fast-clocked director permanently fresh and a slow one permanently stale.
+    stampsOwnSeconds: /ts:\s*Math\.floor\((?:Date\.now\(\)|nowMs)\s*\/\s*1000\)/.test(b),
+    echoesClientTs: /ts:\s*[^,\n]*input\.ts/.test(b),
+  });
+
+  return { workerBlock, harnessBlock, worker: shape(workerBlock), harness: shape(harnessBlock) };
+}
+
+/**
+ * THE FUNCTION THIS FILE'S HEADER NAMES as the only thing keeping the harness from becoming fiction.
+ *
+ * It was referenced twice in prose and never written — caught by an adversarial re-hunt of this very
+ * campaign, which is a tidy demonstration of the thesis: a claimed guard that does not exist is
+ * indistinguishable, from the outside, from one that does.
+ *
+ * Called from the first test in svSyncSystem.test.mjs so it runs before anything relies on the
+ * harness being faithful.
+ */
+export function assertHarnessFidelity(assert) {
+  const w = freshnessWindows();
+  assert.equal(typeof w.worker, "number", "RELAY_LIVE_MAX_AGE_S is no longer readable from sync-worker/src/index.ts");
+  assert.equal(w.harness, w.worker, "the harness's freshness window has drifted from the worker's");
+
+  const c = relayFieldContract();
+  assert.ok(c.workerBlock, "could not locate the worker's snapshot assembly (const next: Snapshot = {…}) — " +
+    "the harness can no longer be checked against it, so treat every relay assertion as unverified");
+  assert.ok(c.harnessBlock, "could not locate the harness's snapshot assembly");
+  assert.deepEqual(c.harness.numbers, c.worker.numbers,
+    `the harness clamps with ${JSON.stringify(c.harness.numbers)} but the worker clamps with ` +
+    `${JSON.stringify(c.worker.numbers)} — the simulation is testing a relay that does not ship`);
+  assert.equal(c.worker.stampsOwnSeconds, true, "the worker no longer stamps its own clock in seconds");
+  assert.equal(c.harness.stampsOwnSeconds, true, "the harness no longer stamps its own clock in seconds");
+  assert.equal(c.worker.echoesClientTs, false, "the worker now echoes the client's ts — freshness stops meaning anything");
+  assert.equal(c.harness.echoesClientTs, false, "the harness echoes the client's ts");
+
+  // The two behaviours the whole dead-director test rests on, read out of the worker rather than
+  // assumed: a socket is handed the snapshot when it is accepted, and a ping is answered with the
+  // snapshot AS OF THE REPLY, which is what keeps a dead director arriving forever.
+  const worker = readSource("sync-worker/src/index.ts");
+  const accept = worker.indexOf("this.ctx.acceptWebSocket(server);");
+  assert.ok(accept > 0, "the worker no longer accepts websockets where this harness expects");
+  assert.match(worker.slice(accept, accept + 400), /server\.send\(JSON\.stringify\(this\.snapshot\)\)/,
+    "the worker no longer pushes the snapshot on accept — a fresh follower would land on no page, " +
+    "and the harness's subscribe() would be simulating a behaviour that does not exist");
+  const wsMsg = worker.indexOf("async webSocketMessage(");
+  const wsEnd = worker.indexOf("async webSocketClose(");
+  assert.ok(wsMsg > 0 && wsEnd > wsMsg, "could not bound the worker's webSocketMessage handler");
+  assert.match(worker.slice(wsMsg, wsEnd), /ws\.send\(JSON\.stringify\(this\.snapshot\)\)/,
+    "a ping is no longer answered with the CURRENT snapshot — the dead-director scenario the " +
+    "harness models cannot occur, so that test would pass without exercising anything");
+
+  // /state's `now` is the only channel a follower can calibrate its clock from.
+  assert.match(worker, /\{\s*\.\.\.snapshot,\s*now:\s*Math\.floor\(Date\.now\(\)\s*\/\s*1000\)\s*\}/,
+    "/state no longer returns `now` in epoch seconds — clock calibration has no source, and the " +
+    "harness's pollState is simulating a field the worker does not send");
+}
+
 /** Every field the decision module produces must be consumed by the caller that executes it.
  *  A field added to svSyncDecision and never read by app.js is a decision that silently does
  *  nothing — the exact shape of the bug that left `forceFollowerReconnectNow` implemented in Swift,

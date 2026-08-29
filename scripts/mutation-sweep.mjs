@@ -225,6 +225,16 @@ function generate(src, ext, ranges) {
       if (from === "=" ) break;
       if ((from === ">" || from === "<") && (src[i - 1] === "=" || src[i - 1] === "<" || src[i - 1] === ">")) break;
       if (from === ">" && src[i - 1] === "=") break; // the `>` of `=>`
+      // The `>` of Swift's return arrow. Without this, `-> Int` becomes `->= Int`, which cannot
+      // compile — and an uncompilable mutant that the tests "catch" is the parser doing the tests'
+      // work, which is the one thing this file's header promises cannot happen.
+      if (from === ">" && src[i - 1] === "-") break;
+      // The INNER `==` of `===`, and the `!=` of `!==`. The scan restarts at every byte, so at the
+      // second `=` of `===` the source still startsWith("=="), producing `a =!= b` — a SyntaxError.
+      // Measured before this guard: 7 of 72 mutants of src/directorRelaySync.js were unparseable
+      // and every one was scored "caught", inflating that file's reported coverage by ~3 points.
+      if ((from === "==" || from === "!=") && (src[i - 1] === "=" || src[i - 1] === "!")) break;
+      if ((from === "==" || from === "!=") && src[i + 2] === "=") break;
       add(i, i + from.length, to, "operator");
       break; // longest match wins; don't also emit the shorter overlapping one
     }
@@ -312,7 +322,12 @@ function makeMirror(tag) {
   }
   // Uncommitted work counts: the point is to test the tests AS THEY ARE NOW, not as they were at
   // HEAD. Overlay anything modified or untracked-but-relevant on top of the tracked copy.
-  const dirty = execSync("git status --porcelain -z", { cwd: REPO, encoding: "utf8" })
+  // `--untracked-files=all`, because the default collapses a wholly-untracked directory to a single
+  // `?? dir/` entry and its contents never get copied. A brand-new test file in a brand-new
+  // directory would then be missing from the mirror, the baseline would be red, and the run would
+  // abort with a confusing "could not find" — which is exactly what happened the first time this
+  // tool was pointed at a scratch probe.
+  const dirty = execSync("git status --porcelain -z --untracked-files=all", { cwd: REPO, encoding: "utf8" })
     .split("\0").filter(Boolean)
     .map((l) => l.slice(3))
     .filter((f) => f && !f.endsWith("/"));
@@ -373,10 +388,41 @@ if (!baseline.ok) {
 const baseTests = (baseline.out.match(/^# pass (\d+)/m) || [])[1];
 log(`baseline: green${baseTests ? ` (${baseTests} passing)` : ""} — ${mutants.length} mutants over ${SOURCES.length} source file(s), ${JOBS} jobs\n`);
 
-// `node --check` is only meaningful for the JS family; a deleted statement is the only operator that
-// can produce an unparseable file, and a mutant that merely fails to parse must not be counted as
-// caught — that would credit the tests for the compiler's work.
-const checkable = (s) => [".js", ".mjs", ".cjs"].includes(path.extname(s));
+// EVERY MUTANT IS PARSE-CHECKED, NOT JUST THE DELETIONS.
+//
+// The first version of this only validated `delete-statement`, on the reasoning that every other
+// operator is syntax-preserving by construction. That reasoning was wrong twice — the inner `==` of
+// `===` and the `>` of Swift's `->` both produced garbage — and the cost of being wrong is the
+// worst kind: an unparseable mutant kills the test process, exits non-zero, and is scored "caught".
+// The parser does the tests' work and the percentage goes up. Measured: 7/72 mutants of
+// directorRelaySync.js, and ~26% of the Swift ones, were free credit of exactly this kind.
+//
+// Those two holes are now closed at the generator, but validating everything is the belt: a future
+// operator with the same flaw inflates nothing, it just shows up as unparseable.
+function parseCheck(file, absPath) {
+  const ext = path.extname(file);
+  if ([".js", ".mjs", ".cjs"].includes(ext)) {
+    // `node --check` picks its parse goal from the extension, and for a bare `.js` under Node 22's
+    // automatic module detection a file that fails BOTH parses can still exit 0. Check it as a
+    // module first and fall back to script, so a mutant only counts as unparseable when neither
+    // grammar accepts it.
+    for (const as of [".mjs", ".cjs"]) {
+      const probe = `${absPath}.probe${as}`;
+      try {
+        fs.copyFileSync(absPath, probe);
+        execSync(`node --check ${JSON.stringify(probe)}`, { stdio: "pipe" });
+        return true;
+      } catch { /* try the other grammar */ }
+      finally { try { fs.rmSync(probe, { force: true }); } catch { /* nothing to clean */ } }
+    }
+    return false;
+  }
+  if (ext === ".swift") {
+    try { execSync(`xcrun swiftc -parse ${JSON.stringify(absPath)}`, { stdio: "pipe" }); return true; }
+    catch { return false; }
+  }
+  return true;   // .ts/.tsx/.html/.css — no cheap syntax check here; documented in the header
+}
 
 const results = [];
 const queue = [...mutants];
@@ -388,10 +434,7 @@ const workers = Array.from({ length: JOBS }, (_, w) => (async () => {
     const target = path.join(dir, m.source);
     fs.writeFileSync(target, m.text);
     let verdict;
-    if (m.kind === "delete-statement" && checkable(m.source)) {
-      try { execSync(`node --check ${JSON.stringify(target)}`, { stdio: "pipe" }); }
-      catch { verdict = "unparseable"; }
-    }
+    if (!parseCheck(m.source, target)) verdict = "unparseable";
     if (!verdict) {
       const r = await runTests(dir, opt.timeout);
       verdict = r.ok ? "SURVIVED" : "caught";

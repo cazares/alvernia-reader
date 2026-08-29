@@ -126,19 +126,37 @@ test("Release assets required by app config exist in-repo", () => {
 
   // THE BOOK. It is not named in either app config — the native shell and the web build both reach
   // for it by its stable path — but it is the one asset whose loss is unrecoverable in a building
-  // with no internet, so it is checked here too, against an independent witness rather than against
-  // itself: web/manifest-baseline.json records the sha256 and page count of the PDF the shipped
-  // bundle was rendered from. Bytes that disagree with that mean either a truncated book or a book
-  // that was changed without rebuilding the web bundle, and the field would keep serving stale pages.
+  // with no internet, so it is checked here too.
+  //
+  // WHAT THIS DELIBERATELY DOES *NOT* DO: compare the PDF's sha256 against
+  // web/manifest-baseline.json. That was the first version of this check and it was a trap. That
+  // file is written by exactly one thing — scripts/release.sh, and only after a successful
+  // PRODUCTION deploy — so it is BY DESIGN allowed to lag the working tree (its own comment records
+  // it sitting two releases behind). Pinning the tree to it means the repo's most ordinary content
+  // task, splicing in a new song, reds CI on the PR with no way to make it green before merge. And
+  // because scripts/verify-behavioural-guards.mjs refuses to run on a red baseline, that one
+  // assertion would have taken all nineteen regression guards down with it. A test whose failure
+  // mode is "block the normal workflow" gets disabled, and then there is no test.
+  //
+  // The property that IS a property of the tree: the book is a real, structurally intact PDF with
+  // the page count the rest of the repo expects. Agreement between the PDF, the rendered pages and
+  // the manifest is a different question, and it already has an owner in
+  // scripts/check-book-consistency.mjs, which `npm run preios` and release.sh both run.
   assertRealAsset("assets/songbook.pdf", "the shipped songbook");
-  const baseline = readJson(path.resolve(appRoot, "web/manifest-baseline.json"));
-  assert.ok(baseline?.sourcePdfSha256, "web/manifest-baseline.json has no sourcePdfSha256 to check the book against");
-  const bookSha = crypto.createHash("sha256")
-    .update(fs.readFileSync(path.resolve(appRoot, "assets/songbook.pdf")))
-    .digest("hex");
-  assert.equal(bookSha, baseline.sourcePdfSha256,
-    "assets/songbook.pdf does not match the book web/manifest-baseline.json was built from — " +
-    "the PDF was truncated or replaced without re-running node web/build.mjs");
+  const bookPath = path.resolve(appRoot, "assets/songbook.pdf");
+  const book = fs.readFileSync(bookPath);
+  // A truncated PDF loses its trailer: no %%EOF, and the page tree count goes with it. Both of the
+  // mutations this test exists to catch — zero bytes, and a book replaced by something else — fail
+  // here, and neither depends on what production last shipped.
+  assert.ok(book.length > 1_000_000,
+    `assets/songbook.pdf is ${book.length} bytes — a 372-page songbook is megabytes; this one is truncated`);
+  assert.ok(book.subarray(-2048).includes(Buffer.from("%%EOF")),
+    "assets/songbook.pdf has no %%EOF trailer — the file is truncated, and poppler will render blank pages");
+  const counts = [...book.toString("latin1").matchAll(/\/Count\s+(\d+)/g)].map((m) => Number(m[1]));
+  assert.ok(counts.length > 0, "assets/songbook.pdf has no /Count — its page tree is gone");
+  assert.ok(Math.max(...counts) >= 300,
+    `assets/songbook.pdf's page tree tops out at ${Math.max(...counts)} pages — the book has been replaced ` +
+    "by a smaller document, and most songs would no longer resolve");
 });
 
 test("Resolved Expo config preserves versioning and embedded-only updates", () => {
