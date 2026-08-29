@@ -41,6 +41,17 @@ RCT_EXTERN_METHOD(refreshDirectorBrowse:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(requestCurrentSnapshot:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// ⟳ AGAINST A WEDGED SESSION. Implemented in Swift since the ⟳ rebuild and never declared here, so
+// on the old architecture (newArchEnabled:false) it was never exported: NativeModules
+// .DirectorSyncModule.forceFollowerReconnectNow was undefined, the JS wrapper's `typeof … ===
+// "function"` guard — written as an OLD-shell fallback — failed on every shell ever shipped, and the
+// call silently resolved null. So the one control that tears down a wedged MCSession has never run:
+// refreshNearbyDiscovery cannot help (scheduleNextDiscoveryRefresh skips re-browsing entirely while
+// connectedDirectorPeer is set) and requestCurrentSnapshot goes down the dead link. That is exactly
+// the 2026-08-17 report — spinner animates, iPad stays on song 59.
+RCT_EXTERN_METHOD(forceFollowerReconnectNow:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(setIdleTimerDisabled:(BOOL)disabled
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

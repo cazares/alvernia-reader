@@ -249,10 +249,19 @@ test("clockOffsetFromServerNow: corrects a skewed device so a fresh director fol
   assert.equal(d.action, "follow", "server-now offset restores correct liveness under skew");
 });
 
-test("no snapshot ts (older wire shape) is treated as fresh, never demoted for age", () => {
+// FLIPPED. This pinned the OPPOSITE rule — "absent ts must not demote" — which is the fail-open
+// behaviour the 2026-08-18 fix ("STALE PAGES MUST NEVER REACH THE CHOIR") was written to end. That
+// fix only ever landed in applyRelaySnapshot's inline fallback, the branch that runs when this lib
+// fails to load; the lib itself, which is the path that always runs, kept applying undateable
+// snapshots — and this test is what made that look intentional.
+//
+// A snapshot that cannot prove its age is indistinguishable from one written hours ago. The worker
+// has stamped ts on every publish since its first commit, so demoting costs a live follower nothing.
+test("a snapshot with no ts cannot prove it is fresh, so it is refused", () => {
   const d = decideRelaySnapshot(
     { page: 42, seq: 5000 }, // no ts field
     ctx({ hasDirector: true, lastSeq: 4999 }),
   );
-  assert.equal(d.action, "follow", "absent ts must not demote — no regression vs the old wire");
+  assert.equal(d.action, "demote", "an undateable snapshot must never be applied to the choir");
+  assert.equal(d.hasDirector, false, "no director can be considered live without a dateable publish");
 });

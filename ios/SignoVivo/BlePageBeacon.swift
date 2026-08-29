@@ -278,6 +278,30 @@ final class BlePageBeacon: NSObject {
   func stopScanning() {
     isScanning = false
     central?.stopScan()
+    log?("ble:scan-stop", [:])
+  }
+
+  /// FORGET WHICH ADVERTISER WE WERE TRACKING. Called on every role change (resetTransport), never
+  /// on a mere scan restart.
+  ///
+  /// An advertisement is continuous STATE (#386), but the receiver deduped it like an event stream
+  /// using baselines that outlived the scanning session: only a NONCE change rebased them. So a
+  /// device that stopped following and started again — while the SAME director kept advertising the
+  /// same nonce at the same seq, because nobody had turned a page — measured every fresh sighting
+  /// of the CURRENT page against a baseline it had already passed, and dropped it at the monotonic
+  /// guard. Deaf until the director's next page turn, which is precisely when BLE is supposed to be
+  /// the channel that needs no handshake and no waiting.
+  ///
+  /// Deliberately NOT called from startScanning()/scanIfReady(): those also run on every
+  /// ensureScanning() self-heal and every foreground, and rebasing there would open a window in
+  /// which a late-delivered CACHED advertisement (same nonce, lower seq) is applied and drags a
+  /// still-following device backwards — the failure the monotonic guard exists to prevent.
+  func resetScanBaseline() {
+    lastSeenNonce = ""
+    lastSeenSeq = -1
+    lastAppliedPage = -1
+    recentNonces.removeAll()
+    lastContentionAt = 0
   }
 
   /// Truncated HMAC-SHA256(key: sessionCode, msg: nonce|seq|page). 4 hex chars (16 bits) is a

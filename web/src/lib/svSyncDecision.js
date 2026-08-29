@@ -77,12 +77,22 @@
       var nowServerS = (nowMs + offsetMs) / 1000;
 
       var hasPublished = isFiniteNum(snap.seq) && snap.seq > 0;
-      // A director counts as live only if it has published AND its last update is
-      // within the freshness window. snap.ts is the server publish time (epoch s);
-      // if absent (older wire shape), treat as fresh so we never regress to worse.
-      var fresh =
-        hasPublished &&
-        (!isFiniteNum(snap.ts) || nowServerS - snap.ts <= maxAgeS);
+      // A director counts as live only if it has published AND its last update is within the
+      // freshness window.
+      //
+      // FAIL CLOSED ON AN UNDATEABLE SNAPSHOT. This read `!isFiniteNum(snap.ts) || <in window>`, so
+      // a snapshot with no timestamp was treated as fresh and applied unconditionally. A snapshot
+      // that cannot prove its age is exactly the one that must not be trusted: it is
+      // indistinguishable from one written hours ago. "Every device jumping to a stale song 2 before
+      // the mesh corrected them to 372" on 2026-08-18 is what that looks like from the loft, and the
+      // fix shipped that day only ever landed in applyRelaySnapshot's INLINE FALLBACK — the branch
+      // that runs when this lib fails to load, i.e. essentially never. This is the path that always
+      // runs, and it kept failing open for ten days.
+      //
+      // Safe to demote instead: the worker has stamped ts on every publish since its first commit,
+      // so no live relay omits it. The cost of being wrong this way is a follower that waits for the
+      // next update; the cost of the other way is a wrong song in front of the congregation.
+      var fresh = hasPublished && isFiniteNum(snap.ts) && nowServerS - snap.ts <= maxAgeS;
 
       // ---- P2-SEQ: FRESHNESS FIRST, before any seq de-dup ------------------
       if (!fresh) {

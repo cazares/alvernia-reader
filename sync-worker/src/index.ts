@@ -167,8 +167,27 @@ export class SyncRoom extends DurableObject<Env> {
     // Collapse any such value to 0 so the `incomingSeq > 0 ? … : this.snapshot.seq + 1` branch
     // below assigns a sane monotonic seq instead.
     let incomingSeq = Number(input.seq ?? 0);
-    if (!Number.isFinite(incomingSeq) || incomingSeq < 0 || incomingSeq > Date.now() + 60000) {
+    if (!Number.isFinite(incomingSeq) || incomingSeq < 0) {
       incomingSeq = 0;
+    } else if (incomingSeq > Date.now() + 60000) {
+      // CLAMP A FAST CLOCK, DO NOT COLLAPSE IT TO THE RESERVED VALUE.
+      //
+      // The native transmitter's seq IS the device's wall clock in ms (directorRelaySync.js:
+      // `Math.max(seqCounter + 1, Date.now())`). So a director iPad whose clock runs more than a
+      // minute ahead of Cloudflare's — automatic date/time off, or drift on a device that was long
+      // powered down — trips this bound on EVERY publish. Folding that to 0 then met the seq=0 gate
+      // below, which rejects 0 while the snapshot is fresh, and the two rules wedged each other: the
+      // first publish landed (stale snapshot lets 0 through) and refreshed ts, which then made every
+      // page turn and every keepalive for the next 90 s "ignored", after which exactly one more
+      // landed. Web followers advanced roughly once per 90 seconds while the app reported ok:true on
+      // every publish and the pill stayed green — the silent frozen-congregation failure, with no
+      // banner and no breadcrumb anywhere.
+      //
+      // 0 is a RESERVED value meaning "no director has published"; a real seq must never be folded
+      // into it. Clamping into the window keeps the director monotonic under the SERVER's clock, and
+      // the snapshot.seq + 1 floor keeps two publishes clamped in the same server millisecond from
+      // colliding with the <= guard.
+      incomingSeq = Math.max(Date.now() + 60000, this.snapshot.seq + 1);
     }
     // The seq guard stops a burst of page turns on a weak link from arriving out of order
     // and rewinding the song — but ONLY while a director is actively live (fresh snapshot).
@@ -502,7 +521,23 @@ export default {
             bookUpdate = decideBookUpdate(env, me, devices, Math.floor(Date.now() / 1000));
           }
         } catch {
-          bookUpdate = null; // never let an arming-decision failure surface as a broken check-in
+          // A 503 IS THE ONLY SAFE FAILURE HERE — 200 IS A DESTRUCTIVE ONE.
+          //
+          // This used to swallow the error into bookUpdate = null and still return 200 {ok:true},
+          // reasoning that it "fails soft" so "the client must not treat a network failure the same
+          // as an explicit no update". The client contract is exactly inverted from that assumption:
+          // an OK response that does not name the device's staged version IS the explicit revoke
+          // (onCheckinResponse deletes STORAGE_KEYS.bookStaged and rmrf's WebBundleStaged), while a
+          // non-ok response is the one shape it already ignores without touching any state.
+          //
+          // So the shape this catch produced was the single most destructive one available: a
+          // transient Durable Object storage error or an eviction mid-call destroyed a verified
+          // 27 MB staged copy on every armed device that happened to check in during the blip, and
+          // re-downloaded it — presenting as "the OTA never sticks on that iPad".
+          //
+          // Only a decideBookUpdate call that actually RAN and returned null may keep producing the
+          // 200-without-bookUpdate revoke shape; that is a real disarm and must still work.
+          return json({ ok: false, error: "arming_unavailable" }, 503, cors);
         }
         // NATIVE BUILD FRESHNESS — see wrangler.jsonc's LATEST_NATIVE_BUILD comment. Fails toward
         // "not confirmed" (the field is simply omitted, never sent as false): a device on a
@@ -557,11 +592,23 @@ export default {
           // NOTE the asymmetry that makes this necessary: refusing a request inside the Worker does
           // NOT save Cloudflare quota, because the Worker already ran to refuse it. The rate limiter
           // below protects the ring BUFFER; only the client backing off protects the ACCOUNT.
+          // NESTED UNDER `policy`, WHICH IS WHAT THE FLEET ACTUALLY READS.
+          //
+          // These were spread FLAT ({ok, total, logIntervalMs, logLevel}) while the native client
+          // reads `j?.policy?.logLevel` — a nested object — and that read is the ONLY writer of
+          // logLevelRef anywhere in the app. The LAN sink (scripts/log-sink.mjs) already emits the
+          // nested shape, so the worker was the one that drifted. Every value it echoed was silently
+          // discarded, which means the mechanism this file advertises three times — "LOG_LEVEL +
+          // wrangler deploy retunes every device in ~20s", "THE KILL SWITCH THAT DID NOT EXIST on
+          // 2026-08-17" — has never once retuned a device talking to the worker. It presents as a
+          // silent fleet, not as a malformed response.
+          //
+          // Flat keys kept alongside for one release in case anything scrapes them.
           const policy = { logIntervalMs: logIntervalMs(env), logLevel: logLevel(env) };
           if (result.rateLimited) {
-            return json({ ok: false, error: "rate_limited", ...policy }, 429, cors);
+            return json({ ok: false, error: "rate_limited", ...policy, policy }, 429, cors);
           }
-          return json({ ...result, ...policy }, 200, cors);
+          return json({ ...result, ...policy, policy }, 200, cors);
         }
         // P6-LOG: GET (read the whole diagnostic buffer) and DELETE (wipe it) were UNGATED — the
         // buffer holds sync breadcrumbs (opaque device ids, roles, page numbers) and must not be

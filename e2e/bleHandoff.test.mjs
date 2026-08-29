@@ -193,8 +193,54 @@ test("a follower scans continuously — BLE is never switched off by connecting"
   // If connecting to the mesh stopped the scan, BLE would cover the first gap and then be dead for
   // every later one — a wedged session, a director restart, a follower that drops. It is the
   // fallback precisely for the moments the mesh is not working.
-  assert.doesNotMatch(MODULE, /bleBeacon\.stopScanning\(\)/,
-    "something now stops scanning — BLE would stop covering everything after the first connection");
+  //
+  // This used to assert that stopScanning() is called NOWHERE, which enforced the property by
+  // enforcing that the scan is literally never stoppable — so every device, including a director
+  // that can never consume a BLE page, ran an allowDuplicates scan for the life of the process. The
+  // real invariant is narrower and is what is pinned now: nothing on a CONNECTION path stops the
+  // scan, and any path that leaves the device following re-arms it.
+  const connectionPaths = [
+    MODULE.slice(MODULE.indexOf("case .connected:"), MODULE.indexOf("case .connecting:")),
+    MODULE.slice(MODULE.indexOf("private func reconsiderFollowerTarget"), MODULE.indexOf("private func handleDirectorConflict")),
+    MODULE.slice(MODULE.indexOf("private func forceFollowerReconnect"), MODULE.indexOf("private func sendFollowerHelloIfNeeded")),
+    MODULE.slice(MODULE.indexOf("func advertiser(\n    _ advertiser: MCNearbyServiceAdvertiser,\n    didReceiveInvitation"), MODULE.indexOf("didNotStartAdvertisingPeer")),
+  ];
+  for (const path of connectionPaths) {
+    assert.ok(path.length > 0, "a connection path could not be located — the slice markers drifted");
+    assert.doesNotMatch(path, /bleBeacon\.stopScanning\(\)/,
+      "a connection path stops the scan — BLE would stop covering everything after the first connection");
+  }
+  // The ONLY place it may be stopped is the full transport teardown, which every role transition
+  // runs — and which is immediately followed by beginFollowing() re-arming the scan for a follower.
+  const stops = MODULE.match(/bleBeacon\.stopScanning\(\)/g) || [];
+  assert.equal(stops.length, 1, "stopScanning is called from somewhere other than resetTransport");
+  const reset = MODULE.slice(MODULE.indexOf("private func resetTransport"), MODULE.indexOf("// MARK: - Event emission"));
+  assert.match(reset, /bleBeacon\.stopScanning\(\)/, "the one stop is not the transport teardown");
+});
+
+test("every path that ends as a follower re-arms the BLE scan and the watchdog", () => {
+  // THE DRIFT THIS CLOSES. approveDirectorTakeover set currentRole = "follower" and started the mesh
+  // transports, but never gave the beacon a session code, never started scanning, never started the
+  // BLE health timer and never started the follower watchdog — so handing over control produced a
+  // follower with no BLE and no automatic recovery of any kind. It only looked fine because nothing
+  // stopped the scan left running from that device's previous follower stint.
+  const follow = MODULE.slice(MODULE.indexOf("private func beginFollowing"), MODULE.indexOf("@objc(stop:rejecter:)"));
+  for (const required of [
+    "bleBeacon.sessionCode = normalizedSessionCode",
+    "bleBeacon.startScanning()",
+    "startBleHealthTimer()",
+    "startFollowerWatchdog()",
+  ]) {
+    assert.ok(follow.includes(required), `beginFollowing no longer does: ${required}`);
+  }
+  // Both entry points must go through it, or they can drift apart again.
+  for (const entry of ["func startFollower", "func approveDirectorTakeover"]) {
+    const idx = MODULE.indexOf(entry);
+    assert.ok(idx > 0, `${entry} is gone`);
+    const body = MODULE.slice(idx, idx + 2000);
+    assert.match(body, /beginFollowing\(sessionCode:/,
+      `${entry} builds its own follower state instead of using beginFollowing`);
+  }
 });
 
 

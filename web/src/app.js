@@ -3961,6 +3961,16 @@ const tripRelayCooldown = (reason) => {
 // there is no geo header to read and no book to resolve — just fetch /state and apply the page.
 const relayPollOnce = async (force = false) => {
   if (relayCooling()) return;
+  // WHAT WE KNEW WHEN THIS POLL LEFT. A forced poll deliberately bypasses the seq de-dup so a
+  // STATIONARY director can re-home a drifted follower — but "bypass the de-dup" was also letting it
+  // apply a snapshot OLDER than one already applied. Forced polls run concurrently with the live
+  // socket on every reconnect, every foreground, and every heartbeat re-home, so the race is routine:
+  // the /state body is read by the Durable Object BEFORE a page turn, the WS push for that turn
+  // arrives and renders first, then the poll resolves a few hundred ms later and force-renders the
+  // PREVIOUS page over it. It also rewinds relay.livePage, so the F1 re-home check (currentPage vs
+  // livePage) now sees agreement and never corrects, and every later ping reply is a duplicate seq.
+  // The follower sits one page behind a stationary director, green pill lit, until the NEXT turn.
+  const preSeq = relay.lastSeq;
   try {
     // Time-box the /state fetch with an AbortController so a HUNG connection fails FAST.
     // navigator.onLine is TRUE on wifi-without-internet, so the fetch can hang indefinitely.
@@ -3997,7 +4007,18 @@ const relayPollOnce = async (force = false) => {
           }
         } catch {}
       }
-      await applyRelaySnapshot(snap, { force });
+      // Did a newer push land while we were in flight? If so this poll lost the race and its body
+      // is stale — drop the FORCE only (still apply it normally, so a genuinely newer snapshot is
+      // honoured and the de-dup handles the rest). Narrow on purpose: a blanket "forced snapshots
+      // may never go backwards" would break the legitimate handover rescue, because the relay
+      // deliberately accepts a LOWER seq from a NEW director once the old snapshot ages past the
+      // 90 s window, and a forced poll is what rescues a follower still holding the old high seq.
+      const lostRace =
+        force && Number.isFinite(snap && snap.seq) && relay.lastSeq > preSeq && snap.seq < relay.lastSeq;
+      if (lostRace) {
+        try { console.info("[sv] stale forced poll ignored (seq", snap.seq, "<", relay.lastSeq + ")"); } catch {}
+      }
+      await applyRelaySnapshot(snap, { force: force && !lostRace });
     }
   } catch {}
 };
@@ -4009,7 +4030,20 @@ const relayPollOnce = async (force = false) => {
 const RELAY_POLL_MS = 15000;
 const startRelayPolling = () => {
   if (relayCooling()) return;
-  stopRelayPolling();
+  // IDEMPOTENT, OR THE 15 s BUDGET IS FICTION. This used to stopRelayPolling() and re-arm on every
+  // call — and connectRelay calls it on every entry while the close handler calls it again at the
+  // backoff cap. In a persistent WS-failure regime that HTTP survives (a 5xx on the upgrade, or a
+  // venue network that blocks WebSockets — exactly the regime the 15 s interval was budgeted for),
+  // the backoff loop cycles every ~8 s and each cycle fired two immediate polls plus an upgrade
+  // attempt: ~3 requests per 8 s, ~32k/day/device, against the account-wide 100,000/day the comment
+  // above calls threatening at 21,600. The interval never once got to tick, because it was reset
+  // before it could. The 429 breaker cannot save this — it only arms AFTER the quota is gone.
+  //
+  // With this guard the first entry into a failure regime still installs the interval and polls
+  // immediately, and every redundant call during the backoff loop is a no-op. P2-POLL-GAP is
+  // preserved: the WS open handler's stopRelayPolling zeroes pollTimer, so the next connectRelay
+  // after a live socket dies still polls right away.
+  if (relay.pollTimer) return;
   relay.pollTimer = setInterval(() => relayPollOnce(true), RELAY_POLL_MS);
   relayPollOnce(true);
 };
