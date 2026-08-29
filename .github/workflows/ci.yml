@@ -61,57 +61,23 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Safe e2e subset (named files only — NEVER the full e2e glob)
-        run: >
-          node --test
-          e2e/repo-minimal-footprint.test.mjs
-          e2e/native-entrypoint.test.mjs
-          e2e/native-stability-config.test.mjs
-          e2e/offline-books-integrity.test.mjs
-          e2e/nearby-sync-contract.test.mjs
-          e2e/permission-flow.test.mjs
-          e2e/svRelayRoom.test.mjs
-          e2e/svSelftest.test.mjs
-          e2e/svSyncDecision.test.mjs
-          e2e/additiveGate.test.mjs
-          e2e/bookResolve.test.mjs
-          e2e/bookUpdate.test.mjs
-          e2e/directorButton.test.mjs
-          e2e/singleDirector.test.mjs
-          e2e/buildBadgeFormat.test.mjs
-          e2e/relayPublishGate.test.mjs
-          e2e/relayAuthRecovery.test.mjs
-          e2e/fabLayout.test.mjs
-          e2e/buildBadgePage1.test.mjs
-          e2e/followerIdleRender.test.mjs
-          e2e/pillWording.test.mjs
-          e2e/buildNumberGuard.test.mjs
-          e2e/rescueAndDiagnostics.test.mjs
-          e2e/bookOtaSeam.test.mjs
-          e2e/sw-page-cache.test.mjs
-          e2e/searchDropdown381.test.mjs
-          e2e/spliceSongPages.test.mjs
-          e2e/bleHandoff.test.mjs
-          e2e/dumbFollowerResync.test.mjs
-          e2e/otaCheckinRestored.test.mjs
-          e2e/relayQuotaGuards.test.mjs
-          e2e/sessionAdmission.test.mjs
-          e2e/otaRevokeIsTotal.test.mjs
-          e2e/transportBackoff.test.mjs
-          e2e/nativeBridgeExports.test.mjs
-          e2e/analyzeJoinLatency.test.mjs
-          e2e/analyzePromotionCapture.test.mjs
-          e2e/renderRetryStorm.test.mjs
-          e2e/renderCache.test.mjs
-          e2e/directorHeartbeatRate.test.mjs
-          e2e/followerBootPageGate.test.mjs
-          e2e/noDirectorTip.test.mjs
-          e2e/noticesCarryControls.test.mjs
-          e2e/otaStandingFleetArm.test.mjs
-          e2e/releaseDistributes.test.mjs
-          sync-worker/test/bookArming.test.mjs
-          sync-worker/test/logBuffer.test.mjs
-          sync-worker/test/publishSeq.test.mjs
+      # ENUMERATED, NOT LISTED. This was a hand-maintained allowlist of 45 filenames, and a
+      # hand-maintained list of tests is a list that silently stops covering things: an earlier
+      # version of it skipped 24 files, including all four that were red at HEAD, and nothing
+      # anywhere said so. A new test file added to e2e/ now runs here the moment it lands, instead
+      # of the moment somebody remembers to add a line.
+      #
+      # The three exclusions are the only files that genuinely cannot run in CI, and each is
+      # excluded for a stated reason rather than by omission:
+      #   relay-sync  — publishes to the PRODUCTION relay room and would flip live followers' pages
+      #   eas-config  — shells out to `npx expo config`, which hangs; it also pins the banned EAS path
+      #   a2          — needs a live local `wrangler dev`
+      - name: Safe e2e subset (everything except the three that cannot run here)
+        run: |
+          set -euo pipefail
+          FILES=$(ls e2e/*.test.mjs sync-worker/test/*.test.mjs | grep -vE 'e2e/relay-sync\.test\.mjs|e2e/eas-config\.test\.mjs|sync-worker/test/a2\.test\.mjs')
+          echo "running:"; echo "$FILES" | sed 's/^/  /'
+          node --test $FILES
 
       - name: Boot smoke test (builds the bundle, asserts it can render + boot)
         run: node scripts/smoke-boot.mjs
@@ -146,3 +112,15 @@ jobs:
       # It also fails if the unmutated suite is red, because that alone makes every mutation "pass".
       - name: Director/rescue guard mutation test (proves those guards have teeth)
         run: node scripts/verify-director-rescue-guards.mjs
+
+      # The newest member of the verify-*-guards family, and the broadest. On 2026-08-29 nineteen
+      # assertions in e2e/ were PROVEN decorative by measurement — apply a real regression, re-run
+      # the named test, watch it stay green. Among them: the publish rate limit (the only abuse
+      # control on an open endpoint) deleted; the four-way director predicate flipped from || to &&,
+      # which makes a follower hang up on its own director; parseInboundPayload force-unwrapping so
+      # any peer in range can crash the app; the songbook index truncated to 10 of 317 entries.
+      #
+      # This replays all nineteen and requires each to redden THE NAMED TEST, scoped with
+      # --test-name-pattern so a sibling assertion in the same file cannot take the credit.
+      - name: Behavioural guard mutation test (replays the 19 regressions that used to slip through)
+        run: node scripts/verify-behavioural-guards.mjs

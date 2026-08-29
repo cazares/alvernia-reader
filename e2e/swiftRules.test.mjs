@@ -186,6 +186,60 @@ test("a stale terminal callback cannot free a reservation made after it", () => 
   assert.equal(out.freed, "true", "the matching release did not free the reservation");
 });
 
+test("occupancy counts reserved slots, not just connected peers", () => {
+  // The occupancy expression is `connectedPeers.count + admissionCount(session)`, and
+  // admissionCount is the half that does the work: connectedPeers omits every peer still shaking
+  // hands, which is exactly the window in which simultaneous joiners all read a session as empty.
+  //
+  // Asserted directly because the burst test above cannot distinguish a broken admissionCount from
+  // a working one — with maxFollowersPerSession at 1, ANY non-zero count fills a session, so a
+  // count that started at 1 instead of 0 produces the same six-session answer for the wrong reason.
+  // A mutation sweep of the Swift found exactly that: `reduce(0)` → `reduce(1)` survived.
+  needSwift();
+  const out = parse(runSwift(admissionProgram(`
+    localPeerID = MCPeerID(displayName: "director")
+    let s = MCSession(peer: localPeerID!, securityIdentity: nil, encryptionPreference: .none)
+    let other = MCSession(peer: localPeerID!, securityIdentity: nil, encryptionPreference: .none)
+    mcSessions = [s, other]
+    print("emptyIsZero:", admissionCount(s))
+    for i in 0..<3 { reserve(MCPeerID(displayName: "p\\(i)"), in: s) }
+    print("threeReserved:", admissionCount(s))
+    print("otherSessionUnaffected:", admissionCount(other))
+  `), { label: "admission-count" }));
+
+  assert.equal(out.emptyIsZero, "0", "a session with no reservations reports non-zero occupancy");
+  assert.equal(out.threeReserved, "3", "three reservations are not counted as three");
+  assert.equal(out.otherSessionUnaffected, "0",
+    "reservations in one session are counted against another — sessions would fill each other up");
+});
+
+test("past maxSessions the director refuses rather than opening another one", () => {
+  // The ceiling is what stops a burst of retrying followers from allocating sessions without bound.
+  // Once it is reached, sessionForAdmitting must return nil so the invitation is answered with a
+  // refusal — a director that kept creating sessions would eventually exhaust MPC's own limits and
+  // fail in a much less legible way.
+  needSwift();
+  const out = parse(runSwift(admissionProgram(`
+    localPeerID = MCPeerID(displayName: "director")
+    let cap = Admission.maxSessions
+    var created = 0
+    for i in 0..<(cap + 5) {
+      let p = MCPeerID(displayName: "f\\(i)")
+      guard let s = sessionForAdmitting(p) else { continue }
+      reserve(p, in: s)
+      created += 1
+    }
+    print("cap:", cap)
+    print("admitted:", created)
+    print("sessions:", mcSessions.count)
+  `), { label: "admission-cap" }));
+
+  assert.equal(out.sessions, out.cap,
+    `the director opened ${out.sessions} sessions against a ceiling of ${out.cap}`);
+  assert.equal(out.admitted, out.cap,
+    "more followers were admitted than there are sessions — the ceiling is not being enforced");
+});
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // 2. THE FOUR-WAY DIRECTOR PREDICATE — the round-5 fix, executed.
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -245,10 +299,22 @@ ${predicate}
     let byRole = MCPeerID(displayName: "p3"); discoveredDirectorInfo[byRole] = ["role": "director"]
     print("byRole:", evaluate(byRole))
 
-    // The invite memory is TIME-BOUNDED: a peer we invited long ago is no longer covered by it.
+    // The invite memory is TIME-BOUNDED, and the bound is tested AT ITS EDGE. A window that has
+    // quietly grown to cover the whole Mass would make the fourth clause "this peer is my director
+    // because I once invited it", which is how an ex-director keeps being accepted after a handover.
+    // The grace above inviteTimeout exists for a slow .connected, so both sides of it matter.
     let stale = MCPeerID(displayName: "stale")
-    invitedDirector = (peer: stale, at: Date().timeIntervalSince1970 - (Mesh.inviteTimeout + 60))
+    let window = Mesh.inviteTimeout + 5
+    invitedDirector = (peer: stale, at: Date().timeIntervalSince1970 - (window - 2))
+    print("insideWindowStillCounts:", evaluate(stale))
+    invitedDirector = (peer: stale, at: Date().timeIntervalSince1970 - (window + 2))
+    print("justOutsideWindowExpires:", !evaluate(stale))
+    invitedDirector = (peer: stale, at: Date().timeIntervalSince1970 - (window + 600))
     print("staleInviteExpires:", !evaluate(stale))
+
+    // The memory is about ONE peer. A different peer must not inherit it.
+    invitedDirector = (peer: stale, at: Date().timeIntervalSince1970)
+    print("inviteIsPeerSpecific:", !evaluate(MCPeerID(displayName: "someone-else")))
   }
 }
 Mesh().drive()
@@ -261,8 +327,16 @@ Mesh().drive()
   assert.equal(out.byPendingInvite, "true", "the pendingInvitePeer clause does not work on its own");
   assert.equal(out.byDiscovery, "true", "the discoveredDirectors clause does not work on its own");
   assert.equal(out.byRole, "true", "the advertised-role clause does not work on its own");
+  assert.equal(out.insideWindowStillCounts, "true",
+    "an invite two seconds inside its own window has already expired — a slow .connected callback " +
+    "would be rejected, which is the case the grace period exists for");
+  assert.equal(out.justOutsideWindowExpires, "true",
+    "the invite window has grown past its bound — an ex-director stays acceptable long after handover");
   assert.equal(out.staleInviteExpires, "true",
     "the invite memory never expires — a peer invited an hour ago is still treated as the director");
+  assert.equal(out.inviteIsPeerSpecific, "true",
+    "the invite memory applies to the wrong peer — any device connecting during the window is taken " +
+    "for the director");
 });
 
 test("the accept-path predicate and the .connected predicate are the SAME four clauses", () => {
