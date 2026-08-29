@@ -34,6 +34,23 @@ const SWIFT = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
 // These tests execute the real cooldown arithmetic rather than asserting on prose, and pin the
 // Swift guard against the source.
 
+/**
+ * Index of the `)` that closes the `(` at openIdx. Used to lift a whole `if (...)` condition out of
+ * the source by STRUCTURE, so an assertion can survive reformatting, a longer comment, or an extra
+ * argument — and so a slice can never silently run to EOF. Returns -1 if the parens never balance.
+ */
+const matchParen = (src, openIdx) => {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i += 1) {
+    if (src[i] === "(") depth += 1;
+    else if (src[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+};
+
 // ── A. the render-retry storm ────────────────────────────────────────────────────────────────
 
 const COOLDOWN = RENDER_RETRY_COOLDOWN_MS;
@@ -164,9 +181,69 @@ test(".notConnected keeps its own twin of the guard", () => {
 });
 
 test("app.js actually CALLS the shared rule inside renderPage — a correct module that is never invoked fixes nothing", () => {
-  const fn = APP.slice(APP.indexOf("const renderPage = async"), APP.indexOf("const requestId = state.pageLoadRequest + 1;"));
-  assert.match(fn, /svShouldPaceRender\(state\.lastRenderFailure, nextPage, Date\.now\(\)\)/, "renderPage does not consult the pacing rule");
-  assert.match(fn, /return;/, "the pacing call does not short-circuit the render");
+  // WHAT THE OLD ASSERTION MISSED. It looked for `svShouldPaceRender(...)` anywhere in the prologue
+  // and, separately, for a bare `return;` anywhere in the same window. The prologue already contains
+  // an unrelated early return — the already-on-this-page guard — so the second assertion was
+  // satisfied no matter what. Deleting the short-circuit while keeping the call
+  // (`if (… svShouldPaceRender(…)) { /* nothing */ }`) restored the full 1 Hz retry storm and the
+  // test stayed green. So now the call and its consequence are pinned as ONE statement: the guard is
+  // located structurally, its condition is EXECUTED with a stub in place of the shipped rule, and
+  // the token immediately after the condition's closing paren must be the `return`.
+  const start = APP.indexOf("const renderPage = async");
+  assert.ok(start > 0, "renderPage is gone");
+  const end = APP.indexOf("const requestId = state.pageLoadRequest + 1;", start);
+  assert.ok(end > start, "renderPage's prologue no longer ends at the page-load request — re-anchor this test");
+  const fn = APP.slice(start, end);
+
+  const callIdx = fn.indexOf("svShouldPaceRender(");
+  assert.ok(callIdx > 0, "renderPage does not consult the pacing rule");
+  const ifIdx = fn.lastIndexOf("if (", callIdx);
+  assert.ok(ifIdx >= 0, "the pacing call is not inside an `if` — it cannot be short-circuiting anything");
+  const openIdx = fn.indexOf("(", ifIdx);
+  const closeIdx = matchParen(fn, openIdx);
+  assert.ok(closeIdx > openIdx, "the pacing guard's condition never closes its parentheses");
+  assert.ok(closeIdx > callIdx, "the pacing call is not part of that `if` condition");
+
+  // THE SHORT-CIRCUIT. Whatever the condition ends up being, the very next thing after it must be a
+  // bare `return;` — not a block, not a log, not a comment standing in for one.
+  const after = fn.slice(closeIdx + 1).trimStart();
+  assert.ok(
+    after.startsWith("return;"),
+    `the pacing guard does not short-circuit the render; it is followed by ${JSON.stringify(after.slice(0, 40))}`,
+  );
+
+  // THE CONDITION, EXECUTED. A stub stands in for the shipped rule so we learn what renderPage
+  // actually asks it, and what renderPage does with the answer.
+  const cond = fn.slice(openIdx + 1, closeIdx);
+  let guard;
+  try {
+    guard = new Function("userInitiated", "state", "nextPage", "svShouldPaceRender", `return !!(${cond});`);
+  } catch {
+    assert.fail(`the pacing guard's condition is no longer evaluable on its own: ${cond}`);
+  }
+
+  const failure = { page: 42, at: 1000 };
+  const calls = [];
+  const paced = (...args) => { calls.push(args); return true; };
+  const notPaced = (...args) => { calls.push(args); return false; };
+
+  assert.equal(guard(false, { lastRenderFailure: failure }, 42, paced), true,
+    "a director re-drive of a page the rule says to pace is not short-circuited — the storm is back");
+  assert.equal(calls.length, 1, "the shipped rule was not consulted exactly once");
+  assert.equal(calls[0][0], failure, "the rule is not given the recorded failure — it can only ever say 'no'");
+  assert.equal(calls[0][1], 42, "the rule is asked about the wrong page");
+  assert.ok(Math.abs(calls[0][2] - Date.now()) < 5000, "the rule is not given the current time, so the cooldown never expires");
+
+  calls.length = 0;
+  assert.equal(guard(false, { lastRenderFailure: failure }, 42, notPaced), false,
+    "a render is short-circuited even when the rule says it is fine — every follower would go laggy");
+
+  // AND THE HUMAN EXEMPTION, from the same statement: a swipe must never be swallowed (2026-08-17,
+  // "it wouldn't let me swipe to songs 4 or 5"). It must not even ask the rule.
+  calls.length = 0;
+  assert.equal(guard(true, { lastRenderFailure: failure }, 42, paced), false,
+    "a human-initiated render is paced — swipes go dead for a cooldown with no error and no feedback");
+  assert.equal(calls.length, 0, "a human tap still consults the pacing rule; the exemption must short-circuit first");
 });
 
 test("the page loads the pacing lib, or the fallback silently disables it forever", () => {

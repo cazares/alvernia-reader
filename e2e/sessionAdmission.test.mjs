@@ -149,19 +149,45 @@ test("a lostPeer mid-handshake does not make the follower reject its real direct
 
 test("both director predicates stay in agreement", () => {
   // The accept path and the .connected path have drifted apart before; the file's own comments say
-  // they must not. Same four clauses, both places.
+  // they must not. Same four clauses, both places — and, load-bearing, joined by OR.
+  //
+  // The old version only grepped for the four clause substrings, which says nothing about how they
+  // are combined: joining them with && leaves every substring intact, so the whole point of the
+  // four-way predicate could be inverted with the test still green. And an inverted predicate is
+  // exactly the outage above — a follower needing all four to be true hangs up on its real director
+  // the moment a lostPeer clears discoveredDirectors and discoveredDirectorInfo together. So the
+  // operator itself is now asserted: the right-hand side is split on ||, and it must yield exactly
+  // these four operands and contain no && at all.
+  const CLAUSES = [
+    "self.pendingInvitePeer == peerID",
+    "self.weInvitedAsDirector(peerID)",
+    "self.discoveredDirectors[peerID] != nil",
+    'self.discoveredDirectorInfo[peerID]?["role"] == "director"',
+  ];
+
+  const rhsOf = (decl, endMarker) => {
+    const block = fn(decl, endMarker);
+    const eq = block.indexOf(" = ");
+    assert.ok(eq > 0, `${decl} is no longer a plain assignment — cannot read its predicate`);
+    return block.slice(eq + 3).replace(/\s+/g, " ").trim();
+  };
+
+  const seen = [];
   for (const [start, end] of [
     ["let isDirector = self.pendingInvitePeer == peerID", "guard isDirector else {"],
     ["let peerIsKnownDirector = self.pendingInvitePeer == peerID", "guard peerIsKnownDirector else {"],
   ]) {
-    const b = fn(start, end);
-    for (const clause of [
-      /pendingInvitePeer == peerID/,
-      /weInvitedAsDirector\(peerID\)/,
-      /discoveredDirectors\[peerID\] != nil/,
-      /discoveredDirectorInfo\[peerID\]\?\["role"\] == "director"/,
-    ]) {
-      assert.match(b, clause, `a director predicate is missing ${clause} — the two places have drifted`);
-    }
+    const rhs = rhsOf(start, end);
+    assert.ok(!rhs.includes("&&"),
+      `${start} is a CONJUNCTION — a follower now needs every clause true at once, so a lostPeer ` +
+      "mid-handshake makes it cancelConnectPeer on its own director");
+    const operands = rhs.split("||").map((s) => s.trim());
+    assert.equal(operands.length, CLAUSES.length,
+      `${start} no longer ORs exactly ${CLAUSES.length} clauses (got ${operands.length}): ${rhs}`);
+    assert.deepEqual([...operands].sort(), [...CLAUSES].sort(),
+      `${start} does not OR the four director clauses — got: ${rhs}`);
+    seen.push(operands.slice().sort().join(" || "));
   }
+  assert.equal(seen[0], seen[1],
+    "the accept path and the .connected path disagree about what makes a peer a director");
 });

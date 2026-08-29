@@ -41,6 +41,57 @@ const L = ladder();
 const delayFor = (count) =>
   count <= L.fastCount ? Math.min(L.base * Math.pow(L.factor, count - 1), L.cap) : L.lastResort;
 
+/**
+ * Slice a Swift declaration's body by BRACE MATCHING, not by a character count and not to the next
+ * comment banner. A count-based window drifts the moment somebody adds a line above it, and a window
+ * whose end marker was deleted silently runs to EOF and matches anything in the file.
+ */
+const bodyOf = (decl) => {
+  const start = MODULE.indexOf(decl);
+  assert.ok(start > 0, `${decl} is gone from DirectorSyncModule.swift`);
+  const open = MODULE.indexOf("{", start);
+  assert.ok(open > start, `could not find the opening brace of ${decl}`);
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < MODULE.length; i++) {
+    if (MODULE[i] === "{") depth += 1;
+    else if (MODULE[i] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  assert.ok(end > open, `${decl}'s body is unterminated`);
+  return MODULE.slice(open + 1, end);
+};
+
+// THE MODEL'S ONE FREE VARIABLE IS READ OUT OF THE SWIFT.
+//
+// invalidatePendingSettle was previously covered only by presence greps for its CALL SITES, so its
+// body could be emptied to `_ = isAdvertiser` — declaration intact, both call sites intact — and
+// every test in this file stayed green while the device went straight back to the 1,2,3,reset
+// sawtooth. The behaviour the function has to have is that it BUMPS the attempt token of the
+// transport that failed, which is what makes the already-doomed settle fail its `token ==` guard.
+// So the replay below takes that fact from the shipped source instead of from a hand-set boolean:
+// gut the body and the model sawtooths, and the ladder assertions go red the way the device did.
+const INVALIDATE_BODY = bodyOf("private func invalidatePendingSettle");
+const SWIFT_INVALIDATES_ON_FAILURE =
+  /\bisAdvertiser\b/.test(INVALIDATE_BODY) &&
+  /\badvertiserAttemptToken\s*&\+=\s*1/.test(INVALIDATE_BODY) &&
+  /\bbrowserAttemptToken\s*&\+=\s*1/.test(INVALIDATE_BODY);
+
+// The settle window is Swift's too — a duplicated `settleSeconds = 10` in this file would keep the
+// model at 10 s while the shipped constant moved, which is the same class of lie as the ladder was.
+const SETTLE_SECONDS = (() => {
+  const m = MODULE.match(
+    /private static let transportSettleSeconds:\s*TimeInterval\s*=\s*([\d.]+)/,
+  );
+  assert.ok(m, "could not read transportSettleSeconds out of DirectorSyncModule.swift");
+  return Number(m[1]);
+})();
+
 test("the ladder the model replays is the one the Swift actually computes", () => {
   // Pins the shape too, so a change to the constants is a deliberate, visible edit rather than a
   // silent drift the model would happily follow into nonsense.
@@ -53,9 +104,15 @@ test("the ladder the model replays is the one the Swift actually computes", () =
 
 /**
  * Replay a transport that fails immediately on every attempt.
- * `invalidateOnFailure` models whether a failure cancels the settle its attempt scheduled.
+ * `invalidateOnFailure` models whether a failure cancels the settle its attempt scheduled; it
+ * defaults to what invalidatePendingSettle's body in the Swift actually does, and the settle window
+ * defaults to the Swift's transportSettleSeconds.
  */
-const replay = ({ invalidateOnFailure, settleSeconds = 10, rounds = 8 }) => {
+const replay = ({
+  invalidateOnFailure = SWIFT_INVALIDATES_ON_FAILURE,
+  settleSeconds = SETTLE_SECONDS,
+  rounds = 8,
+} = {}) => {
   let count = 0;
   let token = 0;
   let settle = null;
@@ -83,19 +140,38 @@ const replay = ({ invalidateOnFailure, settleSeconds = 10, rounds = 8 }) => {
   return counts;
 };
 
+test("invalidatePendingSettle bumps the failed transport's attempt token", () => {
+  // Named separately from the replay so an emptied body reports itself in one line instead of only
+  // as a strange arithmetic failure downstream. The operator matters, not just the operands: the
+  // guard inside noteTransportSettled is `self.advertiserAttemptToken == token`, so anything short
+  // of actually CHANGING the token leaves the doomed settle armed.
+  assert.match(INVALIDATE_BODY, /\bisAdvertiser\b/,
+    "invalidatePendingSettle no longer distinguishes the two transports");
+  assert.match(INVALIDATE_BODY, /\badvertiserAttemptToken\s*&\+=\s*1/,
+    "invalidatePendingSettle does not bump the advertiser's attempt token — its settle stays armed");
+  assert.match(INVALIDATE_BODY, /\bbrowserAttemptToken\s*&\+=\s*1/,
+    "invalidatePendingSettle does not bump the browser's attempt token — its settle stays armed");
+  assert.ok(SWIFT_INVALIDATES_ON_FAILURE);
+});
+
 test("a failed attempt cancels the settle it scheduled, or the ladder sawtooths forever", () => {
+  // What the old version of this test missed: both replays were hand-parameterised, so the whole
+  // assertion was a statement about a boolean literal written three lines above it. It is now
+  // SWIFT_INVALIDATES_ON_FAILURE that drives the second replay, so gutting invalidatePendingSettle's
+  // body — which is exactly what regressed on the device — reddens this test.
   const broken = replay({ invalidateOnFailure: false });
   assert.ok(Math.max(...broken) <= 3,
     "the pre-fix model should stall at the third rung — if not, this test no longer models the bug");
 
-  const fixed = replay({ invalidateOnFailure: true });
-  assert.ok(Math.max(...fixed) > 5,
+  const shipped = replay();
+  assert.ok(Math.max(...shipped) > 5,
     "the failure count still never exceeds 5 — the '> 5' foreground permission-recovery branch stays dead code");
-  assert.deepEqual(fixed.slice(0, 7), [1, 2, 3, 4, 5, 6, 7], "the ladder no longer climbs monotonically");
+  assert.deepEqual(shipped.slice(0, 7), [1, 2, 3, 4, 5, 6, 7],
+    "the ladder no longer climbs monotonically — a failure is not cancelling the settle it scheduled");
 });
 
 test("the ladder reaches the 45 s last-resort tier and stays there", () => {
-  const counts = replay({ invalidateOnFailure: true });
+  const counts = replay();
   const delays = counts.map(delayFor);
   assert.deepEqual(delays.slice(0, 6), [3, 6, 12, 24, 30, 45], "the documented ladder is not what is computed");
   assert.ok(delays.slice(6).every((d) => d === 45), "the last-resort tier is not sustained");

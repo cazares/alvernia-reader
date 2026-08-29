@@ -17,6 +17,28 @@ const dtsSyncSource = fs.readFileSync(path.join(APP_ROOT, "src", "nearbyDirector
 const swiftSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
 const bridgeSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModuleBridge.m"), "utf8");
 
+// Swift cannot be executed here, so several assertions below are source-anchored. That is only
+// honest if the window they read is the ONE function under test — this repo has repeatedly shipped
+// whole-file regexes that stayed green because an identical call in an UNRELATED function satisfied
+// them. These two helpers cut the window on STRUCTURE (a declaration, a `case` label, the member's
+// own closing brace at 2-space indent) and both refuse to return a window unless BOTH endpoints
+// were actually located — a missing end marker must fail loudly, never silently widen to EOF.
+function memberBody(src, declRe, label) {
+  const start = src.search(declRe);
+  assert.ok(start > 0, `${label}: declaration not found — the member this test guards is gone or renamed`);
+  const rel = src.slice(start).indexOf("\n  }");
+  assert.ok(rel > 0, `${label}: could not find the member's closing brace at 2-space indent`);
+  return src.slice(start, start + rel + 4);
+}
+
+function between(src, startRe, endRe, label) {
+  const start = src.search(startRe);
+  assert.ok(start > 0, `${label}: start marker not found`);
+  const rel = src.slice(start + 1).search(endRe);
+  assert.ok(rel > 0, `${label}: end marker not found after the start marker`);
+  return src.slice(start, start + 1 + rel);
+}
+
 test("nearby sync page updates include mode and book identity", () => {
   assert.match(jsSyncSource, /sendPageUpdate\(\s*page,\s*totalPages,\s*String\(context\.mode/);
   assert.match(jsSyncSource, /String\(context\.bookId/);
@@ -43,9 +65,30 @@ test("unsupported-platform sync entrypoints reject through promises instead of t
   assert.doesNotMatch(jsSyncSource, /throw new Error\("La sincronización offline solo está disponible en iPad\."\);/);
 });
 
+// A follower that joins mid-Mass has no page until the director tells it one. Two independent
+// paths cover that: the director pushes a snapshot the moment a peer connects, and it answers every
+// follower "hello" with one. They are belt-and-suspenders for each other, so BOTH must be pinned
+// separately — which is exactly what the old assertions failed to do.
 test("happy path: director immediately snapshots on connect and on hello", () => {
-  assert.match(swiftSource, /case \.connected:[\s\S]*currentRole == "director"[\s\S]*sendCurrentPageSnapshot/);
-  assert.match(swiftSource, /if type == "hello"[\s\S]*currentRole == "director"[\s\S]*sendCurrentPageSnapshot/);
+  // What the old assertions missed: `/case \.connected:[\s\S]*director[\s\S]*sendCurrentPageSnapshot/`
+  // spans the whole 2800-line file, so deleting the snapshot from the .connected director branch
+  // was invisible — the third term was still satisfied by the hello handler ~66 lines further
+  // down. The two paths now get two disjoint, structurally-bounded windows, so losing either one
+  // reddens on its own.
+  const connectedArm = between(
+    swiftSource, /\n      case \.connected:/, /\n      case \.connecting:/, "session(_:peer:didChange:) .connected arm");
+  const dirIdx = connectedArm.search(/self\.currentRole == "director"/);
+  assert.ok(dirIdx > -1, "the .connected arm no longer has a director branch");
+  const directorOnConnect = connectedArm.slice(dirIdx);
+  assert.match(directorOnConnect, /self\.sendCurrentPageSnapshot\(to: peerID, via: session\)/,
+    "a peer connecting to the director no longer gets an immediate page snapshot — a late joiner sits on the wrong page until its next hello tick (8s)");
+
+  const helloHandler = between(
+    swiftSource, /if type == "hello" \{/, /\n      if type == "/, "didReceive hello handler");
+  assert.match(helloHandler, /self\.currentRole == "director"/,
+    "the hello handler no longer checks that WE are the director before answering");
+  assert.match(helloHandler, /self\.sendCurrentPageSnapshot\(to: peerID, via: session\)/,
+    "the director no longer answers a follower hello with a snapshot — the follower's own recovery path is dead");
 });
 
 test("happy path: takeover approved/denied messages are handled only by follower", () => {
@@ -100,7 +143,27 @@ test("follower invite ownership lives in reconsiderFollowerTarget", () => {
 
 // Peer display names longer than 63 chars cause an ObjC exception in MCPeerID init.
 test("Swift caps peer display name to 50 chars before creating MCPeerID", () => {
-  assert.match(swiftSource, /prefix\(50\)/);
+  // What the old single-line assertion missed: prefix(50) occurs at TWO sites — the throwaway
+  // permission-priming peer and stablePeerName, which feeds the real archived MCPeerID. A
+  // whole-file /prefix\(50\)/ is satisfied by either, so removing the cap at the site that
+  // actually matters stayed green while a device whose UIDevice.name exceeds 63 chars would throw
+  // the very ObjC exception this test is named after. Now the cap is asserted INSIDE
+  // stablePeerName, and it must be the value the display name is actually built from.
+  const stable = memberBody(swiftSource, /private var stablePeerName: String \{/, "stablePeerName");
+  const capped = stable.match(/let\s+(\w+)\s*=\s*String\(\s*\w+(?:\.\w+)*\.prefix\(50\)\s*\)/);
+  assert.ok(capped,
+    "stablePeerName no longer caps the device name with prefix(50) — a long UIDevice.name will throw in MCPeerID init");
+  const returned = stable.match(/\n\s*return\s+(.+)/)?.[1] ?? "";
+  assert.ok(returned.length > 0, "stablePeerName has no return statement");
+  assert.ok(returned.includes(capped[1]),
+    `stablePeerName returns ${returned.trim()}, which does not use the capped name \`${capped[1]}\` — the cap is computed and thrown away`);
+
+  // Every MCPeerID the module mints must be fed by a capped name, not just one of them.
+  const peerIdSites = (swiftSource.match(/MCPeerID\(displayName:/g) || []).length;
+  const cappings = (swiftSource.match(/String\(\s*\w+(?:\.\w+)*\.prefix\(50\)\s*\)/g) || []).length;
+  assert.ok(peerIdSites > 0, "no MCPeerID is created anywhere — the mesh cannot start");
+  assert.strictEqual(cappings, peerIdSites,
+    `${peerIdSites} MCPeerID(displayName:) site(s) but only ${cappings} prefix(50) capping(s) — at least one peer name reaches MCPeerID uncapped`);
 });
 
 // sendPageUpdate must store the new page state BEFORE the early-return guard that checks
@@ -237,10 +300,32 @@ test("edge case: protocolVersion mismatch is ignored (v != 0 and != protocolVers
   assert.match(swiftSource, /if v != 0, v != Self\.protocolVersion \{ return \}/);
 });
 
+// parseInboundPayload is the ONLY thing standing between the app and an arbitrary byte string
+// handed to it by any device in Bluetooth/AWDL range. A malformed or absurdly large packet must
+// return nil, not trap.
 test("edge case: parseInboundPayload gracefully rejects invalid JSON", () => {
-  assert.match(swiftSource, /private func parseInboundPayload/);
-  assert.match(swiftSource, /try\?\s*JSONSerialization\.jsonObject/);
-  assert.match(swiftSource, /return nil/);
+  // The old assertions were three whole-file scans, and the source has more than one of each:
+  // `try? JSONSerialization.jsonObject` also appears in an unrelated decoder further down, and
+  // `return nil` appears in availableSessionForNewFollower 30 lines EARLIER. Replacing this entire
+  // body with `try!` / `as!` — which turns any stranger's malformed packet into a crash and drops
+  // the size guard — left the test green. The window is now the function's own body.
+  const body = memberBody(swiftSource, /private func parseInboundPayload\(/, "parseInboundPayload");
+
+  assert.match(body, /data\.count\s*<=\s*Self\.maxInboundPayloadBytes/,
+    "the payload size guard is gone — a pathological packet is handed straight to JSONSerialization");
+  assert.match(body, /try\?\s*JSONSerialization\.jsonObject/,
+    "the JSON parse is no longer an optional try — malformed JSON now throws instead of returning nil");
+  assert.match(body, /as\?\s*\[String\s*:\s*Any\]/,
+    "the dictionary cast is no longer conditional — a JSON array or scalar would trap");
+  assert.doesNotMatch(body, /try\s*!/,
+    "force-try in parseInboundPayload: any peer in range can crash the app with one bad packet");
+  assert.doesNotMatch(body, /as\s*!/,
+    "force-cast in parseInboundPayload: a well-formed JSON array from a peer would crash the app");
+
+  // Both rejection paths (oversized, unparseable) must actually bail rather than fall through.
+  const bails = (body.match(/return nil/g) || []).length;
+  assert.ok(bails >= 2,
+    `parseInboundPayload has only ${bails} nil-returning rejection path(s) — the size guard and the parse failure each need one`);
 });
 
 test("edge case: followerHello is throttled when pages are being received", () => {
@@ -278,9 +363,29 @@ test("edge case: requestCurrentSnapshot only sends when follower is connected to
 });
 
 test("edge case: director sendCurrentPageSnapshot uses reliable delivery", () => {
-  assert.match(swiftSource, /private func sendCurrentPageSnapshot/);
-  assert.match(swiftSource, /with: \.reliable/);
-  assert.match(swiftSource, /with: \.unreliable/);
+  // The catch-up snapshot is a ONE-SHOT: unlike the page heartbeat, nothing resends it on its own.
+  // Sent best-effort it can simply vanish, and the late-joining iPad stays on the wrong page.
+  //
+  // What the old assertions missed: `with: .reliable` appears at six sites and `with: .unreliable`
+  // at two, all matched against the whole file, so flipping the ONE send inside this function to
+  // .unreliable was invisible. The window is now the function body, and the two ordering modes are
+  // checked in their own halves of it — reliable on the primary send, unreliable only as the catch
+  // fallback — so a swap in either direction reddens.
+  const body = memberBody(swiftSource, /private func sendCurrentPageSnapshot\(/, "sendCurrentPageSnapshot");
+
+  const doIdx = body.search(/\bdo\s*\{/);
+  const catchIdx = body.search(/\}\s*catch\b/);
+  assert.ok(doIdx > -1, "the primary snapshot send is no longer wrapped in do/catch");
+  assert.ok(catchIdx > doIdx, "the catch fallback after the primary send is gone");
+  const primary = body.slice(doIdx, catchIdx);
+  const fallback = body.slice(catchIdx);
+
+  assert.match(primary, /session\.send\([^)]*with:\s*\.reliable\)/,
+    "the primary catch-up snapshot is no longer sent .reliable — MPC may drop it and leave a late-joining follower on the wrong page");
+  assert.doesNotMatch(primary, /\.unreliable/,
+    "the primary send has been downgraded to best-effort delivery");
+  assert.match(fallback, /session\.send\([^)]*with:\s*\.unreliable\)/,
+    "the .unreliable catch fallback is gone — a throwing reliable send now drops the snapshot entirely");
 });
 
 // ── The peer bundle-push rail is RETIRED (plan §5.12 / Q4, red team A5) ──────

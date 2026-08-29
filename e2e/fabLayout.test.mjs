@@ -16,64 +16,188 @@ const CSS = fs.readFileSync("web/src/styles.css", "utf8");
 // offset, and until then they could never be on screen together — the old badge showed only for the
 // DIRECTOR, and ⟳ is hidden for exactly that role.
 
-// The cluster is DERIVED from four :root variables now, so this reads them and recomputes the same
+// The cluster is DERIVED from four :root variables now, so this reads them and works out the same
 // ladder the browser will. That is strictly stronger than the old literal arithmetic: changing a
 // size in one place used to leave the offsets stale — which is exactly how ⌕ and Ir a Canto ended up
 // 0.1rem apart, and the pill 0.15rem from ⟳, both on 2026-08-17.
-const rootVar = (name) => {
-  const m = CSS.match(new RegExp(`--${name}:\\s*([\\d.]+)rem`));
-  assert.ok(m, `--${name} is not defined in :root — the ladder cannot be derived`);
-  return Number(m[1]);
+//
+// WHAT THE PREVIOUS VERSION MISSED, and it was measured: it only ever pattern-matched the NAME
+// `var(--fab-slot2)` and substituted the test's own JS constant `SIZE + GAP` for it. The calc() body
+// of --fab-slot2 was never read, so rewriting it to `calc(var(--fab-size) - 2rem)` — which puts ♪
+// 2.00rem INSIDE ⌕ on the director's iPad — left all fourteen tests green. Everything below now
+// evaluates the stylesheet's own expressions: the variables, the calc()s, the max() against the
+// safe-area inset. The numbers the browser resolves are the numbers under test.
+
+const PX_PER_REM = 16;   // the page never overrides the root font-size; px only appears as nudges
+
+// Comments are stripped for VALUE parsing only. They carry braces-free prose today, but a brace or
+// a stray `--fab-size` inside one would otherwise be read as code.
+const CSS_NC = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+
+const matchBrace = (s, open) => {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === "{") depth++;
+    else if (s[i] === "}" && --depth === 0) return i;
+  }
+  return -1;
 };
-const GUTTER = rootVar("fab-gutter");
-const GUTTER_TOP = rootVar("fab-gutter-top");
-const SIZE = rootVar("fab-size");
-const GAP = rootVar("fab-gap");
+const matchParen = (s, open) => {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")" && --depth === 0) return i;
+  }
+  return -1;
+};
+
+// Every TOP-LEVEL rule, as { selectors[], body }. Structural: preludes are read up to their own
+// opening brace and bodies to the matching close, so an added declaration or a reflowed rule cannot
+// shift anything out of a window. @media blocks are deliberately skipped — see the single-definition
+// assertion below, which is what keeps that safe.
+const RULES = (() => {
+  const out = [];
+  let i = 0;
+  while (i < CSS_NC.length) {
+    const open = CSS_NC.indexOf("{", i);
+    if (open < 0) break;
+    const close = matchBrace(CSS_NC, open);
+    if (close < 0) break;
+    const prelude = CSS_NC.slice(i, open).trim();
+    if (!prelude.startsWith("@")) {
+      out.push({
+        selectors: prelude.split(",").map((s) => s.trim()).filter(Boolean),
+        body: CSS_NC.slice(open + 1, close),
+      });
+    }
+    i = close + 1;
+  }
+  return out;
+})();
+assert.ok(RULES.length > 100, `only ${RULES.length} CSS rules parsed — the stylesheet did not parse`);
+
+const declsOf = (name) =>
+  RULES.filter((r) => r.selectors.includes(":root"))
+    .flatMap((r) => [...r.body.matchAll(new RegExp(`(?:^|;)\\s*--${name}\\s*:\\s*([^;]+);`, "g"))])
+    .map((m) => m[1].trim());
+
+// Evaluate a CSS length the way the browser would, in rem. Anything it does not understand is a
+// hard failure, never a silent 0 — a resolver that shrugs at an unfamiliar expression is how a
+// "derived" test quietly stops deriving anything.
+const evalLength = (expr, seen = new Set()) => {
+  const s = String(expr).trim();
+  const fn = /^([a-zA-Z-]+)\s*\(/.exec(s);
+  if (fn) {
+    const open = s.indexOf("(");
+    const close = matchParen(s, open);
+    if (close === s.length - 1) {
+      const inner = s.slice(open + 1, close);
+      const args = [];
+      let depth = 0, cur = "";
+      for (const c of inner) {
+        if (c === "(") depth++;
+        if (c === ")") depth--;
+        if (c === "," && depth === 0) { args.push(cur); cur = ""; continue; }
+        cur += c;
+      }
+      args.push(cur);
+      const name = fn[1].toLowerCase();
+      if (name === "calc") return evalLength(inner, seen);
+      if (name === "max") return Math.max(...args.map((a) => evalLength(a, seen)));
+      if (name === "min") return Math.min(...args.map((a) => evalLength(a, seen)));
+      if (name === "var") {
+        const varName = args[0].trim().replace(/^--/, "");
+        assert.ok(!seen.has(varName), `--${varName} is defined in terms of itself`);
+        const decls = declsOf(varName);
+        if (!decls.length) {
+          assert.ok(args.length > 1, `--${varName} is used but never defined in :root`);
+          return evalLength(args.slice(1).join(","), seen);
+        }
+        return evalLength(decls[decls.length - 1], new Set([...seen, varName]));
+      }
+      // env(): modelled at its FALLBACK, i.e. a device with no notch. Every anchor wraps env() in a
+      // max() against the gutter, and the inset only ever pushes a control FURTHER from the edge —
+      // so the fallback is the tightest case, which is the one where controls collide.
+      if (name === "env") return args.length > 1 ? evalLength(args.slice(1).join(","), seen) : 0;
+      assert.fail(`cannot resolve CSS function ${name}() in "${s}" — teach this resolver, do not skip it`);
+    }
+  }
+  // Top-level + / - terms.
+  const terms = [];
+  let depth = 0, cur = "", sign = 1;
+  for (const c of s) {
+    if (c === "(") depth++;
+    if (c === ")") depth--;
+    if (depth === 0 && (c === "+" || c === "-") && cur.trim() !== "") {
+      terms.push({ sign, text: cur.trim() });
+      cur = ""; sign = c === "+" ? 1 : -1;
+      continue;
+    }
+    cur += c;
+  }
+  if (cur.trim()) terms.push({ sign, text: cur.trim() });
+  if (terms.length > 1) return terms.reduce((n, t) => n + t.sign * evalLength(t.text, seen), 0);
+
+  const leaf = terms.length ? terms[0] : { sign: 1, text: s };
+  const num = /^(-?\d*\.?\d+)(rem|px)?$/.exec(leaf.text);
+  assert.ok(num, `cannot resolve CSS length "${leaf.text}" (from "${s}")`);
+  if (num[2] === "px") return leaf.sign * (Number(num[1]) / PX_PER_REM);
+  assert.ok(num[2] === "rem" || Number(num[1]) === 0,
+    `"${leaf.text}" has no unit — only 0 may be unitless here`);
+  return leaf.sign * Number(num[1]);
+};
+
+const cssVar = (name) => {
+  const decls = declsOf(name);
+  assert.equal(decls.length, 1,
+    `--${name} is declared ${decls.length} times at top level — the ladder is only derivable while ` +
+    "each variable has exactly one value (a @media override would make every number below wrong)");
+  return evalLength(decls[0]);
+};
+
+const GUTTER = cssVar("fab-gutter");
+const GUTTER_TOP = cssVar("fab-gutter-top");
+const SIZE = cssVar("fab-size");
+const GAP = cssVar("fab-gap");
 // Vestigial since 2026-08-18: the DIRECTOR status content-hugs around a lone ☆, so no position is
 // derived from this width. Still read so the ladder fails loudly if someone re-introduces a fixed
 // status width without re-deriving the offsets beside it.
-const STATUS_W = rootVar("fab-status-w");
+const STATUS_W = cssVar("fab-status-w");
 
 const fabWidth = () => SIZE;
 
-// slot2 / slot3 are calc()s of the above; recompute rather than re-read, so a hand-edited calc that
-// disagrees with the variables shows up as an overlap here.
-const SLOT2 = SIZE + GAP;
+// slot2 is a calc() of the above — and it is READ, not recomputed, because a hand-edited calc that
+// disagrees with the variables is precisely the regression this file exists to catch.
+const SLOT2 = cssVar("fab-slot2");
 // THERE IS NO SLOT 3 any more (2026-08-18). The empty-seat state was a text pill sitting third in
 // the follower row; it is now the ⟳ button itself, crossed out. Both roles are two controls wide,
 // which also retires the whole class of bug where slot 3 measured a control that had moved out of
 // the row — it did exactly that for a day, floating "Nadie dirige" 2.33rem clear of its neighbour.
 
-// Resolve a rule's horizontal offset. Now that the ladder is calc()s of :root variables, map the
-// variable NAMES to the numbers above rather than parsing a literal that no longer exists.
-const offsetOf = (selector) => {
-  const lines = CSS.split("\n");
-  let best = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].includes(selector)) continue;
-    const block = lines.slice(i, i + 8).join("\n");
-    const body = block.slice(0, block.indexOf("}") + 1 || undefined);
-    const m = body.match(/(?:left|right):\s*calc\((.*)\)/);
-    if (!m) continue;
-    // Sum every term AFTER the gutter: the offsets are expressed as variables now, so resolve the
-    // variables rather than pattern-matching one shape. A literal rem still counts.
-    const tail = m[1].slice(m[1].indexOf(")") + 1);
-    let n = 0;
-    if (/var\(--fab-slot2\)/.test(tail)) n += SLOT2;
-    if (/var\(--fab-slot3\)/.test(tail)) n += SLOT3;
-    n += (tail.match(/var\(--fab-size\)/g) || []).length * SIZE;
-    n += (tail.match(/var\(--fab-gap\)/g) || []).length * GAP;
-    n += (tail.match(/var\(--fab-status-w\)/g) || []).length * STATUS_W;
-    for (const lit of tail.match(/\+\s*([\d.]+)rem/g) || []) n += Number(lit.replace(/[^\d.]/g, ""));
-    best = Math.max(best, n);
+const near = (a, b, why) =>
+  assert.ok(Math.abs(a - b) < 1e-9, `${why} — got ${a}rem, expected ${b}rem`);
+
+// A rule's resolved distance from the screen edge it is anchored to, in rem. Selectors are matched
+// EXACTLY against a rule's own selector list (so `.song-jump-fab` never picks up the director's
+// more specific rule), and the LAST such rule that sets left/right wins, as the cascade does.
+const edgeOffset = (selector) => {
+  let found = null;
+  for (const rule of RULES) {
+    if (!rule.selectors.includes(selector)) continue;
+    const m = [...rule.body.matchAll(/(?:^|;)\s*(left|right)\s*:\s*([^;]+);/g)].pop();
+    if (m) found = { edge: m[1], value: m[2].trim() };
   }
-  return best;
+  assert.ok(found, `no rule with the exact selector \`${selector}\` sets left/right — it was renamed or deleted`);
+  return { edge: found.edge, rem: evalLength(found.value) };
 };
 
 test("the corner cluster is uniformly spaced, by construction", () => {
   // Every neighbour pair must be exactly --fab-gap apart. This is the property the owner asked for
-  // ("uniformly separated") and the one hand-computed offsets kept breaking.
-  assert.equal(SLOT2 - SIZE, GAP, "slot 2 does not sit one gap after a control");
+  // ("uniformly separated") and the one hand-computed offsets kept breaking. SLOT2 is the
+  // stylesheet's own calc() evaluated, so this compares the ladder against its primitives instead of
+  // comparing the test's arithmetic against itself.
+  near(SLOT2, SIZE + GAP,
+    `--fab-slot2 does not resolve to one control plus one gap (--fab-size ${SIZE}rem + --fab-gap ${GAP}rem)`);
   assert.ok(GAP >= 0.25, `gap ${GAP}rem is too tight to read as separate controls`);
   assert.ok(GUTTER >= 0.75, `gutter ${GUTTER}rem crowds the screen edge`);
 });
@@ -90,16 +214,32 @@ test("the derived offsets are what the stylesheet actually uses", () => {
     "a hard-coded rem offset is back in the cluster — derive it from --fab-size/--fab-gap instead");
 });
 
-const span = (extraOffset, w) => ({ near: GUTTER + extraOffset, far: GUTTER + extraOffset + w });
+// A control's horizontal extent, measured inward from the edge it is anchored to. Both director
+// fabs are right-anchored, so both are measured from the right edge and compared directly.
+const span = (offsetRem, w) => ({ near: offsetRem, far: offsetRem + w });
 
 test("the two DIRECTOR fabs (top-right ⌕ and ♪) never overlap", () => {
   const w = fabWidth();
-  const search = span(0, w);                                              // ⌕ flush to the corner
-  const songJump = span(offsetOf('[data-role="director"] .song-jump-fab'), w);
+  // Neither position is assumed any more. Both are read out of the stylesheet and resolved — which
+  // is the whole repair: the old version hard-coded ⌕ at the gutter and substituted its own
+  // SIZE + GAP for ♪'s offset, so rewriting --fab-slot2's calc() to `var(--fab-size) - 2rem` moved ♪
+  // 2.00rem on top of ⌕ on a real iPad while this test went on computing a comfortable 0.50rem.
+  const searchAt = edgeOffset(".search-fab");
+  const songAt = edgeOffset('html[data-role="director"] .song-jump-fab');
+  assert.equal(searchAt.edge, "right", "⌕ is no longer right-anchored — this comparison assumes one edge");
+  assert.equal(songAt.edge, "right", "the director's ♪ is no longer right-anchored");
+
+  const search = span(searchAt.rem, w);
+  const songJump = span(songAt.rem, w);
   const gap = songJump.near - search.far;
-  assert.ok(gap >= 0, `⌕ and ♪ overlap by ${(-gap).toFixed(2)}rem`);
+  assert.ok(gap >= 0,
+    `⌕ and ♪ overlap by ${(-gap).toFixed(2)}rem — ⌕ spans ${search.near.toFixed(2)}–${search.far.toFixed(2)}rem ` +
+    `from the right edge and ♪ starts at ${songJump.near.toFixed(2)}rem`);
   // A zero gap is touching, not overlapping — still wrong for a thumb on a moving iPad.
   assert.ok(gap >= 0.25, `⌕ and ♪ are only ${gap.toFixed(2)}rem apart — too tight to tap reliably`);
+  // And the separation must be the ladder's gap, not merely "some clearance". A slot that drifts
+  // wider is the same bug as one that drifts narrower: the row stops reading as evenly spaced.
+  near(gap, GAP, "⌕ and ♪ are not exactly one --fab-gap apart");
 });
 
 test("the follower row is exactly two controls — ⟳ and Ir a Canto", () => {
@@ -143,10 +283,10 @@ test("the director keeps the pill flush left, where ⟳ is hidden", () => {
 // button, upper left of the resync button." So the dot now overlaps ⟳ on purpose — it is a badge on
 // that button meaning "this button's link is alive", not a separate indicator.
 //
-// The overlap test above still passes, because offsetOf() takes the MAX offset across matching
-// rules and the is-nobody PILL still carries its 5.15rem shift. That is correct but silent: without
-// the assertions below, someone could delete the dot's placement entirely and every test would stay
-// green. Pin the intent, not just the absence of a collision.
+// The overlap test above says nothing about the dot: it measures the two right-anchored DIRECTOR
+// fabs, and the dot is a left-anchored follower badge. Correct, but silent — without the assertions
+// below, someone could delete the dot's placement entirely and every test would stay green. Pin the
+// intent, not just the absence of a collision.
 test("the follower dot is a badge ON the ⟳ fab, not a control beside it", () => {
   const rule = CSS.slice(CSS.indexOf('html[data-role="follower"] .director-mode-badge.is-following'));
   const body = rule.slice(0, rule.indexOf("}"));

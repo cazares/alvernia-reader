@@ -398,8 +398,66 @@ test("legacy two-field BLE advertisements are rejected", () => {
 });
 
 test("BLE renders standalone again, now that no stale beacon can exist", () => {
+  // BLE is the ONLY path that can put the right page on the glass before the mesh finishes its
+  // ~10s handshake, so it must be able to render having heard nothing from the mesh at all. A gate
+  // on mesh-derived state — lastKnownTotalPages, lastKnownPage, a connected peer — reads as a
+  // harmless sanity check and is in fact a kill switch: lastKnownTotalPages defaults to 0, so the
+  // fallback is dead in exactly the case it exists for, and dead SILENTLY.
+  //
+  // WHAT THE OLD ASSERTION MISSED. It was a whole-file grep for the declaration
+  // `private var lastKnownBookId = "standard"` — a property on line 301, nowhere near the apply
+  // path, with a failure message about a render gate it never looked at. Re-adding a
+  // `guard self.lastKnownTotalPages != 0 else { return }` immediately above the monotonic guard
+  // left it green. What is pinned now is the apply closure itself: every mention of mesh state
+  // inside it must be a VALUE handed to emitPage, never a condition, and the closure must have
+  // exactly the three early returns it is allowed to have.
   const swift = fs.readFileSync(
     path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
+
+  // Both endpoints asserted, and both are executable statements rather than comment banners: a
+  // slice whose end marker has been deleted runs to EOF and turns the "window" into the whole file.
+  const start = swift.indexOf("self.bleBeacon.onPage = {");
+  assert.ok(start > 0, "the BLE apply closure is gone — re-derive this test");
+  const end = swift.indexOf("self.bleBeacon.stopPublishing()", start + 1);
+  assert.ok(end > start, "the statement that bounds the closure is gone — re-derive this test");
+  // Comments describe intent; only code can drop a page. Strip them so a tombstone explaining a
+  // removed gate cannot satisfy — or trip — the checks below.
+  const applyPath = swift.slice(start, end).replace(/\/\/[^\n]*/g, "");
+
+  // The slice really is the apply path, not an empty or drifted window.
+  assert.match(applyPath, /self\.emitPage\([\s\S]*?src: "ble"\)/,
+    "the BLE apply path no longer renders a page at all");
+  assert.match(applyPath, /guard seq > self\.bleAppliedSeq/,
+    "the within-session monotonic guard is missing — this window is not the apply path");
+
+  // THE INVARIANT. Mesh-derived state may be READ here (emitPage carries totalPages/mode/bookId
+  // through), but it may never decide whether the page is rendered.
+  const MESH_STATE =
+    /lastKnownTotalPages|lastKnownPage\b|currentPageNumber|connectedDirectorPeer|mcSessions|discoveredDirectors|meshAppliedSeq/;
+  const meshLines = applyPath.split("\n").filter((l) => MESH_STATE.test(l));
+  assert.ok(meshLines.length > 0,
+    "no mesh state is carried into emitPage any more — this test's premise changed, re-read it");
+  for (const line of meshLines) {
+    assert.doesNotMatch(line, /\b(guard|if|while|else)\b/,
+      `BLE is gated on mesh state: ${line.trim()} — lastKnownTotalPages is 0 until the mesh ` +
+        "delivers, so this disables the fallback exactly when the mesh is broken");
+    assert.doesNotMatch(line, /\breturn\b/,
+      `the BLE apply path returns on mesh state: ${line.trim()}`);
+  }
+
+  // And no NEW early return of any shape, whatever it is spelled with. Exactly three are allowed:
+  //   1. not a follower (or self deallocated)
+  //   2. no book id at all — the one unrecoverable render
+  //   3. the within-session monotonic seq guard
+  // Anything else is a follower deciding not to obey a page it has already heard.
+  const returns = (applyPath.match(/\breturn\b/g) || []).length;
+  assert.equal(returns, 3,
+    `the BLE apply path has ${returns} early returns; exactly 3 are sanctioned (non-follower, ` +
+      "unknown book, stale seq). A fourth is a new precondition on rendering — say why in the " +
+      "prose above before changing this number");
+
+  // The book id is the one piece of state BLE does depend on, and it is why the guard above is
+  // unreachable rather than a gate: it is seeded at declaration, not by the first mesh packet.
   assert.match(swift, /private var lastKnownBookId = "standard"/,
-    "BLE must not wait on a mesh page — that gate disabled the fallback exactly when the mesh broke");
+    "lastKnownBookId no longer defaults, so the ble:skip-no-book guard becomes a real mesh gate");
 });

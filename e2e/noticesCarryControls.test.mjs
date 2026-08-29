@@ -14,17 +14,140 @@ const APP = fs.readFileSync("web/src/app.js", "utf8");
 // The lesson is not "keep the text in sync". It is that a notice describing where a control lives is
 // a promise about the layout, and this layout moves. Notices carry the control instead.
 
-// Toast strings only — the surrounding comments deliberately quote the old wording.
-const toastTexts = () => [...NATIVE.matchAll(/type:\s*"toast",\s*\n\s*text:\s*"([^"]+)"/g)].map((m) => m[1]);
+// WHAT THE OLD ASSERTION MISSED. It matched one shape — `type: "toast",\n text: "…"` — and there are
+// six toast sites in four shapes. It saw three. The three it could not see are the ones that matter:
+// two of them are `text: noticeText`, and the sentence lives in a const one line above, which is
+// exactly where the freshness nudge's copy is written. Putting the old directional sentence back
+// into that const left the file GREEN. A scanner that silently skips half its inputs is worse than
+// no scanner, because it reports a clean sweep it never made. So the extractor now resolves every
+// shape the source uses — literal, template, same-line ternary, and an identifier followed back to
+// its declaration — and the count of resolved texts must equal the count of toast sites, so a new
+// shape fails loudly instead of being skipped.
+
+// ── Reading the source at STRUCTURE level ───────────────────────────────────────────────────────
+// Strings, templates and comments are skipped whole, so a brace or comma inside prose (this file's
+// subject matter is prose) can never be mistaken for syntax. Nothing here re-implements the app;
+// it only decides which characters are code.
+const skipLiteral = (src, i) => {
+  const quote = src[i];
+  for (let j = i + 1; j < src.length; j++) {
+    if (src[j] === "\\") { j++; continue; }
+    if (src[j] === quote) return j + 1;
+  }
+  throw new Error(`unterminated ${quote} literal at offset ${i}`);
+};
+
+// Blank out every literal, comment and nested bracket group, preserving offsets, so an indexOf on
+// the result can only match structure belonging to THIS level. Used instead of a character-count
+// window: a window has to guess how far to look, and guesses wrong every time a comment is added.
+const skeleton = (body) => {
+  const out = body.split("");
+  const blank = (from, to) => { for (let k = from; k < to && k < out.length; k++) out[k] = out[k] === "\n" ? "\n" : " "; };
+  let depth = 0;
+  for (let j = 0; j < body.length; ) {
+    const c = body[j];
+    if (c === '"' || c === "'" || c === "`") { const e = skipLiteral(body, j); blank(j, e); j = e; continue; }
+    if (c === "/" && body[j + 1] === "/") { const nl = body.indexOf("\n", j); const e = nl < 0 ? body.length : nl; blank(j, e); j = e; continue; }
+    if (c === "/" && body[j + 1] === "*") { const e = body.indexOf("*/", j); if (e < 0) throw new Error("unterminated comment"); blank(j, e + 2); j = e + 2; continue; }
+    if (c === "{" || c === "(" || c === "[") { if (depth > 0) out[j] = " "; depth++; j++; continue; }
+    if (c === "}" || c === ")" || c === "]") { depth--; if (depth > 0) out[j] = " "; j++; continue; }
+    if (depth > 0) out[j] = " ";
+    j++;
+  }
+  return out.join("");
+};
+
+// From a position inside an object literal to the `}` that closes it. Structural endpoint, not a
+// count of characters, and it throws rather than running to EOF if the brace is missing.
+const objectBody = (src, from) => {
+  let depth = 0;
+  for (let j = from; j < src.length; ) {
+    const c = src[j];
+    if (c === '"' || c === "'" || c === "`") { j = skipLiteral(src, j); continue; }
+    if (c === "/" && src[j + 1] === "/") { const nl = src.indexOf("\n", j); j = nl < 0 ? src.length : nl; continue; }
+    if (c === "/" && src[j + 1] === "*") { const e = src.indexOf("*/", j); if (e < 0) throw new Error("unterminated comment"); j = e + 2; continue; }
+    if (c === "{" || c === "(" || c === "[") { depth++; j++; continue; }
+    if (c === "}" && depth === 0) return src.slice(from, j);
+    if (c === "}" || c === ")" || c === "]") { depth--; j++; continue; }
+    j++;
+  }
+  throw new Error(`object starting at ${from} is never closed`);
+};
+
+// Every string a fragment of source can produce: quoted literals, and the static halves of a
+// template with its ${…} holes removed (a hole cannot contain a directional word without one of
+// the words also appearing in some string, and we would rather under-claim than invent text).
+const literalsIn = (code) => {
+  const found = [];
+  for (let j = 0; j < code.length; ) {
+    const c = code[j];
+    if (c === '"' || c === "'" || c === "`") {
+      const e = skipLiteral(code, j);
+      found.push(code.slice(j + 1, e - 1).replace(/\$\{[^}]*\}/g, " "));
+      j = e;
+      continue;
+    }
+    if (c === "/" && code[j + 1] === "/") { const nl = code.indexOf("\n", j); j = nl < 0 ? code.length : nl; continue; }
+    if (c === "/" && code[j + 1] === "*") { const e = code.indexOf("*/", j); j = e < 0 ? code.length : e + 2; continue; }
+    j++;
+  }
+  return found;
+};
+
+const lineOf = (src, index) => src.slice(0, index).split("\n").length;
+
+// One entry per `type: "toast"` in the source, with `text` resolved or left null. Null is the
+// interesting case: it means a notice shipped in a shape nothing reads.
+const toastSites = (src) => {
+  const sites = [];
+  for (const m of src.matchAll(/type:\s*"toast"/g)) {
+    const site = { line: lineOf(src, m.index), text: null, how: "unresolved" };
+    sites.push(site);
+    const body = objectBody(src, m.index);
+    const skel = skeleton(body);
+    const key = skel.search(/(^|[\s,{])text\s*:/);
+    if (key < 0) continue;                              // a toast with no text at all
+    const colon = skel.indexOf(":", key);
+    const comma = skel.indexOf(",", colon);
+    const expr = body.slice(colon + 1, comma < 0 ? body.length : comma);
+    let strings = literalsIn(expr);
+    let how = "inline";
+    if (!strings.length) {
+      // `text: someIdent` — follow it back to the declaration it was assigned in. This is the shape
+      // the old matcher could not see, and the one the mutation used.
+      const ident = expr.trim();
+      if (!/^[A-Za-z_$][\w$]*$/.test(ident)) continue;
+      const decl = new RegExp(`(?:const|let|var)\\s+${ident}\\s*=`, "g");
+      let declIdx = -1;
+      for (const d of src.matchAll(decl)) { if (d.index < m.index) declIdx = d.index; }
+      if (declIdx < 0) continue;
+      const tail = src.slice(declIdx);
+      const end = skeleton(tail).indexOf(";");
+      if (end < 0) continue;
+      strings = literalsIn(tail.slice(0, end));
+      how = `${ident} declared at line ${lineOf(src, declIdx)}`;
+    }
+    if (!strings.length) continue;
+    site.text = strings.join(" | ");
+    site.how = how;
+  }
+  return sites;
+};
 
 test("no notice tells anyone where a control is", () => {
-  const texts = toastTexts();
-  assert.ok(texts.length >= 2, `found ${texts.length} toast strings — the matcher drifted`);
+  const sites = toastSites(NATIVE);
+  // A floor, so the notices cannot be deleted into a vacuously clean sweep, and an exact
+  // resolved-vs-declared equality, so a seventh toast written in a new shape reddens this instead
+  // of being quietly ignored the way three of the six were for weeks.
+  assert.ok(sites.length >= 6, `only ${sites.length} toast sites — the notices moved; re-read this test`);
+  const unread = sites.filter((s) => s.text === null).map((s) => `line ${s.line}`);
+  assert.deepEqual(unread, [],
+    `the scanner cannot read the text of ${unread.join(", ")} — an unread notice is an unchecked one, so teach the extractor that shape before shipping it`);
   // Directional words are the tell. Any of them means the sentence is describing the layout.
   const DIRECTIONAL = /\b(arriba|abajo|izquierda|derecha|esquina|superior|inferior)\b/i;
-  for (const t of texts) {
-    assert.doesNotMatch(t, DIRECTIONAL,
-      `a notice describes a position: "${t}" — carry the control instead, or it rots when the layout moves`);
+  for (const s of sites) {
+    assert.doesNotMatch(s.text, DIRECTIONAL,
+      `the notice at line ${s.line} (${s.how}) describes a position: "${s.text}" — carry the control instead, or it rots when the layout moves`);
   }
 });
 

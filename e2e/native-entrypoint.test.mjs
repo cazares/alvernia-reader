@@ -41,9 +41,50 @@ test("native app is a react-native-webview shell — no native FlatList reader",
 // director forever" refactor dismantled (the asserted alert strings are gone from
 // PdfReaderApp.tsx). Dead-behavior tests — restore from git history if takeover returns.
 
-test("song index resolves correctly — song 55 → page 55, out-of-range clamps", () => {
-  const source = fs.readFileSync(path.join(APP_ROOT, "src", "alverniaManual2SongIndex.js"), "utf8");
-  assert.match(source, /\[55,\s*55\]/);
+test("song index resolves correctly — song 55 → page 55, out-of-range clamps", async () => {
+  // What the old assertion missed: its whole body was `assert.match(source, /\[55, 55\]/)` against
+  // src/alverniaManual2SongIndex.js — a forty-line file holding a literal and an Object.freeze, with
+  // no resolver and no clamp anywhere in it. It never opened the file where clamping actually lives,
+  // so deleting the upper bound from clampPage (web/src/app.js) left this green. It also passed on a
+  // commented-out pair. This version resolves the song through the REAL frozen index and then runs
+  // the REAL clampPage as code, so a missing bound changes a returned NUMBER, not a line of text.
+  const { ALVERNIA_MANUAL_2_SONG_INDEX } = await import("../src/alverniaManual2SongIndex.js");
+  const songToPage = new Map(ALVERNIA_MANUAL_2_SONG_INDEX.map(({ song, page }) => [song, page]));
+  assert.equal(songToPage.get(55), 55, "song 55 no longer resolves to page 55");
+  assert.equal(songToPage.get(347), 346, "the one deliberately irregular pair [347, 346] moved");
+  assert.equal(songToPage.get(83), undefined, "song 83 is a gap in the book — it must not resolve");
+
+  // Lift clampPage out of web/src/app.js by its declaration and run it. Both endpoints are
+  // structural (the declaration itself, and the NEXT declaration) and both are asserted found, so a
+  // rename or a deletion fails here instead of silently widening the window to the end of the file.
+  const app = fs.readFileSync(path.join(APP_ROOT, "web", "src", "app.js"), "utf8");
+  const start = app.indexOf("const clampPage = (pageNumber) => {");
+  assert.ok(start > 0, "clampPage is gone from web/src/app.js — nothing bounds a page number now");
+  const end = app.indexOf("const clampSongIndex", start);
+  assert.ok(end > start, "clampPage's slice has no closing marker — refusing to read to EOF");
+  const makeClamp = new Function("state", `${app.slice(start, end)}\nreturn clampPage;`);
+
+  // A 373-page book, the reader parked on page 7.
+  const clampPage = makeClamp({ totalPages: 373, currentPage: 7 });
+  assert.equal(clampPage(songToPage.get(55)), 55, "an in-range page must pass through untouched");
+  assert.equal(clampPage(373), 373, "the last page of the book must not be clamped away");
+
+  // THE UPPER BOUND. Without it, a page past the end reaches pageFileName → page-999.webp → 404,
+  // and the render sticks — the failure clampPage's own comment says it exists to prevent. This is
+  // the assertion that goes red when `Math.min(n, total)` is dropped.
+  assert.equal(clampPage(374), 373, "a page one past the end escaped the clamp");
+  assert.equal(clampPage(999), 373, "a page far past the end escaped the clamp — page-999.webp 404s");
+
+  // The lower bound and the coercions, which the same function owns.
+  assert.equal(clampPage(0), 1, "page 0 escaped the lower clamp");
+  assert.equal(clampPage(-5), 1, "a negative page escaped the lower clamp");
+  assert.equal(clampPage(2.7), 2, "a float reached pageFileName — page-2.7.webp would 404");
+  assert.equal(clampPage(NaN), 7, "NaN must fall back to the current page, not page-NaN.webp");
+
+  // Before pages.json lands, totalPages is unknown and the book is treated as one page long. A
+  // director's snapshot arriving in that window must not be believed either.
+  const clampBeforeManifest = makeClamp({ totalPages: 0, currentPage: 1 });
+  assert.equal(clampBeforeManifest(99), 1, "a page was trusted before totalPages was known");
 });
 
 test("app build number bumps with releases (version.json is the source of truth)", () => {

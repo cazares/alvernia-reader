@@ -191,6 +191,37 @@ test("a never-saved sink resolves to the default, not the string \"null\"", () =
     "String(saved) is back — on the null branch that produces the literal text \"null\"");
 });
 
+/**
+ * Index of the `)` that closes the `(` at openIdx, or -1 if they never balance. Lets an assertion
+ * lift a whole `if (...)` condition out of the source by STRUCTURE — surviving reformatting and an
+ * added clause — instead of quoting today's text or slicing a fixed number of characters.
+ */
+const matchParen = (src, openIdx) => {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i += 1) {
+    if (src[i] === "(") depth += 1;
+    else if (src[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+};
+
+/**
+ * becomeDirector's body, bounded by DECLARATIONS on both ends — the next `const … = useCallback`
+ * after it. Both endpoints are asserted, because a slice whose end marker has been renamed returns
+ * -1 and quietly becomes the whole rest of the file, at which point every `indexOf` ordering check
+ * in here starts measuring some other function.
+ */
+const becomeDirectorBody = () => {
+  const start = NATIVE.indexOf("const becomeDirector = useCallback");
+  assert.ok(start > 0, "becomeDirector is gone");
+  const end = NATIVE.indexOf("const performSoftReset = useCallback", start);
+  assert.ok(end > start, "becomeDirector is no longer followed by performSoftReset — re-anchor this slice");
+  return NATIVE.slice(start, end);
+};
+
 test("the director's first broadcast uses the WEB's true page, not a lagging native mirror", () => {
   // THE RACE THIS CLOSES, confirmed on hardware 2026-08-18 across two separate test runs, each
   // showing a DIFFERENT wrong page (song 2, then page 1) before self-correcting to the director's
@@ -226,8 +257,10 @@ test("the director's first broadcast uses the WEB's true page, not a lagging nat
   // 4. becomeDirector corrects the mirror BEFORE anything downstream can read it — every broadcast
   //    path (no-mesh transmitter, mesh, both heartbeats) reads currentPageRef.current rather than
   //    asking the web again, so the fix has to land here, once, ahead of the first read.
-  const fn = NATIVE.slice(NATIVE.indexOf("const becomeDirector = useCallback"));
-  const body = fn.slice(0, fn.indexOf("const becomeFollower"));
+  //    (The old bound here was `const becomeFollower`, which is declared ABOVE becomeDirector and so
+  //     never appears again — indexOf returned -1 and the "body" was the whole rest of the file
+  //     minus one character. Bounded on the next declaration now, with both ends asserted.)
+  const body = becomeDirectorBody();
   const fixIdx = body.indexOf("currentPageRef.current = knownCurrentPage");
   assert.ok(fixIdx > 0, "becomeDirector no longer corrects the mirror from the known page");
   const firstBroadcastIdx = body.indexOf("broadcastPage(currentPageRef.current");
@@ -236,13 +269,48 @@ test("the director's first broadcast uses the WEB's true page, not a lagging nat
 });
 
 test("a stale mirror is only ever a fallback, never silently trusted over a fresh value", () => {
-  // Model of the fix, executed rather than grepped: with a known-fresh page supplied, the stale
-  // mirror must never win. Without one (an older web bundle, or no bridge payload), the mirror is
-  // still the correct fallback — this must not regress into REQUIRING a fresh value to broadcast at
-  // all, which would break becomeDirector for any caller that cannot supply one.
-  const applyKnownPage = (mirror, known) => (typeof known === "number" && known > 0 ? known : mirror);
-  assert.equal(applyKnownPage(2, 372), 372, "a fresh known page did not override the stale mirror");
-  assert.equal(applyKnownPage(2, undefined), 2, "no known page — the mirror fallback broke");
-  assert.equal(applyKnownPage(2, 0), 2, "a page of 0 was trusted — that is not a real page");
-  assert.equal(applyKnownPage(2, -5), 2, "a negative page was trusted");
+  // With a known-fresh page supplied, the stale mirror must never win. Without one (an older web
+  // bundle, or no bridge payload), the mirror is still the correct fallback — this must not regress
+  // into REQUIRING a fresh value to broadcast at all, which would break becomeDirector for any
+  // caller that cannot supply one.
+  //
+  // WHAT THE OLD ASSERTION MISSED. It called `applyKnownPage`, a four-line model of the guard
+  // written in this file, and imported nothing. The truth table it checked was the truth table of
+  // the TEST, so inverting the real guard in becomeDirector to `knownCurrentPage < 0` — which ships
+  // the lagging mirror on the director's very first broadcast, the whole outage — left all four
+  // assertions green. The predicate is now LIFTED OUT OF PdfReaderApp.tsx and executed: the same
+  // table, run against the operator the app actually ships.
+  const body = becomeDirectorBody();
+  const assignIdx = body.indexOf("currentPageRef.current = knownCurrentPage");
+  assert.ok(assignIdx > 0, "becomeDirector no longer corrects the mirror from the known page at all");
+  const ifIdx = body.lastIndexOf("if (", assignIdx);
+  assert.ok(ifIdx >= 0, "the mirror correction is not guarded — a bogus page would be broadcast as-is");
+  const openIdx = body.indexOf("(", ifIdx);
+  const closeIdx = matchParen(body, openIdx);
+  assert.ok(closeIdx > openIdx, "the freshness guard's condition never closes its parentheses");
+  assert.ok(closeIdx < assignIdx, "the correction sits outside the guard that is supposed to gate it");
+
+  const cond = body.slice(openIdx + 1, closeIdx);
+  let accepts;
+  try {
+    accepts = new Function("knownCurrentPage", `return !!(${cond});`);
+  } catch {
+    assert.fail(`the freshness guard is no longer a plain test of knownCurrentPage: ${cond}`);
+  }
+
+  // true  = the fresh value wins.  false = fall back to the native mirror.
+  assert.equal(accepts(372), true, "a fresh known page did not override the stale mirror — the lagging page ships");
+  assert.equal(accepts(1), true, "page 1 is a real page (the cover) and must be able to override the mirror");
+  assert.equal(accepts(undefined), false, "no known page — the mirror fallback broke");
+  assert.equal(accepts(0), false, "a page of 0 was trusted — that is not a real page");
+  assert.equal(accepts(-5), false, "a negative page was trusted");
+  assert.equal(accepts(NaN), false, "NaN was trusted as a page");
+  assert.equal(accepts("372"), false, "a string off the bridge payload was trusted without a type check");
+
+  // And the guard must only ever ASSIGN the fresh page — never clear or rewrite the mirror on the
+  // fallback path, which is the branch every pre-fix caller still takes.
+  const guarded = body.slice(closeIdx, body.indexOf("\n", assignIdx));
+  assert.match(guarded, /currentPageRef\.current = knownCurrentPage/, "the guarded branch no longer sets the mirror");
+  assert.doesNotMatch(body.slice(closeIdx, assignIdx), /else/,
+    "an else branch now runs when no fresh page was supplied — the mirror fallback must be a no-op");
 });
