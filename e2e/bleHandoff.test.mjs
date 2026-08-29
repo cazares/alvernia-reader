@@ -99,8 +99,12 @@ test("the safety rules that made BLE dangerous in 444 are still in place", () =>
   assert.match(handler, /guard seq > self\.bleAppliedSeq/,
     "the within-session monotonic guard is gone — a stale packet can drag a follower backwards");
   // Legacy 2-field advertisements must stay rejected: pre-448 devices never stop advertising.
-  assert.match(BEACON, /guard parts\.count == 3/,
-    "legacy 2-field beacons are accepted again — those devices broadcast a frozen page forever");
+  // Since the HMAC tag (#374) the only accepted shape is the 4-field "SV<nonce>.<seq>.<page>.<tag>";
+  // the pre-tag 3-field form is rejected too (a 448-455 device can't prove it knows the session code).
+  assert.match(BEACON, /guard parts\.count == 4/,
+    "legacy beacons are accepted again — those devices broadcast a frozen page forever");
+  assert.doesNotMatch(BEACON, /parts\.count == 2\b/, "the 2-field legacy format must not be parsed");
+  assert.doesNotMatch(BEACON, /parts\.count == 3\b/, "the 3-field pre-tag format must not be parsed");
   // And a device that stops directing must stop advertising.
   assert.match(MODULE, /bleBeacon\.stopPublishing\(\)/, "the beacon is never switched off");
 });
