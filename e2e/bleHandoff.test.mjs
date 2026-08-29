@@ -6,7 +6,11 @@ const BEACON = fs.readFileSync("ios/SignoVivo/BlePageBeacon.swift", "utf8");
 const MODULE = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
 
 // A missing marker must FAIL, not silently produce a slice from -1 that happens to contain the
-// string being looked for. Every bounded read in this file goes through here.
+// string being looked for. EVERY two-marker read in this file goes through here — the helper was
+// added for the one site that had already burned us and left the other eight raw, which is how the
+// same slice-to-EOF failure survived one test below it. (Single-marker reads are open-ended by
+// design and cannot mis-bound; they still assert their start exists via indexOf returning >= 0
+// wherever a match is required.)
 const slice = (from, to, src = BEACON) => {
   const a = src.indexOf(from);
   const b = src.indexOf(to, a + 1);
@@ -92,7 +96,7 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
 
   assert.match(MODULE, /private var bleAppliedNonce = ""/, "the module tracks no advertising session");
   assert.match(MODULE, /onPage = \{ \[weak self\] page, seq, nonce in/, "the module ignores the nonce again");
-  const handler = MODULE.slice(MODULE.indexOf("self.bleBeacon.onPage = {"), MODULE.indexOf("A FOLLOWER MUST NEVER ADVERTISE"));
+  const handler = slice("self.bleBeacon.onPage = {", "A FOLLOWER MUST NEVER ADVERTISE", MODULE);
   assert.match(handler, /if nonce != self\.bleAppliedNonce \{[\s\S]*?self\.bleAppliedSeq = -1/,
     "the module does not reset its seq on a new advertiser — the exact half-landing this fixes");
   // Order matters: rebase must happen BEFORE the monotonic guard, or it changes nothing.
@@ -103,7 +107,7 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
 test("the safety rules that made BLE dangerous in 444 are still in place", () => {
   // BLE renders without a handshake, so it has no freshness guarantee of its own. Two rules keep it
   // safe, and a rebase must not quietly remove either.
-  const handler = MODULE.slice(MODULE.indexOf("self.bleBeacon.onPage = {"), MODULE.indexOf("A FOLLOWER MUST NEVER ADVERTISE"));
+  const handler = slice("self.bleBeacon.onPage = {", "A FOLLOWER MUST NEVER ADVERTISE", MODULE);
   assert.match(handler, /guard !self\.lastKnownBookId\.isEmpty/,
     "BLE can render a page number with no known book — the one unrecoverable failure in this app");
   assert.match(handler, /guard seq > self\.bleAppliedSeq/,
@@ -210,9 +214,9 @@ test("a follower scans continuously — BLE is never switched off by connecting"
   // real invariant is narrower and is what is pinned now: nothing on a CONNECTION path stops the
   // scan, and any path that leaves the device following re-arms it.
   const connectionPaths = [
-    MODULE.slice(MODULE.indexOf("case .connected:"), MODULE.indexOf("case .connecting:")),
-    MODULE.slice(MODULE.indexOf("private func reconsiderFollowerTarget"), MODULE.indexOf("private func handleDirectorConflict")),
-    MODULE.slice(MODULE.indexOf("private func forceFollowerReconnect"), MODULE.indexOf("private func sendFollowerHelloIfNeeded")),
+    slice("case .connected:", "case .connecting:", MODULE),
+    slice("private func reconsiderFollowerTarget", "private func handleDirectorConflict", MODULE),
+    slice("private func forceFollowerReconnect", "private func sendFollowerHelloIfNeeded", MODULE),
     MODULE.slice(
       MODULE.indexOf("didReceiveInvitationFromPeer peerID"),
       MODULE.indexOf("func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer"),
@@ -227,7 +231,7 @@ test("a follower scans continuously — BLE is never switched off by connecting"
   // runs — and which is immediately followed by beginFollowing() re-arming the scan for a follower.
   const stops = MODULE.match(/bleBeacon\.stopScanning\(\)/g) || [];
   assert.equal(stops.length, 1, "stopScanning is called from somewhere other than resetTransport");
-  const reset = MODULE.slice(MODULE.indexOf("private func resetTransport"), MODULE.indexOf("// MARK: - Event emission"));
+  const reset = slice("private func resetTransport", "// MARK: - Event emission", MODULE);
   assert.match(reset, /bleBeacon\.stopScanning\(\)/, "the one stop is not the transport teardown");
 });
 
@@ -237,7 +241,7 @@ test("every path that ends as a follower re-arms the BLE scan and the watchdog",
   // BLE health timer and never started the follower watchdog — so handing over control produced a
   // follower with no BLE and no automatic recovery of any kind. It only looked fine because nothing
   // stopped the scan left running from that device's previous follower stint.
-  const follow = MODULE.slice(MODULE.indexOf("private func beginFollowing"), MODULE.indexOf("@objc(stop:rejecter:)"));
+  const follow = slice("private func beginFollowing", "@objc(stop:rejecter:)", MODULE);
   for (const required of [
     "bleBeacon.sessionCode = normalizedSessionCode",
     "bleBeacon.startScanning()",
@@ -372,7 +376,7 @@ test("the BLE scan baseline is never reset on a role change", () => {
   // the cure needs does not exist. The mesh stays authoritative; the gap stays open on purpose.
   assert.ok(!/func resetScanBaseline\s*\(/.test(BEACON), "resetScanBaseline is back — it re-arms the 444 ghost window");
   assert.doesNotMatch(BEACON, /redeliverCurrentPage/, "the one-shot re-delivery is back — a frozen ghost matches it exactly");
-  const reset = MODULE.slice(MODULE.indexOf("private func resetTransport"), MODULE.indexOf("// MARK: - Event emission"));
+  const reset = slice("private func resetTransport", "// MARK: - Event emission", MODULE);
   assert.doesNotMatch(reset, /bleAppliedSeq = -1/,
     "resetTransport drops the module's BLE seq floor — the first packet after a role change will be applied whatever its age");
 });
@@ -383,9 +387,9 @@ test("a director does not scan — and cannot be made to by a radio restart", ()
   // packet-rate scan on the director for the rest of the Mass, which is the whole drain that
   // stopping the scan exists to prevent.
   assert.match(BEACON, /private var wantsScanning = false/, "there is no record of scan INTENT");
-  const ready = BEACON.slice(BEACON.indexOf("private func scanIfReady"), BEACON.indexOf("func resumeOnForeground"));
+  const ready = slice("private func scanIfReady", "func resumeOnForeground");
   assert.match(ready, /guard wantsScanning/, "scanIfReady scans regardless of whether we want to");
-  const ensure = BEACON.slice(BEACON.indexOf("func ensureScanning"), BEACON.indexOf("private func startAdvertisingIfReady"));
+  const ensure = slice("func ensureScanning", "private func startAdvertisingIfReady");
   assert.match(ensure, /guard wantsScanning/, "the 1 Hz self-heal re-arms a deliberately stopped scan");
   // Bounded by a marker that is ASSERTED to exist. This used to end at a doc-comment that the
   // resetScanBaseline revert deleted, so indexOf returned -1, the slice ran to end-of-file, and the

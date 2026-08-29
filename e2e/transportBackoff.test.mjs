@@ -21,8 +21,35 @@ import test from "node:test";
 
 const MODULE = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
 
-// The delay ladder exactly as the module computes it.
-const delayFor = (count) => (count <= 5 ? Math.min(3 * Math.pow(2, count - 1), 30) : 45);
+// THE LADDER IS READ OUT OF THE SWIFT, NOT RESTATED HERE.
+//
+// This was a hand-copied JS constant fed only into the test's own model, so the entire M-F7 retry
+// could have been deleted from DirectorSyncModule and every test in the repo would still have been
+// green — a model of a ladder that no longer exists, proving a property of itself. The whole point
+// of replaying the arithmetic instead of grepping for it is that "the ladder reaches its last-resort
+// tier" is a claim about the shipped code.
+const ladder = () => {
+  const m = MODULE.match(
+    /advertiserFailureCount <= (\d+)\s*\?\s*min\(([\d.]+) \* pow\(([\d.]+), Double\(self\.advertiserFailureCount - 1\)\), ([\d.]+)\)\s*:\s*([\d.]+)/,
+  );
+  assert.ok(m, "could not read the advertiser backoff ladder out of DirectorSyncModule.swift");
+  const [, fastCount, base, factor, cap, lastResort] = m.map(Number);
+  return { fastCount, base, factor, cap, lastResort };
+};
+
+const L = ladder();
+const delayFor = (count) =>
+  count <= L.fastCount ? Math.min(L.base * Math.pow(L.factor, count - 1), L.cap) : L.lastResort;
+
+test("the ladder the model replays is the one the Swift actually computes", () => {
+  // Pins the shape too, so a change to the constants is a deliberate, visible edit rather than a
+  // silent drift the model would happily follow into nonsense.
+  assert.deepEqual(L, { fastCount: 5, base: 3, factor: 2, cap: 30, lastResort: 45 },
+    "the backoff constants changed — update the expectations here and confirm the intent");
+  // The browser must use the same ladder; the file's comment says "same as the advertiser".
+  assert.match(MODULE, /browserFailureCount <= 5\s*\?\s*min\(3\.0 \* pow\(2\.0, Double\(self\.browserFailureCount - 1\)\), 30\.0\)\s*:\s*45\.0/,
+    "the browser ladder has drifted from the advertiser's");
+});
 
 /**
  * Replay a transport that fails immediately on every attempt.

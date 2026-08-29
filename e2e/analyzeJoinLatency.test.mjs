@@ -194,3 +194,27 @@ test("presence is bracketed, so late joiners and early leavers are still not mis
   assert.match(src, /firstRowAt <= s\.t && lastRowAt > s\.t/,
     "presence is no longer bracketed — a late joiner or an early leaver will be called wedged again");
 });
+
+test("the bug-352 stall-then-recover shape is caught, not scored clean", () => {
+  // The REALISTIC version of the false green, and the one that matters: issue #352's iPhone tracks
+  // the first turns, stalls for ~112 s missing eight pages, then recovers and tracks the last ones.
+  // Judging on "has at least one sample" cleared it twice over — at the start and at the end — so
+  // the open bug the fleet is currently being captured to chase was reported ✅ exit 0.
+  const T = 1787060000000;
+  const rows = [{ t: T, dev: "mPad", role: "director", event: "become:director" }];
+  for (let i = 0; i < 12; i++) {
+    const at = T + i * 15000;
+    rows.push({ t: at, dev: "mPad", role: "director", event: "page:send", page: 10 + i });
+    rows.push({ t: at + 200, dev: "iPad1", role: "follower", event: "mesh:page-recv", page: 10 + i });
+    if ([0, 1, 10, 11].includes(i)) {
+      rows.push({ t: at + 250, dev: "iPhone", role: "follower", event: "mesh:page-recv", page: 10 + i });
+    } else {
+      // Present and logging throughout the stall — which is what makes these misses, not absence.
+      rows.push({ t: at + 250, dev: "iPhone", role: "follower", event: "mesh:state", status: "searching" });
+    }
+  }
+  const { code, stdout } = run(rows);
+  assert.match(stdout, /iPhone.*WEDGED — present for 8 turn\(s\) it never received/,
+    "an eight-page stall in the middle of the window is not reported");
+  assert.equal(code, 1, "the #352 stall shape still exits 0");
+});

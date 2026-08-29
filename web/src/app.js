@@ -1789,6 +1789,16 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, use
 
     state.currentPage = nextPage;
     state.lastRenderFailure = null; // this page renders again — stop pacing it
+    // A PAGE THAT RENDERS DESERVES A FRESH RE-HOME BUDGET. The heartbeat's bounded re-home spends an
+    // attempt per tick, but svShouldPaceRender swallows a retry for RENDER_RETRY_COOLDOWN_MS (5 s)
+    // while the heartbeat runs every 4 s — so on a page that just failed, two of the three attempts
+    // are discarded before they can render anything and the budget is gone in 12 s. The follower is
+    // then stranded off the director's page with a green pill and no further polls, because the
+    // reset branch is the negation of the condition that is still true. Tying the reset to a
+    // successful render rather than to being on the right page means the budget is spent on polls
+    // that could actually have worked.
+    relay.rehomeFor = null;
+    relay.rehomeTries = 0;
     syncBuildBadgeVisibility();
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);

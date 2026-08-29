@@ -172,10 +172,24 @@ test("the nudge never blocks, and NEITHER half fires while the mesh is busy", ()
   // the mesh-idle branch, so a device WITH peers connected re-toasted on every 4-minute check-in and
   // every foreground. The only device at Mass with both internet and peers is the director's iPad,
   // which meant the notice slid over the songbook every four minutes for the whole service.
-  const gateIdx = body.indexOf("meshPeerCountRef.current === 0");
-  const toastIdx = body.indexOf('type: "toast"');
-  assert.ok(toastIdx > gateIdx,
-    "the toast fires before/outside the mesh-idle gate — it will repeat every check-in during Mass");
+  // CONTAINMENT, NOT ORDERING. Comparing string offsets only proves the toast appears after the
+  // gate's condition — it catches the exact historical shape (the toast sat on the line ABOVE the
+  // `if`) and nothing else. Anything that reintroduces the toast AFTER the gate block reads as
+  // "later, therefore inside", and the four-minute-toast-during-Mass bug comes back green.
+  const gateStart = body.indexOf("if (meshPeerCountRef.current === 0) {");
+  assert.ok(gateStart > 0, "the mesh-idle gate is gone");
+  // Walk to the matching brace so the block is bounded by structure rather than by a marker.
+  let depth = 0, gateEnd = -1;
+  for (let i = body.indexOf("{", gateStart); i < body.length; i++) {
+    if (body[i] === "{") depth++;
+    else if (body[i] === "}") { depth--; if (depth === 0) { gateEnd = i; break; } }
+  }
+  assert.ok(gateEnd > gateStart, "could not find the end of the mesh-idle gate block");
+  const inGate = body.slice(gateStart, gateEnd);
+  const outsideGate = body.slice(0, gateStart) + body.slice(gateEnd);
+  assert.match(inGate, /type: "toast"/, "the toast is not inside the mesh-idle gate");
+  assert.doesNotMatch(outsideGate, /type: "toast"/,
+    "a toast fires outside the mesh-idle gate — it will repeat every check-in during Mass");
 });
 
 test("the nudge offers BOTH signovivo.com and TestFlight — never a dead end", () => {
