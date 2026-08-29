@@ -158,14 +158,38 @@ test("the confirmation flag fails toward NOT confirmed on any ambiguous input", 
   assert.match(body, /reported >= latest/, "the comparison direction is wrong or missing");
 });
 
-test("the nudge never blocks — it fires a toast unconditionally and a modal only when mesh is idle", () => {
+test("the nudge never blocks, and NEITHER half fires while the mesh is busy", () => {
   const idx = NATIVE.indexOf("NATIVE BUILD FRESHNESS NUDGE");
   assert.ok(idx > 0, "the native-build nudge block is missing");
-  const body = NATIVE.slice(idx, idx + 1800);
+  const body = NATIVE.slice(idx, NATIVE.indexOf("const staged = await readStored", idx));
   assert.match(body, /type: "toast"/, "no non-blocking toast — the only signal is the blocking modal");
   assert.match(body, /meshPeerCountRef\.current === 0/,
     "the modal is not gated on mesh being idle — it could interrupt an active Mass/rehearsal");
   assert.match(body, /didNativeBuildNudgeRef\.current = true/, "no one-shot guard for the modal");
+
+  // THE TOAST MUST BE INSIDE THE GATE TOO. This test used to assert the opposite in its own title
+  // ("fires a toast unconditionally"), and that is exactly the bug: the one-shot flag is set only in
+  // the mesh-idle branch, so a device WITH peers connected re-toasted on every 4-minute check-in and
+  // every foreground. The only device at Mass with both internet and peers is the director's iPad,
+  // which meant the notice slid over the songbook every four minutes for the whole service.
+  // CONTAINMENT, NOT ORDERING. Comparing string offsets only proves the toast appears after the
+  // gate's condition — it catches the exact historical shape (the toast sat on the line ABOVE the
+  // `if`) and nothing else. Anything that reintroduces the toast AFTER the gate block reads as
+  // "later, therefore inside", and the four-minute-toast-during-Mass bug comes back green.
+  const gateStart = body.indexOf("if (meshPeerCountRef.current === 0) {");
+  assert.ok(gateStart > 0, "the mesh-idle gate is gone");
+  // Walk to the matching brace so the block is bounded by structure rather than by a marker.
+  let depth = 0, gateEnd = -1;
+  for (let i = body.indexOf("{", gateStart); i < body.length; i++) {
+    if (body[i] === "{") depth++;
+    else if (body[i] === "}") { depth--; if (depth === 0) { gateEnd = i; break; } }
+  }
+  assert.ok(gateEnd > gateStart, "could not find the end of the mesh-idle gate block");
+  const inGate = body.slice(gateStart, gateEnd);
+  const outsideGate = body.slice(0, gateStart) + body.slice(gateEnd);
+  assert.match(inGate, /type: "toast"/, "the toast is not inside the mesh-idle gate");
+  assert.doesNotMatch(outsideGate, /type: "toast"/,
+    "a toast fires outside the mesh-idle gate — it will repeat every check-in during Mass");
 });
 
 test("the nudge offers BOTH signovivo.com and TestFlight — never a dead end", () => {
@@ -173,7 +197,9 @@ test("the nudge offers BOTH signovivo.com and TestFlight — never a dead end", 
   // just middle finger them." Both this nudge AND the pre-existing shell-too-old modal must offer
   // a path forward that works right now (the web) alongside the actual fix (updating the binary).
   const idx = NATIVE.indexOf("NATIVE BUILD FRESHNESS NUDGE");
-  const body = NATIVE.slice(idx, idx + 1800);
+  // Bounded by the next block rather than a character count, so adding a comment inside the nudge
+  // cannot silently slide its links out of the window and fail a test about behaviour that is intact.
+  const body = NATIVE.slice(idx, NATIVE.indexOf("const staged = await readStored", idx));
   assert.match(body, /SIGNOVIVO_URL/, "no signovivo.com link in the native-build nudge");
   assert.match(body, /TESTFLIGHT_APP_URL/, "no TestFlight link in the native-build nudge");
 

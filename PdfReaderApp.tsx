@@ -220,6 +220,9 @@ export default function App() {
   // CURRENT values without being re-created (re-creating it would restart the 90 s interval).
   const bookStageRef = useRef<string>("");
   const lastCheckinOkAtRef = useRef<number | null>(null);
+  /// When the relay last ANSWERED, ok or not. Distinct from lastCheckinOkAt, which is the
+  /// live-internet proof canApplyNow gates on and must stay tied to a successful response.
+  const lastCheckinRespondedAtRef = useRef<number | null>(null);
   const lastPageTurnAtRef = useRef<number | null>(null);
   const coldBootAtRef = useRef<number>(Date.now());
   const lastKnownRoleRef = useRef<string | null>(null);
@@ -228,6 +231,13 @@ export default function App() {
   // VETOES an apply — a guess would have been worse than nothing here.
   const meshPeerCountRef = useRef(0);
   const stagingInFlightRef = useRef(false);
+  /// Set when an authoritative disarm lands WHILE a download is running. A revoke that arrives
+  /// mid-flight has nothing to delete yet — the staged record does not exist until stageBook
+  /// finishes — so without this it was simply ignored and the device installed the withdrawn book
+  /// a minute later. Safe to treat a null pointer as authoritative here: the worker's throttle
+  /// exempts any device reporting bookStage "downloading…", so a downloading device is never
+  /// throttled to null.
+  const stagingDisarmedRef = useRef(false);
   const onCheckinResponseRef = useRef<((body: unknown) => void) | null>(null);
   // applyStagedBook is declared far BELOW the numpad dispatch that invokes it. Referencing it
   // directly would capture the first render's copy (it is not in that useCallback's deps) and
@@ -370,6 +380,10 @@ export default function App() {
   const dbgDeviceRef = useRef<string>("?");
   const dbgBufferRef = useRef<Array<Record<string, unknown>>>([]);
   const dbgFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /// How long a batch window stays open, in ms. Retunable by the relay via LOG_INTERVAL_MS — the
+  /// documented knob that, until now, was read into a type annotation and applied nowhere. Defaults
+  /// to the 15 s the worker's quota arithmetic is sized against, not to a hard-coded 1 s.
+  const dbgIntervalRef = useRef<number>(15000);
   // TELEMETRY IS OPT-IN AND OFF BY DEFAULT (Miguel, 2026-08-18: "we only want to turn on the faucet
   // when we need water not suck up a whole lake").
   //
@@ -403,6 +417,16 @@ export default function App() {
       .then((pairs) => {
         const map = Object.fromEntries(pairs);
         telemetryEnabledRef.current = map["sv.telemetry"] === "1";
+        // SEED THE LEVEL, OR TELEMETRY CAN NEVER TURN ITSELF ON.
+        //
+        // logLevelRef starts at `off` and its ONLY writer is the policy echoed back on a flush
+        // response — but dbgLog drops every event before buffering when its level exceeds the
+        // current one, and levelForEvent's minimum is `error`. So nothing was ever buffered, the
+        // flush that carries the policy never fired, and the level could never be raised: a
+        // bootstrapping deadlock in which enabling telemetry showed its confirmation toast and
+        // changed nothing, including the toast's own breadcrumb. Every debugging session against a
+        // device — the #352 follower stall included — produced zero JS-side rows.
+        //
         // AsyncStorage.multiGet resolves a MISSING key to null, never undefined — checking for
         // undefined here meant "never saved" was never true, so String(null) ran and the field
         // showed the literal text "null" on every device that had not explicitly saved a sink.
@@ -410,6 +434,17 @@ export default function App() {
         // only the former falls back to the default; an explicit empty save must still stick.
         const saved = map["sv.logSink"];
         logSinkRef.current = (saved === null || saved === undefined ? DEFAULT_LOG_SINK : saved).replace(/\/+$/, "");
+        // WHERE IT GOES DECIDES HOW LOUD IT MAY START. A LAN sink is Miguel's Mac: no quota, and
+        // full fidelity is the entire reason for pointing a device at it — seeding `info` there
+        // would drop every mesh:page-recv, which is exactly the trace a stall investigation needs.
+        // The worker shares a 100,000/day account quota with signovivo.com, so it starts at `info`
+        // and the echoed policy raises it only if LOG_LEVEL says so. Off when telemetry is off, so
+        // a resting device is silent either way.
+        logLevelRef.current = !telemetryEnabledRef.current
+          ? LOG_LEVELS.off
+          : logSinkRef.current
+            ? LOG_LEVELS.debug
+            : LOG_LEVELS.info;
       })
       .catch(() => {});
   }, []);
@@ -475,9 +510,24 @@ export default function App() {
       .then((r) => {
         // Adopt the flush cadence and level the sink (or worker) hands back, so either can retune
         // this device without a rebuild.
-        r.json?.().then((j: { policy?: { logIntervalMs?: number; logLevel?: number } }) => {
-          const p = j?.policy;
-          if (p && Number.isFinite(p.logLevel)) logLevelRef.current = Number(p.logLevel);
+        r.json?.().then((j: {
+          policy?: { logIntervalMs?: number; logLevel?: number };
+          logLevel?: number;
+          logIntervalMs?: number;
+        }) => {
+          // BOTH SHAPES. The LAN sink nests the policy; the worker spread it FLAT for months, so
+          // every value it echoed was silently discarded and LOG_LEVEL — "the kill switch", "retunes
+          // the whole fleet in ~20 seconds" — had never once retuned a device. The worker now nests
+          // it too, but reading both means a fleet on an older binary is still reachable by the
+          // switch, which is the entire point of having one.
+          const lvl = Number.isFinite(j?.policy?.logLevel) ? j?.policy?.logLevel : j?.logLevel;
+          if (Number.isFinite(lvl)) logLevelRef.current = Number(lvl);
+          // Adopt the CADENCE too. Clamped so no echoed policy — or a malformed one — can push a
+          // device above roughly one flush per second against a shared 100,000/day account quota.
+          const ms = Number.isFinite(j?.policy?.logIntervalMs) ? j?.policy?.logIntervalMs : j?.logIntervalMs;
+          if (Number.isFinite(ms) && Number(ms) > 0) {
+            dbgIntervalRef.current = Math.min(Math.max(Number(ms), 1000), 300000);
+          }
         }).catch(() => {});
       })
       .catch(() => {
@@ -503,8 +553,30 @@ export default function App() {
           event,
           ...(data || {}),
         });
-        if (dbgFlushTimerRef.current) clearTimeout(dbgFlushTimerRef.current);
-        dbgFlushTimerRef.current = setTimeout(dbgFlush, 1000);
+        // A BATCH WINDOW, NOT A DEBOUNCE — and the interval the relay asks for, not a constant.
+        //
+        // This cleared and re-armed on every event, so it was a 1 s debounce: under sustained
+        // logging it either never fired at all, or fired about once a second the moment activity
+        // paused. The worker's whole quota argument is sized against a BATCH INTERVAL ("15 s
+        // batching is a 4.8x cut with 100% of rows still delivered"), and LOG_INTERVAL_MS exists to
+        // tune it — but logIntervalMs was only ever read into a type annotation and never applied,
+        // so the documented knob controlled nothing.
+        //
+        // That was harmless while the level was deadlocked at `off` and nothing was ever buffered.
+        // Now that seeding the level makes telemetry genuinely live — on a fleet where sv.telemetry
+        // is likely still latched to "1" from the sessions that produced no rows because of that
+        // very deadlock — an unthrottled ~1 Hz flush per device would exhaust the 10,000/day
+        // non-essential budget in under an hour and take /ota/checkin down with it.
+        //
+        // First event opens a window; everything logged inside it rides the same POST; the flush
+        // clears the handle so the next event opens a fresh window. Matches the Swift side's
+        // repeating-timer design and makes the worker's arithmetic true.
+        if (!dbgFlushTimerRef.current) {
+          dbgFlushTimerRef.current = setTimeout(() => {
+            dbgFlushTimerRef.current = null;
+            dbgFlush();
+          }, dbgIntervalRef.current);
+        }
       } catch {
         /* ignore */
       }
@@ -525,10 +597,21 @@ export default function App() {
   // {deviceId, bookVersion, bookStage} — no label, no role, nothing PII-adjacent — and at a far
   // slower cadence (below) than the dashboard ever needed, since arming is a rare, deliberate,
   // Miguel-supervised action, not something that needs 90s freshness.
-  const otaCheckin = useCallback(() => {
+  // Returns the in-flight check-in so ⟳ can AWAIT one rather than replaying an old pointer. Every
+  // other caller (boot, the 4-minute interval, foreground) still treats it as fire-and-forget; the
+  // chain already terminates in a catch, so an ignored promise can never surface as a rejection.
+  const otaCheckin = useCallback((): Promise<void> => {
     const deviceId = dbgDeviceRef.current;
-    if (!deviceId || deviceId === "?") return;
-    fetch(`${RELAY_BASE}/ota/checkin`, {
+    if (!deviceId || deviceId === "?") return Promise.resolve();
+    // TIME-BOX IT. This became AWAITED when ⟳ started firing a real check-in, and a bare fetch on
+    // parish wifi that associates but does not route never settles — the same failure
+    // directorRelaySync documents for /publish. Without a bound, one tap on a captive-portal
+    // network leaves manualRefreshRef true forever and ⟳ is dead for the rest of the session, which
+    // is worse than the missing check-in it was added to provide.
+    const ac = typeof AbortController === "function" ? new AbortController() : undefined;
+    const abortTimer = ac ? setTimeout(() => { try { ac.abort(); } catch {} }, 7000) : null;
+    return fetch(`${RELAY_BASE}/ota/checkin`, {
+      signal: ac?.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -543,24 +626,36 @@ export default function App() {
       }),
     })
       .then(async (r) => {
+        // THE RELAY ANSWERED — which is a different fact from "it answered ok", and ⟳ needs this
+        // one. A 503 (arming unavailable) or a 429 is the relay talking; treating those as "offline"
+        // would send the refresh button to its stored-pointer fallback, which exists only for a
+        // device that could not reach the relay at all, and could re-stage a version the relay has
+        // since revoked.
+        lastCheckinRespondedAtRef.current = Date.now();
         if (!r.ok) return;
-        // A SUCCESSFUL check-in is the live-internet proof canApplyNow's safety gate depends on.
-        // Recorded here and nowhere else, so it can never be faked by a cached response.
-        const at = Date.now();
-        lastCheckinOkAtRef.current = at;
-        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
         let body: unknown = null;
         try {
           body = await r.json();
         } catch {
+          // A captive portal answers 200 with an HTML login page. Stamping before this parse
+          // counted that as proof of live internet — which is precisely what canApplyNow's safety
+          // gate leans on to decide a staged book is still current. A response we cannot even parse
+          // as our own JSON proves nothing.
           return;
         }
+        // A SUCCESSFUL check-in is the live-internet proof canApplyNow's safety gate depends on.
+        // Recorded here and nowhere else, so it can never be faked by a cached or intercepted
+        // response — it now requires OUR relay's JSON to have come back, not merely some 200.
+        const at = Date.now();
+        lastCheckinOkAtRef.current = at;
+        AsyncStorage.setItem(STORAGE_KEYS.lastCheckinOkAt, String(at)).catch(() => {});
         onCheckinResponseRef.current?.(body);
       })
       .catch(() => {
         /* offline / relay unreachable — inside the church this is the NORMAL case and must stay
            completely silent: no error state, no UI. */
-      });
+      })
+      .finally(() => { if (abortTimer) clearTimeout(abortTimer); });
   }, []);
   // Stable per-install device id so the two devices are distinguishable in the log timeline.
   useEffect(() => {
@@ -1355,6 +1450,11 @@ export default function App() {
           const tel = (msg as Record<string, unknown>).telemetry ? "1" : "";
           logSinkRef.current = sink;
           telemetryEnabledRef.current = tel === "1";
+          // Seed the level so the very first event survives dbgLog's gate — see the boot effect for
+          // the deadlock this breaks, and for why a LAN sink starts at full fidelity while the
+          // worker starts conservative. Note the dbgLog below is itself one of the events that used
+          // to be dropped, so the act of enabling telemetry left no record that it had been enabled.
+          logLevelRef.current = tel !== "1" ? LOG_LEVELS.off : sink ? LOG_LEVELS.debug : LOG_LEVELS.info;
           AsyncStorage.multiSet([["sv.logSink", sink], ["sv.telemetry", tel]]).catch(() => {});
           dbgLog("debug:settings", { sink: sink || "(worker)", telemetry: tel === "1" });
           injectEvent({ type: "toast", text: tel === "1"
@@ -1851,11 +1951,17 @@ export default function App() {
       ) {
         const noticeText = "Hay una versión más reciente del app disponible. Puedes " +
           "actualizar ahora, o mientras tanto usar signovivo.com desde cualquier navegador.";
-        injectEvent({ type: "toast", text: noticeText });
-        // Same mesh-idle gate as shell-too-old: never pop a blocking modal over an active
-        // Mass/rehearsal. If busy right now, the one-shot flag stays false so the NEXT check-in
-        // (~4 min later) tries the modal again once things are quiet.
+        // THE TOAST WAS OUTSIDE THE MESH-IDLE GATE, so the deferral deferred only the modal. The
+        // one-shot flag is set solely inside this branch, which means a device WITH peers connected
+        // re-toasted on every 4-minute check-in and on every foreground. The one device at Mass that
+        // has both internet and connected peers is the director's iPad: the notice slid over the
+        // songbook every four minutes for the whole service — precisely the interruption the gate
+        // was written to prevent, delivered by the half of the nudge the gate did not cover.
+        //
+        // Both halves are behind it now. If the mesh is busy the whole nudge waits for the next
+        // check-in; the flag stays false, so nothing is lost, only deferred to a quiet moment.
         if (meshPeerCountRef.current === 0) {
+          injectEvent({ type: "toast", text: noticeText });
           didNativeBuildNudgeRef.current = true;
           Alert.alert(
             "Actualización disponible",
@@ -1887,7 +1993,22 @@ export default function App() {
           await bookFs.rmrf("WebBundleStaged");
           setBookStage("");
         }
-        if (!pointer) return;
+        if (!pointer) {
+          // THE PARKING-LOT OFFER DIES WITH THE ARMING. pendingPointerRef is the offer ⟳ replays
+          // when its own check-in cannot reach the relay — and it was only ever written, never
+          // cleared, so a check-in that explicitly reported NO arming left the old pointer parked
+          // forever. The block above has just treated that same response as a REVOKE and deleted the
+          // staged copy; a ⟳ tap in a bad-signal parking lot would then replay the revoked pointer
+          // and download all 27 MB of it straight back. A revoke that one tap undoes is not a revoke.
+          pendingPointerRef.current = null;
+          // A DISARM DURING THE DOWNLOAD IS STILL A DISARM. The revoke branch above deletes a
+          // STAGED copy, but a device that is mid-download has not written one yet, so it matched
+          // nothing and the operator's withdrawal was dropped on the floor — the download ran to
+          // completion and auto-applied, putting that iPad on the withdrawn book while the fleet
+          // stayed on the good one. Recorded here and honoured where the staging finishes.
+          if (stagingInFlightRef.current) stagingDisarmedRef.current = true;
+          return;
+        }
 
         // OWNER DECISION, 2026-08-05 (fourth amendment): IT UPDATES WHEN YOU OPEN IT, AND ⟳ FORCES
         // IT. Two triggers, one sentence each. No third path, and nothing decides on its own
@@ -1934,6 +2055,7 @@ export default function App() {
         }
 
         stagingInFlightRef.current = true;
+        stagingDisarmedRef.current = false;
         setBookStage("downloading:0%");
         try {
           const rec = await stageBook({
@@ -2013,6 +2135,16 @@ export default function App() {
                 ],
               );
             }
+          }
+          // WITHDRAWN WHILE IT WAS DOWNLOADING — do not install it, and do not keep it.
+          // Checked before the apply because the operator disarmed for a reason, and the whole
+          // point of a revoke is that it beats work already in progress.
+          if (stagingDisarmedRef.current) {
+            breadcrumb(`staged-disarmed:${pointer.bookVersion}`);
+            await AsyncStorage.removeItem(STORAGE_KEYS.bookStaged).catch(() => {});
+            await bookFs.rmrf("WebBundleStaged");
+            setBookStage("");
+            return;
           }
           // Install it. Don't wait to be asked — canApplyNow decides WHEN, and if right now is a
           // Mass or a rehearsal it defers and the next foreground/check-in retries.
@@ -2115,9 +2247,34 @@ export default function App() {
     manualRefreshRef.current = true;
     breadcrumb("manual-refresh:start");
     try {
-      // A pointer seen on an earlier routine check-in was recorded but deliberately not acted on.
-      // Honour it now, so ⟳ works even if this tap's check-in cannot reach the relay.
-      if (!stagingInFlightRef.current && pendingPointerRef.current) {
+      // ASK THE RELAY NOW. This is the "do it NOW" affordance and it never once checked in: it only
+      // replayed pendingPointerRef, which is populated exclusively BY check-ins (boot, foreground,
+      // the 4-minute interval). So a book armed after this device's last check-in was invisible to
+      // the button — tap it, nothing downloads, tap again, still nothing, until the interval
+      // quietly staged it minutes later. Its own comment ("so ⟳ works even if this tap's check-in
+      // cannot reach the relay") describes a check-in that did not exist.
+      //
+      // Awaited FIRST, and the replay below runs ONLY if it could not reach the relay.
+      //
+      // "Await it, then replay anyway" is not sequencing — the check-in's own staging runs
+      // fire-and-forget inside its response handler (`void (async () => …)()`), so awaiting the
+      // fetch returns BEFORE stagingInFlightRef is set. An unconditional replay therefore starts a
+      // second onCheckinResponse pipeline racing the first, and the guard that is supposed to stop
+      // that cannot see a flag nobody has set yet. Two concurrent stagings of a 27 MB bundle, one of
+      // them possibly for a version the relay has since revoked.
+      //
+      // lastCheckinOkAtRef is stamped inside the response handler and nowhere else, so comparing it
+      // across the await is a truthful "did this tap actually talk to the relay".
+      const respondedBefore = lastCheckinRespondedAtRef.current;
+      await otaCheckin();
+      // "Did the relay answer", NOT "did it answer ok". A 503 or 429 means arming is unavailable
+      // right now, not that this device is offline — replaying a stored pointer there could stage a
+      // version the relay has since revoked.
+      const checkinReachedRelay = lastCheckinRespondedAtRef.current !== respondedBefore;
+      // Bad signal: honour a pointer recorded on an earlier routine check-in and deliberately not
+      // acted on then. This is the whole reason the parking lot exists.
+      if (!checkinReachedRelay && !stagingInFlightRef.current && pendingPointerRef.current) {
+        breadcrumb("manual-refresh:replay-pointer");
         await onCheckinResponseRef.current?.({ bookUpdate: pendingPointerRef.current });
       }
     } catch {
@@ -2126,7 +2283,7 @@ export default function App() {
       manualRefreshRef.current = false;
       breadcrumb("manual-refresh:end");
     }
-  }, [breadcrumb]);
+  }, [breadcrumb, otaCheckin]);
   refreshBookNowRef.current = refreshBookNow;
 
   /**
@@ -2425,7 +2582,20 @@ export default function App() {
   // gated on syncAvailable, so this is harmless for a plain offline follower.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
-      if (next !== "active") return;
+      if (next !== "active") {
+        // FLUSH BEFORE iOS SUSPENDS US. Timers do not fire once suspended, so whatever is sitting in
+        // the batch window would wait for the app to come back — and the breadcrumbs written just
+        // before a backgrounding are exactly the ones that explain a director going dark. The window
+        // is 15 s by default and can be tuned to minutes, so this is up to minutes of evidence, not
+        // the ~1 s the old debounce risked. DirectorSyncModule.handleAppDidEnterBackground has
+        // flushed on this transition all along; the JS side never did.
+        if (dbgFlushTimerRef.current) {
+          clearTimeout(dbgFlushTimerRef.current);
+          dbgFlushTimerRef.current = null;
+        }
+        dbgFlush();
+        return;
+      }
       // IT UPDATES WHEN YOU OPEN IT (owner decision, 2026-08-05). The 90 s check-in timer only
       // ticks while the app is awake, so an iPad asleep when a book was published would otherwise
       // sit on the old one until someone happened to leave it open. Checking here means "open the
@@ -2474,7 +2644,7 @@ export default function App() {
       }
     });
     return () => sub.remove();
-  }, [syncAvailable, broadcastPage, injectEvent, startDirectorHeartbeat]);
+  }, [syncAvailable, broadcastPage, injectEvent, startDirectorHeartbeat, dbgFlush]);
 
   // ── Global JS error trap (breadcrumb only; the web app owns its own UI) ──────
   useEffect(() => {

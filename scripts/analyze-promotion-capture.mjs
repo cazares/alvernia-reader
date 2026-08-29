@@ -210,7 +210,23 @@ for (const e of evs) {
 for (const [dev, list] of byDevice) {
   let role = null, publishing = false, page = null, since = null, prevT = null;
   const close = (t, closedBy) => {
-    if (publishing && page != null && role === "director" && since != null && t > since) {
+    // `>=`, NOT `>`. A publish span that opens and closes at the same instant is still a real
+    // instant of broadcasting, and dropping it made the analyzer accuse a HEALTHY capture of a ghost
+    // page. It happens whenever the director's ble:page-send is the newest row in the pool — which
+    // is the normal shape of a short capture that ends on a page turn: `since`, `prevT` and `endT`
+    // are all that same timestamp, so the final close is a zero-length span and no span is recorded
+    // at all. explainedBy() then finds nobody broadcasting the page the follower just correctly
+    // applied and exits 1.
+    //
+    // Reproduced on this repo's own sv-log-2026-08-18.jsonl — a director ble:page-send of page 372
+    // and a follower ble:page-apply of page 372 in the SAME millisecond, the healthiest possible BLE
+    // exchange — which FAILED as "nobody in the pool ever broadcast 372". The next hardware capture
+    // would have read as PR #380 regressing.
+    //
+    // Safe: explainedBy() already widens by ±PUBLISH_TOL_S on both sides, so a point span still
+    // covers renders around it, and the real ghost fixture (console-capture-ghost7) still fails
+    // byte-identically.
+    if (publishing && page != null && role === "director" && since != null && t >= since) {
       spans.push({ device: dev, page, from: since, to: t, closedBy });
     }
   };
@@ -220,6 +236,21 @@ for (const [dev, list] of byDevice) {
     // most likely gone. Its broadcast must not be assumed to continue across that hole.
     if (prevT != null && e.t - prevT > SILENCE_GRACE_S) {
       close(prevT + SILENCE_GRACE_S, "silent");
+      // END THE PUBLISHING STATE, not just the span. This advanced `since` while leaving
+      // publishing/role/page loaded, so the NEXT state change closed a second span from the instant
+      // the device's log resumed — zero-length, and therefore silently dropped while close() still
+      // required `t > since`. Once close() started recording point spans (which it must, or a
+      // director whose page-send is the newest row in a short capture leaves no span at all and its
+      // followers are accused of rendering a ghost), that phantom became a real span — and
+      // explainedBy widens every span by ±PUBLISH_TOL_S, so it granted a 4-second alibi anchored at
+      // exactly the moment a force-quit ex-director's log comes back as a FOLLOWER. That is when a
+      // stale advertisement is most expected to be read, so the alibi covered the very burst the
+      // ghost check exists to catch: a false GREEN on the tool's headline finding.
+      //
+      // Nothing was broadcasting across a silence that long by assumption — that is what the grace
+      // means — so the state must be cleared, not carried.
+      publishing = false;
+      page = null;
       since = e.t;
     }
     let pub = publishing, pg = page;

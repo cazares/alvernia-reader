@@ -69,10 +69,30 @@ const revealReader = () => liftGateNow();
 // instead of leaving a broken image. Capped so a genuinely-missing asset eventually gives up.
 if (pageImage) {
   let pageImgRetries = 0;
+  // A RETRY MUST NOT OUTLIVE THE PAGE IT WAS FOR. This fired on a timer 350 ms–1.4 s later and
+  // re-assigned the src unconditionally, bypassing renderPage's requestId guard entirely: when the
+  // director turned a page inside that window, the timer put the OLD page's URL back on the visible
+  // <img> while state.currentPage held the new one. Nothing corrected it, because every recovery
+  // path compares state.currentPage to relay.livePage — which agree — and a stationary director's
+  // ping replies are duplicate seqs. The follower sat on the wrong song, green pill, until the next
+  // page turn. Capturing the page and re-checking it at fire time is the whole fix.
+  pageImage.addEventListener("load", () => {
+    // A successful load proves the transient failure is over. Without this the counter only ever
+    // climbed, so four blips ANYWHERE in a session permanently disabled retry for the rest of Mass.
+    pageImgRetries = 0;
+  });
   pageImage.addEventListener("error", () => {
     if (pageImgRetries++ >= 4) return;
     const base = (pageImage.currentSrc || pageImage.src).split("?")[0];
-    window.setTimeout(() => { pageImage.src = `${base}?retry=${pageImgRetries}`; }, 350 * pageImgRetries);
+    const failedPage = state.currentPage;
+    const attempt = pageImgRetries;
+    window.setTimeout(() => {
+      // Superseded by a newer page — the retry is for a page nobody is on any more.
+      if (state.currentPage !== failedPage) return;
+      // Something else already replaced the src (a re-render, a different page): leave it alone.
+      if (!(pageImage.currentSrc || pageImage.src).split("?")[0].endsWith(base.split("/").pop())) return;
+      pageImage.src = `${base}?retry=${attempt}`;
+    }, 350 * attempt);
   });
 }
 const offlineGate = document.getElementById("offline-gate");
@@ -1770,6 +1790,16 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, use
     state.currentPage = nextPage;
     state.lastRenderFailure = null; // this page renders again — stop pacing it
     syncBuildBadgeVisibility();
+    // A PAGE THAT RENDERS DESERVES A FRESH RE-HOME BUDGET. The heartbeat's bounded re-home spends an
+    // attempt per tick, but svShouldPaceRender swallows a retry for RENDER_RETRY_COOLDOWN_MS (5 s)
+    // while the heartbeat runs every 4 s — so on a page that just failed, two of the three attempts
+    // are discarded before they can render anything and the budget is gone in 12 s. The follower is
+    // then stranded off the director's page with a green pill and no further polls, because the
+    // reset branch is the negation of the condition that is still true. Tying the reset to a
+    // successful render rather than to being on the right page means the budget is spent on polls
+    // that could actually have worked.
+    relay.rehomeFor = null;
+    relay.rehomeTries = 0;
     pageImage.src = nextPageUrl;
     pageImage.dataset.page = String(nextPage);
     if (loadState === "timeout") {
@@ -3741,6 +3771,8 @@ const relay = {
   livePage: null,    // latest page the director is on (tracked even while browsing)
   hasDirector: false,
   clockOffsetMs: 0,  // (serverClock - deviceClock), calibrated from /state Date header (P2-CLOCKSKEW)
+  rehomeFor: null,   // which livePage the bounded re-home budget below belongs to
+  rehomeTries: 0,    // forced re-home polls spent on it — see the heartbeat's F1 block
   healthTimer: 0,    // F3: independent time-driven relay-health watchdog (started once)
   cooldownUntil: 0,  // circuit breaker: no relay traffic at all until this timestamp (see tripRelayCooldown)
 };
@@ -3890,6 +3922,7 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
     return;
   }
 
+  const wasLive = relay.hasDirector;
   const d = lib.decideRelaySnapshot(snap, {
     lastSeq: relay.lastSeq,
     hasDirector: relay.hasDirector,
@@ -3922,6 +3955,21 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
   }
   if (d.renderPill) renderRelayPill();
   if (d.reveal) revealReader();  // idempotent — safe to call anytime
+
+  // A DEMOTION MAY BE OUR OWN CLOCK, AND ONLY /state CAN TELL US.
+  //
+  // Freshness is judged against (deviceClock + clockOffsetMs), and that offset is calibrated in
+  // exactly one place: the `now` field of a /state body. WebSocket snapshots carry no `now`, and the
+  // open handler stops polling once the socket is live — so a device whose clock jumps after its
+  // last calibration (a user enabling "Set Automatically" on a hand-set clock, a carrier time sync)
+  // reads every subsequent push as stale and demotes. Nothing recovers it: the socket stays healthy
+  // so no reconnect fires, and the heartbeat's re-home is itself gated on hasDirector.
+  //
+  // One poll on the transition is enough to recalibrate and re-promote. Self-limiting — if the
+  // snapshot really is stale we demote again, but wasLive is false by then, so this cannot loop.
+  if (wasLive && !relay.hasDirector && !relay.pollTimer) {
+    relayPollOnce(true);
+  }
 };
 
 const relayStateUrl = () => RELAY_BASE + "/r/" + encodeURIComponent(RELAY_ROOM) + "/state";
@@ -3961,6 +4009,16 @@ const tripRelayCooldown = (reason) => {
 // there is no geo header to read and no book to resolve — just fetch /state and apply the page.
 const relayPollOnce = async (force = false) => {
   if (relayCooling()) return;
+  // WHAT WE KNEW WHEN THIS POLL LEFT. A forced poll deliberately bypasses the seq de-dup so a
+  // STATIONARY director can re-home a drifted follower — but "bypass the de-dup" was also letting it
+  // apply a snapshot OLDER than one already applied. Forced polls run concurrently with the live
+  // socket on every reconnect, every foreground, and every heartbeat re-home, so the race is routine:
+  // the /state body is read by the Durable Object BEFORE a page turn, the WS push for that turn
+  // arrives and renders first, then the poll resolves a few hundred ms later and force-renders the
+  // PREVIOUS page over it. It also rewinds relay.livePage, so the F1 re-home check (currentPage vs
+  // livePage) now sees agreement and never corrects, and every later ping reply is a duplicate seq.
+  // The follower sits one page behind a stationary director, green pill lit, until the NEXT turn.
+  const preSeq = relay.lastSeq;
   try {
     // Time-box the /state fetch with an AbortController so a HUNG connection fails FAST.
     // navigator.onLine is TRUE on wifi-without-internet, so the fetch can hang indefinitely.
@@ -3997,7 +4055,18 @@ const relayPollOnce = async (force = false) => {
           }
         } catch {}
       }
-      await applyRelaySnapshot(snap, { force });
+      // Did a newer push land while we were in flight? If so this poll lost the race and its body
+      // is stale — drop the FORCE only (still apply it normally, so a genuinely newer snapshot is
+      // honoured and the de-dup handles the rest). Narrow on purpose: a blanket "forced snapshots
+      // may never go backwards" would break the legitimate handover rescue, because the relay
+      // deliberately accepts a LOWER seq from a NEW director once the old snapshot ages past the
+      // 90 s window, and a forced poll is what rescues a follower still holding the old high seq.
+      const lostRace =
+        force && Number.isFinite(snap && snap.seq) && relay.lastSeq > preSeq && snap.seq < relay.lastSeq;
+      if (lostRace) {
+        try { console.info("[sv] stale forced poll ignored (seq", snap.seq, "<", relay.lastSeq + ")"); } catch {}
+      }
+      await applyRelaySnapshot(snap, { force: force && !lostRace });
     }
   } catch {}
 };
@@ -4009,7 +4078,20 @@ const relayPollOnce = async (force = false) => {
 const RELAY_POLL_MS = 15000;
 const startRelayPolling = () => {
   if (relayCooling()) return;
-  stopRelayPolling();
+  // IDEMPOTENT, OR THE 15 s BUDGET IS FICTION. This used to stopRelayPolling() and re-arm on every
+  // call — and connectRelay calls it on every entry while the close handler calls it again at the
+  // backoff cap. In a persistent WS-failure regime that HTTP survives (a 5xx on the upgrade, or a
+  // venue network that blocks WebSockets — exactly the regime the 15 s interval was budgeted for),
+  // the backoff loop cycles every ~8 s and each cycle fired two immediate polls plus an upgrade
+  // attempt: ~3 requests per 8 s, ~32k/day/device, against the account-wide 100,000/day the comment
+  // above calls threatening at 21,600. The interval never once got to tick, because it was reset
+  // before it could. The 429 breaker cannot save this — it only arms AFTER the quota is gone.
+  //
+  // With this guard the first entry into a failure regime still installs the interval and polls
+  // immediately, and every redundant call during the backoff loop is a no-op. P2-POLL-GAP is
+  // preserved: the WS open handler's stopRelayPolling zeroes pollTimer, so the next connectRelay
+  // after a live socket dies still polls right away.
+  if (relay.pollTimer) return;
   relay.pollTimer = setInterval(() => relayPollOnce(true), RELAY_POLL_MS);
   relayPollOnce(true);
 };
@@ -4093,8 +4175,23 @@ const connectRelay = () => {
       // is a duplicate seq → not re-rendered → the follower silently strands on the wrong page with
       // a green "en vivo" pill and no cue, until the director's NEXT move. Force a re-home poll so a
       // drifted follower snaps back within a heartbeat. No-op for an on-page follower (the common case).
+      //
+      // BOUNDED, because "not on the director's page" is not always something a poll can fix. If
+      // renderPage clamps the target (a follower whose cached shell knows fewer pages than the
+      // director's book) or its image load throws, state.currentPage never becomes livePage — and
+      // then this condition is permanently true and fires a forced /state every 4 s for the rest of
+      // the session, silently, on an account whose whole quota is shared with signovivo.com. A few
+      // attempts is a re-home; an unbounded one is a poll loop wearing a re-home's clothes.
       if (!relay.browsing && relay.hasDirector && relay.livePage != null && state.currentPage !== relay.livePage) {
-        relayPollOnce(true);
+        if (relay.rehomeFor !== relay.livePage) { relay.rehomeFor = relay.livePage; relay.rehomeTries = 0; }
+        if (relay.rehomeTries < 3) {
+          relay.rehomeTries += 1;
+          relayPollOnce(true);
+        }
+      } else {
+        // On the director's page (or browsing): arm the budget for whatever comes next.
+        relay.rehomeFor = null;
+        relay.rehomeTries = 0;
       }
     }, 4000);
     relay.heartbeatTimer = myHeartbeat;
@@ -4174,6 +4271,12 @@ const startRelayFollow = () => {
   });
   window.addEventListener("online", () => {
     relay.backoff = 500;
+    // Force a resync on regaining the network, symmetric with visibilitychange above. This used to
+    // happen implicitly because startRelayPolling re-armed (and immediately polled) on every call;
+    // making that idempotent — which is what stopped the backoff loop tripling relay traffic —
+    // removed the accelerator with it. Not a stall (the 15 s tick still corrects), but a follower
+    // that just rejoined the Wi-Fi should not wait out a tick to see the right page.
+    relayPollOnce(true);
     // Symmetric with the visibilitychange recheck above: iOS can keep a DEAD socket at
     // readyState OPEN with NO close event after a network drop. connectRelay's dupe-guard
     // would then see the stale OPEN socket and return immediately — no new socket, no resync —

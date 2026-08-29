@@ -19,6 +19,10 @@ import { decideBookUpdate } from "./bookArming.js";
 // this is the instrument every mesh diagnosis depends on, so it gets real tests.
 // @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
 import { foldLogEntries, logIntervalMs, logLevel, LOG_RATE_BURST, LOG_RATE_PER_SEC } from "./logBuffer.js";
+// Publish sequencing (clamp a fast clock, refuse the reserved 0 while live, hold the monotonic
+// guard). Plain JS for the same reason as the two above: it is load-bearing and now tested.
+// @ts-expect-error - plain JS module with no .d.ts; the shape is asserted by its tests
+import { decidePublish } from "./publishSeq.js";
 
 export interface Env {
   SYNC_ROOM: DurableObjectNamespace<SyncRoom>;
@@ -161,43 +165,30 @@ export class SyncRoom extends DurableObject<Env> {
     if (this.rateLimited(ip, 15, 2)) {
       return { ok: true, seq: this.snapshot.seq, rateLimited: true };
     }
-    // Sanitize seq before it touches the guard. A non-finite (Infinity/NaN), negative, or
-    // unreachably-high seq would poison the room: Infinity serializes as null and, since every
-    // finite seq is <= Infinity, would block every future director for the whole live window.
-    // Collapse any such value to 0 so the `incomingSeq > 0 ? … : this.snapshot.seq + 1` branch
-    // below assigns a sane monotonic seq instead.
-    let incomingSeq = Number(input.seq ?? 0);
-    if (!Number.isFinite(incomingSeq) || incomingSeq < 0 || incomingSeq > Date.now() + 60000) {
-      incomingSeq = 0;
+    // The seq rule lives in publishSeq.js so node --test can cover it without a worker runtime —
+    // the same reason bookArming.js and logBuffer.js are plain JS. It decides three things at once:
+    // clamp a fast device clock instead of folding it into the reserved 0 (the wedge that froze the
+    // web congregation to one page per ~90 s), refuse the reserved 0 while a director is live, and
+    // hold the monotonic guard so an out-of-order burst cannot rewind the song. A stale room accepts
+    // anything, which is what lets a NEW director take over and self-heals a poisoned seq.
+    const decision = decidePublish({
+      rawSeq: input.seq,
+      nowMs: Date.now(),
+      snapshotSeq: this.snapshot.seq,
+      snapshotTs: this.snapshot.ts,
+      maxAgeS: RELAY_LIVE_MAX_AGE_S,
+    });
+    if (!decision.apply) {
+      return { ok: true, seq: decision.seq, ignored: true };
     }
-    // The seq guard stops a burst of page turns on a weak link from arriving out of order
-    // and rewinding the song — but ONLY while a director is actively live (fresh snapshot).
-    // If nobody has published within the live window the snapshot is stale (no active
-    // director), so a NEW director may take over regardless of seq. This also self-heals a
-    // poisoned / wrongly-scaled seq left behind by a gone director (otherwise a too-high
-    // stale seq would silently block every future director from ever transmitting).
-    const nowSec = Math.floor(Date.now() / 1000);
-    const snapshotStale =
-      this.snapshot.seq === 0 || nowSec - this.snapshot.ts > RELAY_LIVE_MAX_AGE_S;
-    // A2 seq=0 gate: seq=0 must NOT bypass the monotonic guard while a director is live. A legit live
-    // director always sends a real (>0) monotonic seq (native transmitters use wall-clock ms); a
-    // seq=0 — or an invalid seq we collapsed to 0 above — arriving while a FRESH director is
-    // broadcasting is malformed or an override attempt, so reject it. seq=0 is only honored as a
-    // takeover/reset when the snapshot is already stale (no active director), which the branch below
-    // and the next-seq assignment already handle.
-    if (!snapshotStale && incomingSeq === 0) {
-      return { ok: true, seq: this.snapshot.seq, ignored: true };
-    }
-    if (!snapshotStale && incomingSeq > 0 && incomingSeq <= this.snapshot.seq) {
-      return { ok: true, seq: this.snapshot.seq, ignored: true };
-    }
+    const incomingSeq = decision.seq;
     const next: Snapshot = {
       v: PROTOCOL_VERSION,
       page: Math.max(1, Math.min(Number(input.page ?? this.snapshot.page) || 1, 100000)),
       totalPages: Math.max(0, Math.min(Number(input.totalPages ?? this.snapshot.totalPages) || 0, 100000)),
       mode: String(input.mode ?? this.snapshot.mode ?? "").slice(0, 64),
       bookId: String(input.bookId ?? this.snapshot.bookId ?? "").slice(0, 64),
-      seq: incomingSeq > 0 ? incomingSeq : this.snapshot.seq + 1,
+      seq: incomingSeq,
       ts: Math.floor(Date.now() / 1000),
     };
     // Persist first, then cache, then broadcast (durability before fan-out).
@@ -502,7 +493,23 @@ export default {
             bookUpdate = decideBookUpdate(env, me, devices, Math.floor(Date.now() / 1000));
           }
         } catch {
-          bookUpdate = null; // never let an arming-decision failure surface as a broken check-in
+          // A 503 IS THE ONLY SAFE FAILURE HERE — 200 IS A DESTRUCTIVE ONE.
+          //
+          // This used to swallow the error into bookUpdate = null and still return 200 {ok:true},
+          // reasoning that it "fails soft" so "the client must not treat a network failure the same
+          // as an explicit no update". The client contract is exactly inverted from that assumption:
+          // an OK response that does not name the device's staged version IS the explicit revoke
+          // (onCheckinResponse deletes STORAGE_KEYS.bookStaged and rmrf's WebBundleStaged), while a
+          // non-ok response is the one shape it already ignores without touching any state.
+          //
+          // So the shape this catch produced was the single most destructive one available: a
+          // transient Durable Object storage error or an eviction mid-call destroyed a verified
+          // 27 MB staged copy on every armed device that happened to check in during the blip, and
+          // re-downloaded it — presenting as "the OTA never sticks on that iPad".
+          //
+          // Only a decideBookUpdate call that actually RAN and returned null may keep producing the
+          // 200-without-bookUpdate revoke shape; that is a real disarm and must still work.
+          return json({ ok: false, error: "arming_unavailable" }, 503, cors);
         }
         // NATIVE BUILD FRESHNESS — see wrangler.jsonc's LATEST_NATIVE_BUILD comment. Fails toward
         // "not confirmed" (the field is simply omitted, never sent as false): a device on a
@@ -557,11 +564,23 @@ export default {
           // NOTE the asymmetry that makes this necessary: refusing a request inside the Worker does
           // NOT save Cloudflare quota, because the Worker already ran to refuse it. The rate limiter
           // below protects the ring BUFFER; only the client backing off protects the ACCOUNT.
+          // NESTED UNDER `policy`, WHICH IS WHAT THE FLEET ACTUALLY READS.
+          //
+          // These were spread FLAT ({ok, total, logIntervalMs, logLevel}) while the native client
+          // reads `j?.policy?.logLevel` — a nested object — and that read is the ONLY writer of
+          // logLevelRef anywhere in the app. The LAN sink (scripts/log-sink.mjs) already emits the
+          // nested shape, so the worker was the one that drifted. Every value it echoed was silently
+          // discarded, which means the mechanism this file advertises three times — "LOG_LEVEL +
+          // wrangler deploy retunes every device in ~20s", "THE KILL SWITCH THAT DID NOT EXIST on
+          // 2026-08-17" — has never once retuned a device talking to the worker. It presents as a
+          // silent fleet, not as a malformed response.
+          //
+          // Flat keys kept alongside for one release in case anything scrapes them.
           const policy = { logIntervalMs: logIntervalMs(env), logLevel: logLevel(env) };
           if (result.rateLimited) {
-            return json({ ok: false, error: "rate_limited", ...policy }, 429, cors);
+            return json({ ok: false, error: "rate_limited", ...policy, policy }, 429, cors);
           }
-          return json({ ...result, ...policy }, 200, cors);
+          return json({ ...result, ...policy, policy }, 200, cors);
         }
         // P6-LOG: GET (read the whole diagnostic buffer) and DELETE (wipe it) were UNGATED — the
         // buffer holds sync breadcrumbs (opaque device ids, roles, page numbers) and must not be
@@ -693,6 +712,16 @@ export default {
       // Last-resort guard for anything the per-branch try/catch above didn't cover (an
       // unexpected throw in routing, header reads, or RPC transport). NEVER strip CORS —
       // return a usable no-director snapshot shape so the web client doesn't brick.
+      //
+      // EXCEPT FOR /ota/checkin, WHERE A 200 IS THE DESTRUCTIVE ANSWER. To an armed device, an OK
+      // response that does not name its staged bookVersion is an explicit REVOKE: it deletes
+      // WebBundleStaged and re-downloads 27 MB. So this generic "be friendly on the way out" reply —
+      // which is right for /state, where an empty snapshot just means no director — silently
+      // destroys verified work on that one route. The per-branch catch already returns 503 there;
+      // without this the outer one quietly undoes it for anything thrown outside that try.
+      if (url.pathname === "/ota/checkin") {
+        return json({ ok: false, error: "arming_unavailable" }, 503, cors);
+      }
       return json(EMPTY_SNAPSHOT, 200, cors);
     }
   },

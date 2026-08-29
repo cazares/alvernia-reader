@@ -5,6 +5,20 @@ import fs from "node:fs";
 const BEACON = fs.readFileSync("ios/SignoVivo/BlePageBeacon.swift", "utf8");
 const MODULE = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8");
 
+// A missing marker must FAIL, not silently produce a slice from -1 that happens to contain the
+// string being looked for. EVERY two-marker read in this file goes through here — the helper was
+// added for the one site that had already burned us and left the other eight raw, which is how the
+// same slice-to-EOF failure survived one test below it. (Single-marker reads are open-ended by
+// design and cannot mis-bound; they still assert their start exists via indexOf returning >= 0
+// wherever a match is required.)
+const slice = (from, to, src = BEACON) => {
+  const a = src.indexOf(from);
+  const b = src.indexOf(to, a + 1);
+  assert.ok(a >= 0, `slice start marker is gone: ${from}`);
+  assert.ok(b > a, `slice end marker is gone or precedes the start: ${to}`);
+  return src.slice(a, b);
+};
+
 // WHY THIS FILE EXISTS. BLE is the only path that can show a follower the right page BEFORE the
 // mesh finishes its ~10s first handshake, and it never once did — because the seq guard exists in
 // TWO layers and only one of them knew about advertising sessions.
@@ -82,7 +96,7 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
 
   assert.match(MODULE, /private var bleAppliedNonce = ""/, "the module tracks no advertising session");
   assert.match(MODULE, /onPage = \{ \[weak self\] page, seq, nonce in/, "the module ignores the nonce again");
-  const handler = MODULE.slice(MODULE.indexOf("self.bleBeacon.onPage = {"), MODULE.indexOf("A FOLLOWER MUST NEVER ADVERTISE"));
+  const handler = slice("self.bleBeacon.onPage = {", "A FOLLOWER MUST NEVER ADVERTISE", MODULE);
   assert.match(handler, /if nonce != self\.bleAppliedNonce \{[\s\S]*?self\.bleAppliedSeq = -1/,
     "the module does not reset its seq on a new advertiser — the exact half-landing this fixes");
   // Order matters: rebase must happen BEFORE the monotonic guard, or it changes nothing.
@@ -93,14 +107,18 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
 test("the safety rules that made BLE dangerous in 444 are still in place", () => {
   // BLE renders without a handshake, so it has no freshness guarantee of its own. Two rules keep it
   // safe, and a rebase must not quietly remove either.
-  const handler = MODULE.slice(MODULE.indexOf("self.bleBeacon.onPage = {"), MODULE.indexOf("A FOLLOWER MUST NEVER ADVERTISE"));
+  const handler = slice("self.bleBeacon.onPage = {", "A FOLLOWER MUST NEVER ADVERTISE", MODULE);
   assert.match(handler, /guard !self\.lastKnownBookId\.isEmpty/,
     "BLE can render a page number with no known book — the one unrecoverable failure in this app");
   assert.match(handler, /guard seq > self\.bleAppliedSeq/,
     "the within-session monotonic guard is gone — a stale packet can drag a follower backwards");
   // Legacy 2-field advertisements must stay rejected: pre-448 devices never stop advertising.
-  assert.match(BEACON, /guard parts\.count == 3/,
-    "legacy 2-field beacons are accepted again — those devices broadcast a frozen page forever");
+  // Since the HMAC tag (#374) the only accepted shape is the 4-field "SV<nonce>.<seq>.<page>.<tag>";
+  // the pre-tag 3-field form is rejected too (a 448-455 device can't prove it knows the session code).
+  assert.match(BEACON, /guard parts\.count == 4/,
+    "legacy beacons are accepted again — those devices broadcast a frozen page forever");
+  assert.doesNotMatch(BEACON, /parts\.count == 2\b/, "the 2-field legacy format must not be parsed");
+  assert.doesNotMatch(BEACON, /parts\.count == 3\b/, "the 3-field pre-tag format must not be parsed");
   // And a device that stops directing must stop advertising.
   assert.match(MODULE, /bleBeacon\.stopPublishing\(\)/, "the beacon is never switched off");
 });
@@ -189,8 +207,57 @@ test("a follower scans continuously — BLE is never switched off by connecting"
   // If connecting to the mesh stopped the scan, BLE would cover the first gap and then be dead for
   // every later one — a wedged session, a director restart, a follower that drops. It is the
   // fallback precisely for the moments the mesh is not working.
-  assert.doesNotMatch(MODULE, /bleBeacon\.stopScanning\(\)/,
-    "something now stops scanning — BLE would stop covering everything after the first connection");
+  //
+  // This used to assert that stopScanning() is called NOWHERE, which enforced the property by
+  // enforcing that the scan is literally never stoppable — so every device, including a director
+  // that can never consume a BLE page, ran an allowDuplicates scan for the life of the process. The
+  // real invariant is narrower and is what is pinned now: nothing on a CONNECTION path stops the
+  // scan, and any path that leaves the device following re-arms it.
+  const connectionPaths = [
+    slice("case .connected:", "case .connecting:", MODULE),
+    slice("private func reconsiderFollowerTarget", "private func handleDirectorConflict", MODULE),
+    slice("private func forceFollowerReconnect", "private func sendFollowerHelloIfNeeded", MODULE),
+    MODULE.slice(
+      MODULE.indexOf("didReceiveInvitationFromPeer peerID"),
+      MODULE.indexOf("func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer"),
+    ),
+  ];
+  for (const path of connectionPaths) {
+    assert.ok(path.length > 0, "a connection path could not be located — the slice markers drifted");
+    assert.doesNotMatch(path, /bleBeacon\.stopScanning\(\)/,
+      "a connection path stops the scan — BLE would stop covering everything after the first connection");
+  }
+  // The ONLY place it may be stopped is the full transport teardown, which every role transition
+  // runs — and which is immediately followed by beginFollowing() re-arming the scan for a follower.
+  const stops = MODULE.match(/bleBeacon\.stopScanning\(\)/g) || [];
+  assert.equal(stops.length, 1, "stopScanning is called from somewhere other than resetTransport");
+  const reset = slice("private func resetTransport", "// MARK: - Event emission", MODULE);
+  assert.match(reset, /bleBeacon\.stopScanning\(\)/, "the one stop is not the transport teardown");
+});
+
+test("every path that ends as a follower re-arms the BLE scan and the watchdog", () => {
+  // THE DRIFT THIS CLOSES. approveDirectorTakeover set currentRole = "follower" and started the mesh
+  // transports, but never gave the beacon a session code, never started scanning, never started the
+  // BLE health timer and never started the follower watchdog — so handing over control produced a
+  // follower with no BLE and no automatic recovery of any kind. It only looked fine because nothing
+  // stopped the scan left running from that device's previous follower stint.
+  const follow = slice("private func beginFollowing", "@objc(stop:rejecter:)", MODULE);
+  for (const required of [
+    "bleBeacon.sessionCode = normalizedSessionCode",
+    "bleBeacon.startScanning()",
+    "startBleHealthTimer()",
+    "startFollowerWatchdog()",
+  ]) {
+    assert.ok(follow.includes(required), `beginFollowing no longer does: ${required}`);
+  }
+  // Both entry points must go through it, or they can drift apart again.
+  for (const entry of ["func startFollower", "func approveDirectorTakeover"]) {
+    const idx = MODULE.indexOf(entry);
+    assert.ok(idx > 0, `${entry} is gone`);
+    const body = MODULE.slice(idx, idx + 2000);
+    assert.match(body, /beginFollowing\(sessionCode:/,
+      `${entry} builds its own follower state instead of using beginFollowing`);
+  }
 });
 
 
@@ -240,11 +307,107 @@ test("losing the director resumes HUNTING, with the pulse still running", () => 
   // and the wedged-session escalation all died at the moment reconnection began. Recovery fell back
   // to one retry and then the 5-12s discovery cadence. Same mistake as forceFollowerReconnect, in a
   // second location — which is why the test asserts the behaviour rather than one call site.
-  const disc = MODULE.slice(MODULE.indexOf("self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil"));
-  const body = disc.slice(0, disc.indexOf("resumeDiscoveryRefreshAfterDisconnect"));
-  assert.match(body, /startFollowerWatchdog\(\)/, "reconnection starts without a retry pulse");
-  assert.doesNotMatch(body.replace(/\/\/.*$/gm, ""), /stopFollowerWatchdog\(\)/,
-    "the pulse is stopped again on the path that begins reconnecting");
-  assert.match(body, /followerHuntingSince = Date\(\)\.timeIntervalSince1970/,
-    "the wedged-session clock does not restart, so escalation never fires after a drop");
+  // ALL THREE connected -> hunting TRANSITIONS, not whichever one an ambiguous anchor happened to
+  // land on. The marker below appears twice (lostPeer and .notConnected), and slicing from its first
+  // occurrence silently re-pointed this test at a different branch the moment the other one changed.
+  // Each transition must restore the same set, which is the actual invariant — the file has now
+  // forgotten a different member of it three separate times.
+  const transitions = [
+    ["lostPeer", slice("func browser(_ browser: MCNearbyServiceBrowser, lostPeer", "func browser(_ browser: MCNearbyServiceBrowser, didNotStart", MODULE)],
+    [".notConnected", slice("EVICT A REPEATEDLY-FAILING TARGET", "} else if self.currentRole == \"director\" {", MODULE)],
+    ["forceFollowerReconnect", slice("private func forceFollowerReconnect", "private func sendFollowerHelloIfNeeded", MODULE)],
+  ];
+  for (const [name, body] of transitions) {
+    const code = body.replace(/\/\/.*$/gm, "");
+    assert.match(code, /startFollowerWatchdog\(\)/, `${name} resumes hunting without the retry pulse`);
+    assert.doesNotMatch(code, /stopFollowerWatchdog\(\)/, `${name} stops the pulse on the path that begins reconnecting`);
+    assert.match(code, /followerHuntingSince = Date\(\)\.timeIntervalSince1970/,
+      `${name} does not restart the wedged-session clock, so escalation never fires after a drop`);
+    assert.match(code, /resumeDiscoveryRefreshAfterDisconnect\(\)/,
+      `${name} leaves the discovery refresh paused — pauseDiscoveryRefreshWhileConnected promises it restarts on a drop`);
+  }
+});
+
+// ── The model that justifies leaving the deafness gap OPEN ───────────────────────────────────
+// A future session WILL look at "a re-entering follower is BLE-deaf until the next page turn" and
+// reach for the same cure. This runs the two candidate cures against the ghost that actually exists
+// on this hardware, so the answer is reproducible rather than a claim in a comment.
+const runGuard = ({ redeliverOnReset, wipeOnReset }) => {
+  const b = { nonce: "", seq: -1, redeliver: false, recent: new Map(), contendedAt: -Infinity };
+  const recv = (adv, now) => {
+    b.recent.set(adv.nonce, now);
+    for (const [n, t] of b.recent) if (now - t > CONTENTION_WINDOW) b.recent.delete(n);
+    if (b.recent.size > 1) { b.contendedAt = now; return null; }
+    if (now - b.contendedAt < CONTENTION_WINDOW) return null;
+    if (adv.nonce !== b.nonce) { b.nonce = adv.nonce; b.seq = -1; }
+    const ok = adv.seq > b.seq || (b.redeliver && adv.seq === b.seq);
+    if (!ok) return null;
+    b.redeliver = false;
+    b.seq = Math.max(b.seq, adv.seq);
+    return adv.page;
+  };
+  // A device force-quit while directing song 357: bluetoothd keeps broadcasting a validly-tagged,
+  // FROZEN packet with no in-process owner (recorded on hardware 2026-08-19).
+  const ghost = { nonce: "G", seq: 4, page: 357 };
+  let t = 0;
+  const applied = [];
+  for (let i = 0; i < 3; i++) { const p = recv(ghost, ++t); if (p !== null) applied.push(p); }
+  // …the mesh has since corrected the screen to the real page. Now a role change asks for a refresh.
+  if (wipeOnReset) { b.nonce = ""; b.seq = -1; b.recent.clear(); b.contendedAt = -Infinity; }
+  if (redeliverOnReset) b.redeliver = true;
+  const afterReset = recv(ghost, ++t);
+  return { firstSightings: applied, afterReset };
+};
+
+test("BOTH candidate cures for the deafness gap re-apply a frozen ghost page", () => {
+  // Blunt cure: forget the advertiser and the seq floor.
+  assert.equal(runGuard({ wipeOnReset: true }).afterReset, 357,
+    "the model no longer reproduces the blunt cure's failure — re-check it before trusting this file");
+  // Narrow cure: allow ONE re-delivery of an EQUAL seq from the SAME nonce, never an older one.
+  // A frozen ghost's seq sits exactly AT the baseline, so this describes it precisely.
+  assert.equal(runGuard({ redeliverOnReset: true }).afterReset, 357,
+    "the narrow cure no longer re-applies the ghost — if this is genuinely fixed, the gap can close");
+  // And with NO reset — what ships — the ghost stays suppressed after its first sighting.
+  assert.equal(runGuard({}).afterReset, null, "the shipped guard leaks a frozen page");
+});
+
+test("the BLE scan baseline is never reset on a role change", () => {
+  // A resetScanBaseline() was written to cure a real gap — a device re-entering follower mode while
+  // the SAME director advertises an unchanged nonce+seq is BLE-deaf until the next page turn — and
+  // then removed, because every version of it re-armed the build-444 wrong-song failure.
+  //
+  // Blunt version (wipe nonce + seq): the first advertisement heard after any role change is applied
+  // whatever its age. Narrow version (allow ONE re-delivery of an EQUAL seq from the same nonce): no
+  // better against the case that matters, because a device force-quit while directing leaves
+  // bluetoothd broadcasting a frozen, validly-tagged page (recorded on hardware 2026-08-19) whose
+  // seq sits exactly AT the baseline — "equal seq from the advertiser I was already tracking"
+  // describes that ghost precisely. Modelled: suppressed packet after packet, then re-delivered the
+  // instant a role change asks for a refresh.
+  //
+  // A stationary director and a ghost are byte-identical in a BLE advertisement, so the distinction
+  // the cure needs does not exist. The mesh stays authoritative; the gap stays open on purpose.
+  assert.ok(!/func resetScanBaseline\s*\(/.test(BEACON), "resetScanBaseline is back — it re-arms the 444 ghost window");
+  assert.doesNotMatch(BEACON, /redeliverCurrentPage/, "the one-shot re-delivery is back — a frozen ghost matches it exactly");
+  const reset = slice("private func resetTransport", "// MARK: - Event emission", MODULE);
+  assert.doesNotMatch(reset, /bleAppliedSeq = -1/,
+    "resetTransport drops the module's BLE seq floor — the first packet after a role change will be applied whatever its age");
+});
+
+test("a director does not scan — and cannot be made to by a radio restart", () => {
+  // centralManagerDidUpdateState fires again on every bluetoothd restart and Control Center toggle,
+  // and used to call scanIfReady() with no notion of role — silently resuming an allowDuplicates
+  // packet-rate scan on the director for the rest of the Mass, which is the whole drain that
+  // stopping the scan exists to prevent.
+  assert.match(BEACON, /private var wantsScanning = false/, "there is no record of scan INTENT");
+  const ready = slice("private func scanIfReady", "func resumeOnForeground");
+  assert.match(ready, /guard wantsScanning/, "scanIfReady scans regardless of whether we want to");
+  const ensure = slice("func ensureScanning", "private func startAdvertisingIfReady");
+  assert.match(ensure, /guard wantsScanning/, "the 1 Hz self-heal re-arms a deliberately stopped scan");
+  // Bounded by a marker that is ASSERTED to exist. This used to end at a doc-comment that the
+  // resetScanBaseline revert deleted, so indexOf returned -1, the slice ran to end-of-file, and the
+  // assertion below passed by finding `wantsScanning = false` somewhere else entirely — a test
+  // reporting green for a property it had stopped checking, which is the failure this whole file
+  // exists to prevent.
+  const stop = slice("func stopScanning", "/// NOT PROVIDED, DELIBERATELY");
+  assert.match(stop, /wantsScanning = false/, "stopping the scan does not clear the intent");
 });

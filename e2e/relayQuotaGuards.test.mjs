@@ -216,7 +216,11 @@ test("the director's first broadcast uses the WEB's true page, not a lagging nat
   // 3. The confirm dialog's callback closes over it rather than dropping it. The dialog is a native
   //    modal Alert, so nothing on the WebView can navigate again while it is open — the page
   //    captured at the ORIGINAL tap is still correct by the time the human taps "Sí, dirigir".
-  assert.match(NATIVE, /onPress: \(\) => becomeDirector\(code, knownCurrentPage\)/,
+  // (The call may fall back to the restored crash-resume page when the web sent no page, so this
+  //  matches the argument rather than the whole expression — pinning `becomeDirector(code,
+  //  knownCurrentPage)` exactly went stale the moment that `?? restoredDirectorPageRef` fallback
+  //  landed, and a red test that guards a property the code still HAS teaches people to ignore it.)
+  assert.match(NATIVE, /onPress: \(\) => becomeDirector\(code, knownCurrentPage\b/,
     "the confirm dialog no longer passes the known page through to becomeDirector");
 
   // 4. becomeDirector corrects the mirror BEFORE anything downstream can read it — every broadcast

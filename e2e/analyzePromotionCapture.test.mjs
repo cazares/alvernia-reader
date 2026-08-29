@@ -283,3 +283,68 @@ test("AUDIT: every real device logging boot-stop-stale is a PASS", () => {
   ]);
   assert.match(run(p).out, /PASS\s+every device \(2\) logged ble:boot-stop-stale/);
 });
+
+test("AUDIT: a send and an apply in the SAME instant is a healthy exchange, not a ghost", () => {
+  // THE ZERO-LENGTH SPAN. A publish span whose open and close land on the same timestamp used to be
+  // discarded (`t > since`), so a director whose ble:page-send is the newest row in the pool left no
+  // span at all — and the ghost check then reported the page the follower had just CORRECTLY applied
+  // as "rendered with nobody broadcasting it". That is the normal shape of a short capture that ends
+  // on a page turn, and it is exactly the shape of this repo's own sv-log-2026-08-18.jsonl.
+  //
+  // A capture that FAILS the ghost check reads as PR #380 regressing, which costs a hardware night.
+  const p = write("same-instant.txt", [
+    line(T0, "director mPad ble:page-send page=372 seq=1"),
+    line(T0, "follower iPad-A ble:page-apply page=372 seq=1"),
+  ]);
+  const r = run(p);
+  assert.doesNotMatch(r.out, /nobody in the pool ever broadcast it/,
+    "a page broadcast in the same instant it was applied is still called a ghost");
+  assert.doesNotMatch(verdictsOf(r.out), /FAIL/,
+    "the healthiest possible BLE exchange still fails the capture");
+});
+
+test("AUDIT: the real ghost fixture still FAILS — the instrument is not blunted", () => {
+  // The counterweight to the test above: widening the span rule must not stop the tool catching a
+  // page that genuinely nobody was broadcasting. This is the captured page-7 ghost from hardware.
+  assert.equal(real.code, 1, "the real ghost capture no longer fails");
+  assert.match(real.out, /page\(s\) rendered with nobody broadcasting them: 7/,
+    "the page-7 ghost is no longer named");
+});
+
+test("AUDIT: a silence gap ends the publish STATE, not just the span", () => {
+  // THE FALSE GREEN THIS CLOSES. The silence-grace branch closed the open span but left
+  // publishing/role/page loaded and merely advanced `since`, so the next state change closed a
+  // SECOND, zero-length span at the instant the device's log resumed. That was invisible while
+  // close() required `t > since` — and became a real span the moment close() started recording
+  // point spans (which it must, or a short capture ending on a page turn accuses its followers of a
+  // ghost).
+  //
+  // explainedBy widens every span by ±PUBLISH_TOL_S, so the phantom granted a 4-second alibi
+  // anchored exactly where a force-quit ex-director's log comes back as a FOLLOWER — which is
+  // precisely when its stale advertisement is read. The alibi covered the burst the ghost check
+  // exists to catch.
+  const p = write("silence-phantom.txt", [
+    line(T0, "director iPad-EX ble:page-send page=7 seq=3"),
+    line(T0 + 2, "director iPad-EX refresh:hold-serving connected=1"),
+    // …force-quit. No stop-publishing, no boot-stop-stale — the log simply ends, while the
+    // advertisement stays on air. It relaunches two minutes later as a FOLLOWER.
+    line(T0 + 130, "follower iPad-EX found peer=iPad-F prole=follower"),
+    // Both live followers read the stale page-7 beacon in that same moment.
+    line(T0 + 130.2, "follower iPad-F ble:new-advertiser nonce=4ca1 page=7"),
+    line(T0 + 130.3, "follower iPad-F ble:page-apply page=7 seq=3"),
+    line(T0 + 130.4, "follower iPad-G ble:new-advertiser nonce=4ca1 page=7"),
+    line(T0 + 130.5, "follower iPad-G ble:page-apply page=7 seq=3"),
+  ]);
+  const r = run(p);
+  // The page must be REPORTED as unexplained. With the phantom span it was explained away and the
+  // ghost section came back empty — the finding vanished silently, which is the worst outcome an
+  // instrument has. (The VERDICT here is deliberately INCONCLUSIVE rather than FAIL: a force-quit
+  // while directing is indistinguishable from a log that simply ends, and this tool downgrades
+  // instead of indicting when it cannot tell. That distinction is the tool's own house rule, so the
+  // assertion is on the finding being surfaced, not on the exit code.)
+  const ghost = r.out.slice(r.out.indexOf("── GHOST PAGE"), r.out.indexOf("══ VERDICTS ══"));
+  assert.match(ghost, /UNEXPLAINED: nobody was broadcasting that page/,
+    "a page rendered while its ex-director was relaunching as a follower is being explained away");
+  assert.match(r.out, /arrived after their broadcaster went quiet/,
+    "the force-quit downgrade no longer names what to re-collect");
+});

@@ -390,9 +390,11 @@ test("legacy two-field BLE advertisements are rejected", () => {
   const fn = ble.slice(ble.indexOf("private func parse("));
   const body = fn.slice(0, fn.indexOf("\n  }"));
   // Builds 433-445 ship a beacon that never stops. During a mixed-build window those frozen
-  // advertisements are in the air, and accepting them is exactly the wrong-song flash.
-  assert.match(body, /parts\.count == 3/, "only the 3-field nonce format may be accepted");
-  assert.doesNotMatch(body, /parts\.count == 2/, "the legacy format must not be parsed");
+  // advertisements are in the air, and accepting them is exactly the wrong-song flash. Since the
+  // HMAC tag (#374) the only accepted shape is the 4-field "SV<nonce>.<seq>.<page>.<tag>".
+  assert.match(body, /parts\.count == 4/, "only the 4-field HMAC-tagged format may be accepted");
+  assert.doesNotMatch(body, /parts\.count == 2\b/, "the 2-field legacy format must not be parsed");
+  assert.doesNotMatch(body, /parts\.count == 3\b/, "the 3-field pre-tag format must not be parsed");
 });
 
 test("BLE renders standalone again, now that no stale beacon can exist", () => {

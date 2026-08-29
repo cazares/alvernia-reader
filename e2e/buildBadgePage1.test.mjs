@@ -30,8 +30,13 @@ test("the badge shows on page 1 and nowhere else", () => {
 
 test("visibility is re-evaluated whenever the page settles", () => {
   // Set once at boot and never again, the badge would stick on whatever the first page was.
-  const commit = APP.slice(APP.indexOf("state.currentPage = nextPage;"));
-  assert.match(commit.slice(0, 200), /syncBuildBadgeVisibility\(\)/,
+  // Bounded by the next statement in the commit sequence rather than a character count — a comment
+  // added between the two silently slid the call out of a 200-char window and reddened a test about
+  // behaviour that was entirely intact.
+  const start = APP.indexOf("state.currentPage = nextPage;");
+  const end = APP.indexOf("pageImage.dataset.page", start);
+  assert.ok(start > 0 && end > start, "the render commit sequence moved — re-bound this test");
+  assert.match(APP.slice(start, end), /syncBuildBadgeVisibility\(\)/,
     "the page-change path does not re-evaluate the badge");
 });
 
