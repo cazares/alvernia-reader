@@ -307,13 +307,25 @@ test("losing the director resumes HUNTING, with the pulse still running", () => 
   // and the wedged-session escalation all died at the moment reconnection began. Recovery fell back
   // to one retry and then the 5-12s discovery cadence. Same mistake as forceFollowerReconnect, in a
   // second location — which is why the test asserts the behaviour rather than one call site.
-  const disc = MODULE.slice(MODULE.indexOf("self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil"));
-  const body = disc.slice(0, disc.indexOf("resumeDiscoveryRefreshAfterDisconnect"));
-  assert.match(body, /startFollowerWatchdog\(\)/, "reconnection starts without a retry pulse");
-  assert.doesNotMatch(body.replace(/\/\/.*$/gm, ""), /stopFollowerWatchdog\(\)/,
-    "the pulse is stopped again on the path that begins reconnecting");
-  assert.match(body, /followerHuntingSince = Date\(\)\.timeIntervalSince1970/,
-    "the wedged-session clock does not restart, so escalation never fires after a drop");
+  // ALL THREE connected -> hunting TRANSITIONS, not whichever one an ambiguous anchor happened to
+  // land on. The marker below appears twice (lostPeer and .notConnected), and slicing from its first
+  // occurrence silently re-pointed this test at a different branch the moment the other one changed.
+  // Each transition must restore the same set, which is the actual invariant — the file has now
+  // forgotten a different member of it three separate times.
+  const transitions = [
+    ["lostPeer", slice("func browser(_ browser: MCNearbyServiceBrowser, lostPeer", "func browser(_ browser: MCNearbyServiceBrowser, didNotStart", MODULE)],
+    [".notConnected", slice("EVICT A REPEATEDLY-FAILING TARGET", "} else if self.currentRole == \"director\" {", MODULE)],
+    ["forceFollowerReconnect", slice("private func forceFollowerReconnect", "private func sendFollowerHelloIfNeeded", MODULE)],
+  ];
+  for (const [name, body] of transitions) {
+    const code = body.replace(/\/\/.*$/gm, "");
+    assert.match(code, /startFollowerWatchdog\(\)/, `${name} resumes hunting without the retry pulse`);
+    assert.doesNotMatch(code, /stopFollowerWatchdog\(\)/, `${name} stops the pulse on the path that begins reconnecting`);
+    assert.match(code, /followerHuntingSince = Date\(\)\.timeIntervalSince1970/,
+      `${name} does not restart the wedged-session clock, so escalation never fires after a drop`);
+    assert.match(code, /resumeDiscoveryRefreshAfterDisconnect\(\)/,
+      `${name} leaves the discovery refresh paused — pauseDiscoveryRefreshWhileConnected promises it restarts on a drop`);
+  }
 });
 
 // ── The model that justifies leaving the deafness gap OPEN ───────────────────────────────────

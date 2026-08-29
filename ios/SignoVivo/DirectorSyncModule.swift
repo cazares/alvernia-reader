@@ -1847,13 +1847,31 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // self-heal, so stopping it here went deaf as well as blind. startFollowerWatchdog invalidates
     // any existing timer first, so restarting is idempotent.
     startFollowerWatchdog()
+    // AND THE DISCOVERY REFRESH, which pauseDiscoveryRefreshWhileConnected promises "restarts
+    // automatically (with a fast burst) when the connection drops" — a promise only .notConnected
+    // was keeping. This is the OTHER way a follower goes from connected to hunting, and on this path
+    // the timer is provably nil: the half-open branch requires connectedDirectorPeer != nil, which
+    // is only ever set alongside a pause, and the old sessions are torn down with delegate = nil so
+    // no .notConnected follows to restore it.
+    //
+    // Losing it costs the periodic transport rebuild, the browserHealthySeconds recovery of a
+    // browser that has gone deaf, and the refresh tick's re-drive of target selection. The
+    // self-directed one-shot does NOT stand in for it: reconsiderFollowerTarget calls
+    // cancelSelfDirectedTimer() as soon as it picks a director, so it is normally cancelled about a
+    // second later — leaving only the 20 s wedge escalation, which itself disarms whenever the
+    // director stops being visible.
+    //
+    // This is the third instance of exactly this omission in this function's history; the
+    // .notConnected branch's own comment calls the second one "Same mistake as
+    // forceFollowerReconnect, second location." scheduleNextDiscoveryRefresh invalidates first, so
+    // it is idempotent, and it sets the early burst itself.
+    resumeDiscoveryRefreshAfterDisconnect()
     startSelfDirectedTimer()
     emitState(status: "searching", message: "Reconectando con el director...")
     // M-F5: the watchdog can fire because the director genuinely LEFT (not just a data half-open),
     // in which case reconsiderFollowerTarget alone stalls (discoveredDirectors may be empty). Kick
     // an immediate re-scan + arm the fast 5 s discovery burst so a returning/other director is
     // re-found in seconds instead of drifting into the slow ~25 s cadence.
-    earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
     refreshDiscovery()
     reconsiderFollowerTarget()
   }
@@ -2473,6 +2491,17 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
             return
           }
           self.connectedDirectorPeer = nil; self.pendingInvitePeer = nil
+          // THE THIRD connected -> hunting TRANSITION, and it restored none of the hunting state.
+          // Harder to reach than the other two (.notConnected normally clears connectedDirectorPeer
+          // first), but when it does fire it left the hello timer running, the wedge clock unarmed,
+          // and — like forceFollowerReconnect did — the discovery refresh paused with nothing to
+          // resume it. All three transitions now restore the same set, so the next person does not
+          // have to find out which of them is the one that forgot.
+          self.stopFollowerHelloTimer()
+          self.followerHuntingSince = Date().timeIntervalSince1970
+          self.startFollowerWatchdog()
+          self.resumeDiscoveryRefreshAfterDisconnect()
+          self.startSelfDirectedTimer()
           self.emitState(status: "searching", message: "Se perdió el director. Buscando otro cercano.")
         }
         self.reconsiderFollowerTarget()
