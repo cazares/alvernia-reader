@@ -36,3 +36,15 @@ director-codes.committed.bak
 # App Store Connect API creds for TestFlight upload (never commit)
 scripts/asc-credentials.env
 *.p8
+
+# Claude Code worktrees. NOT ignored until 2026-08-29, which is how
+# .claude/worktrees/determined-carson-439745 came to be committed as a GITLINK
+# (mode 160000) around the build-265 era. Git reads that entry as a submodule,
+# finds no .gitmodules record, and every `actions/checkout` on this repo dies:
+#
+#   fatal: No url found for submodule path '.claude/worktrees/…' in .gitmodules
+#
+# That is why the `pages-build-deployment` workflow has failed on every commit
+# since at least 2026-08-19. Ignoring the directory stops it happening again; it
+# deliberately does NOT untrack the existing gitlink (see the note below).
+.claude/worktrees/
