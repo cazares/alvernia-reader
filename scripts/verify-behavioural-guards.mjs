@@ -243,6 +243,33 @@ const MUTATIONS = [
        '          return json({ ok: false, error: "arming_unavailable" }, 200, cors);'),
    "e2e/otaRevokeIsTotal.test.mjs", "an internal worker error cannot impersonate a revoke"],
 
+  ["BLE parse() goes lenient and accepts the pre-tag 3-field form — the build-444 wrong song, re-armed",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("guard parts.count == 4, let seq", "guard parts.count >= 3, let seq"),
+   "e2e/bleHandoff.test.mjs", "the safety rules that made BLE dangerous in 444 are still in place"],
+
+  ["resetTransport stops silencing the beacon — a device that directed song 357 broadcasts it forever",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("    // as a follower. That ghost advertisement is what build 444 rendered as song 357.\n    bleBeacon.stopPublishing()\n",
+       "    // as a follower. That ghost advertisement is what build 444 rendered as song 357.\n"),
+   "e2e/bleHandoff.test.mjs", "the safety rules that made BLE dangerous in 444 are still in place"],
+
+  ["a contested BLE packet is applied instead of abstained — followers ping-pong between advertisers",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("      lastContentionAt = now\n      return\n    }", "      lastContentionAt = now\n    }"),
+   "e2e/bleHandoff.test.mjs", "TWO LIVE ADVERTISERS: render NEITHER, rather than flapping or trusting the wrong one"],
+
+  ["the post-contention cooldown is deleted — a rival slower than contentionWindow resumes rendering",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("    if now - lastContentionAt < Self.contentionCooldown {\n      lastAppliedPage = -1\n      return\n    }\n", ""),
+   "e2e/bleHandoff.test.mjs", "TWO LIVE ADVERTISERS: render NEITHER, rather than flapping or trusting the wrong one"],
+
+  ["primeRadios warms only the central — a follower that becomes director pays the cold start",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("  func primeRadios() {\n    if peripheral == nil { peripheral = CBPeripheralManager(delegate: self, queue: .main) }\n",
+       "  func primeRadios() {\n"),
+   "e2e/bleHandoff.test.mjs", "neither radio is created on the critical path"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────
