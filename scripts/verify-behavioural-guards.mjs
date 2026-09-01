@@ -219,6 +219,30 @@ const MUTATIONS = [
    "e2e/broadcastNeverWrongPage.test.mjs",
    "render-failed does not blank the mirror while this device is becoming director"],
 
+  ["the revoke condition is narrowed so a MISSING pointer no longer revokes — a withdrawn book stays installed",
+   "PdfReaderApp.tsx",
+   sub("(!pointer || pointer.bookVersion !== staged.bookVersion)",
+       "(pointer && pointer.bookVersion !== staged.bookVersion)"),
+   "e2e/otaRevokeIsTotal.test.mjs", "a revoke deletes a STAGED copy"],
+
+  ["the parked-pointer clear becomes conditional — one tap can resurrect the withdrawn book",
+   "PdfReaderApp.tsx",
+   sub("          pendingPointerRef.current = null;",
+       "          if (staged?.bookVersion) pendingPointerRef.current = null;"),
+   "e2e/otaRevokeIsTotal.test.mjs", "a revoke clears the PARKED pointer that ⟳ replays offline"],
+
+  ["the mid-flight disarm check is gone — a revoked download finishes and installs anyway",
+   "PdfReaderApp.tsx",
+   sub("          if (stagingDisarmedRef.current) {",
+       "          if (stagingInFlightRef.current === null) {"),
+   "e2e/otaRevokeIsTotal.test.mjs", "a revoke stops a download already in flight"],
+
+  ["an internal worker error returns the DESTRUCTIVE 200-without-bookUpdate instead of 503",
+   "sync-worker/src/index.ts",
+   sub('          return json({ ok: false, error: "arming_unavailable" }, 503, cors);',
+       '          return json({ ok: false, error: "arming_unavailable" }, 200, cors);'),
+   "e2e/otaRevokeIsTotal.test.mjs", "an internal worker error cannot impersonate a revoke"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

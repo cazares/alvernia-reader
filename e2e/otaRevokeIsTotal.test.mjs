@@ -40,6 +40,16 @@ test("a revoke deletes a STAGED copy", () => {
   const b = revokeBranch();
   assert.match(b, /removeItem\(STORAGE_KEYS\.bookStaged\)/, "the staged record survives a revoke");
   assert.match(b, /rmrf\("WebBundleStaged"\)/, "the staged bytes survive a revoke");
+
+  // …and the CONDITION that decides whether any of that runs. The two assertions above only prove
+  // the deletions exist SOMEWHERE inside the branch; narrowing `!pointer ||` to `pointer &&` leaves
+  // them untouched while making a revoke — the no-pointer case, which is the whole point —
+  // unreachable. Measured: the full three-file suite stayed 27/27 green under exactly that mutation.
+  assert.match(
+    NATIVE,
+    /if \(staged\?\.bookVersion && \(!pointer \|\| pointer\.bookVersion !== staged\.bookVersion\)\)/,
+    "the revoke branch no longer triggers on a MISSING pointer — which is what a revoke IS",
+  );
 });
 
 test("a revoke clears the PARKED pointer that ⟳ replays offline", () => {
@@ -48,8 +58,10 @@ test("a revoke clears the PARKED pointer that ⟳ replays offline", () => {
   // the book the operator had just pulled — and nothing downstream objects, because the staged
   // record is already gone so the revoke branch no-ops on the replay.
   const b = revokeBranch();
-  assert.match(b, /pendingPointerRef\.current = null/,
-    "a revoked pointer stays parked — ⟳ can resurrect the withdrawn book");
+  // Presence is not enough: wrapping it in `if (staged?.bookVersion)` still matches, and then a
+  // device that was ARMED but never finished staging keeps the withdrawn pointer forever.
+  assert.match(b, /^\s*pendingPointerRef\.current = null;\s*$/m,
+    "the parked-pointer clear is conditional — a device that never staged keeps the withdrawn book");
 });
 
 test("a revoke stops a download already in flight", () => {
@@ -59,7 +71,11 @@ test("a revoke stops a download already in flight", () => {
 
   // …and the staging completion must actually honour it, BEFORE applying.
   const tail = NATIVE.slice(NATIVE.indexOf('stagingInFlightRef.current = true;'));
-  const disarmIdx = tail.indexOf("stagingDisarmedRef.current");
+  // ANCHOR ON THE CHECK, NOT THE RESET. This found `stagingDisarmedRef.current = false` — the
+  // RESET, 43 chars in — so `disarmIdx < applyIdx` was trivially true wherever the real check
+  // lived, and the whole test rested on the rmrf-between assertion, which any unrelated rmrf in
+  // that span satisfies.
+  const disarmIdx = tail.indexOf("if (stagingDisarmedRef.current)");
   const applyIdx = tail.indexOf("autoApplyIfSafeRef.current?.()");
   assert.ok(disarmIdx > 0 && applyIdx > 0, "the staging completion path moved");
   assert.ok(disarmIdx < applyIdx,
@@ -79,10 +95,17 @@ test("a fresh staging run starts un-disarmed", () => {
 test("an internal worker error cannot impersonate a revoke", () => {
   // The destructive shape is 200-without-bookUpdate. A throw must never produce it, or a transient
   // Durable Object hiccup deletes a verified 27 MB copy on every armed device that checks in.
-  const route = WORKER.slice(WORKER.indexOf('url.pathname === "/ota/checkin"'), WORKER.indexOf('if (url.pathname === "/log")'));
-  assert.ok(route.length > 0, "the /ota/checkin route moved");
-  assert.match(route, /arming_unavailable/, "an internal failure no longer returns 503");
-  assert.match(route, /503/, "an internal failure no longer returns 503");
+  // SLICE FROM THE ROUTE, NOT ITS FIRST MENTION. This started at the first occurrence of the bare
+  // path string — the NON_ESSENTIAL expression far above the route — a window already containing
+  // two other `503`s (a budget return, and the words "A 503 IS T…" inside a comment), so the bare
+  // /503/ could never fail. Changing the route's own status to 200 — the destructive shape — left
+  // this test green.
+  const routeAt = WORKER.indexOf('if (url.pathname === "/ota/checkin")');
+  assert.ok(routeAt > 0, "the /ota/checkin route moved");
+  const route = WORKER.slice(routeAt, WORKER.indexOf('if (url.pathname === "/log")', routeAt));
+  assert.ok(route.length > 0, "could not bound the /ota/checkin route");
+  assert.match(route, /"arming_unavailable" \}, 503/,
+    "an internal failure no longer returns 503 — a 200 without bookUpdate IS a revoke to every client");
 
   // …including from the outer catch-all, which returns a friendly 200 for every OTHER route.
   const outer = WORKER.slice(WORKER.indexOf("Last-resort guard for anything"));
