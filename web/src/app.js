@@ -3910,7 +3910,13 @@ const applyRelaySnapshot = async (snap, { force = false } = {}) => {
     if (hasPub && !dateable) { try { console.warn("[sv] relay snapshot has no ts — refusing to apply"); } catch {} }
     if (!fresh) { relay.hasDirector = false; relay.browsing = false; relay.lastSeq = -1; hideGoLiveBar(); renderRelayPill(); return; }
     if (!force && snap.seq <= relay.lastSeq) { relay.hasDirector = true; renderRelayPill(); return; }
-    relay.lastSeq = Math.max(relay.lastSeq, snap.seq);
+    // ADOPT the accepted seq — see the long note in web/src/lib/svSyncDecision.js. Keeping the
+    // old floor here re-armed the de-dup against a new director whose clock trails the old one's,
+    // freezing the follower on one page for the rest of the Mass under a green "en vivo" pill.
+    // This inline fallback must match the lib exactly; it is the branch that runs when the lib
+    // fails to load, and the 2026-08-18 freshness fix shipped to this copy ONLY, which is how it
+    // went ten days without running anywhere.
+    relay.lastSeq = snap.seq;
     relay.hasDirector = true; relay.livePage = snap.page;
     if (relay.browsing) { renderRelayPill(); revealReader(); return; }
     try {

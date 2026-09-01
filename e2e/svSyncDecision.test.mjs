@@ -265,3 +265,49 @@ test("a snapshot with no ts cannot prove it is fresh, so it is refused", () => {
   assert.equal(d.action, "demote", "an undateable snapshot must never be applied to the choir");
   assert.equal(d.hasDirector, false, "no director can be considered live without a dateable publish");
 });
+
+// ---- P2-HANDOVER: a forced rescue must ADOPT the seq it just accepted ------------
+//
+// The relay deliberately accepts a LOWER seq from a NEW director once the old snapshot ages past
+// the freshness window (sync-worker publishSeq decidePublish, reason "takeover") — which is what
+// happens whenever the incoming director's clock trails the outgoing one's. A forced poll is the
+// documented rescue for a follower still holding the old high seq.
+//
+// It rescued exactly ONE frame. `Math.max(ctx.lastSeq, snap.seq)` kept the stale floor, re-arming
+// the de-dup against the very publisher it had just accepted, so every later page turn came in
+// below the floor as "live-dup": no render, and livePage left unset — which made the heartbeat's
+// re-home comparison agree too, so nothing issued a corrective poll. The follower held one page
+// for the rest of the Mass behind a green "en vivo" pill.
+test("handover: a forced poll that accepts a LOWER seq adopts it as the new floor", () => {
+  const OLD_HIGH = NOW_MS - 300_000; // outgoing director, correct clock
+  const NEW_LOW = OLD_HIGH - 100_000; // incoming director, clock ~100 s behind
+
+  const rescue = decideRelaySnapshot(
+    { page: 42, seq: NEW_LOW, ts: NOW_S - 5 },
+    ctx({ hasDirector: true, lastSeq: OLD_HIGH, currentPage: 42, force: true }),
+  );
+  assert.equal(rescue.action, "follow", "the forced rescue must accept the new director");
+  assert.equal(
+    rescue.lastSeq,
+    NEW_LOW,
+    "the floor must drop to the accepted seq — keeping the old one re-arms de-dup against this director",
+  );
+});
+
+test("handover: the page turn AFTER a forced rescue still renders", () => {
+  const OLD_HIGH = NOW_MS - 300_000;
+  const NEW_LOW = OLD_HIGH - 100_000;
+
+  const rescue = decideRelaySnapshot(
+    { page: 42, seq: NEW_LOW, ts: NOW_S - 5 },
+    ctx({ hasDirector: true, lastSeq: OLD_HIGH, currentPage: 42, force: true }),
+  );
+  // The very next thing that happens at Mass: the new director turns a page.
+  const turn = decideRelaySnapshot(
+    { page: 43, seq: NEW_LOW + 10_000, ts: NOW_S - 1 },
+    ctx({ hasDirector: true, lastSeq: rescue.lastSeq, currentPage: 42, force: false }),
+  );
+  assert.equal(turn.action, "follow", "the next page turn must not be judged a duplicate");
+  assert.equal(turn.renderPage, 43, "the follower must render the page the director turned to");
+  assert.equal(turn.livePage, 43, "livePage must advance, or the heartbeat re-home never corrects it");
+});
