@@ -11,6 +11,28 @@ const MODULE = fs.readFileSync("ios/SignoVivo/DirectorSyncModule.swift", "utf8")
 // same slice-to-EOF failure survived one test below it. (Single-marker reads are open-ended by
 // design and cannot mis-bound; they still assert their start exists via indexOf returning >= 0
 // wherever a match is required.)
+/**
+ * The body of a Swift `func <name>`, brace-matched. Whole-file `assert.match` is how most of the
+ * guards in this file went decorative: a byte-identical line elsewhere satisfied the regex while
+ * the copy that mattered was deleted. Scope to the function that actually implements the rule.
+ */
+const braceBlock = (src, at, what) => {
+  const open = src.indexOf("{", at);
+  assert.ok(open >= at && open !== -1, `no block found for ${what}`);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") { depth--; if (depth === 0) return src.slice(open, i + 1); }
+  }
+  assert.fail(`unbalanced braces in ${what}`);
+};
+
+const swiftFunc = (name, src) => {
+  const at = src.indexOf(`func ${name}(`);
+  assert.ok(at > 0, `func ${name} is gone`);
+  return braceBlock(src, at, `func ${name}`);
+};
+
 const slice = (from, to, src = BEACON) => {
   const a = src.indexOf(from);
   const b = src.indexOf(to, a + 1);
@@ -121,12 +143,27 @@ test("the safety rules that made BLE dangerous in 444 are still in place", () =>
   // Legacy 2-field advertisements must stay rejected: pre-448 devices never stop advertising.
   // Since the HMAC tag (#374) the only accepted shape is the 4-field "SV<nonce>.<seq>.<page>.<tag>";
   // the pre-tag 3-field form is rejected too (a 448-455 device can't prove it knows the session code).
-  assert.match(BEACON, /guard parts\.count == 4/,
-    "legacy beacons are accepted again — those devices broadcast a frozen page forever");
+  // PIN THE REJECTION, not the count. `guard parts.count == 4` also matches a LENIENT parse that
+  // falls through to `else { return (nonce, seq, page) }` — i.e. accepts the pre-tag 3-field form
+  // unverified, which is the build-444 wrong-song failure exactly. Measured: that mutation left all
+  // 15 tests in this file green.
+  assert.match(
+    swiftFunc("parse", BEACON),
+    /guard parts\.count == 4,[^\n]*else \{ return nil \}/,
+    "a malformed or pre-tag advertisement is no longer REJECTED — 444's frozen page renders again",
+  );
   assert.doesNotMatch(BEACON, /parts\.count == 2\b/, "the 2-field legacy format must not be parsed");
   assert.doesNotMatch(BEACON, /parts\.count == 3\b/, "the 3-field pre-tag format must not be parsed");
   // And a device that stops directing must stop advertising.
-  assert.match(MODULE, /bleBeacon\.stopPublishing\(\)/, "the beacon is never switched off");
+  // BOTH call sites, named. This was a whole-file substring search with two call sites, so deleting
+  // the one that carries the fix — resetTransport, the actual build-444 remedy — left it green while
+  // a device that directed song 357 and changed role kept broadcasting 357 forever.
+  assert.equal(
+    (MODULE.match(/bleBeacon\.stopPublishing\(\)/g) || []).length, 2,
+    "a bleBeacon.stopPublishing() call site was added or removed — name the new one here",
+  );
+  assert.match(swiftFunc("resetTransport", MODULE), /bleBeacon\.stopPublishing\(\)/,
+    "resetTransport no longer silences the beacon — this IS the build-444 ghost");
 });
 
 
@@ -159,6 +196,23 @@ test("TWO LIVE ADVERTISERS: render NEITHER, rather than flapping or trusting the
   clock += CONTENTION_WINDOW + 1;
   const out = moduleRecv(m, beaconRecv(b, { nonce: "bbbb", seq: 7, page: 372 }, clock), true);
   assert.equal(out, 372, "after contention clears, the remaining advertiser is still ignored");
+
+  // …AND the Swift must actually implement what the model above describes. Everything above this
+  // line exercises a JS transliteration, so every Swift mutation left it green — including deleting
+  // the abstain-under-contention `return` outright, and deleting the whole post-contention cooldown
+  // (the 2026-08-18 hardening added after a live packet capture).
+  const didDiscover = swiftFunc("centralManager", BEACON);
+  const contentionAt = didDiscover.indexOf("if recentNonces.count > 1 {");
+  assert.ok(contentionAt > 0, "the contention branch is gone — contested packets are applied");
+  // Brace-matched, not indexOf("}") — the first closing brace belongs to the nested contention LOG,
+  // so a naive slice stops before the `return` and passes on a branch that no longer abstains.
+  assert.match(braceBlock(didDiscover, contentionAt, "contention branch"), /\breturn\b/,
+    "a contested packet no longer abstains — followers ping-pong between two advertisers");
+  const cooldownAt = didDiscover.indexOf("if now - lastContentionAt < Self.contentionCooldown {");
+  assert.ok(cooldownAt > 0,
+    "the post-contention cooldown is gone — a rival slower than contentionWindow resumes rendering");
+  assert.match(braceBlock(didDiscover, cooldownAt, "cooldown branch"), /\breturn\b/,
+    "the cooldown no longer abstains");
 });
 
 test("the advertised seq is bounded by page turns, not by wall-clock seconds", () => {
@@ -295,7 +349,13 @@ test("neither radio is created on the critical path", () => {
   // exists to make fast. Both radios are now brought up at startup, in BOTH roles: a follower needs
   // the central to hear the first advertisement, and the peripheral too, because any follower may
   // become the director a second later.
-  assert.match(BEACON, /func primeRadios\(\)/, "nothing pre-warms the radios");
+  // Its BODY, not its name. Gutting primeRadios to create only the central — breaking the test's own
+  // stated reason, "any follower may become the director a second later" — left every assertion here
+  // green.
+  const prime = swiftFunc("primeRadios", BEACON);
+  assert.match(prime, /central\s*==\s*nil/, "primeRadios no longer warms the CENTRAL — a follower goes deaf on boot");
+  assert.match(prime, /peripheral\s*==\s*nil/,
+    "primeRadios no longer warms the PERIPHERAL — becoming director pays the cold start this exists to remove");
   assert.match(MODULE, /bleBeacon\.primeRadios\(\)/, "primeRadios is never called");
   const follower = MODULE.slice(MODULE.indexOf("func startFollower("));
   const fEnd = MODULE.indexOf("\n  func ", MODULE.indexOf("func startFollower(") + 1);
