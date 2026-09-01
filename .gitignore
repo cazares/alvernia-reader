@@ -48,3 +48,17 @@ scripts/asc-credentials.env
 # since at least 2026-08-19. Ignoring the directory stops it happening again; it
 # deliberately does NOT untrack the existing gitlink (see the note below).
 .claude/worktrees/
+
+# ── Session handoff docs are NEVER committed ────────────────────────────────
+# A handoff is a snapshot of one session's state. Committed, it goes stale in
+# days and then actively misleads: the root HANDOFF.md sat tracked from
+# 2026-08-18 to 2026-09-01 telling every cold tab "read it before touching
+# anything" while describing build 457 and an unmerged branch, long after
+# builds 472-476 had merged. That was its THIRD staleness incident — see
+# "refresh HANDOFF.md — it was 5 weeks and 41 builds stale" (#284) and
+# "three of its claims were wrong" (3f9b842) — and it was an OPEN finding in
+# docs/ia-audit-2026-07 the whole time. Write handoffs OUTSIDE the repo and
+# hand over the absolute path. Pinned by e2e/noStaleHandoff.test.mjs.
+HANDOFF.md
+HANDOFF-*.md
+*-HANDOFF.md

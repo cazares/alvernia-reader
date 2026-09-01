@@ -1065,7 +1065,8 @@ fix during Mass** (`pre-mass-checklist.md:7-9`, `:65`).
 > can archive**. The usual way in is the ♪ modal → **"Dirigir el coro"**, with no number to
 > remember. `release.sh` no longer bakes, swaps or restores anything.
 >
-> Current instructions: `HANDOFF.md` §4 and §4b.
+> Director entry and the rescue controls are described in `docs/app-atlas.md`; there is no
+> handoff doc at the repo root (see `CLAUDE.md` — handoffs are never committed).
 
 ### Correction to the existing canary step (RELVER-01 / RELVER-12)
 
@@ -1081,7 +1082,7 @@ Wed/Sat practice, on the live room, on the new TestFlight build, with exactly on
 
 1. ❌ **OBSOLETE.** The book is `assets/songbook.pdf` (stable name since 2026-08-05) and you do not
    place it by hand — `scripts/ota-publish.sh <pdf>` installs it. It need not be additive: the
-   publish path deliberately runs **no gates** (owner decision, `HANDOFF.md` §1). A shrink is
+   publish path deliberately runs **no gates** (owner decision, 2026-08-05). A shrink is
    allowed, and its cost — pages stranded on a device that was offline — is stated there.
 2. ❌ **OBSOLETE.** `scripts/ota-publish.sh <pdf>` is the whole procedure and never asks for
    `ADDITIVE_OVERRIDE`. `release.sh` is now only the **native/IPA** path, which does still gate.

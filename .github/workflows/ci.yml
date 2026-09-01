@@ -124,3 +124,12 @@ jobs:
       # --test-name-pattern so a sibling assertion in the same file cannot take the credit.
       - name: Behavioural guard mutation test (replays the 19 regressions that used to slip through)
         run: node scripts/verify-behavioural-guards.mjs
+
+      # The stale-handoff guard. A HANDOFF.md lived at the repo root and rotted three times — by
+      # 5 weeks and 41 builds (#284), with three claims outright wrong (3f9b842), and finally from
+      # 2026-08-18 to 2026-09-01 telling every cold tab "read it before touching anything" while
+      # describing a superseded build and a branch that was never merged. Two audits filed it OPEN
+      # and it went on misleading sessions anyway, because a finding in a doc cannot enforce itself.
+      # This breaks each thing the guard protects and requires the suite to go red.
+      - name: Stale-handoff guard mutation test (a committed handoff misleads the next session)
+        run: node scripts/verify-handoff-guards.mjs

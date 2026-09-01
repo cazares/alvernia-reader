@@ -289,7 +289,7 @@ docs/audit-reconciliation-374.md §4. Dimension-tagged IDs are the canonical ded
 | new-refactor-relay-test-asserts-dead-twobook | MED | **FIXED-#239** |
 | new-refactor-contract-test-pins-dead-nonstandard-dts | LOW | **OPEN** — nearby-sync-contract.test.mjs:23 still pins `"standard" \| "nonStandard"` |
 | new-refactor-dts-appmode-drift | LOW | **OPEN** — src/nearbyDirectorSync.d.ts:15,30 still declare `nonStandard` |
-| new-refactor-handoff-doc-describes-deleted-app | LOW | **OPEN** — HANDOFF.md still exists at repo root; memory `project_webview_rewrite_groundtruth` corrects it |
+| new-refactor-handoff-doc-describes-deleted-app | LOW | **FIXED 2026-09-01** — HANDOFF.md deleted from the repo root and `HANDOFF*.md` gitignored; pinned by `e2e/noStaleHandoff.test.mjs` |
 
 ### A.3 Sync-reliability audit 2026-07 (3-agent hunt; docs/sync-reliability-audit-2026-07.md)
 
