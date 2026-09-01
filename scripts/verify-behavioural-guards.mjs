@@ -270,6 +270,19 @@ const MUTATIONS = [
        "  func primeRadios() {\n"),
    "e2e/bleHandoff.test.mjs", "neither radio is created on the critical path"],
 
+  ["the BLE seq floor goes back to ONE shared baseline — a frozen ghost re-qualifies and holds a stale song",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("    guard parsed.seq > priorSeq else { return }",
+       "    guard parsed.seq > (seenSeqByNonce[lastSeenNonce]?.seq ?? -1) else { return }"),
+   "e2e/dumbFollowerResync.test.mjs",
+   "a scanner keeps a seq floor PER ADVERTISER, so a new director is never mis-ordered"],
+
+  ["the per-advertiser floor stops being recorded before abstention — contention throws away the ghost evidence",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("    seenSeqByNonce[parsed.nonce] = (seq: max(priorSeq, parsed.seq), at: now)", ""),
+   "e2e/bleHandoff.test.mjs",
+   "both layers carry the nonce, so neither can drift from the other"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

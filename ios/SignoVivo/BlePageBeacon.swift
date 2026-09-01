@@ -75,8 +75,21 @@ final class BlePageBeacon: NSObject {
   private var peripheral: CBPeripheralManager?
   private var central: CBCentralManager?
   private var pendingAdvert: String?
-  private var lastSeenSeq = -1
-  private var lastSeenNonce = ""
+  private var lastSeenNonce = ""   // for logging a genuinely new advertiser; NOT the seq floor
+  /// PER-ADVERTISER SEQ FLOOR — the only thing that separates a live director from a ghost.
+  ///
+  /// A single (lastSeenNonce, lastSeenSeq) pair could not. Two advertisers flip it packet by packet,
+  /// so when one drops out the survivor's nonce differs from the stored one about half the time, the
+  /// baseline rebases to -1, and a FROZEN advertisement re-qualifies. That is the build-444 ghost:
+  /// a force-quit director's bluetoothd keeps radiating a validly-tagged "song 357" with no process
+  /// behind it, and the moment the real director backgrounds — iOS strips the local name from a
+  /// backgrounded advertiser, so it stops parsing entirely — the ghost is the only thing left and
+  /// every follower renders song 357 for the length of the call.
+  ///
+  /// Keyed per nonce, the distinction is free: a ghost's seq is FROZEN and a live director's CLIMBS.
+  /// This is sound because advertSeq = 0 and sessionNonce = newNonce() are assigned together, so a
+  /// seq reset always arrives under a new nonce and the floor for a live advertiser only ever rises.
+  private var seenSeqByNonce: [String: (seq: Int, at: TimeInterval)] = [:]
   private var lastPublishedPage = -1
   /// When the current pendingAdvert was requested, so the trace can show request -> on-air latency.
   private var publishRequestedAt: TimeInterval = 0
@@ -130,6 +143,10 @@ final class BlePageBeacon: NSObject {
   /// in the window. Same magnitude as contentionWindow on purpose — a rival needs to have missed
   /// roughly a full window's worth of chances to be re-heard before it's trusted as gone, not just
   /// one lucky gap.
+  /// How many distinct advertisers to remember seq floors for, and for how long. Generous on both:
+  /// forgetting a ghost is what re-opens the 444 window, and the cost of remembering is a few bytes.
+  private static let maxTrackedAdvertisers = 32
+  private static let advertiserMemory: TimeInterval = 600
   private static let contentionCooldown: TimeInterval = 4.0
 
   /// Power both radios up BEFORE they are needed, so neither pays a cold start on the critical path.
@@ -414,6 +431,18 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     // nothing for a few seconds: BLE only ever buys time before the mesh arrives, and the mesh
     // resolves director conflicts by token within seconds. So when it is ambiguous, say nothing.
     let now = Date().timeIntervalSince1970
+    // RECORD THE FLOOR FIRST — before either abstention below can return. The contention and
+    // cooldown branches used to return without recording anything, which threw away exactly the
+    // evidence that tells a ghost from a director, and left the ghost free to rebase later.
+    let priorSeq = seenSeqByNonce[parsed.nonce]?.seq ?? -1
+    seenSeqByNonce[parsed.nonce] = (seq: max(priorSeq, parsed.seq), at: now)
+    if seenSeqByNonce.count > Self.maxTrackedAdvertisers {
+      // Bound the memory. Prune by last-heard, never by the contention window: a ghost that stays
+      // on the air must stay remembered, or pruning re-opens the hole this closes.
+      for (nonce, entry) in seenSeqByNonce where now - entry.at > Self.advertiserMemory {
+        seenSeqByNonce.removeValue(forKey: nonce)
+      }
+    }
     recentNonces[parsed.nonce] = now
     recentNonces = recentNonces.filter { now - $0.value <= Self.contentionWindow }
     if recentNonces.count > 1 {
@@ -436,14 +465,17 @@ extension BlePageBeacon: CBCentralManagerDelegate {
 
     if parsed.nonce != lastSeenNonce {
       lastSeenNonce = parsed.nonce
-      lastSeenSeq = -1
       lastAppliedPage = -1
+      // No seq reset here any more. A new advertiser's floor is already -1 because it has no entry
+      // in seenSeqByNonce; a RETURNING one keeps the floor it earned, which is what stops a frozen
+      // advertisement from re-qualifying every time attention swings back to it.
       log?("ble:new-advertiser", ["nonce": parsed.nonce, "page": parsed.page])
     }
     // Monotonic guard WITHIN a session: a cached or out-of-order packet must never move a follower
     // backward. Across sessions the nonce check above has already rebased us.
-    guard parsed.seq > lastSeenSeq else { return }
-    lastSeenSeq = parsed.seq
+    // Monotonic guard PER ADVERTISER. A cached, out-of-order, or FROZEN packet must never move a
+    // follower: a ghost's seq never exceeds the floor it set the first time it was heard.
+    guard parsed.seq > priorSeq else { return }
     // Log only when the PAGE moves. A scan with allowDuplicates reports every advertisement packet,
     // and one relay POST per packet is how a diagnostic turns into a denial of service against your
     // own worker.

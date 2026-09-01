@@ -51,15 +51,21 @@ const slice = (from, to, src = BEACON) => {
 
 // ── The two guards, transliterated ────────────────────────────────────────────
 const CONTENTION_WINDOW = 4;
-const makeBeacon = () => ({ nonce: "", seq: -1, recent: new Map() });
+const CONTENTION_COOLDOWN = 4;
+const makeBeacon = () => ({ nonce: "", floors: new Map(), recent: new Map(), contendedAt: -Infinity });
 const beaconRecv = (b, adv, now = 0) => {
+  // PER-ADVERTISER SEQ FLOOR, RECORDED BEFORE ANY ABSTENTION. The abstention branches below used to
+  // return without recording anything, throwing away the one signal that separates a live director
+  // (seq climbs) from a ghost (seq frozen) — see seenSeqByNonce in BlePageBeacon.swift.
+  const prior = b.floors.has(adv.nonce) ? b.floors.get(adv.nonce) : -1;
+  b.floors.set(adv.nonce, Math.max(prior, adv.seq));
   // Contention: two live advertisers => abstain entirely.
   b.recent.set(adv.nonce, now);
   for (const [n, t] of b.recent) if (now - t > CONTENTION_WINDOW) b.recent.delete(n);
-  if (b.recent.size > 1) return null;
-  if (adv.nonce !== b.nonce) { b.nonce = adv.nonce; b.seq = -1; }   // new advertiser => rebase
-  if (!(adv.seq > b.seq)) return null;                              // monotonic WITHIN a session
-  b.seq = adv.seq;
+  if (b.recent.size > 1) { b.contendedAt = now; return null; }
+  if (now - b.contendedAt < CONTENTION_COOLDOWN) return null;
+  if (adv.nonce !== b.nonce) b.nonce = adv.nonce;  // new advertiser: relog, but do NOT reset a floor
+  if (!(adv.seq > prior)) return null;             // monotonic PER ADVERTISER
   return { page: adv.page, seq: adv.seq, nonce: adv.nonce };
 };
 
@@ -114,7 +120,9 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
   assert.match(BEACON, /var onPage: \(\(Int, Int, String\) -> Void\)\?/,
     "onPage no longer carries the nonce — a caller can go back to guessing across sessions");
   assert.match(BEACON, /onPage\?\(parsed\.page, parsed\.seq, parsed\.nonce\)/, "the nonce is not passed through");
-  assert.match(BEACON, /if parsed\.nonce != lastSeenNonce/, "the beacon no longer rebases on a new advertiser");
+  assert.match(BEACON, /if parsed\.nonce != lastSeenNonce/, "the beacon no longer notices a new advertiser");
+  assert.match(BEACON, /seenSeqByNonce\[parsed\.nonce\] = \(seq: max\(priorSeq, parsed\.seq\), at: now\)/,
+    "the per-advertiser seq floor is gone — a frozen ghost can rebase and re-qualify");
 
   assert.match(MODULE, /private var bleAppliedNonce = ""/, "the module tracks no advertising session");
   assert.match(MODULE, /onPage = \{ \[weak self\] page, seq, nonce in/, "the module ignores the nonce again");
@@ -497,4 +505,52 @@ test("a director does not scan — and cannot be made to by a radio restart", ()
   // exists to prevent.
   const stop = slice("func stopScanning", "/// NOT PROVIDED, DELIBERATELY");
   assert.match(stop, /wantsScanning = false/, "stopping the scan does not clear the intent");
+});
+
+test("A GHOST CANNOT RE-QUALIFY once the real director drops", () => {
+  // The build-444 failure, reconstructed from the field conditions that produce it.
+  //
+  // iPad X was force-quit while directing song 357. Per this file's own hardware note, bluetoothd
+  // keeps radiating its last, validly-tagged advertisement with no process behind it — so its seq is
+  // FROZEN. Director D is live alongside it. Then D backgrounds: iOS strips the local name from a
+  // backgrounded advertiser, so D stops parsing entirely and its mesh session dies with it. The
+  // ghost is the only thing left on the air.
+  //
+  // With a single (nonce, seq) baseline the ghost's nonce then differed from the stored one, the
+  // baseline rebased to -1, its frozen seq cleared it, and the loft rendered song 357 for the length
+  // of the call. A per-advertiser floor makes the RE-adoption impossible: the ghost's seq never
+  // exceeds the floor it set the first time it was heard.
+  //
+  // WHAT THIS DOES NOT FIX, and cannot at this layer: the FIRST packet from a lone ghost is still
+  // adopted. Nothing in a BLE advertisement proves the sender is a director — the HMAC keys on the
+  // session code, which every parish device shares — and `publish()` bumps seq only on a REAL page
+  // change, so a live director sitting on one hymn is byte-for-byte as frozen as a ghost. A
+  // "prove liveness by climbing" rule would therefore blind the follower to a stationary director.
+  // Closing that needs the mesh to corroborate the nonce, which is a design change, not a guard.
+  const b = makeBeacon(), m = makeModule();
+  let clock = 0;
+  const rendered = [];
+  const hear = (nonce, seq, page) => {
+    clock += 1;
+    const out = moduleRecv(m, beaconRecv(b, { nonce, seq, page }, clock), true);
+    if (out !== null) rendered.push(out);
+  };
+
+  hear("gggg", 12, 357);                       // lone ghost heard first — adopted (the open hole)
+  assert.deepEqual(rendered, [357], "documents the first-sighting hole; see the note above");
+
+  for (let i = 1; i <= 3; i++) { hear("dddd", i, 40); hear("gggg", 12, 357); }  // both live: contend
+  const afterContention = [...rendered];
+
+  clock += CONTENTION_WINDOW + CONTENTION_COOLDOWN + 2;   // D backgrounds; contention + cooldown lapse
+  for (let i = 0; i < 6; i++) hear("gggg", 12, 357);      // the ghost keeps radiating, unchanged
+
+  assert.deepEqual(rendered, afterContention,
+    "the ghost was RE-adopted after the real director dropped — the 444 wrong song, held for the call");
+
+  // And a genuinely live director is still adopted the moment the air is clear, so this is not deafness.
+  clock += CONTENTION_WINDOW + CONTENTION_COOLDOWN + 2;
+  hear("eeee", 1, 41);
+  assert.deepEqual(rendered, [...afterContention, 41],
+    "with the air clear, a real new director must still be adopted at once");
 });

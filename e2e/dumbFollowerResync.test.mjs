@@ -377,12 +377,23 @@ test("stopPublishing resets state, or a re-promoted director stays silent", () =
   assert.match(body, /sessionNonce = Self\.newNonce\(\)/, "the next session must be a NEW advertiser");
 });
 
-test("a scanner rebases on a new advertiser instead of mis-ordering seqs", () => {
+test("a scanner keeps a seq floor PER ADVERTISER, so a new director is never mis-ordered", () => {
   const ble = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "BlePageBeacon.swift"), "utf8");
   // seq is monotonic only WITHIN a session — it restarts at 0 per launch and is per-device. Without
-  // a rebase a follower holding "last seen 1743" ignores a new director starting at 1, forever.
-  assert.match(ble, /parsed\.nonce != lastSeenNonce/, "a different advertiser must reset the baseline");
-  assert.match(ble, /lastSeenSeq = -1/, "the rebase must clear the seq floor");
+  // a per-advertiser floor a follower holding "last seen 1743" ignores a new director starting at 1.
+  //
+  // This pinned the OLD mechanism: one shared baseline, cleared by `lastSeenSeq = -1` whenever the
+  // nonce changed. That clear is exactly what let a FROZEN advertisement re-qualify — a force-quit
+  // director's bluetoothd keeps radiating a validly-tagged page, and when the real director dropped,
+  // the rebase handed the ghost a floor of -1 and the loft rendered its stale song. Keyed per nonce
+  // the floor is naturally -1 for a genuinely new advertiser and unchanged for a returning one, so
+  // the rebase is unnecessary and the ghost hole closes.
+  assert.match(ble, /private var seenSeqByNonce: \[String: \(seq: Int, at: TimeInterval\)\]/,
+    "the per-advertiser seq floor is gone — one shared baseline lets a frozen ghost re-qualify");
+  assert.match(ble, /guard parsed\.seq > priorSeq else \{ return \}/,
+    "the monotonic guard no longer reads the per-advertiser floor");
+  assert.doesNotMatch(ble, /lastSeenSeq = -1/,
+    "the shared-baseline reset is back — that is the mechanism the ghost exploited");
 });
 
 test("legacy two-field BLE advertisements are rejected", () => {
