@@ -194,6 +194,11 @@ const MUTATIONS = [
    sub('  if [ -e "$IPA_OUT" ] && [ "${ALLOW_REUSED_BUILD:-0}" != "1" ]; then',
        '  if [ ! -e "$IPA_OUT" ] && [ "${ALLOW_REUSED_BUILD:-0}" != "1" ]; then'),
    "e2e/buildNumberGuard.test.mjs", "refuses a number whose IPA already exists"],
+  ["a forced handover rescue keeps the OLD seq floor, so the follower freezes on one page for the rest of the Mass",
+   "web/src/lib/svSyncDecision.js",
+   sub("    out.lastSeq = snap.seq;", "    out.lastSeq = Math.max(ctx.lastSeq, snap.seq);"),
+   "e2e/svSyncDecision.test.mjs", "handover: the page turn AFTER a forced rescue still renders"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

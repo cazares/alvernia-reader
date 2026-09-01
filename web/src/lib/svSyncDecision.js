@@ -123,7 +123,23 @@
         out.renderPill = true;
         return out;
       }
-      out.lastSeq = Math.max(ctx.lastSeq, snap.seq);
+      // ADOPT the accepted seq — do NOT keep the old floor.
+    //
+    // Reaching this line means EITHER ctx.force is set, OR snap.seq > ctx.lastSeq (the
+    // de-dup above returned otherwise). In the second case Math.max was already a no-op,
+    // so this is only a behaviour change on the FORCED path — and there the max was wrong.
+    //
+    // The forced poll exists to rescue a follower after a handover: the relay deliberately
+    // accepts a LOWER seq from a NEW director once the old snapshot ages past the freshness
+    // window (sync-worker/src/publishSeq.js decidePublish, reason "takeover"), which happens
+    // whenever the incoming director's clock trails the outgoing one's. Math.max re-armed the
+    // de-dup against the very publisher it had just accepted: the rescue rendered one frame,
+    // then every subsequent page turn from that director came in at a seq below the stale
+    // floor and was judged "live-dup" — no render, and livePage left unset, so the heartbeat's
+    // re-home comparison agreed too and never issued a corrective poll. The follower sat on one
+    // page for the rest of the Mass under a green "en vivo" pill, recoverable only by a human
+    // tapping reconnect or by the new director's wall clock climbing past the old seq.
+    out.lastSeq = snap.seq;
       out.livePage = snap.page;
 
       // The user is intentionally browsing (tapped a song → jumped). Track the
