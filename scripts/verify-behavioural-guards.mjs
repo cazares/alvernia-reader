@@ -199,6 +199,26 @@ const MUTATIONS = [
    sub("    out.lastSeq = snap.seq;", "    out.lastSeq = Math.max(ctx.lastSeq, snap.seq);"),
    "e2e/svSyncDecision.test.mjs", "handover: the page turn AFTER a forced rescue still renders"],
 
+  ["broadcastPage floors an invalid page to 1 again — a confident wrong page to the whole fleet",
+   "PdfReaderApp.tsx",
+   sub("    const page = rawPage;",
+       "    const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;"),
+   "e2e/broadcastNeverWrongPage.test.mjs",
+   "broadcastPage refuses an invalid page instead of flooring it to page 1"],
+
+  ["the 100ms director heartbeat loses its own guard and hands a -1 mirror straight to Swift",
+   "PdfReaderApp.tsx",
+   sub("      if (!Number.isFinite(currentPageRef.current) || currentPageRef.current < 1) return;\n", ""),
+   "e2e/broadcastNeverWrongPage.test.mjs",
+   "the director heartbeat refuses an invalid page before sending it"],
+
+  ["render-failed blanks the mirror during becomeDirector's await window again",
+   "PdfReaderApp.tsx",
+   sub('if (roleRef.current === "follower" && !becomeDirectorInFlightRef.current) {',
+       'if (roleRef.current === "follower") {'),
+   "e2e/broadcastNeverWrongPage.test.mjs",
+   "render-failed does not blank the mirror while this device is becoming director"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

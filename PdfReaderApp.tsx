@@ -891,7 +891,17 @@ export default function App() {
     // currentPageRef to -1; if this device then becomes director before a real page lands, a raw
     // broadcast of -1 would clamp to page 1 on every follower — yanking the whole congregation.
     // Floor to a real page at the single choke point that feeds BOTH transports.
-    const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
+    // REFUSE, do not floor. The flooring here WAS `: 1`, which is the very outcome this comment
+    // says it prevents: page 1 is not a safe default, it is a wrong page, and it went to the whole
+    // fleet with the same authority as a real page turn. A director whose mirror is not yet valid
+    // has NOTHING true to say, and saying nothing leaves every follower on the last page the
+    // previous director published — which is correct. Silence is recoverable; a confident wrong
+    // page is what the congregation sees.
+    if (!Number.isFinite(rawPage) || rawPage < 1) {
+      dbgLog("page:send-refused", { rawPage, book });
+      return;
+    }
+    const page = rawPage;
     const mode = modeForBook(book);
     const total = totalPagesRef.current;
     if (roleRef.current === "director") {
@@ -943,6 +953,12 @@ export default function App() {
         lastDirectorAtWrittenRef.current = nowMs;
         AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(nowMs)).catch(() => {});
       }
+      // The same refusal as broadcastPage. This tick does NOT go through broadcastPage, so the
+      // choke point that comment claims to be was never actually single: a -1 mirror was handed
+      // straight to Swift, which clamps it to 1 and re-sent page 1 to the fleet ten times a
+      // second. The director never receives their own broadcast, so their screen still showed
+      // the right page and nothing ever surfaced it.
+      if (!Number.isFinite(currentPageRef.current) || currentPageRef.current < 1) return;
       sendNearbyDirectorPageUpdate(currentPageRef.current, totalPagesRef.current, {
         mode: modeForBook(book),
         bookId: book,
@@ -1588,7 +1604,12 @@ export default function App() {
           // gated on explicitTransmitterRef, not roleRef). Resetting on a broadcaster would publish
           // page -1 → clamped to 1 → yank the whole congregation to page 1. Gate positively on
           // "follower" so every broadcaster role is excluded.
-          if (roleRef.current === "follower") {
+          // ...AND not while this device is BECOMING a broadcaster. roleRef stays "follower" for the
+          // whole of becomeDirector's await window (resetNearbyDirectorSync, startNearbyDirector, and
+          // a 2s retry sleep), so a render-failed landing in that window passed the role gate above and
+          // silently undid the mirror correction becomeDirector had just made from the page the user
+          // was actually on. The role check alone was never sufficient.
+          if (roleRef.current === "follower" && !becomeDirectorInFlightRef.current) {
             currentPageRef.current = -1;
           }
           break;
