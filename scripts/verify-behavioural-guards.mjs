@@ -272,7 +272,7 @@ const MUTATIONS = [
 
   ["the BLE seq floor goes back to ONE shared baseline — a frozen ghost re-qualifies and holds a stale song",
    "ios/SignoVivo/BlePageBeacon.swift",
-   sub("    guard parsed.seq > priorSeq else { return }",
+   sub("    guard parsed.seq > floor else { return }",
        "    guard parsed.seq > (seenSeqByNonce[lastSeenNonce]?.seq ?? -1) else { return }"),
    "e2e/dumbFollowerResync.test.mjs",
    "a scanner keeps a seq floor PER ADVERTISER, so a new director is never mis-ordered"],
@@ -282,6 +282,65 @@ const MUTATIONS = [
    sub("    seenSeqByNonce[parsed.nonce] = (seq: max(priorSeq, parsed.seq), at: now)", ""),
    "e2e/bleHandoff.test.mjs",
    "both layers carry the nonce, so neither can drift from the other"],
+
+  ["the BLE applied-floor loses precedence — a director's own contested packets raise the floor against it (the #395 regression)",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("    let floor = appliedSeqByNonce[parsed.nonce] ?? priorSeq", "    let floor = priorSeq"),
+   "e2e/bleHandoff.test.mjs", "both layers carry the nonce, so neither can drift from the other"],
+
+  ["the foreground handler calls the advertiser-destroying refresh for a serving director again",
+   "PdfReaderApp.tsx",
+   sub('        (roleRef.current === "director" ? refreshDirectorBrowse() : refreshNearbyDiscovery()).catch(() => {});',
+       '        refreshNearbyDiscovery().catch(() => {});'),
+   "e2e/foregroundKeepsAdvertiser.test.mjs",
+   "the foreground handler gives a director the browser-only refresh, never the advertiser-destroying one"],
+
+  ["refreshNearbyDiscovery destroys a live advertiser while serving — the Swift guard is removed",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub('      if self.currentRole == "director", !self.allConnectedPeers.isEmpty {\n        self.refreshBrowserOnly()\n      } else {\n        self.refreshDiscovery()\n      }\n',
+       '      self.refreshDiscovery()\n'),
+   "e2e/foregroundKeepsAdvertiser.test.mjs",
+   "refreshNearbyDiscovery itself refuses to destroy a live advertiser while serving followers"],
+
+  ["the takeover confirm broadcasts the page captured when the dialog OPENED — the choir holds a stale page for a song",
+   "PdfReaderApp.tsx",
+   sub("          onPress: () => becomeDirector(code, pageAtConfirm() ?? restoredDirectorPageRef.current),",
+       "          onPress: () => becomeDirector(code, knownCurrentPage ?? restoredDirectorPageRef.current),"),
+   "e2e/takeoverPageAtConfirm.test.mjs",
+   "the takeover dialog snapshots the mirror when it OPENS and resolves the page at CONFIRM"],
+
+  ["pageAtConfirm's comparison inverts — a page turned during the dialog is dropped and a lagging mirror wins",
+   "PdfReaderApp.tsx",
+   sub("        return live !== mirrorAtOpen && Number.isFinite(live) && live > 0 ? live : knownCurrentPage;",
+       "        return live === mirrorAtOpen && Number.isFinite(live) && live > 0 ? live : knownCurrentPage;"),
+   "e2e/takeoverPageAtConfirm.test.mjs",
+   "pageAtConfirm prefers a mirror that MOVED during the dialog, keeps the captured page otherwise, never the sentinel"],
+
+  ["a director's page turns stop refreshing lastDirectorPage — the crash-resume page is the promotion-time page again",
+   "PdfReaderApp.tsx",
+   sub('          if (roleRef.current === "director") {\n            AsyncStorage.setItem(STORAGE_KEYS.lastDirectorPage, String(page)).catch(() => {});\n          }\n', ''),
+   "e2e/crashResumeRestoresPage.test.mjs",
+   "a director's page turns keep lastDirectorPage fresh, so the restored page is the crash-time page"],
+
+  ["bootstrap stops driving the web to the restored page — 'Volver a dirigir' broadcasts the boot default again",
+   "PdfReaderApp.tsx",
+   sub("            const restored = restoredDirectorPageRef.current;", "            const restored = undefined;"),
+   "e2e/crashResumeRestoresPage.test.mjs",
+   "bootstrap drives the web to the restored page, so 'Volver a dirigir' carries it instead of the boot default"],
+
+  ["the 30s relay heartbeat loses its own guard and hands a -1 mirror to publishPageToRelay, which floors it to page 1",
+   "PdfReaderApp.tsx",
+   sub("      if (!Number.isFinite(currentPageRef.current) || currentPageRef.current < 1) return;\n      try {\n",
+       "      try {\n"),
+   "e2e/broadcastNeverWrongPage.test.mjs",
+   "the relay heartbeat refuses an invalid page before publishing it"],
+
+  ["a superseded becomeDirector releases the in-flight claim unconditionally — the newer call's render-failed gate is re-armed",
+   "PdfReaderApp.tsx",
+   sub("        if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded while dropping the link",
+       "        if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = 0; return; } // superseded while dropping the link"),
+   "e2e/becomeDirectorInFlightGeneration.test.mjs",
+   "every release of the in-flight claim is guarded by === myGen"],
 
 ];
 

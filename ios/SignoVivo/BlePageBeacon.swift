@@ -90,6 +90,13 @@ final class BlePageBeacon: NSObject {
   /// This is sound because advertSeq = 0 and sessionNonce = newNonce() are assigned together, so a
   /// seq reset always arrives under a new nonce and the floor for a live advertiser only ever rises.
   private var seenSeqByNonce: [String: (seq: Int, at: TimeInterval)] = [:]
+  /// What we last APPLIED from each advertiser. An advertiser we have followed is judged against this,
+  /// not against seenSeqByNonce — its own packets heard under contention must not raise the floor
+  /// against it. (#395 recorded seen-seq before the abstention and used it as the ONLY floor: a
+  /// director who turned a page while a ghost was on the air was then refused that very page once the
+  /// air cleared, until the next turn — the follower held the old page under a green pill. Two floors:
+  /// `seen` catches the frozen ghost, `applied` keeps the live director.)
+  private var appliedSeqByNonce: [String: Int] = [:]
   private var lastPublishedPage = -1
   /// When the current pendingAdvert was requested, so the trace can show request -> on-air latency.
   private var publishRequestedAt: TimeInterval = 0
@@ -441,6 +448,7 @@ extension BlePageBeacon: CBCentralManagerDelegate {
       // on the air must stay remembered, or pruning re-opens the hole this closes.
       for (nonce, entry) in seenSeqByNonce where now - entry.at > Self.advertiserMemory {
         seenSeqByNonce.removeValue(forKey: nonce)
+        appliedSeqByNonce.removeValue(forKey: nonce)
       }
     }
     recentNonces[parsed.nonce] = now
@@ -471,11 +479,14 @@ extension BlePageBeacon: CBCentralManagerDelegate {
       // advertisement from re-qualifying every time attention swings back to it.
       log?("ble:new-advertiser", ["nonce": parsed.nonce, "page": parsed.page])
     }
-    // Monotonic guard WITHIN a session: a cached or out-of-order packet must never move a follower
-    // backward. Across sessions the nonce check above has already rebased us.
-    // Monotonic guard PER ADVERTISER. A cached, out-of-order, or FROZEN packet must never move a
-    // follower: a ghost's seq never exceeds the floor it set the first time it was heard.
-    guard parsed.seq > priorSeq else { return }
+    // Monotonic guard PER ADVERTISER, against the RIGHT floor. An advertiser we have FOLLOWED is
+    // judged against what we last applied from it — its own packets heard under contention must not
+    // raise the floor against it (a director who turned a page while a ghost was on the air would
+    // otherwise be refused that page until the next turn). One we have NEVER applied is judged
+    // against its last-seen seq, which for a frozen ghost never climbs.
+    let floor = appliedSeqByNonce[parsed.nonce] ?? priorSeq
+    guard parsed.seq > floor else { return }
+    appliedSeqByNonce[parsed.nonce] = parsed.seq
     // Log only when the PAGE moves. A scan with allowDuplicates reports every advertisement packet,
     // and one relay POST per packet is how a diagnostic turns into a denial of service against your
     // own worker.

@@ -89,3 +89,22 @@ test("render-failed does not blank the mirror while this device is becoming dire
     "roleRef stays 'follower' through becomeDirector's awaits, so the role check alone is not enough",
   );
 });
+
+test("the relay heartbeat refuses an invalid page before publishing it", () => {
+  const at = SRC.indexOf("const startDirectorHeartbeat = useCallback(");
+  assert.notEqual(at, -1, "startDirectorHeartbeat must exist");
+  const body = bodyAt(at, "startDirectorHeartbeat");
+
+  const publishAt = body.indexOf("publishPageToRelay(currentPageRef.current");
+  assert.notEqual(publishAt, -1, "the heartbeat must still publish the relay keepalive");
+  // Look only at the RELAY tick — from its setInterval to its publish. The mesh tick's guard sits
+  // earlier in the same body and must not be allowed to satisfy this test on the relay's behalf.
+  const relayAt = body.indexOf("relayHeartbeatRef.current = setInterval(");
+  assert.ok(relayAt !== -1 && relayAt < publishAt, "the relay tick must exist and contain the publish");
+  const tick = body.slice(relayAt, publishAt);
+  assert.match(
+    tick,
+    /if\s*\(\s*!Number\.isFinite\(currentPageRef\.current\)\s*\|\|\s*currentPageRef\.current\s*<\s*1\s*\)\s*return;/,
+    "the relay tick needs its own guard — it bypasses broadcastPage, and publishPageToRelay floors -1 to page 1 for every web follower",
+  );
+});

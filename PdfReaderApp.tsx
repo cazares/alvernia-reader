@@ -278,10 +278,13 @@ export default function App() {
   const lastDirectorAtWrittenRef = useRef<number>(0);
   // Restored director page on cold-boot, for resume-director to use. Set in bootstrap, used by onDirectorCode.
   const restoredDirectorPageRef = useRef<number | undefined>(undefined);
-  // True from the moment becomeDirector is entered until it settles. roleRef is only assigned after
-  // the mesh has started (which can sleep 2s and retry); anything that must not race a director
-  // start in flight reads this, not roleRef.
-  const becomeDirectorInFlightRef = useRef(false);
+  // The roleGeneration that claimed becomeDirector, from entry until it settles; 0 = nobody in flight.
+  // roleRef is only assigned after the mesh has started (which can sleep 2s and retry); anything that
+  // must not race a director start in flight reads this, not roleRef. A GENERATION and not a boolean:
+  // two becomeDirector calls can overlap (a code confirmed twice inside that window), and the OLDER
+  // one's superseded exit must not release the NEWER one's claim — so a release only counts if the
+  // ref still holds the releasing call's own generation.
+  const becomeDirectorInFlightRef = useRef(0);
   // One-shot: the transmitter notice must not re-fire when syncAvailable flips identity.
   const didTransmitterNoticeRef = useRef(false);
   // One-shot per session: a device refused for being on too old a binary (shouldStage's
@@ -978,6 +981,8 @@ export default function App() {
     relayHeartbeatRef.current = setInterval(() => {
       if (roleRef.current !== "director" && !explicitTransmitterRef.current) return;
       const book = currentBookRef.current;
+      // Same refusal as the mesh tick: publishPageToRelay floors -1 to page 1 for web followers.
+      if (!Number.isFinite(currentPageRef.current) || currentPageRef.current < 1) return;
       try {
         publishPageToRelay(currentPageRef.current, totalPagesRef.current, {
           mode: modeForBook(book),
@@ -1052,7 +1057,7 @@ export default function App() {
     async (code: string, knownCurrentPage?: number) => {
       // Claim this role transition; a later flip bumps the generation and supersedes us.
       const myGen = ++roleGenerationRef.current;
-      becomeDirectorInFlightRef.current = true;
+      becomeDirectorInFlightRef.current = myGen;
       // CORRECT THE MIRROR BEFORE ANYTHING CAN READ IT. Every broadcast below — the no-mesh
       // transmitter path, the mesh path, the 1s/30s heartbeats — reads currentPageRef.current
       // rather than asking the web again, so the fix has to land here, once, before the first read.
@@ -1081,7 +1086,7 @@ export default function App() {
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
         startDirectorHeartbeat(); // keep the relay snapshot fresh (guarded on explicitTransmitterRef)
-        becomeDirectorInFlightRef.current = false;
+        if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0;
         return;
       }
       // LIVE-DIRECTOR TAKEOVER: if we're entering a director code while currently a CONNECTED
@@ -1096,7 +1101,7 @@ export default function App() {
         } catch {
           /* best-effort drop; startDirector below still attempts the takeover */
         }
-        if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = false; return; } // superseded while dropping the link
+        if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded while dropping the link
       }
       try {
         try {
@@ -1105,10 +1110,10 @@ export default function App() {
           // Mesh startup can transiently fail (permission race, radio warm-up).
           // Wait briefly and retry the start exactly once before giving up.
           await new Promise((r) => setTimeout(r, 2000));
-          if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = false; return; } // superseded during the retry sleep
+          if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded during the retry sleep
           await startNearbyDirector(DIRECTOR_SESSION);
         }
-        if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = false; return; } // superseded while the mesh was starting
+        if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded while the mesh was starting
         roleRef.current = "director";
         // Record the role AND when. lastDirectorAt is what the boot path reads to tell a crash
         // twenty seconds ago from a cold start next Sunday; the heartbeat keeps it fresh from here.
@@ -1118,7 +1123,7 @@ export default function App() {
         AsyncStorage.setItem(STORAGE_KEYS.lastDirectorAt, String(Date.now())).catch(() => {});
         AsyncStorage.setItem(STORAGE_KEYS.lastDirectorPage, String(currentPageRef.current || 1)).catch(() => {});
         bumpDirectorSessions();
-        if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = false; return; } // superseded while persisting
+        if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded while persisting
         injectEvent({ type: "role", role: "director" });
         broadcastPage(currentPageRef.current, currentBookRef.current);
         startDirectorHeartbeat();
@@ -1133,7 +1138,7 @@ export default function App() {
         // director had no equivalent protection while doing it to everyone reaching for it.
         if (syncAvailable) refreshDirectorBrowse().catch(() => {});
         breadcrumb("director");
-        becomeDirectorInFlightRef.current = false;
+        if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0;
       } catch {
         // A live-takeover attempt that still failed (e.g. Swift DIRECTOR_TAKEOVER_REQUIRED raced
         // back, or a transient mesh error) must NOT strip a connected follower's UI to "none".
@@ -1145,9 +1150,11 @@ export default function App() {
         } else {
           injectEvent({ type: "role", role: "none" });
         }
-        // Released on EVERY exit. A single stuck `true` would wedge the resume guard forever —
-        // the device would refuse to auto-resume for the rest of the session with no signal.
-        becomeDirectorInFlightRef.current = false;
+        // Released on EVERY exit. A single stuck claim would wedge the render-failed gate forever —
+        // a follower's mirror would never blank again for the rest of the session with no signal.
+        // Guarded like every other release: if a newer becomeDirector has claimed the ref, this
+        // superseded call must leave that claim alone.
+        if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0;
       }
     },
     [
@@ -1262,13 +1269,26 @@ export default function App() {
       const body = liveDirector
         ? "Otro dispositivo está dirigiendo AHORA. Si continúas, tú tomas el control y todos te seguirán a ti."
         : "Los demás dispositivos seguirán tu página. Si otro director ya está activo, le quitarás el control.";
+      // THE DIALOG IS MODAL TO TOUCH, NOT TO THE MESH. While it is up the live director's turns keep
+      // landing (mesh `page` → currentPageRef + web render), so the page captured at OPEN can be a
+      // whole song stale by the time a human confirms — and becomeDirector writes it into the mirror,
+      // after which every heartbeat re-asserts it: the whole choir HOLDS the stale page while this
+      // device's own screen shows the right one, invisible to the operator until their next manual
+      // turn. Snapshot the mirror now; at confirm, if it moved to a valid page (the screen moved with
+      // it), prefer the live mirror. If it did not move, the captured page still wins — the mirror may
+      // be mid-lag at open (aa68c9e). The -1 render-failed sentinel never wins.
+      const mirrorAtOpen = currentPageRef.current;
+      const pageAtConfirm = () => {
+        const live = currentPageRef.current;
+        return live !== mirrorAtOpen && Number.isFinite(live) && live > 0 ? live : knownCurrentPage;
+      };
       Alert.alert(title, body, [
         // Cancel: do nothing — stay exactly as you were (a follower keeps following the real director).
         { text: "Cancelar", style: "cancel" },
         {
           text: liveDirector ? "Tomar el control" : "Sí, dirigir",
           style: liveDirector ? "destructive" : "default",
-          onPress: () => becomeDirector(code, knownCurrentPage ?? restoredDirectorPageRef.current),
+          onPress: () => becomeDirector(code, pageAtConfirm() ?? restoredDirectorPageRef.current),
         },
       ]);
     },
@@ -1418,6 +1438,13 @@ export default function App() {
           let page = Math.max(1, Number(msg.page) || currentPageRef.current);
           if (totalPagesRef.current > 0) page = Math.min(page, totalPagesRef.current);
           currentPageRef.current = page;
+          // KEEP THE CRASH-RESUME PAGE FRESH. lastDirectorPage was written only when the role was
+          // TAKEN, so after a crash the "restored" page was the page from when the seat was claimed —
+          // usually the boot page at 11:55 — not the page at crash time, and PR #381's restore never
+          // worked end-to-end. Page turns are human-rate; one AsyncStorage write per turn is nothing.
+          if (roleRef.current === "director") {
+            AsyncStorage.setItem(STORAGE_KEYS.lastDirectorPage, String(page)).catch(() => {});
+          }
           if (typeof msg.totalPages === "number" && msg.totalPages > 0) {
             totalPagesRef.current = msg.totalPages;
           }
@@ -2438,6 +2465,23 @@ export default function App() {
           if (prev === "director") {
             // Restore the page the director was on before the crash, so resume-director has the right context.
             restoredDirectorPageRef.current = pageStr ? Number(pageStr) : undefined;
+            // DRIVE THE WEB TO THE RESTORED PAGE. bootstrap makes this device a FOLLOWER (finally →
+            // becomeFollower), so when the web boots to its default page and posts bridge-ready, the
+            // follower branch ADOPTS page 2 into the mirror and nothing re-homes it — this device WAS
+            // the only director, so requestCurrentSnapshot gets no answer, and native never follows the
+            // relay. "Volver a dirigir" then sent request-director with currentPage: 2, and the resumed
+            // director broadcast the BOOT DEFAULT to a choir sitting on the real page, held until a
+            // human navigated. Injecting the restored page as a sync-event queues until bridge-ready,
+            // flushes right after that adoption, and the web renders it and posts page-changed — so the
+            // mirror, the screen and the request-director payload all carry the crash-time page. If
+            // another device has since taken the seat, its mesh page arrives afterwards and overrides.
+            const restored = restoredDirectorPageRef.current;
+            if (typeof restored === "number" && restored > 0) {
+              injectEvent({
+                type: "sync-event",
+                event: { type: "page", page: restored, book: currentBookRef.current, src: "restore" },
+              });
+            }
             // Written back as follower so the toast fires once per crash, not on every boot forever.
             AsyncStorage.setItem(STORAGE_KEYS.lastSyncRole, "follower").catch(() => {});
             // NO INSTRUCTIONS — THE NOTICE CARRIES THE BUTTON (owner, 2026-08-18: "really shitty
@@ -2633,7 +2677,17 @@ export default function App() {
       // 66 advertiser start/stop events per second, which is why the device that gets picked up and
       // put down all day was the one that could never complete a handshake. The Swift side now
       // invalidates properly and floors the churn at 2 s, but the duplicate had no reason to exist.
-      if (syncAvailable) refreshNearbyDiscovery().catch(() => {});
+      // …AND THE RIGHT ONE FOR THE ROLE. refreshNearbyDiscovery tears the ADVERTISER down first
+      // (DirectorSyncModule.refreshDiscovery: stopAdvertisingPeer, advertiser = nil, then a browser
+      // rebuild and a wipe of the discovered-peer maps). For a SERVING director that is the exact
+      // failure handleAppDidBecomeActive deliberately avoids milliseconds earlier in Swift: every
+      // follower's browser fires lostPeer, in-flight invites evaporate with no callback, and the whole
+      // choir re-handshakes and holds the stale page at the moment the director came back to turn one.
+      // becomeDirector had this same call and was switched to the browser-only refresh; the foreground
+      // path kept the destructive one. Route by role, exactly as becomeDirector does.
+      if (syncAvailable) {
+        (roleRef.current === "director" ? refreshDirectorBrowse() : refreshNearbyDiscovery()).catch(() => {});
+      }
       if (roleRef.current === "follower") {
         // SIMPLE AND STATELESS (Miguel, 2026-08-18) — no longer pre-fills from
         // lastDirectorSnapshotRef on foreground. The fresh request below is what actually

@@ -52,20 +52,26 @@ const slice = (from, to, src = BEACON) => {
 // ── The two guards, transliterated ────────────────────────────────────────────
 const CONTENTION_WINDOW = 4;
 const CONTENTION_COOLDOWN = 4;
-const makeBeacon = () => ({ nonce: "", floors: new Map(), recent: new Map(), contendedAt: -Infinity });
+const makeBeacon = () => ({ nonce: "", seen: new Map(), applied: new Map(), recent: new Map(), contendedAt: -Infinity });
 const beaconRecv = (b, adv, now = 0) => {
-  // PER-ADVERTISER SEQ FLOOR, RECORDED BEFORE ANY ABSTENTION. The abstention branches below used to
-  // return without recording anything, throwing away the one signal that separates a live director
-  // (seq climbs) from a ghost (seq frozen) — see seenSeqByNonce in BlePageBeacon.swift.
-  const prior = b.floors.has(adv.nonce) ? b.floors.get(adv.nonce) : -1;
-  b.floors.set(adv.nonce, Math.max(prior, adv.seq));
+  // TWO PER-ADVERTISER FLOORS — see seenSeqByNonce / appliedSeqByNonce in BlePageBeacon.swift.
+  // `seen` is recorded BEFORE any abstention: it is what stops a frozen ghost re-qualifying after the
+  // real director drops (its seq never climbs past what we first heard). `applied` is recorded only
+  // when we actually follow a packet.
+  const priorSeen = b.seen.has(adv.nonce) ? b.seen.get(adv.nonce) : -1;
+  b.seen.set(adv.nonce, Math.max(priorSeen, adv.seq));
   // Contention: two live advertisers => abstain entirely.
   b.recent.set(adv.nonce, now);
   for (const [n, t] of b.recent) if (now - t > CONTENTION_WINDOW) b.recent.delete(n);
   if (b.recent.size > 1) { b.contendedAt = now; return null; }
   if (now - b.contendedAt < CONTENTION_COOLDOWN) return null;
   if (adv.nonce !== b.nonce) b.nonce = adv.nonce;  // new advertiser: relog, but do NOT reset a floor
-  if (!(adv.seq > prior)) return null;             // monotonic PER ADVERTISER
+  // An advertiser we have FOLLOWED is judged against what we last applied from it, so its own packets
+  // heard under contention cannot raise the floor against it. One we never applied is judged against
+  // its last-seen seq — which for a ghost is frozen.
+  const floor = b.applied.has(adv.nonce) ? b.applied.get(adv.nonce) : priorSeen;
+  if (!(adv.seq > floor)) return null;
+  b.applied.set(adv.nonce, adv.seq);
   return { page: adv.page, seq: adv.seq, nonce: adv.nonce };
 };
 
@@ -123,6 +129,13 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
   assert.match(BEACON, /if parsed\.nonce != lastSeenNonce/, "the beacon no longer notices a new advertiser");
   assert.match(BEACON, /seenSeqByNonce\[parsed\.nonce\] = \(seq: max\(priorSeq, parsed\.seq\), at: now\)/,
     "the per-advertiser seq floor is gone — a frozen ghost can rebase and re-qualify");
+  // TWO floors, not one. #395 used the seen-floor alone and refused a live director the page it turned
+  // while a ghost was on the air (its own contested packets had raised the floor against it). The
+  // applied-floor takes precedence for an advertiser we have followed; the seen-floor catches the ghost.
+  assert.match(BEACON, /let floor = appliedSeqByNonce\[parsed\.nonce\] \?\? priorSeq/,
+    "the applied-floor no longer takes precedence — a director's own contested packets raise the floor against it");
+  assert.match(BEACON, /appliedSeqByNonce\[parsed\.nonce\] = parsed\.seq/,
+    "the applied-floor is never recorded — the two-floor guard collapses back to one");
 
   assert.match(MODULE, /private var bleAppliedNonce = ""/, "the module tracks no advertising session");
   assert.match(MODULE, /onPage = \{ \[weak self\] page, seq, nonce in/, "the module ignores the nonce again");
@@ -553,4 +566,50 @@ test("A GHOST CANNOT RE-QUALIFY once the real director drops", () => {
   hear("eeee", 1, 41);
   assert.deepEqual(rendered, [...afterContention, 41],
     "with the air clear, a real new director must still be adopted at once");
+});
+
+test("a SURVIVING director's page turned DURING contention renders once the air clears", () => {
+  // The regression #395 introduced while closing the ghost re-adoption hole, found by the next hunt.
+  //
+  // Recording every heard seq into the per-advertiser floor BEFORE the contention abstention is what
+  // stops a frozen ghost re-qualifying. But it also records the LIVE director's own contested packets
+  // — so if D turns a page while a ghost is on the air (seq 3, page 42, abstained), D's floor becomes
+  // 3, and when the air clears D's next packet is still seq 3 / page 42 (a director only bumps seq on
+  // a real page change). `3 > 3` fails. The follower sits on 41 while D is on 42, pill green, until D
+  // turns AGAIN. The pre-#395 code compared against the last APPLIED seq (2) and got this right.
+  //
+  // The distinction the guard needs: an advertiser we have ALREADY FOLLOWED is judged against what we
+  // last applied from it; one we never applied (a ghost heard only under contention) is judged against
+  // its own last-seen seq, which for a ghost is frozen. Two floors, not one.
+  const b = makeBeacon(), m = makeModule();
+  let clock = 0;
+  const rendered = [];
+  const hear = (nonce, seq, page) => {
+    clock += 1;
+    const out = moduleRecv(m, beaconRecv(b, { nonce, seq, page }, clock), true);
+    if (out !== null) rendered.push(out);
+  };
+
+  hear("dddd", 1, 40);
+  hear("dddd", 2, 41);
+  assert.deepEqual(rendered, [40, 41], "the live director must be followed normally");
+
+  // A ghost comes into range; D turns a page while the air is contested.
+  hear("gggg", 12, 357);
+  hear("dddd", 3, 42);
+  hear("gggg", 12, 357);
+  hear("dddd", 3, 42);
+  assert.deepEqual(rendered, [40, 41], "nothing renders under contention");
+
+  // The ghost stops. Contention and its cooldown lapse. D is still on 42, still seq 3.
+  clock += CONTENTION_WINDOW + CONTENTION_COOLDOWN + 2;
+  hear("dddd", 3, 42);
+  assert.deepEqual(rendered, [40, 41, 42],
+    "the page D turned to during contention never rendered — D's own contested packets raised the floor against D");
+
+  // And the ghost is still refused if it comes back: this must not re-open what #395 closed.
+  hear("gggg", 12, 357);
+  clock += CONTENTION_WINDOW + CONTENTION_COOLDOWN + 2;
+  hear("gggg", 12, 357);
+  assert.deepEqual(rendered, [40, 41, 42], "the frozen ghost re-qualified — #395's fix regressed");
 });

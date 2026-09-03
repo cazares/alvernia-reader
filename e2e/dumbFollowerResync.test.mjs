@@ -390,7 +390,12 @@ test("a scanner keeps a seq floor PER ADVERTISER, so a new director is never mis
   // the rebase is unnecessary and the ghost hole closes.
   assert.match(ble, /private var seenSeqByNonce: \[String: \(seq: Int, at: TimeInterval\)\]/,
     "the per-advertiser seq floor is gone — one shared baseline lets a frozen ghost re-qualify");
-  assert.match(ble, /guard parsed\.seq > priorSeq else \{ return \}/,
+  // Two floors (build 478): the applied-floor takes precedence for an advertiser we have followed —
+  // #395's seen-only floor refused a live director the page it turned while a ghost was on the air —
+  // and the seen-floor is the fallback that keeps a frozen ghost out.
+  assert.match(ble, /let floor = appliedSeqByNonce\[parsed\.nonce\] \?\? priorSeq/,
+    "the applied-floor no longer takes precedence — a director's own contested packets raise the floor against it");
+  assert.match(ble, /guard parsed\.seq > floor else \{ return \}/,
     "the monotonic guard no longer reads the per-advertiser floor");
   assert.doesNotMatch(ble, /lastSeenSeq = -1/,
     "the shared-baseline reset is back — that is the mechanism the ghost exploited");
