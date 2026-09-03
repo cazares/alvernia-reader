@@ -1215,7 +1215,18 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       guard self.currentRole != "off" else { resolve(nil); return }
       // Reset to early-burst mode so the next few cycles are fast (5 s each).
       self.earlyRefreshCyclesRemaining = Self.earlyRefreshCycleCount
-      self.refreshDiscovery()
+      // NEVER DESTROY A LIVE ADVERTISER WHILE SERVING. refreshDiscovery() begins with
+      // stopAdvertisingPeer + advertiser = nil, and for a director with connected followers that
+      // drops every one of them — lostPeer on each follower's browser, in-flight invites lost with no
+      // callback — at the moment the director came back to turn a page. handleAppDidBecomeActive
+      // already refuses the equivalent restart on this exact condition; this manual/foreground entry
+      // point did not, so a JS caller could do from here what Swift had just declined to do. A serving
+      // director gets the browser-only refresh; every other role gets the full one.
+      if self.currentRole == "director", !self.allConnectedPeers.isEmpty {
+        self.refreshBrowserOnly()
+      } else {
+        self.refreshDiscovery()
+      }
       self.scheduleNextDiscoveryRefresh()
       // Restart the self-directed countdown so the user gets a fresh 10 s window
       // after a manual refresh before the "Modo libre" label re-appears.

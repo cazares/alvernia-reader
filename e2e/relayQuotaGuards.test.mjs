@@ -272,15 +272,17 @@ test("the director's first broadcast uses the WEB's true page, not a lagging nat
   assert.match(caseBlock, /onDirectorCode\(DIRECTOR_CODE, knownPage\)/,
     "onDirectorCode is called without the page — it reverts to trusting the native mirror alone");
 
-  // 3. The confirm dialog's callback closes over it rather than dropping it. The dialog is a native
-  //    modal Alert, so nothing on the WebView can navigate again while it is open — the page
-  //    captured at the ORIGINAL tap is still correct by the time the human taps "Sí, dirigir".
-  // (The call may fall back to the restored crash-resume page when the web sent no page, so this
-  //  matches the argument rather than the whole expression — pinning `becomeDirector(code,
-  //  knownCurrentPage)` exactly went stale the moment that `?? restoredDirectorPageRef` fallback
-  //  landed, and a red test that guards a property the code still HAS teaches people to ignore it.)
-  assert.match(NATIVE, /onPress: \(\) => becomeDirector\(code, knownCurrentPage\b/,
-    "the confirm dialog no longer passes the known page through to becomeDirector");
+  // 3. The confirm dialog's callback still has the known page available — but resolves the page at
+  //    CONFIRM time through pageAtConfirm(). The old comment here said the dialog is a native modal
+  //    Alert "so nothing on the WebView can navigate again while it is open". That is true of TOUCH
+  //    and false of the MESH: the live director's turns keep landing during the dialog, so the page
+  //    captured at OPEN could be a whole song stale by the time a human confirmed — and became the
+  //    page the entire choir held. e2e/takeoverPageAtConfirm.test.mjs owns that behaviour; this pin
+  //    only guards that the known page is still threaded in as the fallback.
+  assert.match(NATIVE, /onPress: \(\) => becomeDirector\(code, pageAtConfirm\(\)/,
+    "the confirm dialog no longer resolves the page at confirm time — it broadcasts the page from when the dialog opened");
+  assert.match(NATIVE, /return live !== mirrorAtOpen && Number\.isFinite\(live\) && live > 0 \? live : knownCurrentPage;/,
+    "pageAtConfirm no longer falls back to the known page — the mid-lag mirror case regresses");
 
   // 4. becomeDirector corrects the mirror BEFORE anything downstream can read it — every broadcast
   //    path (no-mesh transmitter, mesh, both heartbeats) reads currentPageRef.current rather than
