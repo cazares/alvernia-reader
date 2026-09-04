@@ -158,12 +158,16 @@ for (let seed = ONLY_SEED ? Number(ONLY_SEED) : 1; seed <= (ONLY_SEED ? Number(O
   const bPages = published.slice(handoverIndex);
 
   // ── what the pews saw ──
+  // The reference is what the RELAY APPLIED, not what the director tried: the transmitter's latest-wins
+  // coalescer legitimately drops an intermediate page when two turns overlap in flight (page 82 in one
+  // run), and no follower can render a page the relay never had.
+  const applied = sim.relay.publishLog.filter((e) => e.applied).map((e) => e.page);
   const before = violations.length;
   for (const f of followers) {
     const mine = violations.length;
     const rendered = f === browser ? f.pageHistory.filter((p) => p !== browsedPage) : f.pageHistory;
-    if (!isSubsequence(rendered, published)) {
-      fail(seed, f.id, `rendered a page that was never published, or out of order: ${JSON.stringify(rendered.slice(-6))}`);
+    if (!isSubsequence(rendered, applied)) {
+      fail(seed, f.id, `rendered a page the relay never applied, or out of order: ${JSON.stringify(rendered.slice(-8))}`);
     }
     if (f.currentPage !== finalPage) {
       fail(seed, f.id, `ended on page ${f.currentPage}, director is on ${finalPage} (skew ${f.skewMs} ms)`);
@@ -180,8 +184,7 @@ for (let seed = ONLY_SEED ? Number(ONLY_SEED) : 1; seed <= (ONLY_SEED ? Number(O
   sim.uninstall();
 
   const drops = sim.network.dropped, delivered = sim.network.delivered;
-  const applied = sim.relay.publishLog.filter((e) => e.applied).length;
-  console.log(`seed ${seed}: ${followers.length} followers · ${published.length} turns · ${delivered} msgs delivered, ${drops} dropped (${(100 * drops / (drops + delivered)).toFixed(1)}%) · relay applied ${applied}/${sim.relay.publishLog.length} publishes (turns + keepalives)`);
+  console.log(`seed ${seed}: ${followers.length} followers · ${published.length} turns · ${delivered} msgs delivered, ${drops} dropped (${(100 * drops / (drops + delivered)).toFixed(1)}%) · relay applied ${applied.length}/${sim.relay.publishLog.length} publishes (turns + keepalives)`);
 }
 
 console.log();
