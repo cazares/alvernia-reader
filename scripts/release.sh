@@ -210,9 +210,14 @@ else
       echo "         ⚠️  ASC key configured but $EXPORT_P8 is missing — falling back to the Xcode session" >&2
     fi
   fi
+  # ${arr[@]+"${arr[@]}"} — NOT "${arr[@]}". macOS ships bash 3.2, where expanding an EMPTY array
+  # under `set -u` is "unbound variable". So with no ASC credentials configured this line crashed the
+  # release AFTER the ~5-10 minute archive, before export ever ran, and the no-creds fallback below
+  # (Transporter) was unreachable on every Mac this script has ever run on. Found 2026-09-04 (build
+  # 479's first attempt); the wrapper even reported exit 0. The idiom expands to nothing when empty.
   if ! xcodebuild -exportArchive -archivePath build/SignoVivo.xcarchive -exportPath build/export \
         -exportOptionsPlist ios/exportOptions.app-store.plist -allowProvisioningUpdates \
-        "${EXPORT_AUTH[@]}" >>"$LOG" 2>&1; then
+        ${EXPORT_AUTH[@]+"${EXPORT_AUTH[@]}"} >>"$LOG" 2>&1; then
     echo "EXPORT FAILED — tail of $LOG:"; tail -25 "$LOG"; exit 1     # trap restores codes + Podfile.lock
   fi
   cleanup_release   # restore ASAP to minimize the PII window; the EXIT trap is the crash-safety net
@@ -235,7 +240,12 @@ else
       # group AND — for an external group — submitted for beta review. This script used to stop at
       # the upload and print "add it when ready", which left two steps in a human's memory at 1am.
       # Build 451 sat at "Ready to Submit" because of exactly that. Now it is part of the release.
-      echo "==> 4c/6 Attach to beta groups + submit for beta review"
+      # INTERNAL GROUPS ONLY. External groups are the whole choir (Miguel, 2026-09-04: never "TODOS",
+      # never ANY external group — he hardware-tests on his own devices first and adds testers himself).
+      # testflight-distribute.mjs defaults to internal groups and refuses external ones without an
+      # explicit --allow-external, which this script must never pass. Pinned by
+      # e2e/testflightNoExternalGroups.test.mjs.
+      echo "==> 4c/6 Attach to INTERNAL beta groups only (external groups are never touched here)"
       if ! node scripts/testflight-distribute.mjs --build "$BUILD"; then
         echo "         ❌ build $BUILD is NOT reaching testers — see above." >&2
         echo "            Re-run: node scripts/testflight-distribute.mjs --build $BUILD" >&2

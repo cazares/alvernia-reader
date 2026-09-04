@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "bookVersion": "bv_2d92a1c8827cc9a9",
+  "bookVersion": "bv_ac8957605c9c7f2e",
   "totalPages": 372,
-  "builtFromShellBuild": 471,
+  "builtFromShellBuild": 479,
   "minShellBuild": 400,
-  "generatedAt": "2026-08-19T05:25:34.501Z",
+  "generatedAt": "2026-09-04T19:04:22.557Z",
   "sourcePdfSha256": "415d8e23f6937aa86d73e4538ebf0b6cd53907d085a63cd39dce3e0e8335761e",
   "sourcePdfPages": 372,
   "songIndexDigest": "0003e0ed142f06496a007200b16e270761e17709662739fde192bbcf4ada092f",
@@ -1510,9 +1510,9 @@
   "files": [
     {
       "p": "app.js",
-      "n": 226235,
-      "h": "cc0d6e58ac72b2a79fea2e62717a92ccc2daa57544ca539fa5a158d0af83338b",
-      "m": "2fd185f6c9226481aee735f43600cd58"
+      "n": 231754,
+      "h": "f2d955ffc5773576393a044edd1c7eed9f84b23ac53e948986a785000a9f369f",
+      "m": "452ccc7dee568fa8f1696c7bc24b6a0a"
     },
     {
       "p": "books.json",
@@ -3796,9 +3796,9 @@
     },
     {
       "p": "index.html",
-      "n": 32886,
-      "h": "90a8310b24297b4b57e864bc8a6243f6ca5000ac8305b505cff581026d63c8eb",
-      "m": "366d2c0f391ce8333e14025d21a6e38f"
+      "n": 33058,
+      "h": "78cc9ba1c7949b937c13178e605b89978b2195ca770ccabab53659e30a294d20",
+      "m": "5228172fa12f29eb18422ff3c6444134"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3820,9 +3820,9 @@
     },
     {
       "p": "lib/svSyncDecision.js",
-      "n": 8871,
-      "h": "26f85be5d5a85ed6531108ba0eafaafbc0273fffd2d513619b5f82184893bfeb",
-      "m": "d489d586829e7729f5eb16bb476866bf"
+      "n": 11044,
+      "h": "aa33ed67c9ff25bb7e85bc686b159fdc5b179433db6bea705bf59942f24093e2",
+      "m": "25ef166e235e60f4d963e5fa6fa75615"
     },
     {
       "p": "manifest.webmanifest",
@@ -3832,15 +3832,15 @@
     },
     {
       "p": "styles.css",
-      "n": 107455,
-      "h": "6ffd9cafae12d761e6893a5a93a912eab636ddfcdc51f2338004e7ece949d35a",
-      "m": "df3f8cb355ce39bd30e8390a45d601c5"
+      "n": 109839,
+      "h": "4aee910c22904811a477b9d7382c92f7e56cba5cad70d86bd7f7be37e5cba5db",
+      "m": "a6e3e501f65b371b56f0547987ad63bd"
     },
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "b0f9408fe383ffaac220dec5a191600f09f49e2fe84424bf609320e7ca7ff692",
-      "m": "89e0208bcf8081e8476f0df9d7906d84"
+      "h": "4844fe007638254935e3e1205fc27e61709194b271eddadc19389dc0dc980f5d",
+      "m": "0949a666a51226b47a92aa4d140f41db"
     }
   ]
 }

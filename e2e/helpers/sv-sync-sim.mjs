@@ -348,6 +348,13 @@ export class Follower {
   pollState({ force = false } = {}) {
     if (!this.relay || !this.network) return;
     this.pollCount = (this.pollCount || 0) + 1;
+    // WHAT WE KNEW WHEN THIS POLL LEFT — mirrors relayPollOnce, web/src/app.js:4027. A forced poll runs
+    // concurrently with the live socket; if a push lands while the /state body is in flight, the body
+    // is older than what we now show, and force would rewind the follower one page. The real code drops
+    // the FORCE only and still applies normally (app.js:4070-4075), so the de-dup handles it and a
+    // genuinely newer snapshot is still honoured. Without this copy, an 8%-loss sweep of sim-mass.mjs
+    // rendered [46, 49, 46, 49] on a follower — a defect the real app does not have.
+    const preSeq = this.lastSeq;
     this.network.send(this.id, () => {
       const body = this.relay.getState(this.sim.now);
       this.network.send(this.id, () => {
@@ -355,7 +362,8 @@ export class Follower {
         if (Number.isFinite(body.now)) {
           this.clockOffsetMs = clockOffsetFromServerNow(body.now, recvMs, this.clockOffsetMs);
         }
-        this.apply(body, { force });
+        const lostRace = force && Number.isFinite(body.seq) && this.lastSeq > preSeq && body.seq < this.lastSeq;
+        this.apply(body, { force: force && !lostRace });
       }, `state-res→${this.id}`);
     }, `state-req←${this.id}`);
   }
