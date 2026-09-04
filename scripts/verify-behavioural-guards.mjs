@@ -342,6 +342,18 @@ const MUTATIONS = [
    "e2e/becomeDirectorInFlightGeneration.test.mjs",
    "every release of the in-flight claim is guarded by === myGen"],
 
+  ["testflight-distribute attaches external groups by default again — the choir gets the build before hardware testing",
+   "scripts/testflight-distribute.mjs",
+   sub("    return allowExternal === true && wanted !== null;", "    return true;"),
+   "e2e/testflightNoExternalGroups.test.mjs",
+   "by default only INTERNAL groups are selected — an external group is never attached implicitly"],
+
+  ["--allow-external alone reaches EVERY external group instead of only a named one",
+   "scripts/testflight-distribute.mjs",
+   sub("    return allowExternal === true && wanted !== null;", "    return allowExternal === true;"),
+   "e2e/testflightNoExternalGroups.test.mjs",
+   "only --allow-external reaches an external group, and it still requires naming it"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────
@@ -364,8 +376,14 @@ for (const f of [...TRACKED, ...HELPERS]) {
   fs.copyFileSync(from, to);
 }
 
-const orig = Object.fromEntries(FILES.map((f) => [f, fs.readFileSync(path.join(ROOT, f), "utf8")]));
-const restore = () => FILES.forEach((f) => fs.writeFileSync(path.join(ROOT, f), orig[f]));
+// Snapshot EVERY file any mutation touches — the hand-maintained FILES list alone is not enough. When
+// a new mutation targeted a file absent from that literal, restore() never put it back, so the first
+// mutation's edit leaked into the second mutation's `before`, whose pattern then found nothing and was
+// reported as SKIP (2026-09-04, scripts/testflight-distribute.mjs). Deriving the set from MUTATIONS
+// makes that impossible; FILES is kept as a superset for files a test reads without mutating.
+const SNAPSHOT = [...new Set([...FILES, ...MUTATIONS.map((m) => m[1])])];
+const orig = Object.fromEntries(SNAPSHOT.map((f) => [f, fs.readFileSync(path.join(ROOT, f), "utf8")]));
+const restore = () => SNAPSHOT.forEach((f) => fs.writeFileSync(path.join(ROOT, f), orig[f]));
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

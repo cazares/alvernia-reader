@@ -10,13 +10,39 @@
 // ~/.appstoreconnect/private_keys/AuthKey_<id>.p8). The key must carry ADMIN — a lesser role
 // authenticates fine and then 403s, which reads like a different failure entirely.
 //
-//   node scripts/testflight-distribute.mjs                 # newest build, every group
+//   node scripts/testflight-distribute.mjs                 # newest build, INTERNAL groups only
 //   node scripts/testflight-distribute.mjs --build 451
 //   node scripts/testflight-distribute.mjs --groups Internal
 //   node scripts/testflight-distribute.mjs --list          # show state, change nothing
+//   node scripts/testflight-distribute.mjs --build 451 --groups TODOS --allow-external
+//                                                          # the ONLY way to reach an external group
+//
+// EXTERNAL GROUPS ARE THE CHOIR. Miguel, 2026-09-04: never "TODOS", never ANY external testing group —
+// he hardware-tests on his own devices first and adds testers himself. Uploading is always fine; it is
+// the attachment to an external group that puts a build in front of the congregation. So the default
+// here is internal-only, and an external group is reachable only when it is BOTH named with --groups
+// AND opted into with --allow-external. release.sh never passes that flag.
+// Pinned by e2e/testflightNoExternalGroups.test.mjs, which lifts selectTargets() and executes it.
 import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
+
+/**
+ * Which beta groups a build may be attached to. Self-contained on purpose — the test lifts this
+ * function out of the source and runs it, so it must not close over anything.
+ *   - Internal groups: always eligible (subject to --groups if given).
+ *   - External groups: eligible ONLY when explicitly named via --groups AND --allow-external is set.
+ *     --allow-external alone never means "every external group".
+ */
+function selectTargets(groups, { only, allowExternal }) {
+  const wanted = only ? only.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) : null;
+  return groups.filter((g) => {
+    const a = g.attributes;
+    if (wanted && !wanted.includes(String(a.name).toLowerCase())) return false;
+    if (a.isInternalGroup === true) return true;
+    return allowExternal === true && wanted !== null;
+  });
+}
 
 // Read from app.json rather than hardcoded: a wrong literal here fails as "no app found", which
 // reads like an auth or account problem rather than a typo.
@@ -84,12 +110,16 @@ if (!build) { console.error(`build ${want} never appeared. Recent: ${builds.map(
 
 const groups = (await api(`/v1/betaGroups?filter[app]=${app.id}&limit=50`)).data;
 const only = arg("groups");
-const targets = only ? groups.filter((g) => only.split(",").map((s) => s.trim().toLowerCase())
-  .includes(g.attributes.name.toLowerCase())) : groups;
+const ALLOW_EXTERNAL = process.argv.includes("--allow-external");
+const targets = selectTargets(groups, { only, allowExternal: ALLOW_EXTERNAL });
+const isExternal = (g) => g.attributes.isInternalGroup === false;
+const heldBack = groups.filter((g) => isExternal(g) && !targets.includes(g));
 
 console.log(`app      ${app.attributes.name} (${BUNDLE_ID})`);
 console.log(`build    ${build.attributes.version} — ${build.attributes.processingState}`);
-console.log(`groups   ${groups.map((g) => g.attributes.name).join(", ") || "(none)"}`);
+console.log(`groups   ${groups.map((g) => `${g.attributes.name}${isExternal(g) ? " (external)" : ""}`).join(", ") || "(none)"}`);
+console.log(`targets  ${targets.map((g) => g.attributes.name).join(", ") || "(none)"}`);
+if (heldBack.length) console.log(`held     ${heldBack.map((g) => g.attributes.name).join(", ")} — external, NOT attached (standing rule; --groups <name> --allow-external to override deliberately)`);
 
 if (LIST_ONLY) process.exit(0);
 
@@ -130,8 +160,11 @@ if (landed.length) console.log(`\nbuild ${v} assigned to: ${landed.join(", ")}`)
 // while the API reports the group assignment as a clean success. That gap is invisible from here
 // and obvious in the App Store Connect UI, which is exactly the kind of step that gets missed.
 // This app is already through beta review, so submissions auto-approve — but the submission still
-// has to be made.
-if (landed.length) {
+// has to be made. ONLY when an EXTERNAL group was actually attached: a beta review submission is what
+// makes a build installable by external testers, so submitting for an internal-only run would be the
+// first step of exactly the thing the standing rule forbids.
+const landedExternal = targets.some((g) => isExternal(g) && landed.includes(g.attributes.name));
+if (landedExternal) {
   try {
     await api("/v1/betaAppReviewSubmissions", {
       method: "POST",
@@ -165,9 +198,17 @@ const BROKEN  = {
   EXPIRED: "expired",
 };
 const label = SHIPPED[ext] || PENDING[ext] || BROKEN[ext];
-console.log(`\nexternal state: ${ext || "unknown"} — ${label || "UNRECOGNISED — check App Store Connect"}`);
-if (ext in SHIPPED) console.log(`✅ build ${v} is reaching testers.`);
-else if (ext in PENDING) console.log(`⏳ build ${v} is submitted; it will reach testers when review clears.`);
-else { console.log(`❌ build ${v} is NOT reaching testers.`); process.exitCode = 1; }
+if (!landedExternal) {
+  // No external group was targeted, so "Ready to Submit" is the CORRECT external state — it means the
+  // choir cannot see this build yet, which is the rule. Internal testers receive every build via
+  // Apple's automatic distribution; do not fail the release over an external state we never wanted.
+  console.log(`\nexternal state: ${ext || "unknown"} — external groups deliberately not attached`);
+  console.log(`✅ build ${v} is uploaded and available to INTERNAL testers only. The choir does not have it.`);
+} else {
+  console.log(`\nexternal state: ${ext || "unknown"} — ${label || "UNRECOGNISED — check App Store Connect"}`);
+  if (ext in SHIPPED) console.log(`✅ build ${v} is reaching EXTERNAL testers (opted in with --allow-external).`);
+  else if (ext in PENDING) console.log(`⏳ build ${v} is submitted; it will reach external testers when review clears.`);
+  else { console.log(`❌ build ${v} is NOT reaching the external testers you opted into.`); process.exitCode = 1; }
+}
 if (automatic.length) console.log(`build ${v} reaches automatically: ${automatic.join(", ")}`);
 if (failed.length) { console.log(`build ${v} FAILED for: ${failed.join(", ")}`); process.exitCode = 1; }
