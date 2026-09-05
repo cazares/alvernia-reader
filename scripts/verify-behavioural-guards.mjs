@@ -443,6 +443,19 @@ const MUTATIONS = [
    "e2e/renderPageInFlightCancel.test.mjs",
    "a request for the page already on screen invalidates a render still in flight for another page"],
 
+  ["release.sh stops honouring SKIP_OTA_ARM — a release meant to stay unarmed arms the whole fleet and redeploys the worker",
+   "scripts/release.sh",
+   sub("  if [ \"${SKIP_OTA_ARM:-0}\" = \"1\" ]; then\n", "  if [ \"${SKIP_OTA_ARM:-0}\" = \"never\" ]; then\n"),
+   "e2e/releaseSkipOtaArm.test.mjs",
+   "SKIP_OTA_ARM=1 leaves the worker untouched: no rewrite, no deploy, and it says so"],
+
+  ["the OTA arm's fail-soft fallback is deleted — a failed worker deploy aborts a release that already reached TestFlight and prod",
+   "scripts/release.sh",
+   sub("      || echo \"         ⚠ OTA arm/deploy failed — songbook update AND the native-build nudge will NOT reach devices until this is fixed and re-run\"\n",
+       "      || true\n"),
+   "e2e/otaStandingFleetArm.test.mjs",
+   "a failed OTA arm/deploy does not abort the release — it must fail soft and say so"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

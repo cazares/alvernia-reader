@@ -49,6 +49,13 @@ test("the OTA arm step is skipped for STAGING (canary) releases — never arms d
 });
 
 test("a failed OTA arm/deploy does not abort the release — it must fail soft and say so", () => {
-  const block = RELEASE.slice(RELEASE.indexOf("Arm OTA fleet-wide"), RELEASE.indexOf("Arm OTA fleet-wide") + 1200);
-  assert.match(block, /\|\|\s*echo/, "no fallback echo on failure — this would abort the whole release script under set -e");
+  // Marker-bounded, not character-bounded: the block runs from its banner to the `fi` that closes
+  // the sync-worker branch. A fixed 1200-char window went red the moment a comment was added above
+  // the deploy line — and would have stayed GREEN had the fallback been deleted from a longer block.
+  const start = RELEASE.indexOf("Arm OTA fleet-wide");
+  const tail = RELEASE.indexOf('skipping OTA arm"', start);
+  assert.ok(start > 0 && tail > start, "the OTA arm block's markers moved");
+  const block = RELEASE.slice(start, RELEASE.indexOf("\n  fi\n", tail));
+  assert.match(block, /npx wrangler deploy[\s\S]*?\|\|\s*echo/,
+    "no fallback echo after the worker deploy — a failed deploy would abort the whole release script under set -e");
 });
