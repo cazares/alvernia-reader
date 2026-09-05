@@ -120,6 +120,13 @@ console.log(`build    ${build.attributes.version} — ${build.attributes.process
 console.log(`groups   ${groups.map((g) => `${g.attributes.name}${isExternal(g) ? " (external)" : ""}`).join(", ") || "(none)"}`);
 console.log(`targets  ${targets.map((g) => g.attributes.name).join(", ") || "(none)"}`);
 if (heldBack.length) console.log(`held     ${heldBack.map((g) => g.attributes.name).join(", ")} — external, NOT attached (standing rule; --groups <name> --allow-external to override deliberately)`);
+// The TestFlight public link is what the choir actually taps. Show it for every group that has one, so
+// "give me the link" is a --list away instead of a click-path through App Store Connect.
+for (const g of groups) {
+  const a = g.attributes;
+  if (a.publicLinkEnabled && a.publicLink) console.log(`link     ${a.name}: ${a.publicLink}${a.publicLinkLimitEnabled ? ` (limit ${a.publicLinkLimit})` : ""}`);
+  else if (isExternal(g)) console.log(`link     ${a.name}: public link NOT enabled (App Store Connect → TestFlight → ${a.name} → Enable Public Link)`);
+}
 
 if (LIST_ONLY) process.exit(0);
 
