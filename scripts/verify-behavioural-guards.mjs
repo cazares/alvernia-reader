@@ -406,6 +406,30 @@ const MUTATIONS = [
    "e2e/meshWedges.test.mjs",
    "the director's invite check treats a director sighting as evidence only while it is FRESH"],
 
+  ["the post-gate reconciliation is deleted — a fresh director reveals on the cover with state on page 2 and broadcasts song 2",
+   "web/src/app.js",
+   sub("    if (!firstNativePageArrived && renderedPage() !== state.currentPage) {\n      await renderPage(renderedPage(), { pushToHistory: false });\n    }\n", ""),
+   "e2e/bootStateMatchesScreen.test.mjs",
+   "after the native reveal gate, a screen that disagrees with state is RENDERED so state, mirror and badge agree"],
+
+  ["the reconciliation only assigns state instead of rendering — native's mirror keeps the boot default and the badge is never re-synced",
+   "web/src/app.js",
+   sub("      await renderPage(renderedPage(), { pushToHistory: false });\n", "      state.currentPage = renderedPage();\n"),
+   "e2e/bootStateMatchesScreen.test.mjs",
+   "after the native reveal gate, a screen that disagrees with state is RENDERED so state, mirror and badge agree"],
+
+  ["the page handler stops recording the arrival — the reconciliation cannot tell a director's page from the static boot image",
+   "web/src/app.js",
+   sub("      firstNativePageArrived = true;\n", ""),
+   "e2e/bootStateMatchesScreen.test.mjs",
+   "the sync-event page handler records that a native page arrived, so a real page is never overridden by the reconciliation"],
+
+  ["renderedPage() stops understanding a ?reload= retry token — a retried page reads as state instead of the screen",
+   "web/src/app.js",
+   sub("/page-(\\d+)\\.webp(?:\\?.*)?$/", "/page-(\\d+)\\.webp$/"),
+   "e2e/bootStateMatchesScreen.test.mjs",
+   "renderedPage() reads the page from the <img> itself — the static boot image is page 1"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

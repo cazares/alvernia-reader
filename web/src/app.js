@@ -330,6 +330,18 @@ const pageImageMatches = (pageNumber) => {
   const currentSrc = pageImage.getAttribute("src") || "";
   return currentSrc.endsWith(pageFileName(pageNumber));
 };
+// THE PAGE THAT IS ACTUALLY ON SCREEN. state.currentPage is what the reader INTENDS to show; the <img>
+// is what the choir is looking at. renderPage keeps them equal — except on a native boot, where
+// index.html paints page-001 and initReader sets state.currentPage = DEFAULT_START_PAGE without
+// rendering (see the reconciliation in initReader). Read from the <img> itself so this can never be a
+// third number drifting from both: data-page is stamped by renderPage, the src pattern covers the
+// static boot image (and a ?reload= retry token), and with neither the answer is state — never a guess.
+const renderedPage = () => {
+  const stamped = Number(pageImage.dataset.page);
+  if (Number.isInteger(stamped) && stamped > 0) return stamped;
+  const match = /page-(\d+)\.webp(?:\?.*)?$/.exec(pageImage.getAttribute("src") || "");
+  return match ? Number(match[1]) : state.currentPage;
+};
 // ALWAYS returns an in-range INTEGER. A float (2.7) or NaN must never reach
 // pageFileName → page-2.7.webp / page-NaN.webp would 404 and stick the render.
 const clampPage = (pageNumber) => {
@@ -400,6 +412,10 @@ const postNativeBridge = (payload) => {
 // a genuinely brand-new install/book with no saved page and nobody directing yet.
 const FIRST_NATIVE_PAGE_TIMEOUT_MS = 2500;
 let resolveFirstNativePageSignal = null;
+// Set the moment a real page arrives from native — distinct from the one-shot promise below.
+// initReader's post-gate reconciliation reads this to tell "a director's page landed" from "nothing
+// came and the static boot image is still up".
+let firstNativePageArrived = false;
 const firstNativePageSignal = hasNativeBridge()
   ? new Promise((resolve) => { resolveFirstNativePageSignal = resolve; })
   : null;
@@ -1670,6 +1686,7 @@ const applyNativeSyncEvent = async (payload) => {
       renderDirectorModeBadge();
       // Single-book app: ignore any event.book and just render the director's page.
       renderPage(event.page, { pushToHistory: false });
+      firstNativePageArrived = true;
       // First real page since this WebView mounted — let initReader's reveal gate through.
       // Idempotent: a resolved promise ignores every later resolve() call, and this fires on
       // every page turn for the rest of the session, not just the first one.
@@ -4402,6 +4419,19 @@ const initReader = async () => {
         firstNativePageSignal,
         new Promise((resolve) => setTimeout(resolve, FIRST_NATIVE_PAGE_TIMEOUT_MS)),
       ]);
+    }
+    // THE SCREEN IS THE TRUTH, AND UNTIL NOW THE STATE WAS NOT. When no native page arrives inside the
+    // gate — a device with nobody directing yet, i.e. the DIRECTOR's own iPad at the start of every
+    // Mass — the reader revealed on index.html's static page-001 while state.currentPage still held
+    // DEFAULT_START_PAGE (2) from above, and nothing reconciled them: bridge-ready had already told
+    // native "page 2", and "Ser Director" sends state.currentPage as the page to broadcast. The
+    // director saw the cover, the whole choir was sent to song 2, and the director's first swipe went
+    // cover → song 3. Reproduced on two isolated simulators, 2026-09-04. Rendering the page that is on
+    // screen brings state, native's mirror (renderPage posts page-changed) and the badge back into
+    // agreement before anyone can act on them. A native page that lands later still wins: it bumps
+    // the load request and this render steps aside.
+    if (!firstNativePageArrived && renderedPage() !== state.currentPage) {
+      await renderPage(renderedPage(), { pushToHistory: false });
     }
   } else {
     // Open directly on the director's current page if one is broadcasting (the relay state is
