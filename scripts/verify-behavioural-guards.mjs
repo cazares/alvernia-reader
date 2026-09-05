@@ -57,6 +57,8 @@ const FILES = [
   "app.json",
   "ios/SignoVivo/BlePageBeacon.swift",
   "ios/SignoVivo/DirectorSyncModule.swift",
+  "ios/SignoVivo/DirectorSyncModuleBridge.m",
+  "src/nearbyDirectorSync.js",
   "scripts/release.sh",
   "src/alverniaManual2SongIndex.js",
   "sync-worker/src/index.ts",
@@ -524,6 +526,58 @@ const MUTATIONS = [
        "            decision.reason !== \"already-staged\"\n"),
    "e2e/stageFailureQuarantine.test.mjs",
    "a quarantined pointer is a settled state — no stage-skip breadcrumb per check-in for the life of the install"],
+
+  // ── 2026-09-05 three-device hardware test: two directors for 45 s, and a dead advertisement replayed ──
+
+  ["the takeover no longer announces the new token to the director it replaces — 45 s of two directors again",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("      self.sendControlPayload([\n        \"v\": Self.protocolVersion,\n        \"type\": \"director_announce\",\n        \"token\": token,\n      ], to: oldDirector)\n", ""),
+   "e2e/takeoverAnnounce.test.mjs",
+   "takeoverDirector announces the minted token to the connected director BEFORE becoming director"],
+
+  ["beginDirecting mints its own token — the announced token and the advertised one differ, so the replaced director never demotes",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("    currentDirectorToken = token\n", "    currentDirectorToken = Self.randomToken()\n"),
+   "e2e/takeoverAnnounce.test.mjs",
+   "takeoverDirector announces the minted token to the connected director BEFORE becoming director"],
+
+  ["the JS takeover path goes back to the plain director start — the announcing takeover is never called",
+   "PdfReaderApp.tsx",
+   sub("const startAsDirector = wasFollower ? takeoverNearbyDirector : startNearbyDirector;",
+       "const startAsDirector = startNearbyDirector;"),
+   "e2e/takeoverAnnounce.test.mjs",
+   "the takeover is exported to JavaScript and the JS path no longer drops the link first"],
+
+  ["takeoverDirector is dropped from the bridge .m — JS sees undefined and silently falls back to drop-then-start",
+   "ios/SignoVivo/DirectorSyncModuleBridge.m",
+   sub("RCT_EXTERN_METHOD(takeoverDirector:(NSString *)sessionCode\n                  resolver:(RCTPromiseResolveBlock)resolve\n                  rejecter:(RCTPromiseRejectBlock)reject)\n\n", ""),
+   "e2e/nativeBridgeExports.test.mjs",
+   "every Swift @objc method is declared in the bridge .m"],
+
+  ["the BLE newcomer grace is deleted — a dead director's replayed advertisement renders on its first packet again",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("    if appliedSeqByNonce[parsed.nonce] == nil,\n       let first = firstHeardByNonce[parsed.nonce], now - first.at < Self.newAdvertiserGrace {\n      return\n    }\n", ""),
+   "e2e/bleHandoff.test.mjs",
+   "THE 2026-09-05 REPLAY: a dead director's advertisement re-emitted at its successor's start must not render"],
+
+  ["a contested newcomer is judged against its LAST-seen seq again — the surviving live director's page waits for the next turn",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("    } else if contestedNonces.contains(parsed.nonce) {\n      floor = firstSeen\n",
+       "    } else if contestedNonces.contains(parsed.nonce) {\n      floor = priorSeq\n"),
+   "e2e/bleHandoff.test.mjs",
+   "THE 2026-09-05 REPLAY: a dead director's advertisement re-emitted at its successor's start must not render"],
+
+  ["contention stops marking the advertisers on the air — a frozen ghost heard under contention re-qualifies as an uncontested newcomer",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("      for nonce in recentNonces.keys { contestedNonces.insert(nonce) }   // everyone on the air is suspect\n", ""),
+   "e2e/bleHandoff.test.mjs",
+   "THE 2026-09-05 REPLAY: a dead director's advertisement re-emitted at its successor's start must not render"],
+
+  ["an uncontested newcomer must climb too — a lone brand-new director is refused until its first page turn",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("      floor = firstSeen - 1\n", "      floor = firstSeen\n"),
+   "e2e/bleHandoff.test.mjs",
+   "THE 2026-09-05 REPLAY: a dead director's advertisement re-emitted at its successor's start must not render"],
 
 ];
 

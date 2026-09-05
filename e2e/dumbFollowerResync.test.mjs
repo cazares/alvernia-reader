@@ -393,7 +393,8 @@ test("a scanner keeps a seq floor PER ADVERTISER, so a new director is never mis
   // Two floors (build 478): the applied-floor takes precedence for an advertiser we have followed —
   // #395's seen-only floor refused a live director the page it turned while a ghost was on the air —
   // and the seen-floor is the fallback that keeps a frozen ghost out.
-  assert.match(ble, /let floor = appliedSeqByNonce\[parsed\.nonce\] \?\? priorSeq/,
+  // (2026-09-05: the never-applied fallback became the FIRST-heard seq — see bleHandoff's replay test.)
+  assert.match(ble, /if let applied = appliedSeqByNonce\[parsed\.nonce\] \{\s*floor = applied\s*\}/,
     "the applied-floor no longer takes precedence — a director's own contested packets raise the floor against it");
   assert.match(ble, /guard parsed\.seq > floor else \{ return \}/,
     "the monotonic guard no longer reads the per-advertiser floor");

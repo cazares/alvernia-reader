@@ -97,6 +97,28 @@ final class BlePageBeacon: NSObject {
   /// air cleared, until the next turn — the follower held the old page under a green pill. Two floors:
   /// `seen` catches the frozen ghost, `applied` keeps the live director.)
   private var appliedSeqByNonce: [String: Int] = [:]
+  /// The FIRST packet heard from each advertiser (seq and when), kept apart from the running floor.
+  ///
+  /// Hardware, 2026-09-05 (three devices, build 480): the director's iPhone was demoted, relaunched
+  /// and promoted again. 66 ms after its new `startAdvertising`, a follower that had also relaunched
+  /// received the phone's PREVIOUS process's advertisement — old nonce, old page 82, old seq 36 —
+  /// and rendered it, because bluetoothd re-emits an app's last advertisement data for a few seconds
+  /// when advertising restarts, and a rebooted follower has no floor for that nonce. 440 ms later the
+  /// live nonce arrived, contention abstained, and when the ghost died the live director's page was
+  /// STILL refused: its seq had been recorded as the floor while we abstained, so `seq > floor` waited
+  /// for the next page turn. Two rules fix both halves, and both need the first hearing:
+  ///  - a NEWCOMER (never applied) is not rendered until it has been on the air for newAdvertiserGrace
+  ///    with no contention — a rival that appears within that window is caught BEFORE anything renders;
+  ///  - a newcomer that was heard under contention must CLIMB past the seq we first heard from it (a
+  ///    frozen ghost never does, a live director does on its next turn), while an uncontested newcomer
+  ///    is accepted as-is once the grace has passed.
+  private var firstHeardByNonce: [String: (seq: Int, at: TimeInterval)] = [:]
+  /// Nonces that were on the air while contention or its cooldown was active. See firstHeardByNonce.
+  private var contestedNonces: Set<String> = []
+  /// How long a never-applied advertiser must be heard, uncontested, before its page renders. The
+  /// replay above put the ghost and the live nonce 440 ms apart; one second is twice that margin and
+  /// costs a brand-new director exactly one second on its first page — page turns are unaffected.
+  private static let newAdvertiserGrace: TimeInterval = 1.0
   private var lastPublishedPage = -1
   /// When the current pendingAdvert was requested, so the trace can show request -> on-air latency.
   private var publishRequestedAt: TimeInterval = 0
@@ -443,12 +465,15 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     // evidence that tells a ghost from a director, and left the ghost free to rebase later.
     let priorSeq = seenSeqByNonce[parsed.nonce]?.seq ?? -1
     seenSeqByNonce[parsed.nonce] = (seq: max(priorSeq, parsed.seq), at: now)
+    if firstHeardByNonce[parsed.nonce] == nil { firstHeardByNonce[parsed.nonce] = (seq: parsed.seq, at: now) }
     if seenSeqByNonce.count > Self.maxTrackedAdvertisers {
       // Bound the memory. Prune by last-heard, never by the contention window: a ghost that stays
       // on the air must stay remembered, or pruning re-opens the hole this closes.
       for (nonce, entry) in seenSeqByNonce where now - entry.at > Self.advertiserMemory {
         seenSeqByNonce.removeValue(forKey: nonce)
         appliedSeqByNonce.removeValue(forKey: nonce)
+        firstHeardByNonce.removeValue(forKey: nonce)
+        contestedNonces.remove(nonce)
       }
     }
     recentNonces[parsed.nonce] = now
@@ -457,6 +482,7 @@ extension BlePageBeacon: CBCentralManagerDelegate {
       if lastAppliedPage != -1 { log?("ble:contention", ["advertisers": recentNonces.count]) }
       lastAppliedPage = -1        // so the next uncontested reading logs as a fresh apply
       lastContentionAt = now
+      for nonce in recentNonces.keys { contestedNonces.insert(nonce) }   // everyone on the air is suspect
       return
     }
     // COOLDOWN AFTER CONTENTION (2026-08-18, hardened after a live capture — see
@@ -468,6 +494,16 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     // one goes quiet and the cooldown naturally expires.
     if now - lastContentionAt < Self.contentionCooldown {
       lastAppliedPage = -1
+      contestedNonces.insert(parsed.nonce)
+      return
+    }
+    // NEWCOMER GRACE (2026-09-05 replay incident — see firstHeardByNonce). An advertiser we have
+    // never followed is not rendered on its first packet; it has to stay on the air, uncontested,
+    // for newAdvertiserGrace first. A dead process's replayed advertisement and its live successor
+    // arrive well inside that window, so the contention branch above catches them before either
+    // reaches the screen. Nothing else about the packet is judged here — the floor below still runs.
+    if appliedSeqByNonce[parsed.nonce] == nil,
+       let first = firstHeardByNonce[parsed.nonce], now - first.at < Self.newAdvertiserGrace {
       return
     }
 
@@ -483,8 +519,20 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     // judged against what we last applied from it — its own packets heard under contention must not
     // raise the floor against it (a director who turned a page while a ghost was on the air would
     // otherwise be refused that page until the next turn). One we have NEVER applied is judged
-    // against its last-seen seq, which for a frozen ghost never climbs.
-    let floor = appliedSeqByNonce[parsed.nonce] ?? priorSeq
+    // against the seq we FIRST heard from it: if it was ever on a contested air it must climb past
+    // that (a frozen ghost never does; a live director does on its next turn), and if it was never
+    // contested its first packet after the grace is accepted as-is. The old floor here was the
+    // LAST-seen seq — which the newcomer's own packets raised while we abstained, so on 2026-09-05
+    // the surviving live director's page 2 was refused until it turned to page 3.
+    let firstSeen = firstHeardByNonce[parsed.nonce]?.seq ?? parsed.seq
+    let floor: Int
+    if let applied = appliedSeqByNonce[parsed.nonce] {
+      floor = applied
+    } else if contestedNonces.contains(parsed.nonce) {
+      floor = firstSeen
+    } else {
+      floor = firstSeen - 1
+    }
     guard parsed.seq > floor else { return }
     appliedSeqByNonce[parsed.nonce] = parsed.seq
     // Log only when the PAGE moves. A scan with allowDuplicates reports every advertisement packet,

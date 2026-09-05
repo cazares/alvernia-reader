@@ -707,9 +707,10 @@ test("BLE page broadcasts are HMAC-bound to the session code — a lone broadcas
     "parse() no longer verifies the tag — any well-formed packet would be trusted again");
 
   const nativeSource = fs.readFileSync(path.join(APP_ROOT, "ios", "SignoVivo", "DirectorSyncModule.swift"), "utf8");
-  const setSites = (nativeSource.match(/self\.bleBeacon\.sessionCode = normalizedSessionCode/g) || []).length;
+  // One site per role: beginDirecting (shared by startDirector and takeoverDirector) and beginFollowing.
+  const setSites = (nativeSource.match(/\bbleBeacon\.sessionCode = normalizedSessionCode/g) || []).length;
   assert.strictEqual(setSites, 2,
-    "expected bleBeacon.sessionCode to be set from BOTH startDirector and startFollower — found " + setSites);
+    "expected bleBeacon.sessionCode to be set from BOTH the director and the follower entry — found " + setSites);
 });
 
 test("a follower never accepts a mesh invite from another follower", () => {

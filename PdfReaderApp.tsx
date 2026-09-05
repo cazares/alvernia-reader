@@ -35,6 +35,7 @@ import {
   sendNearbyDirectorPageUpdate,
   startNearbyDirector,
   startNearbyFollower,
+  takeoverNearbyDirector,
 } from "./src/nearbyDirectorSync";
 import {
   publishPageToRelay,
@@ -1089,29 +1090,25 @@ export default function App() {
         if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0;
         return;
       }
-      // LIVE-DIRECTOR TAKEOVER: if we're entering a director code while currently a CONNECTED
-      // follower, Swift's startDirector guard rejects with DIRECTOR_TAKEOVER_REQUIRED
-      // (currentRole=="follower" && connectedDirectorPeer != nil). Drop the follower link FIRST
-      // so the guard passes, then start as director (the most-recent token wins on contention).
+      // LIVE-DIRECTOR TAKEOVER: entering the director code while currently a CONNECTED follower.
+      // This used to drop the follower link FIRST (so Swift's startDirector guard would pass) and
+      // then start as director — which meant the director being replaced was never told: the
+      // announce in Swift's director start had no session left to travel over, and on real AWDL the
+      // browser does not re-report a peer whose role flipped, so the old director stayed director
+      // until its next ~25 s browser rebuild. Hardware 2026-09-05: 45 s of TWO directors. The
+      // native takeover keeps the link, announces the new token across it, then becomes director.
       const wasFollower = roleRef.current === "follower";
-      if (wasFollower) {
-        stopDirectorHeartbeat(); // belt-and-suspenders; a follower shouldn't have one running
-        try {
-          await resetNearbyDirectorSync();
-        } catch {
-          /* best-effort drop; startDirector below still attempts the takeover */
-        }
-        if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded while dropping the link
-      }
+      if (wasFollower) stopDirectorHeartbeat(); // belt-and-suspenders; a follower shouldn't have one running
+      const startAsDirector = wasFollower ? takeoverNearbyDirector : startNearbyDirector;
       try {
         try {
-          await startNearbyDirector(DIRECTOR_SESSION);
+          await startAsDirector(DIRECTOR_SESSION);
         } catch {
           // Mesh startup can transiently fail (permission race, radio warm-up).
           // Wait briefly and retry the start exactly once before giving up.
           await new Promise((r) => setTimeout(r, 2000));
           if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded during the retry sleep
-          await startNearbyDirector(DIRECTOR_SESSION);
+          await startAsDirector(DIRECTOR_SESSION);
         }
         if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded while the mesh was starting
         roleRef.current = "director";
@@ -1143,8 +1140,8 @@ export default function App() {
         // A live-takeover attempt that still failed (e.g. Swift DIRECTOR_TAKEOVER_REQUIRED raced
         // back, or a transient mesh error) must NOT strip a connected follower's UI to "none".
         if (wasFollower) {
-          // We already dropped the follower link via resetNearbyDirectorSync above; re-join the
-          // mesh as a follower so the device keeps syncing instead of stranding link-less.
+          // The takeover may have torn the follower link down before failing; re-join the mesh as
+          // a follower so the device keeps syncing instead of stranding link-less.
           // (becomeFollower bumps the generation, so this also supersedes our own stale path.)
           if (myGen === roleGenerationRef.current) becomeFollower();
         } else {
