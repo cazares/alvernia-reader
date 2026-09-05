@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "bookVersion": "bv_ac8957605c9c7f2e",
+  "bookVersion": "bv_1d454af624b85e5a",
   "totalPages": 372,
-  "builtFromShellBuild": 479,
+  "builtFromShellBuild": 480,
   "minShellBuild": 400,
-  "generatedAt": "2026-09-04T19:04:22.557Z",
+  "generatedAt": "2026-09-05T11:44:30.681Z",
   "sourcePdfSha256": "415d8e23f6937aa86d73e4538ebf0b6cd53907d085a63cd39dce3e0e8335761e",
   "sourcePdfPages": 372,
   "songIndexDigest": "0003e0ed142f06496a007200b16e270761e17709662739fde192bbcf4ada092f",
@@ -1510,9 +1510,9 @@
   "files": [
     {
       "p": "app.js",
-      "n": 231754,
-      "h": "f2d955ffc5773576393a044edd1c7eed9f84b23ac53e948986a785000a9f369f",
-      "m": "452ccc7dee568fa8f1696c7bc24b6a0a"
+      "n": 236019,
+      "h": "a86561bcee2909ef53fe7851dab53f66781ada3e425b358a8ccbedc0e8ae1389",
+      "m": "b7b79ecea730ec35da633d781cb2d30f"
     },
     {
       "p": "books.json",
@@ -3797,8 +3797,8 @@
     {
       "p": "index.html",
       "n": 33058,
-      "h": "78cc9ba1c7949b937c13178e605b89978b2195ca770ccabab53659e30a294d20",
-      "m": "5228172fa12f29eb18422ff3c6444134"
+      "h": "81e637cc98b1363e5a9c429298d76ddb009e34d4f8b2ae8abebba03f9857dcf9",
+      "m": "d6a25349e9c88a9b45f7ebf48bf8338c"
     },
     {
       "p": "lib/svRelayRoom.js",
@@ -3839,8 +3839,8 @@
     {
       "p": "sw.js",
       "n": 29815,
-      "h": "4844fe007638254935e3e1205fc27e61709194b271eddadc19389dc0dc980f5d",
-      "m": "0949a666a51226b47a92aa4d140f41db"
+      "h": "c769f34efbfcd5c8b36b972b0683d86c69cf062e659665d27a41d0d36ff3dbdd",
+      "m": "0402695a4e22601445b48cfdc48816b1"
     }
   ]
 }
