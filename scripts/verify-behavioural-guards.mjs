@@ -430,6 +430,19 @@ const MUTATIONS = [
    "e2e/bootStateMatchesScreen.test.mjs",
    "renderedPage() reads the page from the <img> itself — the static boot image is page 1"],
 
+  ["a version-mismatch stage failure stops counting toward quarantine — a stale arm pointer re-fetches the manifest every check-in forever",
+   "PdfReaderApp.tsx",
+   sub("            (rec.error === \"cannot-outrank-baked-shell\" || rec.error === \"version-mismatch\") &&\n",
+       "            rec.error === \"cannot-outrank-baked-shell\" &&\n"),
+   "e2e/stageFailureQuarantine.test.mjs",
+   "a version-mismatch stage failure counts toward quarantine, not just cannot-outrank-baked-shell"],
+
+  ["the already-on-this-page return stops invalidating an in-flight render — a mis-tap correction commits the wrong page over the right one",
+   "web/src/app.js",
+   sub("    state.pageLoadRequest += 1;\n    if (pageImage.classList.contains(\"is-loading\")) hideLoadingIndicator();\n", ""),
+   "e2e/renderPageInFlightCancel.test.mjs",
+   "a request for the page already on screen invalidates a render still in flight for another page"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

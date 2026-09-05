@@ -1759,6 +1759,16 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, use
     pageImage.complete &&
     pageImage.naturalWidth > 0
   ) {
+    // THE PAGE ON SCREEN WINS OVER A PAGE IN FLIGHT. This return used to be bare, and it did not
+    // look at a render still loading for a DIFFERENT page: a director's mis-tap correction (B → A → B
+    // inside A's load time) arrived here with B on screen while A was still loading, so A then
+    // committed on top of a correct B and the follower sat on A until a later heartbeat happened to
+    // re-drive B against a now-different state — ≤1 s over the mesh, up to ~4 s for a relay follower.
+    // The same bare return also kept a stale "No se pudo cargar esta página" overlay up for a page
+    // nobody was asking for any more. Every in-flight render re-checks pageLoadRequest after each
+    // await, so bumping it here makes that render step aside; the indicator it scheduled goes with it.
+    state.pageLoadRequest += 1;
+    if (pageImage.classList.contains("is-loading")) hideLoadingIndicator();
     return;
   }
 

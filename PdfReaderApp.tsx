@@ -2145,7 +2145,18 @@ export default function App() {
           // list/threshold (isQuarantined, 3 failures) rather than a new mechanism — same "counter,
           // not a tombstone" philosophy, so a future genuinely-newer book (a new bookVersion hash)
           // is never affected, and this settles within ~3 check-ins instead of never.
-          if (rec.error === "cannot-outrank-baked-shell" && rec.bookVersion) {
+          // "version-mismatch" IS THE SAME SHAPE FROM THE OTHER SIDE. The pointer names a book the
+          // origin no longer serves under that ?v= — a stale arm left standing by a release that
+          // skipped the worker redeploy, which is exactly how 479 shipped (worker still naming 471's
+          // book, DEVICES "*"). Every current device with internet then re-fetched that manifest on
+          // every 4-minute check-in and every foreground for the life of the install, reported itself
+          // as "error:version-mismatch" to the fleet on every call, and filled the 200-slot breadcrumb
+          // ring — the only Mass forensics — with stage-failed lines. Three strikes settles it; a
+          // genuinely new book has a new hash and is never touched by this counter.
+          if (
+            (rec.error === "cannot-outrank-baked-shell" || rec.error === "version-mismatch") &&
+            rec.bookVersion
+          ) {
             try {
               const raw = await AsyncStorage.getItem(STORAGE_KEYS.bookQuarantine);
               const list = raw ? JSON.parse(raw) : [];
