@@ -387,6 +387,25 @@ const MUTATIONS = [
    "e2e/holdServingRequiresRecentSighting.test.mjs",
    "follower sightings are timestamped, like director sightings already are"],
 
+  ["a failed invite restarts the wedge clock again — the 20 s session rebuild can never fire while invites keep failing",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("          if self.followerHuntingSince == 0 { self.followerHuntingSince = Date().timeIntervalSince1970 }\n",
+       "          self.followerHuntingSince = Date().timeIntervalSince1970\n"),
+   "e2e/meshWedges.test.mjs",
+   "a failed invite does not restart the wedged-session clock — only arm it if it is not running"],
+
+  ["a peer re-sighted as a follower keeps its director records — the conflict winner rejects the loser forever",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("        self.discoveredDirectors.removeValue(forKey: peerID)\n        self.discoveredDirectorInfo.removeValue(forKey: peerID)\n        self.discoveredDirectorSeenAt.removeValue(forKey: peerID)\n", ""),
+   "e2e/meshWedges.test.mjs",
+   "a peer re-sighted as a FOLLOWER is no longer remembered as a director"],
+
+  ["the peer-is-director check loses its freshness requirement — a stale record refuses a legitimate follower",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("          && directorSeenAgo < Self.browserHealthySeconds\n", ""),
+   "e2e/meshWedges.test.mjs",
+   "the director's invite check treats a director sighting as evidence only while it is FRESH"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

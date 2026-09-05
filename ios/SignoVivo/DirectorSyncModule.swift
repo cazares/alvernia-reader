@@ -2363,8 +2363,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         // directors fighting over the same followers (split-brain). If the inviting peer is one
         // we've discovered advertising role=director, reject and let token-based conflict
         // resolution (handleDirectorConflict) decide which one demotes instead.
-        let peerIsKnownDirector = self.discoveredDirectors[peerID] != nil
-          || self.discoveredDirectorInfo[peerID]?["role"] == "director"
+        // …and only while the sighting is FRESH. Records are cleared by lostPeer, by a role=follower
+        // re-sighting (above) and by browser rebuilds — none of which is guaranteed while serving. A
+        // record older than browserHealthySeconds is a memory, not evidence; refusing a follower on it
+        // strands that device, while accepting a stale-labelled live director is what the token conflict
+        // path resolves within seconds anyway.
+        let directorSeenAgo = Date().timeIntervalSince1970 - (self.discoveredDirectorSeenAt[peerID] ?? -.infinity)
+        let peerIsKnownDirector = (self.discoveredDirectors[peerID] != nil
+          || self.discoveredDirectorInfo[peerID]?["role"] == "director")
+          && directorSeenAgo < Self.browserHealthySeconds
         if peerIsKnownDirector {
           self.dbgLog("invite:reject", ["from": peerID.displayName, "why": "peer-is-director"])
           invitationHandler(false, nil)
@@ -2464,6 +2471,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       } else if role == "follower", self.currentRole == "director" {
         self.discoveredFollowers.insert(peerID)
         self.discoveredFollowerSeenAt[peerID] = Date().timeIntervalSince1970
+        // A peer now advertising role=follower is not a director, whatever it was a minute ago. The
+        // loser of a director conflict re-advertises as a follower and invites the winner; with its
+        // director record left standing, the winner's accept path refused it as "peer-is-director"
+        // indefinitely (the winner never refreshes its browser while serving, so nothing else cleared it).
+        self.discoveredDirectors.removeValue(forKey: peerID)
+        self.discoveredDirectorInfo.removeValue(forKey: peerID)
+        self.discoveredDirectorSeenAt.removeValue(forKey: peerID)
         self.discoveredFollowerInfo[peerID] = info ?? [:]
         guard !self.allConnectedPeers.contains(peerID) else { return }
         let isLegacyFollower = info?["hgen"] == nil  // build ≤226: no hgen → director must invite
@@ -2705,7 +2719,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           // 0.5 Hz retry, the BLE scan self-heal and the wedged-session escalation all went with
           // it — leaving reconnection to one retry at followerRetryDelay and then the 5-12s
           // discovery cadence. Same mistake as forceFollowerReconnect, second location.
-          self.followerHuntingSince = Date().timeIntervalSince1970
+          // ARM, DO NOT RESTART. This branch also runs for every FAILED OUTBOUND INVITE (its condition
+          // includes pendingInvitePeer == peerID), and an unconditional stamp here reset the wedge clock
+          // every <= 8 s — so `now - followerHuntingSince > followerWedgedSeconds` could never be true
+          // while invites kept timing out, and the session rebuild it gates was unreachable in exactly
+          // the wedge it exists for. Same rule reconsiderFollowerTarget already uses: stamp only if
+          // the clock is not running. The connected path zeroes it, so a drop from connected still arms.
+          if self.followerHuntingSince == 0 { self.followerHuntingSince = Date().timeIntervalSince1970 }
           self.startFollowerWatchdog()
           self.resumeDiscoveryRefreshAfterDisconnect()
           // Give the director a grace window to reconnect before going self-directed.
