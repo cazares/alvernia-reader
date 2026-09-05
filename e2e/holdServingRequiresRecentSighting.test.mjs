@@ -61,7 +61,10 @@ test("the serving-director hold requires a CONNECTED peer or a RECENT sighting, 
   const head = M.slice(M.lastIndexOf("if self.currentRole == \"director\"", at), at);
   assert.doesNotMatch(head, /!self\.discoveredFollowers\.isEmpty/,
     "the hold still fires on the bare presence of a follower sighting — one stale sighting pins a deaf advertiser for the rest of Mass");
-  assert.match(head, /!self\.allConnectedPeers\.isEmpty \|\| self\.hasRecentFollowerSighting\(\)/,
+  // Three kinds of evidence hold the transport: a CONNECTED peer, a HANDSHAKE IN FLIGHT (pendingAdmissions,
+  // tokened and self-expiring — added after a skeptic showed a same-peer re-invite losing its handshake to
+  // this tick), or a RECENT sighting. Never a bare memory.
+  assert.match(head, /!self\.allConnectedPeers\.isEmpty \|\| !self\.pendingAdmissions\.isEmpty \|\| self\.hasRecentFollowerSighting\(\)/,
     "the hold must be: connected peer OR recent sighting");
   const helperAt = M.indexOf("private func hasRecentFollowerSighting()");
   assert.notEqual(helperAt, -1, "hasRecentFollowerSighting is missing");

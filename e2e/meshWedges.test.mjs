@@ -68,6 +68,13 @@ test("the director's invite check treats a director sighting as evidence only wh
   const at = M.indexOf("let peerIsKnownDirector =");
   assert.notEqual(at, -1, "the peer-is-director check moved");
   const stmt = M.slice(at, M.indexOf("if peerIsKnownDirector", at));
-  assert.match(stmt, /browserHealthySeconds/,
-    "a stale director record (never cleared while serving) rejects a legitimate follower with no freshness check");
+  // The exact comparison, not the token: a skeptic showed that `<` → `>` (fresh record ACCEPTED =
+  // split-brain re-opened, stale record REFUSED = the original wedge) left a bare /browserHealthySeconds/
+  // pin green. Pin the predicate text and the missing-timestamp default (-.infinity → "never seen" =
+  // infinitely old = never refused on the timestamp alone).
+  assert.match(stmt, /&& directorSeenAgo < Self\.browserHealthySeconds/,
+    "the freshness comparison is not `directorSeenAgo < browserHealthySeconds` — a stale record still refuses, or a fresh one is accepted");
+  const ago = M.slice(M.lastIndexOf("let directorSeenAgo", at), at);
+  assert.match(ago, /self\.discoveredDirectorSeenAt\[peerID\] \?\? -\.infinity/,
+    "directorSeenAgo must read the DIRECTOR sighting time and treat a missing stamp as infinitely old");
 });

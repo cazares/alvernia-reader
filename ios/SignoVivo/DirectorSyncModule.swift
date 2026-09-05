@@ -1456,6 +1456,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
 
     discoveredDirectors = [:]
     discoveredDirectorInfo = [:]
+    discoveredDirectorSeenAt = [:]   // the three director records clear as a unit, everywhere
     discoveredFollowers = []
     discoveredFollowerSeenAt = [:]
     discoveredFollowerInfo = [:]
@@ -1660,8 +1661,12 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           // A CONNECTED peer is proof the transport works. A mere SIGHTING is proof only while it is
           // FRESH — see discoveredFollowerSeenAt. The bare-presence check that stood here let one stale
           // sighting hold a deaf advertiser un-refreshed for the rest of Mass.
+          // …and a HANDSHAKE IN FLIGHT is proof too: pendingAdmissions holds a tokened reservation for
+          // every invite accepted but not yet connected, self-expiring at inviteTimeout+2 s, so it
+          // cannot wedge this hold. Without it a long-connected follower that dropped and re-invited
+          // (same peer id, no new foundPeer, stale stamp) had its handshake torn down by this tick.
           if self.currentRole == "director",
-             !self.allConnectedPeers.isEmpty || self.hasRecentFollowerSighting() {
+             !self.allConnectedPeers.isEmpty || !self.pendingAdmissions.isEmpty || self.hasRecentFollowerSighting() {
             self.dbgLog("refresh:hold-serving", [
               "connected": self.allConnectedPeers.count,
               "discovered": self.discoveredFollowers.count,
@@ -2380,6 +2385,10 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         // Route incoming follower to a session with room
         if let session = self.sessionForAdmitting(peerID) {
           self.dbgLog("invite:accept", ["from": peerID.displayName])
+          // AN INVITE IS A SIGHTING. foundPeer fires once per browser generation, so a follower that
+          // dropped and re-invited with the same peer id carried only its old stamp; the refresh tick
+          // then read "no recent sighting" and refreshed the advertiser under this very handshake.
+          self.discoveredFollowerSeenAt[peerID] = Date().timeIntervalSince1970
           // Claim the slot BEFORE answering. connectedPeers will not show this peer for the whole
           // handshake, so without the reservation the next invitation in this same burst is routed
           // into the same session.

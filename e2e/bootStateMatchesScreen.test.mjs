@@ -65,8 +65,36 @@ test("after the native reveal gate, a screen that disagrees with state is RENDER
   const between = APP.slice(race, reveal);
   assert.match(between, /if \(!firstNativePageArrived && renderedPage\(\) !== state\.currentPage\)/,
     "nothing reconciles state.currentPage with the page on screen when no native page arrived — the boot default is broadcast while the cover is on screen");
-  assert.match(between, /await renderPage\(renderedPage\(\), \{ pushToHistory: false \}\)/,
-    "the reconciliation must RENDER the on-screen page (renderPage posts page-changed, which corrects native's mirror), not merely assign state");
+  assert.match(between, /await renderPage\(renderedPage\(\), \{ pushToHistory: false, notifyNative: false \}\)/,
+    "the reconciliation must RENDER the on-screen page (state, data-page, badge, status re-sync), and must do it WEB-LOCAL (notifyNative: false)");
+});
+
+test("the boot reconciliation never posts page-changed to native — a director's late remount would adopt and broadcast the cover", () => {
+  // Skeptic finding on d8fefc3: if native's re-assert of the director's real page lands after the
+  // 2.5 s gate, a page-changed{1} from the reconciliation reaches a director whose webReady is already
+  // true, so the boot-render guard does not apply; the mirror becomes 1 and the 100 ms heartbeat sends
+  // the cover to the choir until the real page renders. The render must therefore be silent to native.
+  const start = APP.indexOf("const renderPage = async");
+  assert.notEqual(start, -1, "renderPage moved");
+  const rp = APP.slice(start, APP.indexOf("\n};\n", start));
+  assert.match(rp, /notifyNative = true/, "renderPage has no notifyNative option — every render posts page-changed, including the boot reconciliation");
+  assert.match(rp, /if \(notifyNative\) \{\s*postNativeBridge\(\{\s*type: "page-changed"/,
+    "renderPage posts page-changed regardless of notifyNative — the reconciliation's render reaches native");
+  assert.match(rp, /postNativeBridge\(\{\s*type: "page-changed"/, "renderPage no longer posts page-changed at all — native's mirror would never follow a real turn");
+  // ...and the reconciliation must actually ASK for silence. The option existing is not the fix; the call using it is.
+  const race = APP.indexOf("firstNativePageSignal,\n        new Promise((resolve) => setTimeout(resolve, FIRST_NATIVE_PAGE_TIMEOUT_MS))");
+  const reveal = APP.indexOf("revealReader();", race);
+  assert.ok(race !== -1 && reveal !== -1, "the reveal-gate race or revealReader() moved");
+  assert.match(APP.slice(race, reveal), /renderPage\(renderedPage\(\), \{ pushToHistory: false, notifyNative: false \}\)/,
+    "the reconciliation renders WITH notification — a director whose remount re-assert lands after the gate adopts the cover and broadcasts it");
+});
+
+test("index.html's static page image is what renderedPage() reads at boot — the two files cannot drift apart", () => {
+  const html = readFileSync(join(ROOT, "web", "src", "index.html"), "utf8");
+  const m = html.match(/<img id="page-image" src="([^"]+)"/);
+  assert.ok(m, "index.html no longer carries the static #page-image src the boot reconciliation reads");
+  assert.equal(liftRenderedPage()(img(m[1]), { currentPage: 2 }), 1,
+    `renderedPage() does not read index.html's static src (${m[1]}) as page 1 — the reconciliation would render the wrong page or nothing`);
 });
 
 test("the sync-event page handler records that a native page arrived, so a real page is never overridden by the reconciliation", () => {

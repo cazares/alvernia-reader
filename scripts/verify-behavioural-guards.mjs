@@ -369,21 +369,22 @@ const MUTATIONS = [
 
   ["a failed takeover that was not previously following leaves publishing enabled with no director role",
    "PdfReaderApp.tsx",
-   sub("          // web follower from nobody. Mirror becomeFollower and turn it off on this exit too.\n          setRelayPublishing(false);\n",
-       "          // web follower from nobody. Mirror becomeFollower and turn it off on this exit too.\n"),
+   sub("          explicitTransmitterRef.current = false;\n          setRelayPublishing(false);\n          injectEvent({ type: \"role\", role: \"none\" });\n",
+       "          explicitTransmitterRef.current = false;\n          injectEvent({ type: \"role\", role: \"none\" });\n"),
    "e2e/stepDownStopsPublishing.test.mjs",
    "becomeDirector's non-follower failure path disables relay publishing"],
 
   ["the serving-director hold fires on the bare presence of a follower sighting again — one stale sighting pins a deaf advertiser for the rest of Mass",
    "ios/SignoVivo/DirectorSyncModule.swift",
-   sub("             !self.allConnectedPeers.isEmpty || self.hasRecentFollowerSighting() {\n",
-       "             !self.allConnectedPeers.isEmpty || !self.discoveredFollowers.isEmpty {\n"),
+   sub("             !self.allConnectedPeers.isEmpty || !self.pendingAdmissions.isEmpty || self.hasRecentFollowerSighting() {\n",
+       "             !self.allConnectedPeers.isEmpty || !self.pendingAdmissions.isEmpty || !self.discoveredFollowers.isEmpty {\n"),
    "e2e/holdServingRequiresRecentSighting.test.mjs",
    "the serving-director hold requires a CONNECTED peer or a RECENT sighting, never a bare memory"],
 
   ["follower sightings stop being timestamped — every sighting is forever fresh",
    "ios/SignoVivo/DirectorSyncModule.swift",
-   sub("        self.discoveredFollowerSeenAt[peerID] = Date().timeIntervalSince1970\n", ""),
+   sub("        self.discoveredFollowers.insert(peerID)\n        self.discoveredFollowerSeenAt[peerID] = Date().timeIntervalSince1970\n",
+       "        self.discoveredFollowers.insert(peerID)\n"),
    "e2e/holdServingRequiresRecentSighting.test.mjs",
    "follower sightings are timestamped, like director sightings already are"],
 
@@ -408,13 +409,13 @@ const MUTATIONS = [
 
   ["the post-gate reconciliation is deleted — a fresh director reveals on the cover with state on page 2 and broadcasts song 2",
    "web/src/app.js",
-   sub("    if (!firstNativePageArrived && renderedPage() !== state.currentPage) {\n      await renderPage(renderedPage(), { pushToHistory: false });\n    }\n", ""),
+   sub("    if (!firstNativePageArrived && renderedPage() !== state.currentPage) {\n      await renderPage(renderedPage(), { pushToHistory: false, notifyNative: false });\n    }\n", ""),
    "e2e/bootStateMatchesScreen.test.mjs",
    "after the native reveal gate, a screen that disagrees with state is RENDERED so state, mirror and badge agree"],
 
   ["the reconciliation only assigns state instead of rendering — native's mirror keeps the boot default and the badge is never re-synced",
    "web/src/app.js",
-   sub("      await renderPage(renderedPage(), { pushToHistory: false });\n", "      state.currentPage = renderedPage();\n"),
+   sub("      await renderPage(renderedPage(), { pushToHistory: false, notifyNative: false });\n", "      state.currentPage = renderedPage();\n"),
    "e2e/bootStateMatchesScreen.test.mjs",
    "after the native reveal gate, a screen that disagrees with state is RENDERED so state, mirror and badge agree"],
 
@@ -455,6 +456,74 @@ const MUTATIONS = [
        "      || true\n"),
    "e2e/otaStandingFleetArm.test.mjs",
    "a failed OTA arm/deploy does not abort the release — it must fail soft and say so"],
+
+  ["the boot reconciliation posts page-changed to native again — a director whose remount re-assert lands after the gate adopts the cover and broadcasts it",
+   "web/src/app.js",
+   sub("      await renderPage(renderedPage(), { pushToHistory: false, notifyNative: false });\n",
+       "      await renderPage(renderedPage(), { pushToHistory: false });\n"),
+   "e2e/bootStateMatchesScreen.test.mjs",
+   "the boot reconciliation never posts page-changed to native — a director's late remount would adopt and broadcast the cover"],
+
+  ["renderPage ignores notifyNative — every render, the reconciliation included, reaches native as a page-changed",
+   "web/src/app.js",
+   sub("    if (notifyNative) {\n      postNativeBridge({\n        type: \"page-changed\",\n",
+       "    {\n      postNativeBridge({\n        type: \"page-changed\",\n"),
+   "e2e/bootStateMatchesScreen.test.mjs",
+   "the boot reconciliation never posts page-changed to native — a director's late remount would adopt and broadcast the cover"],
+
+  ["the hold stops honouring a handshake in flight — a re-inviting follower's handshake is torn down by the refresh tick",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("             !self.allConnectedPeers.isEmpty || !self.pendingAdmissions.isEmpty || self.hasRecentFollowerSighting() {\n",
+       "             !self.allConnectedPeers.isEmpty || self.hasRecentFollowerSighting() {\n"),
+   "e2e/holdServingHandshake.test.mjs",
+   "the hold honours an in-flight handshake (pendingAdmissions), a connection, or a fresh sighting"],
+
+  ["invite:accept stops stamping the sighting — a same-peer re-invite after 20 s is invisible to the hold",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("          // then read \"no recent sighting\" and refreshed the advertiser under this very handshake.\n          self.discoveredFollowerSeenAt[peerID] = Date().timeIntervalSince1970\n",
+       "          // then read \"no recent sighting\" and refreshed the advertiser under this very handshake.\n"),
+   "e2e/holdServingHandshake.test.mjs",
+   "accepting an invite stamps the follower sighting — an invite IS a sighting"],
+
+  ["hasRecentFollowerSighting's comparison inverts — the director holds ONLY on stale sightings and refreshes every 5 s while followers handshake",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("    return Date().timeIntervalSince1970 - newest < Self.browserHealthySeconds\n",
+       "    return Date().timeIntervalSince1970 - newest >= Self.browserHealthySeconds\n"),
+   "e2e/holdServingHandshake.test.mjs",
+   "the freshness comparison is `age < browserHealthySeconds`, not its inverse"],
+
+  ["configureTransport stops clearing discoveredDirectorSeenAt — the three director records drift apart",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("    discoveredDirectorSeenAt = [:]   // the three director records clear as a unit, everywhere\n", ""),
+   "e2e/holdServingHandshake.test.mjs",
+   "configureTransport clears the three director records as a unit"],
+
+  ["the peer-is-director freshness comparison inverts — a fresh director is ACCEPTED as a follower (split-brain), a stale record still refuses",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("          && directorSeenAgo < Self.browserHealthySeconds\n", "          && directorSeenAgo > Self.browserHealthySeconds\n"),
+   "e2e/meshWedges.test.mjs",
+   "the director's invite check treats a director sighting as evidence only while it is FRESH"],
+
+  ["the already-directing failure exit leaves the heartbeats running and roleRef 'director' while the web shows 'none'",
+   "PdfReaderApp.tsx",
+   sub("          stopDirectorHeartbeat();\n          roleRef.current = \"off\";\n          explicitTransmitterRef.current = false;\n          setRelayPublishing(false);\n          injectEvent({ type: \"role\", role: \"none\" });\n",
+       "          setRelayPublishing(false);\n          injectEvent({ type: \"role\", role: \"none\" });\n"),
+   "e2e/directorCatchExitNeutral.test.mjs",
+   "a failed takeover by a device that was already directing stops the heartbeats and mirrors role off"],
+
+  ["the reset confirmation goes back to saying the device stops directing OR following — it re-enters follower mode",
+   "PdfReaderApp.tsx",
+   sub("Se reinicia la conexión: este dispositivo deja de dirigir y vuelve a buscar al director.",
+       "Se reinicia la conexión y este dispositivo deja de dirigir o seguir."),
+   "e2e/directorCatchExitNeutral.test.mjs",
+   "the reset confirmation describes what a soft reset now does: back to following, not neutral"],
+
+  ["a quarantined pointer writes a stage-skip breadcrumb on every 4-minute check-in again — the forensics ring fills with a settled state",
+   "PdfReaderApp.tsx",
+   sub("            decision.reason !== \"already-staged\" &&\n            decision.reason !== \"quarantined\"\n",
+       "            decision.reason !== \"already-staged\"\n"),
+   "e2e/stageFailureQuarantine.test.mjs",
+   "a quarantined pointer is a settled state — no stage-skip breadcrumb per check-in for the life of the install"],
 
 ];
 

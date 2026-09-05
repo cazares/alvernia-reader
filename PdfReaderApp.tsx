@@ -1151,6 +1151,14 @@ export default function App() {
           // setRelayPublishing(true) ran at the top of this call. Leaving it on while injecting role
           // "none" is a device that publishes with no director role — a queued frame drains to every
           // web follower from nobody. Mirror becomeFollower and turn it off on this exit too.
+          // ...and make the shell's own state match the "none" the web is shown: roleRef stayed
+          // "director" and both heartbeats kept running here (stopDirectorHeartbeat only ran for a
+          // former follower), so the 1 s mesh tick collected DIRECTOR_ROLE_INVALID every second from a
+          // native module whose role was already "off". Low reachability (only a bridge-level failure
+          // lands here for a current director), but "every exit from the role" has to mean every exit.
+          stopDirectorHeartbeat();
+          roleRef.current = "off";
+          explicitTransmitterRef.current = false;
           setRelayPublishing(false);
           injectEvent({ type: "role", role: "none" });
         }
@@ -1564,7 +1572,7 @@ export default function App() {
         case "request-soft-reset":
           Alert.alert(
             "¿Reparar este dispositivo?",
-            "Se reinicia la conexión y este dispositivo deja de dirigir o seguir. No borra el cancionero. Úsalo si la sincronización se quedó atascada.",
+            "Se reinicia la conexión: este dispositivo deja de dirigir y vuelve a buscar al director. No borra el cancionero. Úsalo si la sincronización se quedó atascada.",
             [
               { text: "Cancelar", style: "cancel" },
               { text: "Sí, reparar", onPress: () => onDirectorCode(SOFT_RESET_CODE) },
@@ -2111,7 +2119,14 @@ export default function App() {
           shellBuild: Number(BUILD_VERSION) || 0,
         });
         if (!decision.stage) {
-          if (decision.reason !== "already-active" && decision.reason !== "already-staged") {
+          // A quarantined pointer is a SETTLED state, like already-active/already-staged: writing one
+          // breadcrumb per 4-minute check-in for the life of the install would pollute the 200-slot
+          // ring that is the only forensics the badge dump shows — the three strikes are already there.
+          if (
+            decision.reason !== "already-active" &&
+            decision.reason !== "already-staged" &&
+            decision.reason !== "quarantined"
+          ) {
             breadcrumb(`stage-skip:${decision.reason}`);
           }
           return;

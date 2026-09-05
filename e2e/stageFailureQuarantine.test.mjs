@@ -41,6 +41,16 @@ test("a version-mismatch stage failure counts toward quarantine, not just cannot
   assert.match(block, /recordBundleFailure\(/, "the block no longer records the failure in the quarantine counter");
 });
 
+test("a quarantined pointer is a settled state — no stage-skip breadcrumb per check-in for the life of the install", () => {
+  const at = APP.indexOf("breadcrumb(`stage-skip:${decision.reason}`);");
+  assert.notEqual(at, -1, "the stage-skip breadcrumb moved");
+  const guard = APP.slice(APP.lastIndexOf("if (", at), at);
+  for (const settled of ["already-active", "already-staged", "quarantined"]) {
+    assert.match(guard, new RegExp(`decision\\.reason !== "${settled}"`),
+      `'${settled}' still writes a stage-skip breadcrumb on every check-in — the forensics ring fills with a settled state`);
+  }
+});
+
 test("the error string the shell quarantines is the one stageBook actually emits", () => {
   // A rename on either side would silently disconnect the two; pin both spellings to each other.
   assert.match(BOOK_UPDATE, /fail\("version-mismatch"[,)]/, "stageBook no longer fails with the literal 'version-mismatch'");

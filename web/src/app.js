@@ -1740,7 +1740,13 @@ const loadPageImage = async (pageNumber, retryToken = "") => {
   return { url, loadState };
 };
 
-const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, userInitiated = false } = {}) => {
+// notifyNative: every render posts page-changed to the shell — EXCEPT the boot reconciliation, which
+// is a display correction, not a navigation. A director's WebView remount whose native re-assert
+// landed after the 2.5 s gate would otherwise see the web post page-changed{1} for the cover, adopt
+// it into the mirror (webReady is already true, so the boot-render guard does not apply) and
+// broadcast the cover to the whole choir until the real page rendered. Native never needs that
+// message: request-director and director-code carry state.currentPage themselves.
+const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, userInitiated = false, notifyNative = true } = {}) => {
   const nextPage = clampPage(pageNumber);
 
   // ALREADY ON THIS PAGE — do nothing. A director's mesh heartbeat arrives once per SECOND, and
@@ -1832,12 +1838,14 @@ const renderPage = async (pageNumber, { pushToHistory = true, direction = 0, use
     if (loadState === "timeout") {
       console.warn("La carga de la página tardó demasiado", nextPage);
     }
-    postNativeBridge({
-      type: "page-changed",
-      page: nextPage,
-      totalPages: state.totalPages,
-      book: state.currentBook,
-    });
+    if (notifyNative) {
+      postNativeBridge({
+        type: "page-changed",
+        page: nextPage,
+        totalPages: state.totalPages,
+        book: state.currentBook,
+      });
+    }
     if (direction !== 0) {
       const animClass = direction > 0 ? "slide-from-right" : "slide-from-left";
       pageImage.classList.remove("slide-from-right", "slide-from-left");
@@ -4439,9 +4447,12 @@ const initReader = async () => {
     // cover → song 3. Reproduced on two isolated simulators, 2026-09-04. Rendering the page that is on
     // screen brings state, native's mirror (renderPage posts page-changed) and the badge back into
     // agreement before anyone can act on them. A native page that lands later still wins: it bumps
-    // the load request and this render steps aside.
+    // the load request and this render steps aside. WEB-LOCAL ON PURPOSE (notifyNative: false): the
+    // shell must not learn about this render as a page-changed — a DIRECTOR whose WebView remounted
+    // and whose own re-assert arrived late would adopt page 1 and broadcast the cover to the choir.
+    // Native's mirror does not need it: request-director / director-code carry state.currentPage.
     if (!firstNativePageArrived && renderedPage() !== state.currentPage) {
-      await renderPage(renderedPage(), { pushToHistory: false });
+      await renderPage(renderedPage(), { pushToHistory: false, notifyNative: false });
     }
   } else {
     // Open directly on the director's current page if one is broadcasting (the relay state is
