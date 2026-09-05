@@ -258,12 +258,13 @@ const MUTATIONS = [
 
   ["a contested BLE packet is applied instead of abstained — followers ping-pong between advertisers",
    "ios/SignoVivo/BlePageBeacon.swift",
-   sub("      lastContentionAt = now\n      return\n    }", "      lastContentionAt = now\n    }"),
+   sub("      lastContentionAt = now\n      for nonce in recentNonces.keys { contestedNonces.insert(nonce) }   // everyone on the air is suspect\n      return\n    }",
+       "      lastContentionAt = now\n      for nonce in recentNonces.keys { contestedNonces.insert(nonce) }   // everyone on the air is suspect\n    }"),
    "e2e/bleHandoff.test.mjs", "TWO LIVE ADVERTISERS: render NEITHER, rather than flapping or trusting the wrong one"],
 
   ["the post-contention cooldown is deleted — a rival slower than contentionWindow resumes rendering",
    "ios/SignoVivo/BlePageBeacon.swift",
-   sub("    if now - lastContentionAt < Self.contentionCooldown {\n      lastAppliedPage = -1\n      return\n    }\n", ""),
+   sub("    if now - lastContentionAt < Self.contentionCooldown {\n      lastAppliedPage = -1\n      contestedNonces.insert(parsed.nonce)\n      return\n    }\n", ""),
    "e2e/bleHandoff.test.mjs", "TWO LIVE ADVERTISERS: render NEITHER, rather than flapping or trusting the wrong one"],
 
   ["primeRadios warms only the central — a follower that becomes director pays the cold start",
@@ -287,7 +288,8 @@ const MUTATIONS = [
 
   ["the BLE applied-floor loses precedence — a director's own contested packets raise the floor against it (the #395 regression)",
    "ios/SignoVivo/BlePageBeacon.swift",
-   sub("    let floor = appliedSeqByNonce[parsed.nonce] ?? priorSeq", "    let floor = priorSeq"),
+   sub("    if let applied = appliedSeqByNonce[parsed.nonce] {\n      floor = applied\n    } else if",
+       "    if false, let applied = appliedSeqByNonce[parsed.nonce] {\n      floor = applied\n    } else if"),
    "e2e/bleHandoff.test.mjs", "both layers carry the nonce, so neither can drift from the other"],
 
   ["the foreground handler calls the advertiser-destroying refresh for a serving director again",
@@ -339,8 +341,8 @@ const MUTATIONS = [
 
   ["a superseded becomeDirector releases the in-flight claim unconditionally — the newer call's render-failed gate is re-armed",
    "PdfReaderApp.tsx",
-   sub("        if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded while dropping the link",
-       "        if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = 0; return; } // superseded while dropping the link"),
+   sub("          if (myGen !== roleGenerationRef.current) { if (becomeDirectorInFlightRef.current === myGen) becomeDirectorInFlightRef.current = 0; return; } // superseded during the retry sleep",
+       "          if (myGen !== roleGenerationRef.current) { becomeDirectorInFlightRef.current = 0; return; } // superseded during the retry sleep"),
    "e2e/becomeDirectorInFlightGeneration.test.mjs",
    "every release of the in-flight claim is guarded by === myGen"],
 
