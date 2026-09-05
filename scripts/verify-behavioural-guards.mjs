@@ -581,6 +581,25 @@ const MUTATIONS = [
    "e2e/bleHandoff.test.mjs",
    "THE 2026-09-05 REPLAY: a dead director's advertisement re-emitted at its successor's start must not render"],
 
+  ["a never-applied advertiser reappearing after silence keeps its opening-seq floor — a replay of a dead director's LAST packet re-admits its stale song",
+   "ios/SignoVivo/BlePageBeacon.swift",
+   sub("      if appliedSeqByNonce[parsed.nonce] == nil, let heard = lastHeardAt, now - heard > Self.contentionWindow {\n        firstHeardByNonce[parsed.nonce] = (seq: priorSeq, at: first.at)\n      }\n", ""),
+   "e2e/bleHandoff.test.mjs",
+   "REAPPEARANCE after silence: a never-applied advertiser that climbed while contested cannot be re-admitted by a later replay"],
+
+  ["the deferred takeover start loses its generation guard — a role change inside the flush window is overridden by a page-less director",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("        guard self.resetGeneration == generation, self.currentRole == \"follower\" else {\n          self.dbgLog(\"takeover:superseded\", [:])\n          reject(\"DIRECTOR_TAKEOVER_SUPERSEDED\", \"Otro cambio de rol se adelantó. Intenta de nuevo.\", nil)\n          return\n        }\n", ""),
+   "e2e/takeoverAnnounce.test.mjs",
+   "takeoverDirector announces the minted token to the connected director BEFORE becoming director"],
+
+  ["a director stops re-browsing when a follower drops — a taker on a pre-481 build is found only at the next ~25 s rebuild",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("          // refreshBrowserOnly's own minRefreshInterval, so a flapping follower cannot churn it.\n          self.refreshBrowserOnly()\n",
+       "          // refreshBrowserOnly's own minRefreshInterval, so a flapping follower cannot churn it.\n"),
+   "e2e/takeoverAnnounce.test.mjs",
+   "a director re-browses the moment a follower drops, so a taker on an older build is found within seconds"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

@@ -936,7 +936,13 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// then become director with that SAME token. The receiver demotes because the token is newer;
   /// nothing else in the protocol changed.
   ///
-  /// Without a connected director (the link dropped an instant ago) this is exactly startDirector.
+  /// Without a connected director (the link dropped an instant ago) this behaves like startDirector
+  /// minus its connected-follower rejection — there is nobody left to announce to, so it just starts.
+  ///
+  /// The deferred start is generation-guarded like every other deferred block in this file: a role
+  /// change that lands inside the flush window (a WebView remount's becomeFollower, a soft reset)
+  /// wins, and the takeover rejects with DIRECTOR_TAKEOVER_SUPERSEDED instead of making Swift a
+  /// director that JS no longer drives — a page-less advertiser nobody is directing from.
   private static let takeoverAnnounceFlushSeconds: TimeInterval = 0.4
 
   @objc(takeoverDirector:resolver:rejecter:)
@@ -952,12 +958,9 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     }
     DispatchQueue.main.async {
       let token = Self.randomToken()
-      let begin = {
-        self.beginDirecting(sessionCode: normalizedSessionCode, token: token)
-        resolve(["role": "director", "sessionCode": normalizedSessionCode, "tookOver": true])
-      }
       guard self.currentRole == "follower", let oldDirector = self.connectedDirectorPeer else {
-        begin()
+        self.beginDirecting(sessionCode: normalizedSessionCode, token: token)
+        resolve(["role": "director", "sessionCode": normalizedSessionCode, "announced": false])
         return
       }
       // Tell the director we are replacing, while the wire to it still exists.
@@ -967,7 +970,16 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         "token": token,
       ], to: oldDirector)
       self.dbgLog("takeover:announce", ["to": oldDirector.displayName])
-      DispatchQueue.main.asyncAfter(deadline: .now() + Self.takeoverAnnounceFlushSeconds, execute: begin)
+      let generation = self.resetGeneration
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.takeoverAnnounceFlushSeconds) {
+        guard self.resetGeneration == generation, self.currentRole == "follower" else {
+          self.dbgLog("takeover:superseded", [:])
+          reject("DIRECTOR_TAKEOVER_SUPERSEDED", "Otro cambio de rol se adelantó. Intenta de nuevo.", nil)
+          return
+        }
+        self.beginDirecting(sessionCode: normalizedSessionCode, token: token)
+        resolve(["role": "director", "sessionCode": normalizedSessionCode, "announced": true])
+      }
     }
   }
 
@@ -2806,6 +2818,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           }
         } else if self.currentRole == "director" {
           self.emitState(status: self.allConnectedPeers.isEmpty ? "waiting-followers" : "connected")
+          // A FOLLOWER THAT JUST DROPPED MAY BE TAKING OVER. A taker on a build before 481 drops its
+          // link and starts directing without announcing (takeoverDirector did not exist), and on real
+          // AWDL the browser never re-reports a peer whose role flipped — so on 2026-09-05 the replaced
+          // director found out at its next full rebuild, 41 s later, while two BLE advertisers fought
+          // in front of the choir. A fresh browser re-reports every peer with its CURRENT role within a
+          // second or two, and foundPeer(role=director) resolves the conflict by token. Browser only:
+          // the advertiser stays up, so followers mid-invite to us keep their target. Rate-limited by
+          // refreshBrowserOnly's own minRefreshInterval, so a flapping follower cannot churn it.
+          self.refreshBrowserOnly()
         }
       @unknown default:
         break

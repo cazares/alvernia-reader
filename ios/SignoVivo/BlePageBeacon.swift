@@ -117,7 +117,10 @@ final class BlePageBeacon: NSObject {
   private var contestedNonces: Set<String> = []
   /// How long a never-applied advertiser must be heard, uncontested, before its page renders. The
   /// replay above put the ghost and the live nonce 440 ms apart; one second is twice that margin and
-  /// costs a brand-new director exactly one second on its first page — page turns are unaffected.
+  /// costs a brand-new UNCONTESTED director exactly one second on its first page — page turns are
+  /// unaffected. A director that appears within contentionWindow of another advertiser (every live
+  /// takeover, to every third follower) is contested and is followed over BLE from its first page
+  /// TURN; the mesh carries its first page, exactly as in build 480.
   private static let newAdvertiserGrace: TimeInterval = 1.0
   private var lastPublishedPage = -1
   /// When the current pendingAdvert was requested, so the trace can show request -> on-air latency.
@@ -464,8 +467,23 @@ extension BlePageBeacon: CBCentralManagerDelegate {
     // cooldown branches used to return without recording anything, which threw away exactly the
     // evidence that tells a ghost from a director, and left the ghost free to rebase later.
     let priorSeq = seenSeqByNonce[parsed.nonce]?.seq ?? -1
+    let lastHeardAt = seenSeqByNonce[parsed.nonce]?.at
     seenSeqByNonce[parsed.nonce] = (seq: max(priorSeq, parsed.seq), at: now)
-    if firstHeardByNonce[parsed.nonce] == nil { firstHeardByNonce[parsed.nonce] = (seq: parsed.seq, at: now) }
+    if let first = firstHeardByNonce[parsed.nonce] {
+      // A never-applied advertiser that REAPPEARS after falling silent is judged against the last seq
+      // we heard from it BEFORE the silence — build 480's floor — not the seq it opened with long ago.
+      // Skeptic finding on the first cut (2026-09-05): a nonce that climbed while contested and was
+      // never applied kept a floor of its opening seq forever, so a replay of its LAST packet minutes
+      // later (seq above the opening seq) rendered a dead director's stale song. Re-stamping to the
+      // last-heard seq refuses a frozen replay (seq == floor) and still admits a survivor whose seq
+      // CLIMBED during a gap we missed. Only the seq is re-stamped; `at` stays, so sparse packets can
+      // never re-arm the grace.
+      if appliedSeqByNonce[parsed.nonce] == nil, let heard = lastHeardAt, now - heard > Self.contentionWindow {
+        firstHeardByNonce[parsed.nonce] = (seq: priorSeq, at: first.at)
+      }
+    } else {
+      firstHeardByNonce[parsed.nonce] = (seq: parsed.seq, at: now)
+    }
     if seenSeqByNonce.count > Self.maxTrackedAdvertisers {
       // Bound the memory. Prune by last-heard, never by the contention window: a ghost that stays
       // on the air must stay remembered, or pruning re-opens the hole this closes.
