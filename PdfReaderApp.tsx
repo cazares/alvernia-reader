@@ -1148,6 +1148,10 @@ export default function App() {
           // (becomeFollower bumps the generation, so this also supersedes our own stale path.)
           if (myGen === roleGenerationRef.current) becomeFollower();
         } else {
+          // setRelayPublishing(true) ran at the top of this call. Leaving it on while injecting role
+          // "none" is a device that publishes with no director role — a queued frame drains to every
+          // web follower from nobody. Mirror becomeFollower and turn it off on this exit too.
+          setRelayPublishing(false);
           injectEvent({ type: "role", role: "none" });
         }
         // Released on EVERY exit. A single stuck claim would wedge the render-failed gate forever —
@@ -1173,6 +1177,11 @@ export default function App() {
     breadcrumb("soft-reset");
     roleGenerationRef.current++; // supersede any in-flight become* from the prior role
     stopDirectorHeartbeat();
+    // STOP PUBLISHING ON EVERY WAY OUT OF THE DIRECTOR ROLE. Publishes are coalesced and drain
+    // asynchronously, so a frame still queued when this reset began would otherwise leave AFTER the
+    // role is gone — from a device that had just been reset — and land on every web follower.
+    // becomeFollower does this for the step-down path; the reset path did not.
+    setRelayPublishing(false);
     try {
       await resetNearbyDirectorSync();
     } catch {
@@ -1197,7 +1206,13 @@ export default function App() {
       /* keep the current URI rather than leaving the app with none */
     }
     setMountKey((k) => k + 1); // remount the WebView from scratch
-  }, [breadcrumb, stopDirectorHeartbeat]);
+    // RE-ENTER FOLLOWER MODE. This used to leave the device in role "off" with mesh, BLE and relay all
+    // torn down, while the remounted WebView came up showing the ordinary follower UI — a screen that
+    // said "following" on a device that followed nothing, until a human tapped the pill. Every other
+    // path back to a neutral state (bootstrap's `.finally(() => becomeFollower())`) re-enters follower
+    // mode; a recovery action must leave the device recovering, not parked.
+    void becomeFollower();
+  }, [breadcrumb, stopDirectorHeartbeat, becomeFollower]);
 
   // ── Director-code dispatch (codes entered on the web numpad) ────────────────
   const onDirectorCode = useCallback(

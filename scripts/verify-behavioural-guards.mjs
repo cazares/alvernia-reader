@@ -354,6 +354,39 @@ const MUTATIONS = [
    "e2e/testflightNoExternalGroups.test.mjs",
    "only --allow-external reaches an external group, and it still requires naming it"],
 
+  ["a soft reset leaves relay publishing ENABLED — a queued frame drains to every web follower from a device that just reset",
+   "PdfReaderApp.tsx",
+   sub("    // becomeFollower does this for the step-down path; the reset path did not.\n    setRelayPublishing(false);\n",
+       "    // becomeFollower does this for the step-down path; the reset path did not.\n"),
+   "e2e/stepDownStopsPublishing.test.mjs",
+   "performSoftReset disables relay publishing before it tears the role down"],
+
+  ["a soft reset parks the device in role 'off' with every transport down while the web shows the follower UI",
+   "PdfReaderApp.tsx",
+   sub("    void becomeFollower();\n", ""),
+   "e2e/stepDownStopsPublishing.test.mjs",
+   "performSoftReset re-enters follower mode after the remount instead of stranding the device 'off'"],
+
+  ["a failed takeover that was not previously following leaves publishing enabled with no director role",
+   "PdfReaderApp.tsx",
+   sub("          // web follower from nobody. Mirror becomeFollower and turn it off on this exit too.\n          setRelayPublishing(false);\n",
+       "          // web follower from nobody. Mirror becomeFollower and turn it off on this exit too.\n"),
+   "e2e/stepDownStopsPublishing.test.mjs",
+   "becomeDirector's non-follower failure path disables relay publishing"],
+
+  ["the serving-director hold fires on the bare presence of a follower sighting again — one stale sighting pins a deaf advertiser for the rest of Mass",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("             !self.allConnectedPeers.isEmpty || self.hasRecentFollowerSighting() {\n",
+       "             !self.allConnectedPeers.isEmpty || !self.discoveredFollowers.isEmpty {\n"),
+   "e2e/holdServingRequiresRecentSighting.test.mjs",
+   "the serving-director hold requires a CONNECTED peer or a RECENT sighting, never a bare memory"],
+
+  ["follower sightings stop being timestamped — every sighting is forever fresh",
+   "ios/SignoVivo/DirectorSyncModule.swift",
+   sub("        self.discoveredFollowerSeenAt[peerID] = Date().timeIntervalSince1970\n", ""),
+   "e2e/holdServingRequiresRecentSighting.test.mjs",
+   "follower sightings are timestamped, like director sightings already are"],
+
 ];
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────

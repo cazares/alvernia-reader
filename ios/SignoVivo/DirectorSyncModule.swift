@@ -166,8 +166,20 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
   /// Full discoveryInfo keyed by peer — used to detect legacy directors (no "hgen" key).
   private var discoveredDirectorInfo: [MCPeerID: [String: String]] = [:]
   private var discoveredFollowers: Set<MCPeerID> = []
+  /// When each follower was last SIGHTED by the browser. discoveredFollowers is a Set with no notion of
+  /// age, and MPC's lostPeer is not reliable — so a follower found once and never reported lost looked
+  /// exactly like a live one to the hold-serving guard, which then never refreshed a browser or
+  /// advertiser that had gone deaf, for the rest of Mass. Mirrors discoveredDirectorSeenAt.
+  private var discoveredFollowerSeenAt: [MCPeerID: TimeInterval] = [:]
   /// Full discoveryInfo for discovered followers — used to detect legacy followers (no "hgen" key).
   private var discoveredFollowerInfo: [MCPeerID: [String: String]] = [:]
+  /// True while at least one follower was sighted within browserHealthySeconds — the same freshness
+  /// window the follower side already uses for director sightings. foundPeer fires once per discovery,
+  /// so a sighting that never became a connection ages out here and the normal refresh resumes.
+  private func hasRecentFollowerSighting() -> Bool {
+    guard let newest = discoveredFollowerSeenAt.values.max() else { return false }
+    return Date().timeIntervalSince1970 - newest < Self.browserHealthySeconds
+  }
   private var pendingInvitePeer: MCPeerID?
   private var pendingInviteTimestamp: TimeInterval = 0
   /// Consecutive failed-connect count per candidate director, so a STALE entry in
@@ -1445,6 +1457,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     discoveredDirectors = [:]
     discoveredDirectorInfo = [:]
     discoveredFollowers = []
+    discoveredFollowerSeenAt = [:]
     discoveredFollowerInfo = [:]
     pendingInvitePeer = nil
     connectedDirectorPeer = nil
@@ -1644,8 +1657,11 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           // new peers without a restart, so new followers still self-invite the live advertiser. We
           // STILL run the split-brain announce/conflict here so two directors converge. Only churn the
           // transport when the director is fully idle (no followers at all → discovery may be wedged).
+          // A CONNECTED peer is proof the transport works. A mere SIGHTING is proof only while it is
+          // FRESH — see discoveredFollowerSeenAt. The bare-presence check that stood here let one stale
+          // sighting hold a deaf advertiser un-refreshed for the rest of Mass.
           if self.currentRole == "director",
-             !self.allConnectedPeers.isEmpty || !self.discoveredFollowers.isEmpty {
+             !self.allConnectedPeers.isEmpty || self.hasRecentFollowerSighting() {
             self.dbgLog("refresh:hold-serving", [
               "connected": self.allConnectedPeers.count,
               "discovered": self.discoveredFollowers.count,
@@ -1990,7 +2006,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       let forgotten = discoveredDirectors.count + discoveredFollowers.count
       discoveredDirectors.removeAll(); discoveredDirectorSeenAt.removeAll()
       discoveredDirectorInfo.removeAll()
-      discoveredFollowers.removeAll(); discoveredFollowerInfo.removeAll()
+      discoveredFollowers.removeAll(); discoveredFollowerSeenAt.removeAll(); discoveredFollowerInfo.removeAll()
       if forgotten > 0 { dbgLog("refresh:browser-only", ["forgotten": forgotten]) }
       startBrowsing()
     }
@@ -2053,7 +2069,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       let forgotten = discoveredDirectors.count + discoveredFollowers.count
       discoveredDirectors.removeAll(); discoveredDirectorSeenAt.removeAll()
       discoveredDirectorInfo.removeAll()
-      discoveredFollowers.removeAll(); discoveredFollowerInfo.removeAll()
+      discoveredFollowers.removeAll(); discoveredFollowerSeenAt.removeAll(); discoveredFollowerInfo.removeAll()
       if forgotten > 0 { dbgLog("refresh:peers-cleared", ["forgotten": forgotten]) }
 
       startAdvertising()
@@ -2104,7 +2120,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
     // stationary director are indistinguishable in a BLE packet.
     localPeerID = nil
     discoveredDirectors = [:]; discoveredDirectorSeenAt = [:]; discoveredDirectorInfo = [:]
-    discoveredFollowers = []; discoveredFollowerInfo = [:]
+    discoveredFollowers = []; discoveredFollowerSeenAt = [:]; discoveredFollowerInfo = [:]
     pendingInvitePeer = nil; pendingInviteTimestamp = 0; connectedDirectorPeer = nil
     invitedDirector = nil
     pendingTakeoverTimers.values.forEach { $0.invalidate() }
@@ -2447,6 +2463,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         }
       } else if role == "follower", self.currentRole == "director" {
         self.discoveredFollowers.insert(peerID)
+        self.discoveredFollowerSeenAt[peerID] = Date().timeIntervalSince1970
         self.discoveredFollowerInfo[peerID] = info ?? [:]
         guard !self.allConnectedPeers.contains(peerID) else { return }
         let isLegacyFollower = info?["hgen"] == nil  // build ≤226: no hgen → director must invite
@@ -2474,6 +2491,7 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
       self.discoveredDirectorSeenAt.removeValue(forKey: peerID)
       self.discoveredDirectorInfo.removeValue(forKey: peerID)
       self.discoveredFollowers.remove(peerID)
+      self.discoveredFollowerSeenAt.removeValue(forKey: peerID)
       self.discoveredFollowerInfo.removeValue(forKey: peerID)
       if self.currentRole == "follower" {
         if self.connectedDirectorPeer == peerID {
