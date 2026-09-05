@@ -128,7 +128,20 @@ for (const g of groups) {
   else if (isExternal(g)) console.log(`link     ${a.name}: public link NOT enabled (App Store Connect → TestFlight → ${a.name} → Enable Public Link)`);
 }
 
-if (LIST_ONLY) process.exit(0);
+if (LIST_ONLY) {
+  // --list --builds N: every build still on record, newest first, with its expiry — the question
+  // "which older build can still be a backup" is answered by expirationDate, not by memory.
+  const n = Number(arg("builds", 0));
+  if (n > 0) {
+    const all = (await api(`/v1/builds?filter[app]=${app.id}&sort=-version&limit=${Math.min(n, 200)}`)).data;
+    for (const b of all) {
+      const a = b.attributes;
+      const days = Math.round((new Date(a.expirationDate) - Date.now()) / 86_400_000);
+      console.log(`build    ${String(a.version).padEnd(5)} ${a.processingState.padEnd(8)} ${a.expired ? "EXPIRED " : `${String(days).padStart(3)}d left`}  uploaded ${String(a.uploadedDate).slice(0, 10)}`);
+    }
+  }
+  process.exit(0);
+}
 
 // A build cannot be attached while Apple is still processing it. Poll rather than fail: the wait is
 // typically a few minutes and the alternative is remembering to come back and re-run this.
