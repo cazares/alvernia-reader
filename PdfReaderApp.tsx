@@ -1148,6 +1148,18 @@ export default function App() {
           // (becomeFollower bumps the generation, so this also supersedes our own stale path.)
           if (myGen === roleGenerationRef.current) becomeFollower();
         } else {
+          // setRelayPublishing(true) ran at the top of this call. Leaving it on while injecting role
+          // "none" is a device that publishes with no director role — a queued frame drains to every
+          // web follower from nobody. Mirror becomeFollower and turn it off on this exit too.
+          // ...and make the shell's own state match the "none" the web is shown: roleRef stayed
+          // "director" and both heartbeats kept running here (stopDirectorHeartbeat only ran for a
+          // former follower), so the 1 s mesh tick collected DIRECTOR_ROLE_INVALID every second from a
+          // native module whose role was already "off". Low reachability (only a bridge-level failure
+          // lands here for a current director), but "every exit from the role" has to mean every exit.
+          stopDirectorHeartbeat();
+          roleRef.current = "off";
+          explicitTransmitterRef.current = false;
+          setRelayPublishing(false);
           injectEvent({ type: "role", role: "none" });
         }
         // Released on EVERY exit. A single stuck claim would wedge the render-failed gate forever —
@@ -1173,6 +1185,11 @@ export default function App() {
     breadcrumb("soft-reset");
     roleGenerationRef.current++; // supersede any in-flight become* from the prior role
     stopDirectorHeartbeat();
+    // STOP PUBLISHING ON EVERY WAY OUT OF THE DIRECTOR ROLE. Publishes are coalesced and drain
+    // asynchronously, so a frame still queued when this reset began would otherwise leave AFTER the
+    // role is gone — from a device that had just been reset — and land on every web follower.
+    // becomeFollower does this for the step-down path; the reset path did not.
+    setRelayPublishing(false);
     try {
       await resetNearbyDirectorSync();
     } catch {
@@ -1197,7 +1214,13 @@ export default function App() {
       /* keep the current URI rather than leaving the app with none */
     }
     setMountKey((k) => k + 1); // remount the WebView from scratch
-  }, [breadcrumb, stopDirectorHeartbeat]);
+    // RE-ENTER FOLLOWER MODE. This used to leave the device in role "off" with mesh, BLE and relay all
+    // torn down, while the remounted WebView came up showing the ordinary follower UI — a screen that
+    // said "following" on a device that followed nothing, until a human tapped the pill. Every other
+    // path back to a neutral state (bootstrap's `.finally(() => becomeFollower())`) re-enters follower
+    // mode; a recovery action must leave the device recovering, not parked.
+    void becomeFollower();
+  }, [breadcrumb, stopDirectorHeartbeat, becomeFollower]);
 
   // ── Director-code dispatch (codes entered on the web numpad) ────────────────
   const onDirectorCode = useCallback(
@@ -1549,7 +1572,7 @@ export default function App() {
         case "request-soft-reset":
           Alert.alert(
             "¿Reparar este dispositivo?",
-            "Se reinicia la conexión y este dispositivo deja de dirigir o seguir. No borra el cancionero. Úsalo si la sincronización se quedó atascada.",
+            "Se reinicia la conexión: este dispositivo deja de dirigir y vuelve a buscar al director. No borra el cancionero. Úsalo si la sincronización se quedó atascada.",
             [
               { text: "Cancelar", style: "cancel" },
               { text: "Sí, reparar", onPress: () => onDirectorCode(SOFT_RESET_CODE) },
@@ -2096,7 +2119,14 @@ export default function App() {
           shellBuild: Number(BUILD_VERSION) || 0,
         });
         if (!decision.stage) {
-          if (decision.reason !== "already-active" && decision.reason !== "already-staged") {
+          // A quarantined pointer is a SETTLED state, like already-active/already-staged: writing one
+          // breadcrumb per 4-minute check-in for the life of the install would pollute the 200-slot
+          // ring that is the only forensics the badge dump shows — the three strikes are already there.
+          if (
+            decision.reason !== "already-active" &&
+            decision.reason !== "already-staged" &&
+            decision.reason !== "quarantined"
+          ) {
             breadcrumb(`stage-skip:${decision.reason}`);
           }
           return;
@@ -2130,7 +2160,18 @@ export default function App() {
           // list/threshold (isQuarantined, 3 failures) rather than a new mechanism — same "counter,
           // not a tombstone" philosophy, so a future genuinely-newer book (a new bookVersion hash)
           // is never affected, and this settles within ~3 check-ins instead of never.
-          if (rec.error === "cannot-outrank-baked-shell" && rec.bookVersion) {
+          // "version-mismatch" IS THE SAME SHAPE FROM THE OTHER SIDE. The pointer names a book the
+          // origin no longer serves under that ?v= — a stale arm left standing by a release that
+          // skipped the worker redeploy, which is exactly how 479 shipped (worker still naming 471's
+          // book, DEVICES "*"). Every current device with internet then re-fetched that manifest on
+          // every 4-minute check-in and every foreground for the life of the install, reported itself
+          // as "error:version-mismatch" to the fleet on every call, and filled the 200-slot breadcrumb
+          // ring — the only Mass forensics — with stage-failed lines. Three strikes settles it; a
+          // genuinely new book has a new hash and is never touched by this counter.
+          if (
+            (rec.error === "cannot-outrank-baked-shell" || rec.error === "version-mismatch") &&
+            rec.bookVersion
+          ) {
             try {
               const raw = await AsyncStorage.getItem(STORAGE_KEYS.bookQuarantine);
               const list = raw ? JSON.parse(raw) : [];

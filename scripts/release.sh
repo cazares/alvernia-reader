@@ -12,6 +12,7 @@
 #
 # Usage:  bash scripts/release.sh            # bump + build web + build native IPA + deploy web (PROD)
 #         SKIP_NATIVE=1 bash scripts/release.sh   # web-only refresh (still rebuilds+deploys web at the bumped version)
+#         SKIP_OTA_ARM=1 bash scripts/release.sh  # full release but step 5b does NOT arm the fleet or deploy the worker
 #         STAGING=1 bash scripts/release.sh   # CANARY: build web at the CURRENT version + deploy to the
 #                                             #   isolated Pages preview branch 'staging'. NO version bump,
 #                                             #   NO native archive, NEVER touches production ('main') or
@@ -333,7 +334,17 @@ if [ "$STAGING" != "1" ]; then
     echo "         (native build freshness NOT updated this run — no binary uploaded)"
   fi
   echo "==> 5b/6 Arm OTA fleet-wide for $NEW_BOOK_VERSION (sync-worker)"
-  if [ -d sync-worker ] && [ -f sync-worker/wrangler.jsonc ]; then
+  # SKIP_OTA_ARM=1 — release the binary and the web WITHOUT arming the fleet or touching the worker.
+  # Until 2026-09-05 this step had no off switch: 479 shipped unarmed only because the script crashed
+  # before reaching it, and the next release would have armed every device (and redeployed the
+  # worker, which also ships HEAD's relay code) seconds after `pages deploy`. Say so loudly — a silent
+  # skip reads as "armed" to whoever scrolls this log tomorrow. Arm later with scripts/ota-arm.sh
+  # (one device first), or re-run without the flag.
+  if [ "${SKIP_OTA_ARM:-0}" = "1" ]; then
+    echo "         ⏭  SKIPPED (SKIP_OTA_ARM=1): worker NOT deployed; BOOK_UPDATE_VERSION / LATEST_NATIVE_BUILD NOT rewritten."
+    echo "            The fleet keeps whatever the worker is armed with right now. Arm deliberately later:"
+    echo "              bash scripts/ota-arm.sh --version $NEW_BOOK_VERSION --devices <one device id>"
+  elif [ -d sync-worker ] && [ -f sync-worker/wrangler.jsonc ]; then
     node -e '
       const fs=require("fs");
       const p="sync-worker/wrangler.jsonc";

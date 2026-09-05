@@ -20,19 +20,40 @@ const APP = fs.readFileSync("web/src/app.js", "utf8");
 // 2026-08-06: a follower left on one screen for several minutes, doing nothing.
 
 // Execute the real guard so a weakened condition changes the RESULT, not just a line of source.
-const skips = ({ next, current, imgMatches, complete, naturalWidth, userInitiated = false }) => {
+// Returns the verdict AND the state/spies the guard touched, so the "page on screen wins over a page
+// in flight" behaviour (below) is executed too, not quoted.
+const run = ({ next, current, imgMatches, complete, naturalWidth, userInitiated = false, loading = false }) => {
   const start = APP.indexOf("const renderPage = async");
   const guard = APP.slice(start, APP.indexOf("const requestId = state.pageLoadRequest + 1;", start));
   const body = guard.slice(guard.indexOf("if ("));
-  const fn = new Function("nextPage", "state", "pageImage", "pageImageMatches", "svShouldPaceRender", "userInitiated",
+  const fn = new Function("nextPage", "state", "pageImage", "pageImageMatches", "svShouldPaceRender", "userInitiated", "hideLoadingIndicator",
     `${body.replace(/\n\s*return;\n\s*\}/, "\n    return true;\n  }")}\n  return false;`);
   // lastRenderFailure: null — no page is currently failing, so the pacing rule is inert here.
-  return fn(next, { currentPage: current, lastRenderFailure: null }, { complete, naturalWidth }, () => imgMatches, shouldPaceRender, userInitiated);
+  // pageLoadRequest: 7 — some request is in flight; the guard is expected to invalidate it.
+  const state = { currentPage: current, lastRenderFailure: null, pageLoadRequest: 7 };
+  const hidden = { calls: 0 };
+  const pageImage = { complete, naturalWidth, classList: { contains: (c) => c === "is-loading" && loading } };
+  const skipped = fn(next, state, pageImage, () => imgMatches, shouldPaceRender, userInitiated, () => { hidden.calls += 1; });
+  return { skipped, state, hidden };
 };
+const skips = (opts) => run(opts).skipped;
 const base = { next: 50, current: 50, imgMatches: true, complete: true, naturalWidth: 800 };
 
 test("an idle heartbeat on the same page does no work", () => {
   assert.equal(skips(base), true, "the follower re-renders on every heartbeat — this is the crash");
+});
+
+test("a request for the page on screen invalidates a render still in flight for another page", () => {
+  // Director on B taps to A (A starts loading), then back to B inside A's load time. B is on screen,
+  // so the guard returns early — but it must also make the in-flight A render step aside, or A commits
+  // on top of a correct B and the follower sits on the wrong page until a later re-drive.
+  const { skipped, state, hidden } = run(base);
+  assert.equal(skipped, true);
+  assert.equal(state.pageLoadRequest, 8, "the early return left the in-flight request valid — a mis-tap correction commits the wrong page over the right one");
+  assert.equal(hidden.calls, 0, "nothing was loading, so there was no indicator to clear");
+  const loading = run({ ...base, loading: true });
+  assert.equal(loading.skipped, true);
+  assert.equal(loading.hidden.calls, 1, "the cancelled render's loading indicator (or a stale error overlay) was left on screen");
 });
 
 test("a real page turn still renders", () => {
@@ -82,11 +103,11 @@ const skipsWithFailure = ({ next, userInitiated }) => {
   const start = APP.indexOf("const renderPage = async");
   const guard = APP.slice(start, APP.indexOf("const requestId = state.pageLoadRequest + 1;", start));
   const body = guard.slice(guard.indexOf("if ("));
-  const fn = new Function("nextPage", "state", "pageImage", "pageImageMatches", "svShouldPaceRender", "userInitiated",
+  const fn = new Function("nextPage", "state", "pageImage", "pageImageMatches", "svShouldPaceRender", "userInitiated", "hideLoadingIndicator",
     `${body.replace(/return;/g, "return true;")}\n  return false;`);
   // This page failed 100ms ago — squarely inside the 5s pacing window.
-  return fn(next, { currentPage: 3, lastRenderFailure: { page: next, at: Date.now() - 100 } },
-            { complete: false, naturalWidth: 0 }, () => false, shouldPaceRender, userInitiated);
+  return fn(next, { currentPage: 3, lastRenderFailure: { page: next, at: Date.now() - 100 }, pageLoadRequest: 0 },
+            { complete: false, naturalWidth: 0, classList: { contains: () => false } }, () => false, shouldPaceRender, userInitiated, () => {});
 };
 
 test("the director's automatic re-drive of a failing page IS paced", () => {
