@@ -914,26 +914,97 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
         reject("DIRECTOR_TAKEOVER_REQUIRED", "Ya hay un director conectado. Solicita permiso para tomar control.", nil)
         return
       }
-      self.resetTransport(emitState: false)
-      self.currentRole = "director"
-      self.currentSessionCode = normalizedSessionCode
-      self.currentDirectorToken = Self.randomToken()
-      self.bleBeacon.sessionCode = normalizedSessionCode
-      self.bleBeacon.primeRadios()   // belt-and-braces: a director that never passed through startFollower
-      self.configureTransport()
-      self.startBleHealthTimer()
-      self.startAdvertising()
-      self.startBrowsing()
-      self.startDiscoveryRefreshTimer()
-      // Split-brain mitigation: tell every peer still connected through this device that we are
-      // now the director carrying this token, so a peer that is ALSO directing demotes at once
-      // via handleDirectorConflict rather than waiting for the ~25 s browser cycle to catch the
-      // higher token. resetTransport() above tears down prior sessions, so this is usually a
-      // no-op at this instant; the per-peer announce on .connected (below) covers the live case.
-      self.broadcastDirectorAnnounce()
-      self.emitState(status: "advertising")
+      self.beginDirecting(sessionCode: normalizedSessionCode, token: Self.randomToken())
       resolve(["role": "director", "sessionCode": normalizedSessionCode])
     }
+  }
+
+  /// LIVE TAKEOVER — "Tomar el control" while CONNECTED to the director being replaced.
+  ///
+  /// Hardware, 2026-09-05 (build 480): the middle iPad took over from the iPhone and BOTH stayed
+  /// director for 45 s. The JS side dropped the follower link first (so startDirector's guard would
+  /// pass) and then started as director — so the announce in beginDirecting had nobody left to tell,
+  /// and the old director could learn of the newer token only through browser discovery. On real
+  /// AWDL the browser does not re-report a peer whose role flipped, so the phone found out at its
+  /// next ~25 s browser rebuild plus hold-serving delays: `refresh:peers-cleared` at 12:01:12, demoted
+  /// at 12:01:12.9, half a minute of two directors and two BLE advertisers in front of the choir.
+  ///
+  /// The old director must be TOLD, over the session that still connects us, BEFORE that session is
+  /// torn down. So: mint the token first, send `director_announce` carrying it to connectedDirectorPeer
+  /// (the receiver already runs handleDirectorConflict on it — and has since well before build 472,
+  /// so a mixed fleet demotes just the same), give the reliable send a moment to leave the radio,
+  /// then become director with that SAME token. The receiver demotes because the token is newer;
+  /// nothing else in the protocol changed.
+  ///
+  /// Without a connected director (the link dropped an instant ago) this behaves like startDirector
+  /// minus its connected-follower rejection — there is nobody left to announce to, so it just starts.
+  ///
+  /// The deferred start is generation-guarded like every other deferred block in this file: a role
+  /// change that lands inside the flush window (a WebView remount's becomeFollower, a soft reset)
+  /// wins, and the takeover rejects with DIRECTOR_TAKEOVER_SUPERSEDED instead of making Swift a
+  /// director that JS no longer drives — a page-less advertiser nobody is directing from.
+  private static let takeoverAnnounceFlushSeconds: TimeInterval = 0.4
+
+  @objc(takeoverDirector:resolver:rejecter:)
+  func takeoverDirector(
+    _ sessionCode: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    let normalizedSessionCode = Self.normalizeSessionCode(sessionCode)
+    guard !normalizedSessionCode.isEmpty else {
+      reject("DIRECTOR_SESSION_INVALID", "Ingresa un código de sesión válido.", nil)
+      return
+    }
+    DispatchQueue.main.async {
+      let token = Self.randomToken()
+      guard self.currentRole == "follower", let oldDirector = self.connectedDirectorPeer else {
+        self.beginDirecting(sessionCode: normalizedSessionCode, token: token)
+        resolve(["role": "director", "sessionCode": normalizedSessionCode, "announced": false])
+        return
+      }
+      // Tell the director we are replacing, while the wire to it still exists.
+      self.sendControlPayload([
+        "v": Self.protocolVersion,
+        "type": "director_announce",
+        "token": token,
+      ], to: oldDirector)
+      self.dbgLog("takeover:announce", ["to": oldDirector.displayName])
+      let generation = self.resetGeneration
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.takeoverAnnounceFlushSeconds) {
+        guard self.resetGeneration == generation, self.currentRole == "follower" else {
+          self.dbgLog("takeover:superseded", [:])
+          reject("DIRECTOR_TAKEOVER_SUPERSEDED", "Otro cambio de rol se adelantó. Intenta de nuevo.", nil)
+          return
+        }
+        self.beginDirecting(sessionCode: normalizedSessionCode, token: token)
+        resolve(["role": "director", "sessionCode": normalizedSessionCode, "announced": true])
+      }
+    }
+  }
+
+  /// EVERYTHING IT TAKES TO BE A DIRECTOR, IN ONE PLACE — the body startDirector and takeoverDirector
+  /// share, so a takeover can hand in the token it has already announced.
+  private func beginDirecting(sessionCode normalizedSessionCode: String, token: String) {
+    resetTransport(emitState: false)
+    currentRole = "director"
+    currentSessionCode = normalizedSessionCode
+    currentDirectorToken = token
+    bleBeacon.sessionCode = normalizedSessionCode
+    bleBeacon.primeRadios()   // belt-and-braces: a director that never passed through startFollower
+    configureTransport()
+    startBleHealthTimer()
+    startAdvertising()
+    startBrowsing()
+    startDiscoveryRefreshTimer()
+    // Split-brain mitigation: tell every peer still connected through this device that we are
+    // now the director carrying this token, so a peer that is ALSO directing demotes at once
+    // via handleDirectorConflict rather than waiting for the ~25 s browser cycle to catch the
+    // higher token. resetTransport() above tears down prior sessions, so this is usually a
+    // no-op at this instant; the per-peer announce on .connected (below) covers the live case,
+    // and takeoverDirector announces to the replaced director BEFORE the teardown.
+    broadcastDirectorAnnounce()
+    emitState(status: "advertising")
   }
 
   @objc(startFollower:resolver:rejecter:)
@@ -2747,6 +2818,15 @@ final class DirectorSyncModule: RCTEventEmitter, MCNearbyServiceAdvertiserDelega
           }
         } else if self.currentRole == "director" {
           self.emitState(status: self.allConnectedPeers.isEmpty ? "waiting-followers" : "connected")
+          // A FOLLOWER THAT JUST DROPPED MAY BE TAKING OVER. A taker on a build before 481 drops its
+          // link and starts directing without announcing (takeoverDirector did not exist), and on real
+          // AWDL the browser never re-reports a peer whose role flipped — so on 2026-09-05 the replaced
+          // director found out at its next full rebuild, 41 s later, while two BLE advertisers fought
+          // in front of the choir. A fresh browser re-reports every peer with its CURRENT role within a
+          // second or two, and foundPeer(role=director) resolves the conflict by token. Browser only:
+          // the advertiser stays up, so followers mid-invite to us keep their target. Rate-limited by
+          // refreshBrowserOnly's own minRefreshInterval, so a flapping follower cannot churn it.
+          self.refreshBrowserOnly()
         }
       @unknown default:
         break

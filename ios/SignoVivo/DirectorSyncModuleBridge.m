@@ -7,6 +7,12 @@ RCT_EXTERN_METHOD(startDirector:(NSString *)sessionCode
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// Live takeover: announces the new token to the director being replaced over the still-open
+// session, then becomes director with that token — see takeoverDirector in DirectorSyncModule.swift.
+RCT_EXTERN_METHOD(takeoverDirector:(NSString *)sessionCode
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(startFollower:(NSString *)sessionCode
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

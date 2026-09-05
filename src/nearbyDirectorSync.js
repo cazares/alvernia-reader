@@ -12,6 +12,22 @@ export const startNearbyDirector = async (sessionCode) => {
   return nativeModule.startDirector(sessionCode);
 };
 
+// LIVE TAKEOVER ("Tomar el control" while connected to the director being replaced). The native
+// side announces the new token to that director over the still-open session BEFORE tearing it down,
+// so the old director demotes at once instead of at its next ~25 s browser rebuild (45 s of two
+// directors on hardware, 2026-09-05). Falls back to the old drop-then-start sequence on a shell that
+// predates the method; the old director then learns through discovery, as before.
+export const takeoverNearbyDirector = async (sessionCode) => {
+  if (!isNearbyDirectorSyncAvailable()) {
+    return Promise.reject(new Error("La sincronización offline solo está disponible en iPad."));
+  }
+  if (typeof nativeModule.takeoverDirector === "function") {
+    return nativeModule.takeoverDirector(sessionCode);
+  }
+  await resetNearbyDirectorSync().catch(() => null);
+  return nativeModule.startDirector(sessionCode);
+};
+
 export const startNearbyFollower = async (sessionCode) => {
   if (!isNearbyDirectorSyncAvailable()) {
     return Promise.reject(new Error("La sincronización offline solo está disponible en iPad."));

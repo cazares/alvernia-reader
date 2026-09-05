@@ -52,24 +52,53 @@ const slice = (from, to, src = BEACON) => {
 // ── The two guards, transliterated ────────────────────────────────────────────
 const CONTENTION_WINDOW = 4;
 const CONTENTION_COOLDOWN = 4;
-const makeBeacon = () => ({ nonce: "", seen: new Map(), applied: new Map(), recent: new Map(), contendedAt: -Infinity });
-const beaconRecv = (b, adv, now = 0) => {
-  // TWO PER-ADVERTISER FLOORS — see seenSeqByNonce / appliedSeqByNonce in BlePageBeacon.swift.
-  // `seen` is recorded BEFORE any abstention: it is what stops a frozen ghost re-qualifying after the
-  // real director drops (its seq never climbs past what we first heard). `applied` is recorded only
-  // when we actually follow a packet.
+const NEW_ADVERTISER_GRACE = 1;
+// The two rules added after the 2026-09-05 replay incident (see that test). RULES_480 reproduces the
+// scanner exactly as build 480 shipped it; RULES_NOW is the current Swift.
+const RULES_480 = { grace: false, firstHeardFloor: false, restampOnReturn: false };
+// The first cut of the fix (1b05c1d) before the skeptic's flip-flop finding — see the REAPPEARANCE test.
+const RULES_FIRST_CUT = { grace: true, firstHeardFloor: true, restampOnReturn: false };
+const RULES_NOW = { grace: true, firstHeardFloor: true, restampOnReturn: true };
+const makeBeacon = () => ({
+  nonce: "", seen: new Map(), seenAt: new Map(), applied: new Map(), first: new Map(), contested: new Set(),
+  recent: new Map(), contendedAt: -Infinity,
+});
+const beaconRecv = (b, adv, now = 0, rules = RULES_NOW) => {
+  // PER-ADVERTISER FLOORS — see seenSeqByNonce / appliedSeqByNonce / firstHeardByNonce in
+  // BlePageBeacon.swift. `seen` is recorded BEFORE any abstention. `applied` is recorded only when we
+  // actually follow a packet. `first` remembers the seq (and moment) each advertiser was FIRST heard;
+  // `contested` remembers which advertisers were ever on a contested air.
   const priorSeen = b.seen.has(adv.nonce) ? b.seen.get(adv.nonce) : -1;
+  const lastHeardAt = b.seenAt.get(adv.nonce);
   b.seen.set(adv.nonce, Math.max(priorSeen, adv.seq));
-  // Contention: two live advertisers => abstain entirely.
+  b.seenAt.set(adv.nonce, now);
+  if (!b.first.has(adv.nonce)) b.first.set(adv.nonce, { seq: adv.seq, at: now });
+  // A never-applied advertiser reappearing after silence is judged against the last seq heard BEFORE
+  // the silence — build 480's floor (the moment it was first heard is kept, so sparse packets cannot
+  // re-arm the grace).
+  else if (rules.restampOnReturn && !b.applied.has(adv.nonce) && lastHeardAt !== undefined && now - lastHeardAt > CONTENTION_WINDOW) {
+    b.first.set(adv.nonce, { seq: priorSeen, at: b.first.get(adv.nonce).at });
+  }
+  // Contention: two live advertisers => abstain entirely, and mark everyone on the air as suspect.
   b.recent.set(adv.nonce, now);
   for (const [n, t] of b.recent) if (now - t > CONTENTION_WINDOW) b.recent.delete(n);
-  if (b.recent.size > 1) { b.contendedAt = now; return null; }
-  if (now - b.contendedAt < CONTENTION_COOLDOWN) return null;
+  if (b.recent.size > 1) { b.contendedAt = now; for (const n of b.recent.keys()) b.contested.add(n); return null; }
+  if (now - b.contendedAt < CONTENTION_COOLDOWN) { b.contested.add(adv.nonce); return null; }
+  // Newcomer grace: an advertiser we never followed is not rendered until it has been on the air,
+  // uncontested, for NEW_ADVERTISER_GRACE.
+  if (rules.grace && !b.applied.has(adv.nonce) && now - b.first.get(adv.nonce).at < NEW_ADVERTISER_GRACE) return null;
   if (adv.nonce !== b.nonce) b.nonce = adv.nonce;  // new advertiser: relog, but do NOT reset a floor
   // An advertiser we have FOLLOWED is judged against what we last applied from it, so its own packets
   // heard under contention cannot raise the floor against it. One we never applied is judged against
-  // its last-seen seq — which for a ghost is frozen.
-  const floor = b.applied.has(adv.nonce) ? b.applied.get(adv.nonce) : priorSeen;
+  // the seq we FIRST heard from it: a contested newcomer must climb past it (a frozen ghost never
+  // does), an uncontested one is accepted as-is. Build 480 judged a newcomer against its LAST-seen
+  // seq — which its own contested packets had raised — so a surviving live director's page was
+  // refused until the next turn.
+  let floor;
+  if (b.applied.has(adv.nonce)) floor = b.applied.get(adv.nonce);
+  else if (!rules.firstHeardFloor) floor = priorSeen;
+  else if (b.contested.has(adv.nonce)) floor = b.first.get(adv.nonce).seq;
+  else floor = b.first.get(adv.nonce).seq - 1;
   if (!(adv.seq > floor)) return null;
   b.applied.set(adv.nonce, adv.seq);
   return { page: adv.page, seq: adv.seq, nonce: adv.nonce };
@@ -91,9 +120,14 @@ const run = (rebases) => {
   const rendered = [];
   let clock = 0;
   const advertise = (nonce, pages) => pages.forEach((page, i) => {
-    clock += 1;
-    const out = moduleRecv(m, beaconRecv(b, { nonce, seq: i + 1, page }, clock), rebases);
-    if (out !== null) rendered.push(out);
+    // allowDuplicates delivers every packet, and a page is on the air for many of them. Two per page,
+    // a second apart: a NEW advertiser's first packet is swallowed by the newcomer grace (see
+    // beaconRecv) and its second renders — the hardware cadence, not a special case.
+    for (let k = 0; k < 2; k++) {
+      clock += 1;
+      const out = moduleRecv(m, beaconRecv(b, { nonce, seq: i + 1, page }, clock), rebases);
+      if (out !== null) rendered.push(out);
+    }
   });
   advertise("aaaa", [10, 11, 12, 13, 14]);   // director A: seq 1..5
   const afterA = rendered.length;
@@ -132,7 +166,8 @@ test("both layers carry the nonce, so neither can drift from the other", () => {
   // TWO floors, not one. #395 used the seen-floor alone and refused a live director the page it turned
   // while a ghost was on the air (its own contested packets had raised the floor against it). The
   // applied-floor takes precedence for an advertiser we have followed; the seen-floor catches the ghost.
-  assert.match(BEACON, /let floor = appliedSeqByNonce\[parsed\.nonce\] \?\? priorSeq/,
+  // (2026-09-05: the never-applied fallback is the FIRST-heard seq now — see the replay test below.)
+  assert.match(BEACON, /if let applied = appliedSeqByNonce\[parsed\.nonce\] \{\s*floor = applied\s*\}/,
     "the applied-floor no longer takes precedence — a director's own contested packets raise the floor against it");
   assert.match(BEACON, /appliedSeqByNonce\[parsed\.nonce\] = parsed\.seq/,
     "the applied-floor is never recorded — the two-floor guard collapses back to one");
@@ -210,8 +245,10 @@ test("TWO LIVE ADVERTISERS: render NEITHER, rather than flapping or trusting the
       if (out !== null) rendered.push(out);
     }
   }
-  assert.deepEqual(rendered, [100],
-    `contested advertisers rendered ${JSON.stringify(rendered)} — expected at most the first, then silence`);
+  // Nothing at all: the first packet of either falls inside the newcomer grace, and by the time it
+  // would have rendered the second advertiser is on the air. (Build 480 rendered the first, 100.)
+  assert.deepEqual(rendered, [],
+    `contested advertisers rendered ${JSON.stringify(rendered)} — expected silence`);
 
   // And once the loser goes quiet, the survivor is adopted rather than being locked out forever.
   clock += CONTENTION_WINDOW + 1;
@@ -382,9 +419,11 @@ test("neither radio is created on the critical path", () => {
   const fEnd = MODULE.indexOf("\n  func ", MODULE.indexOf("func startFollower(") + 1);
   assert.match(MODULE.slice(MODULE.indexOf("func startFollower("), fEnd), /primeRadios\(\)/,
     "a follower does not warm its radios, so becoming director pays a cold start");
-  const director = MODULE.slice(MODULE.indexOf("func startDirector("));
-  assert.match(director.slice(0, 2000), /primeRadios\(\)/,
+  // Both director entry points share beginDirecting (2026-09-05), which is where the warm-up lives.
+  assert.match(swiftFunc("beginDirecting", MODULE), /primeRadios\(\)/,
     "a director that never followed first still pays a cold start");
+  assert.match(swiftFunc("startDirector", MODULE), /self\.beginDirecting\(/, "startDirector no longer goes through beginDirecting");
+  assert.match(swiftFunc("takeoverDirector", MODULE), /self\.beginDirecting\(/, "takeoverDirector no longer goes through beginDirecting");
 
   // And the trace must be able to PROVE it, or "it should be fast" is just a claim.
   assert.match(BEACON, /"coldRadio": cold/, "nothing reports when a publish hit a cold radio");
@@ -549,7 +588,8 @@ test("A GHOST CANNOT RE-QUALIFY once the real director drops", () => {
     if (out !== null) rendered.push(out);
   };
 
-  hear("gggg", 12, 357);                       // lone ghost heard first — adopted (the open hole)
+  hear("gggg", 12, 357);                       // lone ghost heard first — the newcomer grace holds it...
+  hear("gggg", 12, 357);                       // ...one second later, still alone: adopted (the open hole)
   assert.deepEqual(rendered, [357], "documents the first-sighting hole; see the note above");
 
   for (let i = 1; i <= 3; i++) { hear("dddd", i, 40); hear("gggg", 12, 357); }  // both live: contend
@@ -564,8 +604,9 @@ test("A GHOST CANNOT RE-QUALIFY once the real director drops", () => {
   // And a genuinely live director is still adopted the moment the air is clear, so this is not deafness.
   clock += CONTENTION_WINDOW + CONTENTION_COOLDOWN + 2;
   hear("eeee", 1, 41);
+  hear("eeee", 1, 41);                          // a second later — past the newcomer grace
   assert.deepEqual(rendered, [...afterContention, 41],
-    "with the air clear, a real new director must still be adopted at once");
+    "with the air clear, a real new director must still be adopted within the grace");
 });
 
 test("a SURVIVING director's page turned DURING contention renders once the air clears", () => {
@@ -591,6 +632,7 @@ test("a SURVIVING director's page turned DURING contention renders once the air 
   };
 
   hear("dddd", 1, 40);
+  hear("dddd", 1, 40);                          // a second later — past the newcomer grace
   hear("dddd", 2, 41);
   assert.deepEqual(rendered, [40, 41], "the live director must be followed normally");
 
@@ -612,4 +654,122 @@ test("a SURVIVING director's page turned DURING contention renders once the air 
   clock += CONTENTION_WINDOW + CONTENTION_COOLDOWN + 2;
   hear("gggg", 12, 357);
   assert.deepEqual(rendered, [40, 41, 42], "the frozen ghost re-qualified — #395's fix regressed");
+});
+
+test("THE 2026-09-05 REPLAY: a dead director's advertisement re-emitted at its successor's start must not render", () => {
+  // Three devices, build 480, from the Varela iPad's trace (times relative to the phone's on-air):
+  //
+  //   11:58:04  the iPhone directs page 82 under nonce f88c, seq 36; it is demoted at 11:58:58 and
+  //             relaunched at 11:59:38 (boot-stop-stale ran). The iPad also relaunched, so it holds
+  //             no floor for f88c.
+  //   +0.000 s  the phone starts advertising again: NEW nonce c442, page 1, seq 1.
+  //   +0.066 s  the iPad receives f88c / page 82 / seq 36 at RSSI -33 — bluetoothd re-emitted the dead
+  //             process's advertisement — and RENDERS 82 ("they go to the song they were on").
+  //   +0.5 s    c442 arrives; contention; the follower abstains — on 82.
+  //   ~+1 s     the ghost is gone for good. c442 keeps coming; the cooldown holds.
+  //   +6.85 s   the phone turns to page 2 (seq 2). Packets heard during the cooldown raise the floor.
+  //   +8.17 s   first c442 packet past the cooldown: page 2, seq 2 — REFUSED (2 > 2 fails).
+  //   +9.2 s    the phone turns to page 3 — rendered. "Then I switch it, then it catches up."
+  //
+  // Two rules close it: a newcomer is held for one uncontested second before rendering (so the ghost
+  // and the live nonce meet in the contention branch BEFORE anything renders), and a contested
+  // newcomer is judged against the seq it was FIRST heard at, not the seq its own packets raised
+  // while we abstained (so the survivor's current page renders as soon as the air clears).
+  const play = (rules) => {
+    const b = makeBeacon(), m = makeModule();
+    const rendered = [];
+    const hear = (nonce, seq, page, at) => {
+      const out = moduleRecv(m, beaconRecv(b, { nonce, seq, page }, at, rules), true);
+      if (out !== null) rendered.push(out);
+    };
+    hear("f88c", 36, 82, 0.066);                                    // the ghost
+    hear("c442", 1, 1, 0.51);                                       // the live successor: contention
+    hear("f88c", 36, 82, 0.9);                                      // the ghost's last packet
+    for (const t of [1.3, 2.3, 3.3, 4.3, 4.9]) hear("c442", 1, 1, t);   // ghost still inside the window
+    for (const t of [5.5, 6.5, 7.4]) hear("c442", 1, 1, t);         // window clear; cooldown holds
+    for (const t of [7.9, 8.5]) hear("c442", 2, 2, t);              // page 2, heard during the cooldown
+    hear("c442", 2, 2, 9.0);                                        // first packet past the cooldown
+    hear("c442", 3, 3, 10.0);                                       // the director turns the page
+    return rendered;
+  };
+  assert.deepEqual(play(RULES_480), [82, 3],
+    "the model no longer reproduces the field failure — re-check it before trusting the fix below");
+  assert.deepEqual(play(RULES_NOW), [2, 3],
+    "the ghost's page 82 rendered, or the survivor's page 2 waited for the next turn");
+
+  // A lone brand-new director still renders — one second after it is first heard, not on the first
+  // packet. That second is the whole price of the grace.
+  const alone = [];
+  const b = makeBeacon(), m = makeModule();
+  for (const t of [0.0, 0.3, 0.6, 1.0]) {
+    const out = moduleRecv(m, beaconRecv(b, { nonce: "dddd", seq: 1, page: 40 }, t), true);
+    if (out !== null) alone.push([t, out]);
+  }
+  assert.deepEqual(alone, [[1.0, 40]], "a lone new director must render exactly once the grace has passed");
+
+  // …AND the Swift must implement what the model describes (everything above runs a transliteration).
+  const didDiscover = swiftFunc("centralManager", BEACON);
+  assert.match(didDiscover,
+    /if appliedSeqByNonce\[parsed\.nonce\] == nil,\s*let first = firstHeardByNonce\[parsed\.nonce\], now - first\.at < Self\.newAdvertiserGrace \{\s*return\s*\}/,
+    "the newcomer grace is gone — a replayed dead advertisement renders on its first packet again");
+  const grace = /private static let newAdvertiserGrace: TimeInterval = ([0-9.]+)/.exec(BEACON);
+  assert.ok(grace && Number(grace[1]) >= 1.0, "the newcomer grace is shorter than the replay margin it exists to cover");
+  const contentionAt = didDiscover.indexOf("if recentNonces.count > 1 {");
+  assert.match(braceBlock(didDiscover, contentionAt, "contention branch"),
+    /for nonce in recentNonces\.keys \{ contestedNonces\.insert\(nonce\) \}/,
+    "contention no longer marks the advertisers on the air — a contested newcomer is judged like an uncontested one");
+  assert.match(didDiscover,
+    /if now - lastContentionAt < Self\.contentionCooldown \{\s*lastAppliedPage = -1\s*contestedNonces\.insert\(parsed\.nonce\)\s*return/,
+    "the cooldown no longer marks the survivor as contested");
+  assert.match(didDiscover,
+    /let firstSeen = firstHeardByNonce\[parsed\.nonce\]\?\.seq \?\? parsed\.seq\s*let floor: Int\s*if let applied = appliedSeqByNonce\[parsed\.nonce\] \{\s*floor = applied\s*\} else if contestedNonces\.contains\(parsed\.nonce\) \{\s*floor = firstSeen\s*\} else \{\s*floor = firstSeen - 1\s*\}/,
+    "the three-way floor is gone — a contested survivor waits for the next turn, or a frozen ghost re-qualifies, or a lone new director is refused");
+  assert.match(didDiscover, /firstHeardByNonce\.removeValue\(forKey: nonce\)\s*contestedNonces\.remove\(nonce\)/,
+    "pruning forgets the seen floor but not the first-heard record — the two tables drift apart");
+});
+
+test("REAPPEARANCE after silence: a never-applied advertiser that climbed while contested cannot be re-admitted by a later replay", () => {
+  // The skeptic's finding on the first cut of the replay fix (same day). Follower F follows D1 (aaaa).
+  // Phone P takes over (nonce f88c): contention, P turns one page while F abstains — so F holds
+  // firstSeen=1 and seen=2 for f88c, never applied. D1 takes the role back within seconds (the
+  // flip-flop the DIRECTOR_CONFLICT comment describes); f88c goes off the air. Minutes later P is
+  // promoted again from a clear air, and bluetoothd replays P's dead advertisement — f88c, seq 2 —
+  // before the live nonce. With a floor frozen at the OPENING seq (1), 2 > 1 re-admits the dead
+  // director's stale song. Build 480 refused it (its floor was the last-seen seq, 2). The current
+  // rule re-stamps a never-applied advertiser's first-heard seq to the LAST seq heard before the
+  // silence when it reappears after more than a contention window — so a frozen replay is refused
+  // and a survivor whose seq climbed during a gap we missed still renders (TWO LIVE ADVERTISERS
+  // above) — while keeping the moment it was first heard, so sparse packets can never re-arm the grace.
+  const play = (rules) => {
+    const b = makeBeacon(), m = makeModule();
+    const rendered = [];
+    const hear = (nonce, seq, page, at) => {
+      const out = moduleRecv(m, beaconRecv(b, { nonce, seq, page }, at, rules), true);
+      if (out !== null) rendered.push(out);
+    };
+    for (const [t, seq, page] of [[0, 1, 20], [1, 1, 20], [2, 2, 21], [3, 3, 22]]) hear("aaaa", seq, page, t);
+    hear("aaaa", 3, 22, 59.5);
+    hear("f88c", 1, 50, 60.0);                       // P takes over: contention
+    hear("f88c", 2, 51, 62.0);                       // P turns a page while F abstains (seen=2, never applied)
+    for (const t of [67, 69, 71]) hear("aaaa", 4, 23, t);   // D1 takes the role back; f88c off the air
+    hear("aaaa", 4, 23, 75);                         // air clear: D1's page renders (applied floor)
+    hear("f88c", 2, 51, 600.066);                    // minutes later: bluetoothd replays P's DEAD advertisement
+    hear("c442", 1, 23, 600.51);                     // P's live successor nonce: contention
+    for (const t of [601.5, 602.5, 603.5, 604.5, 605.5, 607, 608.5]) hear("c442", 1, 23, t);
+    hear("c442", 2, 24, 610);                        // P turns a page: the contested newcomer climbs
+    return rendered;
+  };
+  assert.deepEqual(play(RULES_480), [20, 21, 22, 23, 24], "build 480 must refuse the replay — the model drifted");
+  assert.deepEqual(play(RULES_FIRST_CUT), [20, 21, 22, 23, 51, 24],
+    "the first cut no longer reproduces the re-admission — re-check the model before trusting the fix");
+  assert.deepEqual(play(RULES_NOW), [20, 21, 22, 23, 24],
+    "a dead director's replayed packet was re-admitted through a floor frozen at its opening seq");
+
+  // Swift: the re-stamp happens on reappearance, for never-applied advertisers only, and keeps `at`.
+  const didDiscover = swiftFunc("centralManager", BEACON);
+  assert.match(didDiscover,
+    /if appliedSeqByNonce\[parsed\.nonce\] == nil, let heard = lastHeardAt, now - heard > Self\.contentionWindow \{\s*firstHeardByNonce\[parsed\.nonce\] = \(seq: priorSeq, at: first\.at\)\s*\}/,
+    "a never-applied advertiser reappearing after silence keeps its opening-seq floor — a later replay can re-admit a dead director");
+  assert.match(didDiscover, /let lastHeardAt = seenSeqByNonce\[parsed\.nonce\]\?\.at\s*seenSeqByNonce\[parsed\.nonce\] = /,
+    "the last-heard moment is read AFTER it is overwritten — the silence gap is always zero");
 });
